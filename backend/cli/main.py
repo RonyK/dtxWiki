@@ -8,6 +8,7 @@ import sys
 import webbrowser
 from pathlib import Path
 from typing import Annotated
+from uuid import UUID
 
 import typer
 import uvicorn
@@ -302,6 +303,14 @@ def reindex(
         raise typer.Exit(code=1)
 
 
+def _is_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+        return True
+    except ValueError:
+        return False
+
+
 @app.command()
 def info(json_output: bool = typer.Option(False, "--json")) -> None:
     settings = invocation_settings()
@@ -317,6 +326,30 @@ def info(json_output: bool = typer.Option(False, "--json")) -> None:
         "alembic_db": status.alembic_db,
         "migration_status": status.status,
     }
+    from dataclasses import asdict
+
+    from backend.app.context_version_storage import build_context_storage
+
+    store, _writer = build_context_storage()
+    payload["context_repositories_root"] = str(data_dir() / "repositories")
+    payload["context_git_library"] = store.library_version()
+    payload["context_repositories"] = {
+        path.stem: asdict(store.inspect(UUID(path.stem)))
+        for path in (data_dir() / "repositories").glob("*.git")
+        if _is_uuid(path.stem)
+    }
+    payload["context_repository_maintenance"] = {
+        "last_success": None,
+        "last_failure": None,
+    }
+    if status.status == "synced":
+        from backend.app.db import make_session_factory_from_settings
+        from backend.services.context_version_storage import maintenance_observations
+
+        with make_session_factory_from_settings(settings)() as session:
+            payload["context_repository_maintenance"] = maintenance_observations(
+                session
+            )
     _print_update_notice(settings)
     if json_output:
         typer.echo(json.dumps(payload, indent=2))

@@ -604,7 +604,7 @@ Settings → Deployment의 `Identity & Recovery`는 provider·발신자·canonic
 
 ## 백업과 복구 점검
 
-SQLite DB만 복사하면 충분하지 않습니다. DB, 업로드/Library 파일, session secret, OAuth signing
+SQLite DB만 복사하면 충분하지 않습니다. DB, 업로드/Library 파일, Context의 `repositories/`, session secret, OAuth signing
 key(내부 CA를 쓰면 Caddy `pki` 디렉터리 포함)를 한 세트로 보관해야 합니다. Docker의 `--tls internal`
 스택은 `caddy_data` volume도 같은 방식으로 보관합니다. 아래는 쓰기를 잠시 멈추고 일관된 수동 백업을 만드는 예입니다.
 
@@ -632,6 +632,36 @@ sudo sha256sum "$BACKUP/dtxwiki.sqlite"
 같은 dtxWiki version을 설치한 뒤 `/health/ready`, 로그인, 첨부파일 읽기를 확인하세요. 복구할 때는
 서비스를 중지하고 `/var/lib/dtxwiki`와 `/etc/dtxwiki`를 함께 복원한 뒤 ownership을 확인하고
 `dtxwiki bootstrap`을 실행합니다.
+
+### Context Git 저장소 점검
+
+Context 게시 시 `<data_dir>/repositories/<workspace UUID>.git`에 snapshot을 함께 기록합니다.
+Git 실행 파일은 필요 없으며 Python 의존성 pygit2/libgit2를 사용합니다. 저장소를 DB와
+따로 이동·삭제하지 마세요. 이 전환의 첫 단계에서는 기존 DB 본문과 block_map도 유지합니다.
+
+자동 백업의 manifest schema 3은 DB·Library·Git을 함께 검증하고 복원합니다. 구 schema
+1·2 백업도 지원하며, 구 DB 전체 복원 시 새 Git 저장소를 함께 정리합니다. secrets-only
+복원은 Git에 영향을 주지 않습니다. 복원은 서비스를 중지한 상태에서 수행하고 다음을 확인합니다.
+
+```bash
+dtxwiki context storage verify
+dtxwiki info --json
+```
+
+첫 명령은 모든 DB snapshot OID·페이지 경로·원문 bytes·크기와 게시 head를 읽기만 하여
+대조합니다. 실패하면 원본 백업을 보존하고 원인을 해결한 뒤 재시도하세요. worker는 저장소가
+있는 workspace를 하루 한 번 점검해 DB 게시 포인터에 head를 맞추고 pack을 생성합니다.
+pack은 원문·OID를 바꾸지 않습니다. 같은 Context 게시는 transaction 종료까지 직렬화되며,
+SQLite에서는 다른 Context의 게시도 같은 DB writer를 기다립니다.
+
+구버전에서 업그레이드하기 전 history 점검은 **기존 설치 버전의**
+`dtxwiki context history repair --dry-run`으로 수행합니다. 새 CLI는 Git 컬럼이 없는
+구 schema를 현재 ORM으로 읽지 않고 중단합니다. 직접 Alembic API를 실행하는 운영 도구는
+`Config.attributes["context_repositories_root"]`에 절대 repository 경로를 전달해야 합니다.
+`dtxwiki bootstrap/update`는 실제 data directory 경로를 전달합니다. `migrate-data`는 DB
+표만 옮기므로 전체 data directory, 특히 `repositories/`는 같은 일관된 세트로 보관합니다.
+DB 파일을 즉시 축소하려고 자동 VACUUM을 실행하지 않으며 필요하면 별도 점검·백업 뒤
+서비스를 멈춘 운영 절차로 수행합니다.
 
 ### 정기 작업 이력과 SQLite 파일 용량
 

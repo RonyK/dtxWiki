@@ -546,3 +546,5 @@ For code and documentation contributions, see the
 dtxWiki is available under your choice of **AGPL-3.0-only OR Elastic-2.0**.
 See [LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/LICENSE) for the terms,
 third-party notices, and commercial licensing options.
+
+Context publications also use bare Git repositories under `repositories/` in the data directory. Back up that directory together with the database and Library files. Git is provided by pygit2/libgit2; no Git executable is required. Run `dtxwiki context storage verify` after restoring a stopped service.

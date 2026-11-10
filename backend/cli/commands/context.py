@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typer
+from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.db import make_session_factory_from_settings
@@ -18,6 +19,7 @@ from backend.services.context_lifecycle import (
 from backend.utils.block_identity import heal_block_map
 
 context_app = typer.Typer(help="Inspect and repair Context operational state.")
+context_storage_app = typer.Typer(help="Verify Context Git storage.")
 context_history_app = typer.Typer(help="Inspect and repair Context version history.")
 
 
@@ -39,6 +41,21 @@ def context_history_repair(
     # Do not bootstrap here: this command is the recovery path when the
     # Context-history preflight itself prevented an Alembic upgrade.
     session_factory = make_session_factory_from_settings(settings)
+
+    with session_factory() as session:
+        columns = {
+            column["name"]
+            for column in inspect(session.get_bind()).get_columns(
+                "context_page_version"
+            )
+        }
+    if "commit_oid" not in columns:
+        typer.echo(
+            "This schema predates Git storage. Run history repair with the "
+            "installed pre-upgrade version, or restore its consistent backup.",
+            err=True,
+        )
+        raise typer.Exit(2)
 
     if not apply:
         try:
@@ -76,8 +93,7 @@ def context_history_repair(
     except ContextHistoryRepairFailedError as exc:
         _render_report(exc.report, mode="apply-rolled-back")
         typer.echo(
-            "context history repair failed post-check; the transaction was "
-            "rolled back",
+            "context history repair failed post-check; the transaction was rolled back",
             err=True,
         )
         raise typer.Exit(2) from exc
@@ -161,3 +177,35 @@ def context_block_map_audit(
 
 
 context_app.add_typer(context_history_app, name="history")
+
+
+@context_storage_app.command(name="verify")
+def context_storage_verify(
+    db: str | None = typer.Option(None, help="Override database URL."),
+) -> None:
+    """Verify every Git mapping, exact DB body and published ref without changes."""
+    from backend.services.context_version_storage import (
+        ContextStorageServiceError,
+        verify_context_storage,
+    )
+
+    settings = Settings(database_url=db) if db else Settings()
+    factory = make_session_factory_from_settings(settings)
+    try:
+        with factory() as session:
+            result = verify_context_storage(
+                session, session.info["context_snapshot_store"]
+            )
+    except (SQLAlchemyError, ContextStorageServiceError) as exc:
+        typer.echo(
+            "Context storage verification failed: "
+            f"{getattr(exc, 'error_code', 'schema_unavailable')}",
+            err=True,
+        )
+        raise typer.Exit(2) from exc
+    typer.echo(
+        f"Verified {result['verified_snapshots']} snapshots. No changes applied."
+    )
+
+
+context_app.add_typer(context_storage_app, name="storage")

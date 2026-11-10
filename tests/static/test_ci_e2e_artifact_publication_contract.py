@@ -191,6 +191,7 @@ def playwright_config(tmp_path):
             **os.environ,
             "CI": "true",
             "DTXWIKI_E2E_DATABASE_URL": f"sqlite:///{tmp_path / 'test.db'}",
+            "DTXWIKI_E2E_DATA_DIR": str(tmp_path / "app-data"),
             "DTXWIKI_E2E_LIBRARY_BLOB_ROOT": str(tmp_path / "blobs"),
             "DTXWIKI_E2E_STATIC_ROOT": str(tmp_path / "static"),
         },
@@ -263,7 +264,7 @@ def _build_miniature_report(directory: Path) -> None:
 
     (directory / "data").mkdir(parents=True)
     (directory / "index.html").write_text(
-        "<html><script type=\"module\">const asset='eyJ"
+        '<html><script type="module">const asset=\'eyJ'
         + "A" * 40
         + "';</script>"
         + '<template id="playwrightReportBase64">data:application/zip;base64,'
@@ -323,7 +324,7 @@ def test_dir_mode_reaches_the_base64_report_payload_a_pipe_cannot_see(tmp_path):
         "the one-time reset token survived inside the base64-inlined report "
         f"payload: {published!r}"
     )
-    assert b'?token=<redacted>' in published
+    assert b"?token=<redacted>" in published
 
     # The reporter's own application must come through untouched: a JWT-shaped
     # literal in the inlined script is the shape that would be eaten.
@@ -485,8 +486,7 @@ def test_dir_mode_redacts_the_trace_zip_the_reporter_copies_into_data(tmp_path):
         f"the rewrite must preserve entry names and order, got {names}"
     )
     assert TOKEN not in trace_text, (
-        "the trace entry still carries the one-time token after --dir: "
-        f"{trace_text!r}"
+        f"the trace entry still carries the one-time token after --dir: {trace_text!r}"
     )
     assert "<redacted>" in trace_text
     assert json.loads(trace_text)["title"], "the rewritten entry must stay valid JSON"

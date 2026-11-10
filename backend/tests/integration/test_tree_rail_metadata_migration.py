@@ -244,7 +244,9 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
 
     event.listen(Engine, "before_cursor_execute", record)
     try:
-        command.upgrade(config, "head")
+        # Measure the revision owning this backfill. Later migrations, such
+        # as Git snapshot conversion, have their own query contracts.
+        command.upgrade(config, "19db79d3e622")
     finally:
         event.remove(Engine, "before_cursor_execute", record)
     assert history_reads
@@ -259,6 +261,7 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
         private_id not in str(version_read_parameters)
         for private_id in private_version_ids
     ), version_read_parameters
+    command.upgrade(config, "head")
     engine = create_engine(url)
     try:
         with Session(engine) as session:

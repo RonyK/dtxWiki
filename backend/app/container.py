@@ -47,6 +47,7 @@ def has_due_media_gc_work(
         session, workspace_id=workspace_id, now=now
     )
 
+
 __all__ = [
     "PER_WORKSPACE_DATABASE_TOPOLOGY",
     "SHIPPED_STORAGE_TOPOLOGY",
@@ -255,7 +256,12 @@ class DatabaseProvider:
         # has (backend/services/job_hints.py).
         configure = getattr(factory, "configure", None)
         if callable(configure):
-            configure(info={"database_provider": self})
+            configure(
+                info={
+                    **getattr(factory, "kw", {}).get("info", {}),
+                    "database_provider": self,
+                }
+            )
         return factory
 
     # Declared, not inferred (see the storage-topology block above). The
@@ -375,6 +381,41 @@ class ServiceRegistry:
     # (Callable[[UUID], sessionmaker[Session]]) -- get_services() stamps
     # self.db.session_for -- not one session_factory pinned to a plane.
     context_media_session_for: object | None = None
+
+    @cached_property
+    def context_storage(self):
+        from backend.app.context_version_storage import build_context_storage
+
+        return build_context_storage()
+
+    @property
+    def context_snapshot_store(self):
+        return self.context_storage[0]
+
+    @property
+    def context_version_writer(self):
+        return self.context_storage[1]
+
+    @cached_property
+    def context_repository_maintenance(self):
+        from backend.services.context_repository_maintenance import (
+            ContextRepositoryMaintenance,
+        )
+
+        return ContextRepositoryMaintenance(
+            session_for=self.context_media_session_for,
+            store=self.context_snapshot_store,
+            writer=self.context_version_writer,
+        )
+
+    @cached_property
+    def workspace_content_storage(self):
+        from backend.services.workspace_content_storage import WorkspaceContentStorage
+
+        return WorkspaceContentStorage(
+            blob_store_provider=self.blob_store_provider,
+            repository_purger=self.context_snapshot_store,
+        )
 
     @cached_property
     def workspace_directory(self) -> WorkspaceDirectory:
@@ -947,6 +988,7 @@ class ServiceRegistry:
         from backend.services.context_write_service import ContextWriteService
 
         return ContextWriteService(
+            context_version_writer=self.context_version_writer,
             body_preparer=self.body_preparer,
             context_media_repository_factory=self.context_media_repository_factory,
             media_installer_factory=self.validated_media_installer_for_session,
@@ -970,6 +1012,7 @@ class ServiceRegistry:
         from backend.services.review_service import ReviewService
 
         return ReviewService(
+            context_version_writer=self.context_version_writer,
             context_media_repository_factory=self.context_media_repository_factory,
             body_preparer=self.body_preparer,
             # Resolved on first decision, so review and inbox build in any order.
@@ -1023,6 +1066,7 @@ class ServiceRegistry:
 
         return LintService(
             job_queue=self.job_queue,
+            context_version_writer=self.context_version_writer,
             lint_registry=self.lint_registry,
             context_media_repository_factory=self.context_media_repository_factory,
             self_origins=configured_self_origins(self.settings),
@@ -1140,6 +1184,15 @@ class AppContainer:
         # Resolve link origins from this container even before get_services()
         # initializes another cached service.
         self.services.settings = self.settings
+        # Inherit an explicitly injected/cached factory without eagerly opening
+        # a database: liveness and unconfigured readiness must still work.
+        provider_state = getattr(self.db, "__dict__", {})
+        factory = provider_state.get("session_factory") or provider_state.get(
+            "_session_factory"
+        )
+        from backend.app.context_version_storage import bind_context_storage
+
+        bind_context_storage(self.services, factory)
 
     def get_page_service(self):
         if self.page_service is None:
@@ -1147,6 +1200,7 @@ class AppContainer:
 
             self.page_service = PageService(
                 self.db.control_session_factory(),
+                context_version_writer=self.services.context_version_writer,
                 job_queue=self.services.job_queue,
                 body_preparer=self.services.body_preparer,
                 lint_registry=self.services.lint_registry,

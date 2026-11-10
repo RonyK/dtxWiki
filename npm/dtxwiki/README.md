@@ -81,3 +81,5 @@ SMTP, backups, and advanced configuration.
 dtxWiki is licensed under `AGPL-3.0-only OR Elastic-2.0`, at your election;
 see the [license terms](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/LICENSE).
 dtxSuite also offers commercial licenses.
+
+Context publications also use `repositories/` under the same data directory. Preserve it with the database and Library during backup, restore and launcher upgrades. Python supplies pygit2/libgit2; the launcher does not require a system Git executable.

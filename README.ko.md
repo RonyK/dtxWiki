@@ -537,3 +537,5 @@ systemd updater는 자동으로 설정하며 Docker 이미지는 이미 `externa
 dtxWiki는 **AGPL-3.0-only OR Elastic-2.0** 중 하나를 선택하여 사용할 수 있습니다.
 이용 조건, 제3자 구성요소의 고지, 상용 라이선스 안내는
 [LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/LICENSE)를 참고하세요.
+
+Context 게시본은 data directory의 `repositories/` Git 저장소에도 기록됩니다. DB·Library와 함께 백업하세요. pygit2/libgit2를 사용하므로 Git 실행 파일은 필요 없습니다. 서비스 중지 상태에서 복원한 뒤 `dtxwiki context storage verify`로 대조할 수 있습니다.

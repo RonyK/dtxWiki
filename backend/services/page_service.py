@@ -102,6 +102,7 @@ from backend.services.context_push import target_ids_for_operations
 from backend.services.context_review_disposition import (
     context_version_review_metadata,
 )
+from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.context_visibility import (
     editable_context_version_id,
     visible_context_version_expression,
@@ -198,6 +199,12 @@ class PageValidationError(PageServiceError):
         # paired with, say, "not_found". The inner code is kept beside it so a
         # caller that wants to know exactly what refused the placement can ask.
         self.cause_error_code = cause_error_code
+
+
+class PageContextStorageError(PageServiceError):
+    def __init__(self, code: str) -> None:
+        self.error_code = code
+        super().__init__("Context version storage operation failed")
 
 
 class PageMediaPolicyError(PageValidationError):
@@ -438,7 +445,9 @@ class PageService:
         lint_registry: LintRegistry | None = None,
         body_preparer: BodyPreparer | None = None,
         actor_context: ActorContext | None = None,
+        context_version_writer=None,
     ) -> None:
+        self.context_version_writer = context_version_writer
         self.session_factory = session_factory
         self.actor_context = actor_context
         self.body_preparer = (
@@ -598,6 +607,8 @@ class PageService:
                     workspace_id=page.workspace_id,
                     body_markdown=version.body_md,
                 )
+            except ContextStorageServiceError as exc:
+                raise PageContextStorageError(exc.error_code) from exc
             except LegacyMediaCutoverConflictError as exc:
                 # Public reads never reveal whether the page is missing,
                 # private, stale, or cut over from the historical resolver.
@@ -703,6 +714,8 @@ class PageService:
                         workspace_id=page.workspace_id,
                         body_markdown=published_version.body_md,
                     )
+                except ContextStorageServiceError as exc:
+                    raise PageContextStorageError(exc.error_code) from exc
                 except LegacyMediaCutoverConflictError as exc:
                     # Public exposure is a visibility transition in its own
                     # right.  A completed cutover must therefore refuse it
@@ -1181,6 +1194,7 @@ class PageService:
         assert actor.workspace_id is not None
         with self.session_factory.begin() as session:
             result = ContextWriteService(
+                context_version_writer=self.context_version_writer,
                 audit_service=self.change_audit_recorder.audit_service,
                 job_queue=self.job_queue,
                 context_media_repository_factory=self.context_media_repository_factory,
@@ -1425,6 +1439,7 @@ class PageService:
                 session.flush()
             try:
                 result = ContextWriteService(
+                    context_version_writer=self.context_version_writer,
                     audit_service=self.change_audit_recorder.audit_service,
                     job_queue=self.job_queue,
                     body_preparer=self.body_preparer,
@@ -1444,6 +1459,8 @@ class PageService:
                     actor_id=actor_id,
                     publish_despite_findings=publish_despite_findings,
                 )
+            except ContextStorageServiceError as exc:
+                raise PageContextStorageError(exc.error_code) from exc
             except LegacyMediaCutoverConflictError as exc:
                 raise PageContextMediaError(
                     str(exc),
@@ -5316,12 +5333,15 @@ class PageService:
         try:
             apply_context_publication(
                 session,
+                context_version_writer=self.context_version_writer,
                 page=page,
                 version=version,
                 require_latest_draft=False,
                 actor=self.actor_context,
                 self_origins=self.body_preparer.self_origins,
             )
+        except ContextStorageServiceError as exc:
+            raise PageContextStorageError(exc.error_code) from exc
         except LegacyMediaCutoverConflictError as exc:
             raise PageContextMediaError(
                 str(exc),

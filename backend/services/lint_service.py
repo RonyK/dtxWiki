@@ -92,8 +92,10 @@ class LintService:
         *,
         lint_registry: LintRegistry | None = None,
         context_media_repository_factory=None,
+        context_version_writer=None,
         self_origins: frozenset[str] | None = None,
     ) -> None:
+        self.context_version_writer = context_version_writer
         self.lint_registry = (
             lint_registry if lint_registry is not None else LintRegistry.builtin()
         )
@@ -779,6 +781,7 @@ class LintService:
             ).all()
             writer = LintFixWriter(
                 lint_registry=self.lint_registry,
+                context_version_writer=self.context_version_writer,
                 audit_service=self.audit_service,
                 job_queue=self.job_queue,
                 context_media_repository_factory=self.context_media_repository_factory,

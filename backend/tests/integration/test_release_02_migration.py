@@ -33,7 +33,6 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import sessionmaker
 
 from backend.app.bootstrap import (
     current_alembic_head,
@@ -41,6 +40,7 @@ from backend.app.bootstrap import (
     resolve_alembic_ini,
     resolve_migrations_dir,
 )
+from backend.app.db import make_session_factory
 from backend.app.settings import Settings
 from backend.models import Base
 from backend.services.ops.alembic_migration_graph import initialization_script_directory
@@ -52,6 +52,7 @@ from backend.tests.integration.test_release_schema_migration import (
     _config,
     _schema_snapshot,
 )
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 # Published 0.1.4. The 0.2.1 package used a development-only parent instead.
 PARENT = "eb86fdacb1bb"
@@ -273,6 +274,9 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         _assert_labs_policy_upgrade(engine, config, workspace_id)
         _assert_archived_inbox_indexes(engine)
         _assert_model_parity(engine)
+        # Current runtime uses the current model. Advance to head before its
+        # real publication, then traverse the historical downgrade as before.
+        command.upgrade(config, "head")
         _seed_runtime_links(engine, release_data)
         command.downgrade(config, REVISION)
         assert "labs_policy" not in {
@@ -312,7 +316,7 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         _assert_labs_policy_upgrade(
             engine, config, workspace_id, upgrade=False, raw_default=True
         )
-        _assert_archived_inbox_indexes(engine)
+        _assert_archived_inbox_indexes(engine, expected_revision=current_alembic_head())
         assert retained_account_state() == retained
         assert audit_inputs(database_url) == []
     finally:
@@ -430,11 +434,13 @@ def _assert_labs_policy_upgrade(
         connection.execute(workspaces.delete().where(workspaces.c.id == inserted_id))
 
 
-def _assert_archived_inbox_indexes(engine, *, present=True):
+def _assert_archived_inbox_indexes(
+    engine, *, present=True, expected_revision=RELEASE_023_REVISION
+):
     """Inspect the indexes applied with Labs by the same 0.2.3 revision."""
 
     if present:
-        assert _stamp(engine) == RELEASE_023_REVISION
+        assert _stamp(engine) == expected_revision
     inspector = inspect(engine)
     for table, owner in (
         ("workspace_inbox_entry", ["workspace_id", "user_id"]),
@@ -884,6 +890,7 @@ def _assert_atomic_release_failures(config, engine, tmp_path, *, direction):
     broken = Config(str(resolve_alembic_ini()))
     broken.set_main_option("script_location", str(scripts))
     broken.set_main_option("sqlalchemy.url", config.get_main_option("sqlalchemy.url"))
+    configure_test_repositories(broken)
     before = _schema_snapshot(engine)
     with engine.connect() as connection:
         tables = inspect(connection).get_table_names()
@@ -907,7 +914,7 @@ def _assert_atomic_release_failures(config, engine, tmp_path, *, direction):
 def _seed_runtime_links(engine, data):
     # A real publication writes URL and wikilink projections together. Downgrade
     # must use the surviving wikilink, rather than keep a mixed URL edge weight.
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = make_session_factory(engine)
     from backend.scripts.seed_dev import seed_default_workspace
 
     with factory.begin() as session:

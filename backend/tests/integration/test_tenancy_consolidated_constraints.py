@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 final_phase = import_module(
     "backend.migrations.revision_modules.v0_1.efcbcf724889_core_schema.tenancy_schema"
@@ -28,6 +29,7 @@ def _config(database_url: str) -> Config:
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     return config
 
 

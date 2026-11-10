@@ -39,6 +39,7 @@ from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.job_queue import JobQueueService
 from backend.services.ops import runtime_lock
 from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
+from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.worker import entry as worker_entry
 from backend.worker.entry import app as worker_cli
 from backend.worker.runtime import InitialRecoveryResult, OneShotWorker
@@ -164,6 +165,7 @@ def test_worker_refuses_a_schema_that_still_needs_migration(tmp_path, data_dir):
 
     config = Config(config_ini)
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     command.upgrade(config, "bd62193d5cf6")
 

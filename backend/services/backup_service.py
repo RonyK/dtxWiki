@@ -1,7 +1,8 @@
 """Pre-update backups of dtxWiki state, with manifest, retention, and restore.
 
-The default SQLite backup is an operational checkpoint: the database and the
-configured immutable Library blob tree are captured together. The database
+The default SQLite backup is an operational checkpoint: the database, configured
+immutable Library blob tree and Context Git repositories are captured together.
+The database
 contains converter provenance while the tree contains non-rebuildable source
 blobs (plus rebuildable derived blobs), so restoring only one side is unsafe.
 Legacy uploads remain opt-in through ``include_files=True``.
@@ -20,10 +21,11 @@ import shutil
 import sqlite3
 import stat
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy.engine import make_url
 
@@ -32,7 +34,7 @@ from backend.app.settings import Settings
 from backend.services.ops import db_lock
 
 MANIFEST_NAME = "manifest.json"
-MANIFEST_SCHEMA = 2
+MANIFEST_SCHEMA = 3
 DEFAULT_KEEP = 5
 BACKUPS_DIRNAME = "backups"
 
@@ -47,6 +49,7 @@ ENV_BACKUP_NAME = "dtxwiki.env"
 USER_FILES_DIRNAME = "files"
 LIBRARY_CHECKPOINT_DIRNAME = "library"
 LIBRARY_CHECKPOINT_PREFIX = f"{USER_FILES_DIRNAME}/{LIBRARY_CHECKPOINT_DIRNAME}"
+REPOSITORY_CHECKPOINT_PREFIX = f"{USER_FILES_DIRNAME}/repositories"
 
 # Bounds protect backup/restore from an accidentally selected filesystem root,
 # a corrupt manifest, and pathological directory trees. They intentionally
@@ -137,7 +140,7 @@ def create_backup(
     data_dir: Path | None = None,
     env_file: Path | None = None,
 ) -> Path:
-    """Snapshot DB + Library blobs + secrets into a timestamped directory.
+    """Snapshot DB + Library + Context repositories + secrets together.
 
     A SQLite snapshot always includes the configured Library root, even when it
     is empty. This keeps source blobs and their database provenance in one
@@ -174,6 +177,7 @@ def create_backup(
             files.append(_file_entry(dest))
 
         library_checkpoint = _omitted_library_checkpoint()
+        repository_checkpoint = _omitted_library_checkpoint()
         if includes_db:
             library_root = _library_root(settings, base)
             _validate_library_root_location(library_root, backups_root)
@@ -181,6 +185,12 @@ def create_backup(
                 library_root, backup_dir
             )
             files.extend(library_entries)
+            repositories_root = base / "repositories"
+            _validate_library_root_location(repositories_root, backups_root)
+            repository_entries, repository_checkpoint = _copy_repository_checkpoint(
+                repositories_root, backup_dir
+            )
+            files.extend(repository_entries)
 
         if settings.oauth_jwt_private_key_path:
             jwt_src = Path(settings.oauth_jwt_private_key_path)
@@ -223,6 +233,8 @@ def create_backup(
             "includes_db": includes_db,
             "includes_library_blobs": library_checkpoint["included"],
             "library_checkpoint": library_checkpoint,
+            "includes_context_repositories": repository_checkpoint["included"],
+            "context_repository_checkpoint": repository_checkpoint,
             "includes_user_files": include_files,
         }
         write_manifest(backup_dir, manifest)
@@ -245,8 +257,8 @@ def restore_backup(
 ) -> dict:
     """Restore a verified checkpoint from a backup dir (or manifest path).
 
-    Schema-v2 full checkpoints stage the SQLite file and Library tree beside
-    their live targets, then cut both over with recoverable rename operations.
+    Full checkpoints stage the SQLite file, Library tree and Context repositories
+    beside their live targets, then cut over with recoverable rename operations.
     A failed cutover rolls every already-moved target back before returning.
     Schema-v1 backups retain their historical restore behavior.
 
@@ -276,9 +288,10 @@ def restore_backup(
             db_backup=db_backup,
             db_target=_absolute_path(db_path),
             library_target=library_root,
+            repository_target=base / "repositories",
         )
     elif db_path is not None and db_backup.exists():
-        _restore_sqlite(db_backup, db_path)
+        _restore_sqlite(db_backup, db_path, repository_target=base / "repositories")
 
     jwt_backup = backup_dir / JWT_BACKUP_NAME
     if jwt_backup.exists() and settings.oauth_jwt_private_key_path:
@@ -400,7 +413,11 @@ def verify_backup_integrity(backup: Path) -> None:
     backup_dir = resolve_backup_dir(backup)
     manifest = read_manifest(backup_dir)
     schema = manifest.get("schema")
-    if not isinstance(schema, int) or isinstance(schema, bool) or schema not in (1, 2):
+    if (
+        not isinstance(schema, int)
+        or isinstance(schema, bool)
+        or schema not in (1, 2, 3)
+    ):
         raise BackupIntegrityError(f"unsupported backup manifest schema: {schema!r}")
 
     raw_entries = manifest.get("files")
@@ -430,6 +447,14 @@ def verify_backup_integrity(backup: Path) -> None:
 
     if schema >= 2:
         _verify_v2_checkpoint(backup_dir, manifest, entries)
+    elif DB_BACKUP_NAME in entries:
+        # Schema 1 only bound payload bytes; revision evidence probes validate
+        # the database separately. Preserve that contract for opaque payloads.
+        database = backup_dir / DB_BACKUP_NAME
+        with database.open("rb") as checkpoint:
+            sqlite_header = checkpoint.read(16) == b"SQLite format 3\x00"
+        if sqlite_header:
+            _verify_repository_database_references(database, None)
 
 
 # --- internals -----------------------------------------------------------
@@ -506,6 +531,10 @@ def _verify_v2_checkpoint(
         _verify_library_database_references(
             _safe_backup_member(backup_dir, DB_BACKUP_NAME), library_entries
         )
+        if manifest["schema"] >= 3:
+            _verify_repository_checkpoint(backup_dir, manifest, entries)
+        else:
+            _verify_repository_database_references(backup_dir / DB_BACKUP_NAME, None)
     else:
         if (
             complete
@@ -518,6 +547,18 @@ def _verify_v2_checkpoint(
         if library_entries or library.get("included") is not False:
             raise BackupIntegrityError(
                 "secrets-only checkpoint unexpectedly contains Library blobs"
+            )
+        repositories = manifest.get("context_repository_checkpoint")
+        if manifest["schema"] >= 3 and (
+            manifest.get("includes_context_repositories") is not False
+            or not isinstance(repositories, dict)
+            or repositories.get("included") is not False
+            or any(
+                name.startswith(f"{REPOSITORY_CHECKPOINT_PREFIX}/") for name in entries
+            )
+        ):
+            raise BackupIntegrityError(
+                "secrets-only checkpoint contains Git repositories"
             )
 
     # A v2 manifest enumerates every regular payload file. Reject unexpected
@@ -578,6 +619,215 @@ def _verify_library_checkpoint(
     expected = {entry["name"] for entry in relative_entries}
     if actual != expected:
         raise BackupIntegrityError("Library checkpoint tree is partial")
+
+
+def _repository_relative_entries(entries: object) -> list[dict]:
+    prefix = f"{REPOSITORY_CHECKPOINT_PREFIX}/"
+    relative = []
+    for raw in entries:
+        entry = dict(raw)
+        if not entry["name"].startswith(prefix):
+            raise BackupIntegrityError("Git entry is outside its tree prefix")
+        entry["name"] = entry["name"][len(prefix) :]
+        relative.append(entry)
+    return relative
+
+
+def _copy_repository_checkpoint(root: Path, backup_dir: Path) -> tuple[list, dict]:
+    target = backup_dir / REPOSITORY_CHECKPOINT_PREFIX
+    if _path_exists(root):
+        _require_directory(root, label="Git repositories root")
+        excluded = {".locks"}
+        _repository_workspace_ids(root, exclude_locks=True)
+        entries = _copy_tree_snapshot(
+            root,
+            target,
+            manifest_prefix=REPOSITORY_CHECKPOINT_PREFIX,
+            exclude_top_level=excluded,
+            exclude_directory=_is_git_temporary_directory,
+        )
+    else:
+        target.mkdir(parents=True)
+        _chmod_700(target)
+        entries = []
+    metadata = {"included": True, "tree_prefix": REPOSITORY_CHECKPOINT_PREFIX}
+    metadata.update(_tree_summary(_repository_relative_entries(entries)))
+    return entries, metadata
+
+
+def _repository_workspace_ids(root: Path, *, exclude_locks: bool = False) -> set[UUID]:
+    """Validate the bare-store namespace shared by capture and copied checks."""
+    _require_directory(root, label="Git repositories root")
+    workspaces = set()
+    for child in root.iterdir():
+        if exclude_locks and child.name == ".locks":
+            continue
+        try:
+            workspace_id = UUID(child.stem)
+            if child.name != f"{workspace_id}.git":
+                raise ValueError("not a canonical bare repository path")
+        except ValueError as exc:
+            raise BackupIntegrityError("unexpected Git repository entry") from exc
+        _require_directory(child, label="Git repository")
+        workspaces.add(workspace_id)
+    return workspaces
+
+
+def _is_git_temporary_directory(relative: PurePosixPath) -> bool:
+    """Only the adapter's immediate bare-repository scratch directories."""
+    return (
+        len(relative.parts) == 2
+        and relative.parts[0].endswith(".git")
+        and relative.name.startswith((".pack-stage-", ".pack-check-"))
+    )
+
+
+def _verify_repository_checkpoint(
+    backup_dir: Path, manifest: dict, entries: dict
+) -> None:
+    metadata = manifest.get("context_repository_checkpoint")
+    if (
+        manifest.get("includes_context_repositories") is not True
+        or not isinstance(metadata, dict)
+        or metadata.get("included") is not True
+        or metadata.get("tree_prefix") != REPOSITORY_CHECKPOINT_PREFIX
+    ):
+        raise BackupIntegrityError("full checkpoint omits Git repositories")
+    if (
+        type(metadata.get("file_count")) is not int
+        or not 0 <= metadata["file_count"] <= MAX_CHECKPOINT_FILES
+        or type(metadata.get("total_bytes")) is not int
+        or not 0 <= metadata["total_bytes"] <= MAX_CHECKPOINT_TOTAL_BYTES
+        or not _is_sha256(metadata.get("tree_sha256"))
+    ):
+        raise BackupIntegrityError("invalid Git checkpoint summary")
+    repository_entries = {
+        name: entry
+        for name, entry in entries.items()
+        if name.startswith(f"{REPOSITORY_CHECKPOINT_PREFIX}/")
+    }
+    summary = _tree_summary(_repository_relative_entries(repository_entries.values()))
+    for key in ("file_count", "total_bytes", "tree_sha256"):
+        if metadata.get(key) != summary[key]:
+            raise BackupIntegrityError(f"Git checkpoint {key} mismatch")
+    root = _safe_backup_member(backup_dir, REPOSITORY_CHECKPOINT_PREFIX)
+    _require_directory(root, label="Git checkpoint tree")
+    actual = {relative for _, relative, _ in _walk_regular_files(root)}
+    expected = {
+        entry["name"]
+        for entry in _repository_relative_entries(repository_entries.values())
+    }
+    if actual != expected:
+        raise BackupIntegrityError("Git checkpoint tree is partial")
+    _verify_repository_database_references(backup_dir / DB_BACKUP_NAME, root)
+
+
+def _verify_repository_database_references(database: Path, root: Path | None) -> None:
+    """Verify copied Git data against the copied DB, never the live repository."""
+    connection = sqlite3.connect(
+        f"{database.resolve().as_uri()}?mode=ro&immutable=1", uri=True
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        actual_heads = {}
+        if root is not None:
+            from backend.app.context_version_storage import build_context_storage
+
+            store, _ = build_context_storage(root)
+            # Even a rolled-back migration can leave valid Git data beside an
+            # old DB schema. Check its structure before optional DB mappings.
+            actual_heads = {
+                workspace_id: store.list_heads(workspace_id)
+                for workspace_id in _repository_workspace_ids(root)
+            }
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(context_page_version)")
+        }
+        if "commit_oid" not in columns:
+            return
+        invalid = connection.execute(
+            "SELECT 1 FROM context_page_version WHERE "
+            "(version_status IN ('published_snapshot', 'superseded_snapshot')) "
+            "!= (commit_oid IS NOT NULL) LIMIT 1"
+        ).fetchone()
+        invalid_pointer = connection.execute(
+            "SELECT 1 FROM context_page p LEFT JOIN context_page_version v "
+            "ON v.id=p.current_published_version_id AND v.page_id=p.id "
+            "AND v.workspace_id=p.workspace_id "
+            "WHERE p.current_published_version_id IS NOT NULL AND "
+            "(v.id IS NULL OR v.version_status!='published_snapshot' "
+            "OR v.commit_oid IS NULL) LIMIT 1"
+        ).fetchone()
+        if invalid is not None or invalid_pointer is not None:
+            raise BackupIntegrityError(
+                "Context Git state or published pointer mismatch"
+            )
+        rows = connection.execute(
+            "SELECT workspace_id, page_id, id, commit_oid, content_format, "
+            "format_version, media_type, encoding, content_byte_size, body_md "
+            "FROM context_page_version WHERE commit_oid IS NOT NULL"
+        ).fetchall()
+        if root is None:
+            if not rows:
+                return
+            raise BackupIntegrityError(
+                "database references Git but checkpoint omits repositories"
+            )
+        from backend.context_versions.domain import ContentDescriptor
+
+        commits = {}
+        workspaces = set()
+        for row in rows:
+            workspace_id = UUID(row["workspace_id"])
+            page_id = UUID(row["page_id"])
+            descriptor = ContentDescriptor(
+                content_format=row["content_format"],
+                format_version=row["format_version"],
+                media_type=row["media_type"],
+                encoding=row["encoding"],
+            )
+            content = store.read(
+                workspace_id=workspace_id,
+                page_id=page_id,
+                commit_oid=row["commit_oid"],
+                descriptor=descriptor,
+            )
+            if row["content_byte_size"] != len(content):
+                raise BackupIntegrityError("Git snapshot size differs from database")
+            if row["body_md"] is not None and content != row["body_md"].encode("utf-8"):
+                raise BackupIntegrityError("Git snapshot bytes differ from database")
+            commits[(workspace_id, page_id, UUID(row["id"]))] = row["commit_oid"]
+            workspaces.add(workspace_id)
+        expected = {
+            workspace_id: {} for workspace_id in workspaces | actual_heads.keys()
+        }
+        for page in connection.execute(
+            "SELECT id, workspace_id, current_published_version_id FROM context_page"
+        ):
+            if page["current_published_version_id"] is None:
+                continue
+            workspace_id = UUID(page["workspace_id"])
+            page_id = UUID(page["id"])
+            oid = commits.get(
+                (workspace_id, page_id, UUID(page["current_published_version_id"]))
+            )
+            if oid is None:
+                raise BackupIntegrityError("published snapshot lacks Git checkpoint")
+            expected.setdefault(workspace_id, {})[page_id] = oid
+        for workspace_id, heads in expected.items():
+            if actual_heads.get(workspace_id, {}) != heads:
+                raise BackupIntegrityError(
+                    "Git heads differ from database publication pointers"
+                )
+    except BackupIntegrityError:
+        raise
+    except Exception as exc:
+        raise BackupIntegrityError(
+            "Git checkpoint reference validation failed"
+        ) from exc
+    finally:
+        connection.close()
 
 
 def _verify_library_database_references(
@@ -789,15 +1039,26 @@ def _copy_tree_snapshot(
     *,
     manifest_prefix: str,
     exclude_top_level: set[str] | None = None,
+    exclude_directory: Callable[[PurePosixPath], bool] | None = None,
 ) -> list[dict]:
     if _path_exists(target):
         raise FileExistsError(f"snapshot target already exists: {target}")
     target.mkdir(parents=True)
     _chmod_700(target)
-    walked = _walk_regular_files(source, exclude_top_level=exclude_top_level or set())
     entries: list[dict] = []
     total_bytes = 0
     try:
+        directories: list[str] = []
+        walked = _walk_regular_files(
+            source,
+            exclude_top_level=exclude_top_level or set(),
+            exclude_directory=exclude_directory,
+            directories=directories,
+        )
+        for relative in directories:
+            target.joinpath(*PurePosixPath(relative).parts).mkdir(
+                parents=True, exist_ok=True
+            )
         for source_path, relative, source_stat in walked:
             destination = target.joinpath(*PurePosixPath(relative).parts)
             sha256, byte_size = _copy_regular_file(
@@ -820,8 +1081,13 @@ def _copy_tree_snapshot(
 
 
 def _walk_regular_files(
-    root: Path, *, exclude_top_level: set[str] | None = None
+    root: Path,
+    *,
+    exclude_top_level: set[str] | None = None,
+    exclude_directory: Callable[[PurePosixPath], bool] | None = None,
+    directories: list[str] | None = None,
 ) -> list[tuple[Path, str, os.stat_result]]:
+    """Validate the tree and optionally collect its included directory names."""
     _require_directory(root, label="checkpoint tree")
     excluded = exclude_top_level or set()
     stack: list[tuple[Path, PurePosixPath | None]] = [(root, None)]
@@ -855,6 +1121,10 @@ def _walk_regular_files(
             if stat.S_ISDIR(child_stat.st_mode):
                 if relative_dir is None and child.name in excluded:
                     continue
+                if exclude_directory is not None and exclude_directory(relative):
+                    continue
+                if directories is not None:
+                    directories.append(relative_text)
                 stack.append((child_path, relative))
             elif stat.S_ISREG(child_stat.st_mode):
                 if child_stat.st_size > MAX_CHECKPOINT_FILE_BYTES:
@@ -988,11 +1258,17 @@ def _sqlite_backup(src: Path, dest: Path) -> None:
     _chmod_600(dest)
 
 
-def _restore_sqlite(src: Path, dest: Path) -> None:
+def _restore_sqlite(
+    src: Path, dest: Path, *, repository_target: Path | None = None
+) -> None:
     """Atomically restore a legacy SQLite-only backup with rollback staging."""
 
     dest = _absolute_path(dest)
     _validate_restore_target(dest, expect_directory=False)
+    if repository_target is not None:
+        _validate_restore_target(repository_target, expect_directory=True)
+        if _paths_overlap(dest, repository_target):
+            raise BackupIntegrityError("SQLite and Git restore targets overlap")
     token = uuid4().hex
     staged = dest.parent / f".{dest.name}.restore-new-{token}"
     expected_stat = src.stat(follow_symlinks=False)
@@ -1011,6 +1287,8 @@ def _restore_sqlite(src: Path, dest: Path) -> None:
         _removal_swap(dest.with_name(dest.name + "-shm"), token),
         _replacement_swap(dest, staged, token),
     ]
+    if repository_target is not None:
+        swaps.insert(2, _removal_swap(repository_target, token))
     _commit_restore_swaps(swaps)
 
 
@@ -1021,20 +1299,29 @@ def _restore_full_checkpoint(
     db_backup: Path,
     db_target: Path,
     library_target: Path,
+    repository_target: Path,
 ) -> None:
-    """Stage and recoverably cut over DB + Library as one restore operation."""
+    """Stage and recoverably cut over DB + Library + Git together."""
 
     _validate_restore_target(db_target, expect_directory=False)
     _validate_restore_target(library_target, expect_directory=True)
-    if _paths_overlap(db_target, library_target):
+    _validate_restore_target(repository_target, expect_directory=True)
+    if (
+        _paths_overlap(db_target, library_target)
+        or _paths_overlap(db_target, repository_target)
+        or _paths_overlap(library_target, repository_target)
+    ):
         raise BackupIntegrityError(
-            "SQLite and Library restore targets must not overlap"
+            "SQLite, Library and Git restore targets must not overlap"
         )
 
     token = uuid4().hex
     staged_db = db_target.parent / f".{db_target.name}.restore-new-{token}"
     staged_library = (
         library_target.parent / f".{library_target.name}.restore-new-{token}"
+    )
+    staged_repositories = (
+        repository_target.parent / f".{repository_target.name}.restore-new-{token}"
     )
     db_target.parent.mkdir(parents=True, exist_ok=True)
     library_target.parent.mkdir(parents=True, exist_ok=True)
@@ -1067,10 +1354,31 @@ def _restore_full_checkpoint(
                 raise BackupIntegrityError(f"staged Library checkpoint {key} mismatch")
         _apply_tree_target_identity(staged_library, library_target)
 
+        repository_swap = _removal_swap(repository_target, token)
+        if manifest["schema"] >= 3:
+            repository_source = _safe_backup_member(
+                backup_dir, REPOSITORY_CHECKPOINT_PREFIX
+            )
+            copied_repositories = _copy_tree_snapshot(
+                repository_source,
+                staged_repositories,
+                manifest_prefix=REPOSITORY_CHECKPOINT_PREFIX,
+            )
+            summary = _tree_summary(_repository_relative_entries(copied_repositories))
+            metadata = manifest["context_repository_checkpoint"]
+            if any(summary[key] != metadata[key] for key in summary):
+                raise BackupIntegrityError("staged Git checkpoint mismatch")
+            _verify_repository_database_references(staged_db, staged_repositories)
+            _apply_tree_target_identity(staged_repositories, repository_target)
+            repository_swap = _replacement_swap(
+                repository_target, staged_repositories, token
+            )
+
         swaps = [
             _removal_swap(db_target.with_name(db_target.name + "-wal"), token),
             _removal_swap(db_target.with_name(db_target.name + "-shm"), token),
             _replacement_swap(library_target, staged_library, token),
+            repository_swap,
             _replacement_swap(db_target, staged_db, token),
         ]
         _commit_restore_swaps(swaps)
@@ -1079,6 +1387,8 @@ def _restore_full_checkpoint(
             _remove_path(staged_db)
         if _path_exists(staged_library):
             _remove_path(staged_library)
+        if _path_exists(staged_repositories):
+            _remove_path(staged_repositories)
         raise
 
 

@@ -20,11 +20,12 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import RULES
 from backend.models.agent import AgentPage
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPage
 from backend.models.favorite import UserFavorite
 from backend.models.library import LibraryItem
 from backend.services.context_media_policy import resolve_context_media_policy
 from backend.services.ops.input_maintenance import audit_inputs, repair_input
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 pytestmark = pytest.mark.xdist_group("postgres")
 
@@ -37,6 +38,7 @@ def _config(url):
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", url)
+    configure_test_repositories(config)
     return config
 
 
@@ -187,6 +189,18 @@ def _seed_existing_content(engine, workspace_id):
     """Insert existing rows without the four columns added by 0.1.3."""
     context_id, version_id, agent_id, library_id = (uuid4() for _ in range(4))
     with engine.begin() as connection:
+        # Reflect this historical schema: current-model defaults include Git
+        # descriptor columns that do not exist at the migration's parent.
+        versions = sa.Table(
+            "context_page_version",
+            sa.MetaData(),
+            sa.Column("id", sa.Uuid(), primary_key=True),
+            sa.Column("workspace_id", sa.Uuid()),
+            sa.Column("page_id", sa.Uuid()),
+            autoload_with=connection,
+            resolve_fks=False,
+        )
+        now = datetime.now(UTC)
         connection.execute(
             ContextPage.__table__.insert().values(
                 id=context_id,
@@ -196,15 +210,22 @@ def _seed_existing_content(engine, workspace_id):
             )
         )
         connection.execute(
-            ContextPageVersion.__table__.insert().values(
+            versions.insert().values(
                 id=version_id,
                 workspace_id=workspace_id,
                 page_id=context_id,
+                version_no=1,
                 body_md="# Preserved context\n\nExisting draft body.",
+                rendering_profile="gfm_mermaid",
                 content_hash="preserved",
+                graph_status="linear",
                 actor_type="human",
+                version_status="draft",
+                editing_revision=1,
+                last_saved_at=now,
                 created_by_actor_kind="human",
                 created_by_actor_id="migration-test",
+                created_at=now,
             )
         )
         connection.execute(

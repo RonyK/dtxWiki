@@ -216,6 +216,14 @@ def test_info_json_output_contains_install_state(tmp_path, monkeypatch):
     assert payload["database_url"].startswith("sqlite+pysqlite:///")
     assert "detected_mcp_clients" in payload
     assert "dtxwiki_mcp_path" not in payload
+    assert payload["context_repositories_root"] == str(
+        tmp_path / "dtxwiki" / "repositories"
+    )
+    assert "libgit2" in payload["context_git_library"]
+    assert payload["context_repository_maintenance"] == {
+        "last_success": None,
+        "last_failure": None,
+    }
 
 
 def test_migrate_data_command_outputs_json(monkeypatch):

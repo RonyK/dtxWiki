@@ -31,13 +31,16 @@ from backend.services.read_errors import UnsupportedRetrievalModeError
 from backend.services.search_result_metadata import enrich_search_result_metadata
 from backend.services.search_service import SearchService, ranked_result_types
 from backend.services.tree_service import TreeService
+from backend.tests.utils.context_git import configure_test_context_storage
 from backend.utils.content_hash import content_hash as calculate_content_hash
 
 
 def make_session_factory():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+    return configure_test_context_storage(
+        sessionmaker(bind=engine, expire_on_commit=False)
+    )
 
 
 def audit_actor(workspace_id, *, scopes=("audit-read",)) -> ActorContext:

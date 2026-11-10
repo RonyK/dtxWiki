@@ -187,7 +187,29 @@ def update_command(
                 if inherited_db_guard
                 else acquire_paths(database_paths, "exclusive")
             ):
+                # Migration runs as the updater (often root). Keep the prior
+                # data owner so newly written repositories remain writable by
+                # the service after restart, including custom/numeric owners.
+                owner = (
+                    resources.root.stat()
+                    if install.kind == "systemd" and resources.root.is_dir()
+                    else None
+                )
                 bootstrap_app(settings)
+                if owner is not None:
+                    problems = prod_setup.hand_data_to_service_user(
+                        resources.root,
+                        f"{owner.st_uid}:{owner.st_gid}",
+                        database_file=prod_setup.sqlite_database_file(
+                            settings.database_url
+                        ),
+                        lookup_ids=lambda _name: (owner.st_uid, owner.st_gid),
+                        echo=typer.echo,
+                    )
+                    if problems:
+                        # The parent leaves services stopped on any failed
+                        # finalization; never restart with unwritable Git data.
+                        raise OSError("; ".join(problems))
         except (runtime_lock.RuntimeLockHeldError, OSError, HandoffError) as exc:
             typer.echo(f"finalize-bootstrap refused: {exc}", err=True)
             raise typer.Exit(3) from exc

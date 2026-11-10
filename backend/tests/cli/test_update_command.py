@@ -244,6 +244,23 @@ def test_systemd_update_finalization_preserves_split_worker(
         assert cmd.prod_setup.get_env_value(env, "DTXWIKI_WORKER_MODE") == "external"
 
     monkeypatch.setattr(cmd, "bootstrap_app", bootstrap)
+    data_root = RuntimeResources.for_settings(Settings()).root
+    data_root.mkdir(parents=True, exist_ok=True)
+    original_owner = data_root.stat()
+    handed_over = []
+
+    def hand_over(root, service_user, *, database_file, lookup_ids, echo):
+        assert seen == ["external"]  # migration precedes ownership handover
+        assert root == data_root
+        assert service_user == f"{original_owner.st_uid}:{original_owner.st_gid}"
+        assert lookup_ids(service_user) == (
+            original_owner.st_uid,
+            original_owner.st_gid,
+        )
+        handed_over.append(root)
+        return []
+
+    monkeypatch.setattr(cmd.prod_setup, "hand_data_to_service_user", hand_over)
     queries = []
 
     def systemctl_show(argv, **kwargs):
@@ -281,6 +298,7 @@ def test_systemd_update_finalization_preserves_split_worker(
     assert result.exit_code == 0, result.output
     assert len(queries) == (0 if explicit_env else 1)
     assert seen == ["external"]
+    assert handed_over == [data_root]
     assert (
         cmd.prod_setup.get_env_value(env, "DTXWIKI_SESSION_SECRET")
         == "preserve-this-value"

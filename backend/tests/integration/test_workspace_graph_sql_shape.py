@@ -25,6 +25,7 @@ from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.schemas.workspace_graph import WorkspaceGraphOverviewRequest
 from backend.services.workspace_graph_service import WorkspaceGraphService
+from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 from backend.tests.utils.workspace_graph_corpora import (
     add_knowledge_40_relation_branch_fixtures,
@@ -145,6 +146,7 @@ def test_workspace_graph_query_parameter_count_is_constant_on_postgres() -> None
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     drop_reflected_postgres_metadata(engine)
     try:
         command.upgrade(config, "head")

@@ -116,17 +116,44 @@ FORBIDDEN_IMPORTS = {
         *INNER_LAYER_CONCRETE_IMPORTS,
     ),
     "backend/context_media/adapters": ("backend.app",),
+    "backend/context_versions/domain.py": (
+        "backend.context_versions.application",
+        "backend.context_versions.adapters",
+        "backend.context_versions.ports",
+        "backend.context_versions.codecs",
+        "pygit2",
+        *INNER_LAYER_CONCRETE_IMPORTS,
+    ),
+    "backend/context_versions/ports.py": (
+        "backend.context_versions.application",
+        "backend.context_versions.adapters",
+        "pygit2",
+        *INNER_LAYER_CONCRETE_IMPORTS,
+    ),
+    "backend/context_versions/application.py": (
+        "backend.context_versions.adapters",
+        "pygit2",
+        *INNER_LAYER_CONCRETE_IMPORTS,
+    ),
+    "backend/context_versions/codecs.py": (
+        "backend.context_versions.adapters",
+        "backend.context_versions.application",
+        "pygit2",
+        *INNER_LAYER_CONCRETE_IMPORTS,
+    ),
 }
 
 CONCRETE_MEDIA_IMPORTS = (
     "backend.media.adapters",
     "backend.library_media.adapters",
     "backend.context_media.adapters",
+    "backend.context_versions.adapters",
 )
 ADAPTER_PACKAGE_PATHS = (
     ("backend/media/adapters", "backend.media.adapters"),
     ("backend/library_media/adapters", "backend.library_media.adapters"),
     ("backend/context_media/adapters", "backend.context_media.adapters"),
+    ("backend/context_versions/adapters", "backend.context_versions.adapters"),
 )
 MEDIA_PACKAGE_LAYERS = {
     "backend/media": frozenset({"domain", "ports", "application", "adapters"}),
@@ -139,11 +166,19 @@ MEDIA_PACKAGE_LAYERS = {
 }
 REQUIRED_MEDIA_INNER_LAYERS = ("domain", "ports", "application")
 MEDIA_COMPOSITION_ROOT = "backend/app/container.py"
+CONTEXT_COMPOSITION_ROOT = "backend/app/context_version_storage.py"
+CONTEXT_FROZEN_GIT_HELPER = (
+    "backend/migrations/revision_modules/v0_2/"
+    "_74e5d4f912a6_context_git/context_content_to_git.py"
+)
 
 
 def iter_python_files(package_path: str, *, root: Path = ROOT):
     directory = root / package_path
     if not directory.exists():
+        return
+    if directory.is_file():
+        yield directory
         return
     yield from directory.rglob("*.py")
 
@@ -285,7 +320,13 @@ def concrete_adapter_violations(*, root: Path = ROOT) -> list[str]:
         # dependency injection.
         if relative.startswith("backend/tests/"):
             continue
-        if relative == MEDIA_COMPOSITION_ROOT:
+        imported_modules = imports_from(source_file, root=root)
+        if relative != CONTEXT_FROZEN_GIT_HELPER and not relative.startswith(
+            "backend/context_versions/adapters/"
+        ):
+            for imported in shortest_matching_imports(imported_modules, "pygit2"):
+                violations.append(f"{relative} imports native Git library {imported}")
+        if relative in {MEDIA_COMPOSITION_ROOT, CONTEXT_COMPOSITION_ROOT}:
             continue
         source_adapter = next(
             (
@@ -296,7 +337,6 @@ def concrete_adapter_violations(*, root: Path = ROOT) -> list[str]:
             ),
             None,
         )
-        imported_modules = imports_from(source_file, root=root)
         for prefix in CONCRETE_MEDIA_IMPORTS:
             for imported in most_specific_matching_imports(imported_modules, prefix):
                 normalized_import = imported
@@ -307,13 +347,14 @@ def concrete_adapter_violations(*, root: Path = ROOT) -> list[str]:
                 else:
                     import_family = None
                 if source_adapter is not None and prefix == source_adapter[1]:
+                    if prefix == "backend.context_versions.adapters":
+                        # A Git adapter can share its repository guard helper;
+                        # these are one storage implementation, not media families.
+                        continue
                     package_path, _import_prefix = source_adapter
                     source_suffix = relative.removeprefix(f"{package_path}/")
                     source_family = source_suffix.split("/", 1)[0].removesuffix(".py")
-                    if (
-                        source_family != "__init__"
-                        and source_family == import_family
-                    ):
+                    if source_family != "__init__" and source_family == import_family:
                         continue
                 violations.append(
                     f"{relative} imports concrete adapter {normalized_import}"

@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.services.library_storage import inline_text_ref
+from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.utils.content_hash import content_hash as calculate_content_hash
 
 epic1 = import_module("backend.migrations.versions.v0_1.efcbcf724889_core_schema")
@@ -60,6 +61,7 @@ def _config(database_url: str) -> Config:
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)
+    configure_test_repositories(config)
     return config
 
 

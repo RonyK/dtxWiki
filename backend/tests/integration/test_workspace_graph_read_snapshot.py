@@ -22,6 +22,7 @@ from backend.services.db_write_intent import acquire_write_intent
 from backend.services.page_service import PageService
 from backend.services.workspace_graph_service import WorkspaceGraphService
 from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.utils.context_git import seed_published_snapshot
 
 pytestmark = pytest.mark.integration
 
@@ -178,6 +179,7 @@ def _published_page(session, workspace_id, slug):
     session.add(version)
     session.flush()
     page.current_version_id = page.current_published_version_id = version.id
+    seed_published_snapshot(session, version)
     return page, version
 
 

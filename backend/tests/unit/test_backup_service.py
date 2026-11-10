@@ -3,7 +3,11 @@
 import hashlib
 import os
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
+
+import pytest
 
 from backend.app.settings import Settings
 from backend.services import backup_service
@@ -62,6 +66,57 @@ def _add_library_blob(db: Path, library_root: Path, content: bytes) -> tuple[Pat
     finally:
         connection.close()
     return blob, storage_key
+
+
+def _add_context_snapshot(db: Path, root: Path, content: bytes):
+    from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
+    from backend.context_versions.domain import ContentPayload
+
+    workspace_id, page_id, version_id = uuid4(), uuid4(), uuid4()
+    store = GitSnapshotStore(root)
+    oid = store.commit(
+        workspace_id=workspace_id,
+        page_id=page_id,
+        version_id=version_id,
+        created_at=datetime(2026, 11, 9, tzinfo=UTC),
+        payload=ContentPayload(content),
+        parents=[],
+    )
+    store.set_head(workspace_id, page_id, oid)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "CREATE TABLE context_page (id TEXT, workspace_id TEXT, "
+            "current_published_version_id TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE context_page_version (id TEXT, workspace_id TEXT, "
+            "page_id TEXT, commit_oid TEXT, content_format TEXT, format_version INT, "
+            "media_type TEXT, encoding TEXT, content_byte_size INT, body_md TEXT, "
+            "version_status TEXT NOT NULL DEFAULT 'published_snapshot')"
+        )
+        connection.execute(
+            "INSERT INTO context_page VALUES (?, ?, ?)",
+            (page_id.hex, workspace_id.hex, version_id.hex),
+        )
+        connection.execute(
+            "INSERT INTO context_page_version "
+            "(id, workspace_id, page_id, commit_oid, content_format, format_version, "
+            "media_type, encoding, content_byte_size, body_md) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                version_id.hex,
+                workspace_id.hex,
+                page_id.hex,
+                oid,
+                "markdown",
+                1,
+                "text/markdown",
+                "utf-8",
+                len(content),
+                content.decode(),
+            ),
+        )
+    return store, workspace_id, page_id, oid
 
 
 def test_db_path_from_url_variants():
@@ -132,9 +187,7 @@ def test_create_backup_normalizes_wal_source_to_standalone_checkpoint(tmp_path):
 
     checkpoint = backup_dir / backup_service.DB_BACKUP_NAME
     manifest = backup_service.read_manifest(backup_dir)
-    assert manifest["database_snapshot_method"] == (
-        "sqlite3_backup_delete_journal"
-    )
+    assert manifest["database_snapshot_method"] == ("sqlite3_backup_delete_journal")
     with sqlite3.connect(checkpoint) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
         assert connection.execute("SELECT v FROM t").fetchone()[0] == "latest-in-wal"
@@ -175,6 +228,15 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path):
     settings = _settings_for(db, jwt)
 
     backup_dir = backup_service.create_backup(settings, version="0.1.0", data_dir=base)
+    # A pre-Git schema-2 checkpoint restores normally and retires newer Git data.
+    manifest = backup_service.read_manifest(backup_dir)
+    manifest["schema"] = 2
+    manifest.pop("includes_context_repositories")
+    manifest.pop("context_repository_checkpoint")
+    backup_service.write_manifest(backup_dir, manifest)
+    repositories = base / "repositories"
+    repositories.mkdir()
+    (repositories / "newer-data").write_bytes(b"retired by the older DB restore")
 
     # Mutate live state after the backup.
     _make_db(db, 5)  # now 8 rows
@@ -185,6 +247,33 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path):
 
     assert _row_count(db) == 3
     assert jwt.read_text(encoding="utf-8") == "ORIGINAL"
+    assert not repositories.exists()
+
+    # A failed Git migration can leave orphan objects after its SQL changes
+    # roll back. Schema-3 capture still validates that copied bare layout.
+    from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
+    from backend.context_versions.domain import ContentPayload
+
+    legacy_git = GitSnapshotStore(repositories)
+    workspace_id = uuid4()
+    legacy_git.commit(
+        workspace_id=workspace_id,
+        page_id=uuid4(),
+        version_id=uuid4(),
+        created_at=datetime(2026, 11, 10, tzinfo=UTC),
+        payload=ContentPayload(b"candidate before the SQL migration rolled back"),
+        parents=[],
+    )
+    old_schema_checkpoint = backup_service.create_backup(settings, data_dir=base)
+    copied_repository = (
+        old_schema_checkpoint / "files" / "repositories" / f"{workspace_id}.git"
+    )
+    (copied_repository / "refs").rename(copied_repository / ".missing-refs")
+    with pytest.raises(
+        backup_service.BackupIntegrityError,
+        match="Git checkpoint reference validation failed",
+    ):
+        backup_service.verify_backup_integrity(old_schema_checkpoint)
 
 
 def test_restore_reapplies_jwt_key_ownership(tmp_path, monkeypatch):
@@ -446,6 +535,9 @@ def test_include_files_restored(tmp_path):
 
 
 def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path):
+    from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
+    from backend.context_versions.domain import ContentDescriptor, ContentPayload
+
     base = tmp_path / "data"
     base.mkdir()
     db = base / "dtxwiki.sqlite"
@@ -458,20 +550,70 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
     staging.parent.mkdir(parents=True)
     staging.write_bytes(b"ephemeral")
     settings = _settings_for(db, jwt, library_root=library_root)
+    git, workspace_id, page_id, oid = _add_context_snapshot(
+        db, base / "repositories", b"# Exact\r\ncontent  \r\n"
+    )
+    # SQL can roll back after Git creates objects and before any ref is set.
+    # That workspace's empty refs directory still belongs to the checkpoint.
+    orphan_workspace_id, orphan_page_id = uuid4(), uuid4()
+    orphan_body = b"unreferenced publication candidate"
+    orphan_oid = git.commit(
+        workspace_id=orphan_workspace_id,
+        page_id=orphan_page_id,
+        version_id=uuid4(),
+        created_at=datetime(2026, 11, 9, tzinfo=UTC),
+        payload=ContentPayload(orphan_body),
+        parents=[],
+    )
+    locks = base / "repositories" / ".locks"
+    locks.mkdir(exist_ok=True)
+    (locks / "ignored.lock").write_bytes(b"not checkpoint data")
+    repository = git.repository_path(workspace_id)
+    abandoned_pack = repository / ".pack-stage-leftover" / "pack"
+    abandoned_pack.mkdir(parents=True)
+    (abandoned_pack / "unfinished.pack").write_bytes(b"not a completed Git pack")
+    (repository / ".operator-note").write_bytes(b"ordinary hidden file")
+
+    # A post-Git snapshot with a lost mapping is corruption, not an empty
+    # repository checkpoint. Refuse it before producing a full backup.
+    with sqlite3.connect(db) as connection:
+        connection.execute("UPDATE context_page_version SET commit_oid=NULL")
+    with pytest.raises(
+        backup_service.BackupIntegrityError, match="state or published pointer"
+    ):
+        backup_service.create_backup(settings, data_dir=base)
+    with sqlite3.connect(db) as connection:
+        connection.execute("UPDATE context_page_version SET commit_oid=?", (oid,))
 
     first = backup_service.create_backup(settings, data_dir=base)
     second = backup_service.create_backup(settings, data_dir=base)
     first_manifest = backup_service.read_manifest(first)
     second_manifest = backup_service.read_manifest(second)
 
-    assert first_manifest["schema"] == 2
+    assert first_manifest["schema"] == 3
     assert first_manifest["checkpoint_kind"] == "full"
     assert first_manifest["checkpoint_complete"] is True
     assert first_manifest["includes_library_blobs"] is True
+    assert first_manifest["includes_context_repositories"] is True
     assert first_manifest["includes_user_files"] is False
     entry_name = f"files/library/blobs/{storage_key}"
     assert entry_name in {entry["name"] for entry in first_manifest["files"]}
     assert not (first / "files" / "library" / "staging").exists()
+    assert not (first / "files" / "repositories" / ".locks").exists()
+    repository_copy = first / "files" / "repositories" / repository.name
+    assert not (repository_copy / ".pack-stage-leftover").exists()
+    assert (repository_copy / ".operator-note").read_bytes() == b"ordinary hidden file"
+    assert not any(
+        ".pack-stage-leftover" in entry["name"] for entry in first_manifest["files"]
+    )
+    checkpoint_git = GitSnapshotStore(first / "files" / "repositories")
+    assert checkpoint_git.list_heads(orphan_workspace_id) == {}
+    assert checkpoint_git.read(
+        workspace_id=orphan_workspace_id,
+        page_id=orphan_page_id,
+        commit_oid=orphan_oid,
+        descriptor=ContentDescriptor(),
+    ) == orphan_body
     assert (
         first_manifest["library_checkpoint"]["tree_sha256"]
         == second_manifest["library_checkpoint"]["tree_sha256"]
@@ -480,11 +622,65 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
     blob.write_bytes(b"live-mutated")
     extra = library_root / "blobs" / "orphan"
     extra.write_bytes(b"not-in-checkpoint")
+    with git.management_guard(workspace_id):
+        git.purge_workspace(workspace_id)
     backup_service.restore_backup(first, settings, data_dir=base)
 
     assert blob.read_bytes() == b"source-payload"
     assert not extra.exists()
     assert not staging.exists()
+    assert git.list_heads(workspace_id) == {page_id: oid}
+    assert (
+        git.read(
+            workspace_id=workspace_id,
+            page_id=page_id,
+            commit_oid=oid,
+            descriptor=ContentDescriptor(),
+        )
+        == b"# Exact\r\ncontent  \r\n"
+    )
+    assert git.list_heads(orphan_workspace_id) == {}
+    assert git.read(
+        workspace_id=orphan_workspace_id,
+        page_id=orphan_page_id,
+        commit_oid=orphan_oid,
+        descriptor=ContentDescriptor(),
+    ) == orphan_body
+    git.commit(
+        workspace_id=orphan_workspace_id,
+        page_id=orphan_page_id,
+        version_id=uuid4(),
+        created_at=datetime(2026, 11, 10, tzinfo=UTC),
+        payload=ContentPayload(b"next candidate after restore"),
+        parents=[orphan_oid],
+    )
+
+    # With no mapped snapshots, structural verification must still open each
+    # copied repository. Removing an empty directory changes no file checksum.
+    git.set_head(workspace_id, page_id, None)
+    with sqlite3.connect(db) as connection:
+        connection.execute("UPDATE context_page SET current_published_version_id=NULL")
+        connection.execute(
+            "UPDATE context_page_version SET version_status='draft', "
+            "commit_oid=NULL, content_byte_size=NULL"
+        )
+    unmapped = backup_service.create_backup(settings, data_dir=base)
+    unexpected = unmapped / "files" / "repositories" / "unexpected_empty"
+    unexpected.mkdir()
+    with pytest.raises(
+        backup_service.BackupIntegrityError, match="unexpected Git repository entry"
+    ):
+        backup_service.verify_backup_integrity(unmapped)
+    unexpected.rmdir()
+    copied_orphan = (
+        unmapped / "files" / "repositories" / f"{orphan_workspace_id}.git"
+    )
+    (copied_orphan / "refs").rename(copied_orphan / ".missing-refs")
+    with pytest.raises(
+        backup_service.BackupIntegrityError,
+        match="Git checkpoint reference validation failed",
+    ):
+        backup_service.verify_backup_integrity(unmapped)
 
 
 def test_create_backup_rejects_db_reference_to_missing_source_blob(tmp_path):
@@ -720,7 +916,12 @@ def test_full_restore_rolls_back_library_when_db_cutover_fails(tmp_path, monkeyp
     library_root = tmp_path / "library"
     blob, _ = _add_library_blob(db, library_root, b"checkpoint")
     settings = _settings_for(db, jwt, library_root=library_root)
+    git, workspace_id, _, _ = _add_context_snapshot(
+        db, base / "repositories", b"checkpoint Git body"
+    )
     backup_dir = backup_service.create_backup(settings, data_dir=base)
+    extra = git.repository_path(workspace_id) / "live-state"
+    extra.write_bytes(b"survives failed restore")
     blob.write_bytes(b"live-state")
     _make_db(db, 1)
 
@@ -744,6 +945,7 @@ def test_full_restore_rolls_back_library_when_db_cutover_fails(tmp_path, monkeyp
 
     assert blob.read_bytes() == b"live-state"
     assert _row_count(db) == 2
+    assert extra.read_bytes() == b"survives failed restore"
     assert not list(tmp_path.rglob("*.restore-new-*"))
     assert not list(tmp_path.rglob("*.restore-old-*"))
 

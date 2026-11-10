@@ -10,7 +10,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from backend.app import versioning
-from backend.app.data_dir import db_dir, logs_dir
+from backend.app.data_dir import data_dir, db_dir, logs_dir
 from backend.app.db import make_engine, make_session_factory
 from backend.app.plugins import load_plugins
 from backend.app.settings import Settings
@@ -179,7 +179,9 @@ def ensure_app_version_synced(settings: Settings, app=None) -> None:
             db_revision or "<absent>",
             alembic_head,
         )
-        run_alembic_upgrade(settings.database_url)
+        run_alembic_upgrade(
+            settings.database_url, repositories_root=data_dir() / "repositories"
+        )
         migrated = _database_preflight(settings)
         if migrated.revision != alembic_head or migrated.verdict != "ready":
             raise RuntimeError(
@@ -428,10 +430,11 @@ def ensure_data_dirs() -> None:
     logs_dir().mkdir(parents=True, exist_ok=True)
 
 
-def run_alembic_upgrade(database_url: str) -> None:
+def run_alembic_upgrade(database_url: str, *, repositories_root: Path) -> None:
     cfg = Config(str(resolve_alembic_ini()))
     cfg.set_main_option("sqlalchemy.url", database_url)
     cfg.set_main_option("script_location", str(resolve_migrations_dir()))
+    cfg.attributes["context_repositories_root"] = repositories_root
     logger.info("alembic upgrade head (db=%s)", _redact(database_url))
     command.upgrade(cfg, "head")
 

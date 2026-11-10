@@ -80,7 +80,7 @@ def _manifest_fields(
     if (
         not isinstance(schema, int)
         or isinstance(schema, bool)
-        or schema not in (1, 2)
+        or schema not in (1, 2, 3)
     ):
         raise backup_service.BackupIntegrityError("unsupported schema")
     if revision is not None and not is_revision_id(revision):

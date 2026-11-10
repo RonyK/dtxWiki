@@ -78,8 +78,10 @@ class LintFixWriter:
         job_queue: JobQueueService | None = None,
         context_media_repository_factory: Callable[[Session], ContextMediaRepository]
         | None = None,
+        context_version_writer=None,
         self_origins: frozenset[str] | None = None,
     ) -> None:
+        self.context_version_writer = context_version_writer
         self.registry = lint_registry
         self.audit = audit_service or AuditService()
         self.job_queue = job_queue
@@ -115,6 +117,7 @@ class LintFixWriter:
 
         service = PageService(
             _SessionBoundFactory(session),
+            context_version_writer=self.context_version_writer,
             actor_context=ActorContext(
                 actor_kind="system", actor_id="lint-autofix", workspace_id=workspace_id
             ),

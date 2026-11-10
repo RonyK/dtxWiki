@@ -150,12 +150,8 @@ WorkspaceViewerAccessDep = Annotated[
 WorkspaceEditorAccessDep = Annotated[
     WorkspaceAccess, Depends(workspace_access("editor"))
 ]
-WorkspaceOwnerAccessDep = Annotated[
-    WorkspaceAccess, Depends(workspace_access("owner"))
-]
-WorkspaceAdminAccessDep = Annotated[
-    WorkspaceAccess, Depends(workspace_access("admin"))
-]
+WorkspaceOwnerAccessDep = Annotated[WorkspaceAccess, Depends(workspace_access("owner"))]
+WorkspaceAdminAccessDep = Annotated[WorkspaceAccess, Depends(workspace_access("admin"))]
 
 
 def workspace_labs_feature_enabled(
@@ -226,9 +222,7 @@ WorkspaceAgentAccessDep = Annotated[
 def read_service_error_response(exc: ReadServiceError) -> JSONResponse:
     candidate_payloads = getattr(exc, "candidate_payloads", None)
     extra = (
-        {"candidates": candidate_payloads()}
-        if callable(candidate_payloads)
-        else None
+        {"candidates": candidate_payloads()} if callable(candidate_payloads) else None
     )
     # A stale-base refusal names the bytes the caller must reconcile against,
     # using the same keys the page routes already emit for PageConflictError
@@ -255,6 +249,10 @@ def read_service_error_response(exc: ReadServiceError) -> JSONResponse:
 
 
 def status_code_for_read_error(exc: ReadServiceError) -> int:
+    if exc.error_code in {"context_repository_unavailable", "context_repository_busy"}:
+        return 503
+    if exc.error_code == "context_format_unsupported":
+        return 422
     if exc.error_code in {
         "legacy_media_cutover_conflict",
         "stale_context_draft",

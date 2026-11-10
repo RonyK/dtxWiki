@@ -32,6 +32,7 @@ from backend.services.ops.input_maintenance import (
     repair_input,
 )
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.tests.utils.migration_paths import configure_test_repositories
 
 PRE_INPUT_REVISION = "efcbcf724889"
 CURRENT_HEAD = ScriptDirectory.from_config(
@@ -51,6 +52,7 @@ def _database(tmp_path, templates, template="rev_efcbcf724889"):
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", url)
+    configure_test_repositories(config)
     return url, config
 
 
@@ -428,17 +430,33 @@ def test_context_title_repair_keeps_staged_name_and_historical_body(
                 title="Old title",
             )
         )
+        # Reflect the released schema: the current model has later Git
+        # columns that this historical repair must not require or populate.
+        versions = sa.Table(
+            "context_page_version", sa.MetaData(), autoload_with=connection
+        )
+        for column in versions.c:
+            column.type = ContextPageVersion.__table__.c[column.name].type
+        values = dict(
+            id=version_id,
+            workspace_id=workspace,
+            page_id=page,
+            body_md=body,
+            content_hash="preserved-historical-hash",
+            actor_type="human",
+            version_status="draft",
+            version_no=1,
+            graph_status="linear",
+            rendering_profile="gfm_mermaid",
+            created_by_actor_kind="human",
+            created_by_actor_id="00000000-0000-0000-0000-000000000010",
+            created_at=datetime.now(UTC),
+            last_saved_at=datetime.now(UTC),
+            editing_revision=1,
+        )
         connection.execute(
-            ContextPageVersion.__table__.insert().values(
-                id=version_id,
-                workspace_id=workspace,
-                page_id=page,
-                body_md=body,
-                content_hash="preserved-historical-hash",
-                actor_type="human",
-                version_status="draft",
-                created_by_actor_kind="human",
-                created_by_actor_id="00000000-0000-0000-0000-000000000010",
+            versions.insert().values(
+                {name: value for name, value in values.items() if name in versions.c}
             )
         )
         connection.execute(

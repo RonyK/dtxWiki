@@ -232,6 +232,12 @@ class OneShotWorker:
             # routing provider.  In particular media_blob_gc must open and
             # commit its own short phases after the job claim transaction.
             self._services.context_media_session_for = database_provider.session_for
+            from backend.app.context_version_storage import bind_context_storage
+
+            bind_context_storage(
+                self._services, database_provider.control_session_factory()
+            )
+
         if blob_store_provider is not None:
             # Match assemble(): seed the cached-property slot before any
             # dependent service is resolved, preserving the exact overlay
@@ -2027,6 +2033,14 @@ class OneShotWorker:
             "drained_count": result.drained_count,
         }
 
+    def _business_context_repository_maintenance(self, session, job, queue_job):
+        del session, queue_job
+        if isinstance(job, Job):
+            raise RuntimeError(
+                "context_repository_maintenance_requires_two_phase_dispatch"
+            )
+        return self._services.context_repository_maintenance.run(job.workspace_id)
+
     def _business_media_blob_gc(
         self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
     ) -> dict[str, Any]:
@@ -2500,6 +2514,13 @@ register(
     "credential_replica_reconcile",
     JobHandler(
         OneShotWorker._business_credential_replica_reconcile,
+        completes_in_service=False,
+    ),
+)
+register(
+    "context_repository_maintenance",
+    JobHandler(
+        OneShotWorker._business_context_repository_maintenance,
         completes_in_service=False,
     ),
 )

@@ -126,6 +126,7 @@ def get_page_service(request: Request, workspace_slug: str) -> PageService:
         raise PageNotFoundError("workspace not found")
     return PageService(
         container.db.session_for(workspace_id),
+        context_version_writer=services.context_version_writer,
         job_queue=services.job_queue,
         body_preparer=services.body_preparer,
         lint_registry=services.lint_registry,
