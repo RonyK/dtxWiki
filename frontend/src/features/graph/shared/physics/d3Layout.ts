@@ -46,6 +46,8 @@ export type LocalLayoutOptions = {
   autoStart?: boolean;
   /** Only a complete, same-visible-scene solved checkpoint may skip initialization. */
   initialPositionsAreSolved?: boolean;
+  /** Stop the first solve early; the caller finishes this cooling with update(settleAtCurrentAlpha). */
+  initialTicks?: number;
   /** Worker lifecycle resumes permission without automatically reheating cooled nodes. */
   preserveCoolingOnResume?: boolean;
 };
@@ -61,7 +63,8 @@ export type LocalLayout = {
   getIndexedPositions(): Float32Array;
   /** Update the current scope without resetting existing positions or velocities. */
   update(input: LocalLayoutInput, fixedPositions?: LocalLayoutPositions, options?: D3LayoutUpdateOptions): void;
-  pause(): void;
+  /** The Worker proxy keeps a solve's newer rows in the Worker when workerOwnsRows is set. */
+  pause(workerOwnsRows?: boolean): void;
   resume(reheat?: boolean): void;
   destroy(): void;
   pin(key: string, position?: GraphPoint, reheat?: boolean): GraphPoint | null;
@@ -92,6 +95,11 @@ function finitePoint(point: GraphPoint | undefined | null): point is GraphPoint 
 
 function safeRadius(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 3;
+}
+
+function boundedTicks(requested: number | undefined): number {
+  return Number.isInteger(requested) && requested! > 0
+    ? Math.min(LOCAL_LAYOUT_PARAMS.preTicks, requested!) : LOCAL_LAYOUT_PARAMS.preTicks;
 }
 
 /**
@@ -372,18 +380,15 @@ export function createD3Layout(
     setState("cooled");
   });
   if (restored) simulation.alpha(0);
-  else simulation.tick(LOCAL_LAYOUT_PARAMS.preTicks);
+  else simulation.tick(boundedTicks(options.initialTicks));
   notify();
   options.onState?.({ ...state });
   if (!restored) startLive();
 
   const settle = (updateOptions: D3LayoutUpdateOptions): void => {
-    const requested = updateOptions.settleTicks;
-    const ticks = Number.isInteger(requested) && requested! > 0
-      ? Math.min(LOCAL_LAYOUT_PARAMS.preTicks, requested!) : LOCAL_LAYOUT_PARAMS.preTicks;
     simulation.stop();
     if (!updateOptions.settleAtCurrentAlpha) simulation.alpha(0.3);
-    simulation.tick(ticks);
+    simulation.tick(boundedTicks(updateOptions.settleTicks));
     if (updateOptions.settleAtCurrentAlpha) pendingMotion = simulation.alpha() >= simulation.alphaMin();
   };
 

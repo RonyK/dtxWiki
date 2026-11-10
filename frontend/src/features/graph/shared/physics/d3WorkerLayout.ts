@@ -119,7 +119,8 @@ export function createD3WorkerLayout(input: LocalLayoutInput, options: D3WorkerL
   };
   worker.addEventListener("message", onMessage); worker.addEventListener("error", onError); worker.addEventListener("messageerror", onError);
   send({ type: "init", input, options: { cachedPositions: options.cachedPositions, fixedPositions: options.fixedPositions,
-    reducedMotion: options.reducedMotion, autoStart: options.autoStart, initialPositionsAreSolved: options.initialPositionsAreSolved } });
+    reducedMotion: options.reducedMotion, autoStart: options.autoStart, initialPositionsAreSolved: options.initialPositionsAreSolved,
+    initialTicks: options.initialTicks } });
   const localPoint = (key: string, point?: GraphPoint): GraphPoint | null => {
     const index = byKey.get(key);
     if (destroyed || index === undefined || key !== seed && point !== undefined && !finite(point)) return null;
@@ -156,11 +157,11 @@ export function createD3WorkerLayout(input: LocalLayoutInput, options: D3WorkerL
       send({ type: "setPositions", positions: next, pins: nextPins,
         options: { ...reconcile, pinsOnly, reheat: reconcile.reheat ?? published } });
     },
-    pause() {
+    pause(workerOwnsRows = false) {
       if (destroyed) return;
       suppressed = true; state = { ...state, running: false, phase: state.ready ? "paused" : "initial" };
-      // Provisional phyllotaxis must never travel back over the Worker's cold solve.
-      if (published) {
+      // Provisional rows must never travel back over the Worker's unfinished cold solve.
+      if (published && !workerOwnsRows) {
         const rows = positions.slice();
         worker.postMessage({ type: "pause", sequence: ++sequence, topology, positions: { keys, positions: rows } }, [rows.buffer]);
       } else send({ type: "pause" });

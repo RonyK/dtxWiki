@@ -43,4 +43,41 @@ describe("Map D3 consumer failure boundary", () => {
     expect(onError).toHaveBeenCalledOnce();
     expect(layout.isRunning()).toBe(false);
   });
+
+  it("finishes one cooling in two batches and accepts a Fit too small to separate every body", () => {
+    vi.clearAllMocks();
+    // Two bodies a tenth of a unit apart beside a far third stay overlapped at any Fit.
+    const dense = Float32Array.from([0, 0, .1, 0, 10_000, 0]);
+    const spread = Float32Array.from([0, 0, 5_000, 0, 10_000, 0]);
+    const keys = ["context:a", "context:b", "context:c"];
+    const input = { columns: { nodeKeys: keys, edgeIds: ["edge:a"], edgeSources: Uint32Array.from([0]), edgeTargets: Uint32Array.from([1]),
+      edgeKinds: Uint8Array.from([0]), edgeCounts: Uint32Array.from([1]), edgeWeights: Float64Array.from([1]) } as WorkspaceMapColumns,
+    positions: dense, diameters: Float32Array.from([6, 6, 6]), shapes: new Float32Array(3), pins: [], reducedMotion: false,
+    viewport: { width: 1000, height: 500 } };
+    const onPositions = vi.fn(), onState = vi.fn(), onError = vi.fn();
+    const ticks = () => mock.driver.update.mock.calls.map(call => call[2].settleTicks);
+    const layout = createWorkspaceD3Layout(input, { onPositions, onState, onError });
+    expect(mock.options!.initialTicks).toBe(150);
+    mock.options!.onIndexedTick!(dense, keys);
+    expect(ticks()).toEqual([160]);
+    // The Worker holds newer rows than this provisional frame until one is accepted.
+    layout.stop();
+    expect(mock.driver.pause).toHaveBeenLastCalledWith(true);
+    layout.start();
+    expect(ticks()).toEqual([160, 1]);
+    for (let frame = 0; frame < 4; frame++) mock.options!.onIndexedTick!(dense, keys);
+    expect(ticks()).toEqual([160, 1, 80, 80, 80]);
+    expect(onPositions).toHaveBeenCalledExactlyOnceWith(dense);
+    expect(onError).not.toHaveBeenCalled();
+
+    // Separated bodies are accepted at once, even when the Fit is below the reference.
+    mock.driver.update.mockClear();
+    const separated = vi.fn();
+    createWorkspaceD3Layout(input, { onPositions: separated, onState, onError });
+    mock.options!.onIndexedTick!(Float32Array.from([0, 0, 40, 0, 80, 0]), keys);
+    mock.options!.onIndexedTick!(spread, keys);
+    expect(ticks()).toEqual([160]);
+    expect(separated).toHaveBeenCalledExactlyOnceWith(spread);
+    expect(onError).not.toHaveBeenCalled();
+  });
 });

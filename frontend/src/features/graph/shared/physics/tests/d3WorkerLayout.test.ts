@@ -78,6 +78,13 @@ describe("shared D3 Worker and proxy integration", () => {
     expect(worker.messages.filter(message => message.type === "frame").every(frame => !Object.hasOwn(frame, "keys"))).toBe(true);
     expect(layout.getIndexedPositions()).toHaveLength(80);
     layout.destroy(); expect(worker.terminate).toHaveBeenCalledOnce();
+
+    // A shortened first batch reaches the real Worker and stops the solve there.
+    const extent = (rows: Float32Array) => Math.max(...rows) - Math.min(...rows);
+    const early = createD3WorkerLayout(input, { workerFactory: factory(new ThreadWorker()), autoStart: false, initialTicks: 1 });
+    const full = createD3WorkerLayout(input, { workerFactory: factory(new ThreadWorker()), autoStart: false });
+    await vi.waitFor(() => expect(early.getState().ready && full.getState().ready).toBe(true), { timeout: 10_000 });
+    expect(extent(early.getIndexedPositions())).toBeLessThan(extent(full.getIndexedPositions()) / 2);
   });
 
   it("restores solved checkpoints without motion, preserves cooled permission resumes, and fails closed on an older live Worker error", async () => {

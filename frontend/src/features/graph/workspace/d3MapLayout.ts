@@ -34,10 +34,14 @@ export type WorkspaceD3LayoutOptions = {
   onError(error: Error): void;
 };
 
-// One initial shared solve, followed by at most six bounded batches using the
-// same D3 forces at their current cooling alpha. No camera/resize can rearm it.
-const MAX_CALIBRATION_PASSES = 6;
-const CALIBRATION_TICKS = 300;
+// One D3 cooling run in two batches: the rows after the first batch give the
+// real extent that converts CSS glyphs to graph units, and the same cooling
+// finishes with those radii (ending below alphaMin). Short contact passes then
+// resolve what is left. No camera/resize can rearm it.
+const INITIAL_SOLVE_TICKS = 150;
+const REMAINING_SOLVE_TICKS = 160;
+const CONTACT_PASS_TICKS = 80;
+const MAX_CONTACT_PASSES = 3;
 const FIT_CLEARANCE_SLACK = .97;
 const MATERIAL_OVERLAP_CSS = .5;
 
@@ -79,9 +83,13 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
     catch { /* A failed state consumer must not prevent the terminal error notification. */ }
     options.onError(error);
   };
+  const hasBodyOverlap = (positions: Float32Array, fit: number): boolean => {
+    const actualGlyphs = buildWorkspaceD3UnitBasis({ ...input, positions, viewport: basis.referenceViewport, referenceZoom: fit });
+    return measureWorkspaceD3BodyOverlap(positions, actualGlyphs.nominalRadiusCss, fit, MATERIAL_OVERLAP_CSS, fixedIndices).overlappingNodes > 0;
+  };
   const layout = createD3WorkerLayout(currentScene, {
     cachedPositions, fixedPositions, autoStart: false, reducedMotion,
-    initialPositionsAreSolved: reused,
+    initialPositionsAreSolved: reused, initialTicks: INITIAL_SOLVE_TICKS,
     onIndexedTick(positions, workerKeys) {
       if (destroyed) return;
       try {
@@ -101,19 +109,17 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
           // asks for another bounded Worker frame instead of copying phyllotaxis.
           if (explicitlyPaused) return;
           const fit = workspaceD3FitZoom(ordered, basis.referenceViewport);
-          const actualGlyphs = buildWorkspaceD3UnitBasis({ ...input, positions: ordered,
-            viewport: basis.referenceViewport, referenceZoom: fit });
-          const overlap = measureWorkspaceD3BodyOverlap(ordered, actualGlyphs.nominalRadiusCss, fit, MATERIAL_OVERLAP_CSS, fixedIndices);
-          if (overlap.overlappingNodes > 0 || fit < basis.referenceZoom * .98) {
-            if (calibrationPasses >= MAX_CALIBRATION_PASSES) {
-              fail(new Error(`D3 Map initial body calibration did not settle (${overlap.overlappingNodes} overlapping nodes)`)); return;
-            }
+          const coolingRemains = calibrationPasses === 0;
+          // Glyphs keep their CSS size, so a dense scene may not separate at a
+          // phone's Fit. Zooming in resolves that; it is never a Map failure.
+          if (coolingRemains || calibrationPasses <= MAX_CONTACT_PASSES && hasBodyOverlap(ordered, fit)) {
             calibrationPasses++;
             basis = buildWorkspaceD3UnitBasis({ ...input, positions: ordered, viewport: basis.referenceViewport,
               referenceZoom: Math.min(basis.referenceZoom, fit) * FIT_CLEARANCE_SLACK,
               calibrationPasses });
             currentScene = scene();
-            layout.update(currentScene, undefined, { settle: true, settleTicks: CALIBRATION_TICKS, settleAtCurrentAlpha: true });
+            layout.update(currentScene, undefined, { settle: true, settleAtCurrentAlpha: true,
+              settleTicks: coolingRemains ? REMAINING_SOLVE_TICKS : CONTACT_PASS_TICKS });
             return;
           }
           acceptedSolved = true;
@@ -155,7 +161,7 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
       if (destroyed) return;
       explicitlyPaused = true;
       requestedRunning = false; requestedReheat = false;
-      layout.pause();
+      layout.pause(!acceptedSolved);
     },
     destroy() { if (!destroyed) { destroyed = true; layout.destroy(); } },
     isRunning: () => !destroyed && acceptedSolved && layout.isRunning(),
