@@ -15,8 +15,8 @@ describe("PageEditor static regressions", () => {
     expect(source).toContain("const CONTEXT_RAIL_DRAWER_MAX_WIDTH = 1024");
     expect(source).toContain("const SINGLE_PANE_EDITOR_MAX_WIDTH = 640");
     expect(source).toContain("<MobileDrawer");
-    expect(source).toContain("mobileLayout={contextRailDrawerViewport}");
-    expect(source).toContain("active: contextRailDrawerViewport && contextRailOpen");
+    expect(source).toContain("mobileLayout={contextRailUsesDrawer}");
+    expect(source).toContain("active: contextRailUsesDrawer && contextRailOpen");
     expect(source).toContain("useMobileModalFocus({");
   });
 
@@ -98,6 +98,8 @@ describe("PageEditor static regressions", () => {
     expect(styles).toContain("minmax(320px, var(--editor-split-start, 50fr))");
     expect(styles).toContain("minmax(320px, var(--editor-split-end, 50fr))");
     expect(styles).toContain("minmax(280px, var(--editor-split-start, 50fr))");
+    // PageEditor's stacked panes must fit the body above the docked toolbar.
+    expect(styles).toContain("minmax(0, var(--editor-split-start, 50fr))");
     expect(styles).toContain(":not([aria-disabled=\"true\"])");
     expect(styles).toContain(".editor-action-button.active:focus");
     expect(styles).toContain("inset 4px 0 0 var(--context)");

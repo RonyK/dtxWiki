@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Context editor on phones and tablets
+
+- Give the body the screen: on widths up to 1024px, short screens and touch
+  tablets up to 1366px, the app bar and sidebar hide while editing, and one top
+  row replaces the stacked header. The explorer (or overflow) and view tabs sit
+  on the left; the status message, Publish, Request review and Close on the
+  right. A mouse-driven desktop from 1025px keeps the existing layout.
+- Dock the formatting toolbar under the body and size the editor from the
+  visual viewport, so the toolbar stays directly above the on-screen keyboard.
+- Move less frequent page actions into an overflow that opens as a bottom sheet
+  on phones and a menu on wider screens. When the top row runs out of room the
+  status message shrinks to its icon first, then Request review moves into the
+  overflow. Focus mode is not offered on these screens.
+
 ### Release maintenance
 
 - Read the release version from `pyproject.toml` and synchronize package

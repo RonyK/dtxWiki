@@ -27,6 +27,10 @@ const knowledgeStyles = readFileSync(
   resolve(process.cwd(), "src/styles/04-knowledge.css"),
   "utf8",
 );
+const compactEditorStyles = readFileSync(
+  resolve(process.cwd(), "src/styles/15-compact-editor.css"),
+  "utf8",
+);
 
 describe("mobile layout regression styles", () => {
   it("keeps Activity filter controls inside the phone content column", () => {
@@ -174,7 +178,7 @@ describe("mobile layout regression styles", () => {
     );
   });
 
-  it("keeps the page editor rail off-canvas and reserves half a phone viewport for editing", () => {
+  it("keeps the page editor rail off-canvas and gives the compact editor body the remaining height", () => {
     expect(
       ruleBody(".page-workspace:not(.focus-mode)", workspaceStyles),
     ).toContain("grid-template-rows: auto minmax(0, 1fr)");
@@ -188,9 +192,12 @@ describe("mobile layout regression styles", () => {
       /\.workspace-left-panel\s*\{[^}]*transform:\s*translateX\(-100%\)/,
     );
 
-    const phoneEditor = ruleBody(".page-workspace .editor-grid");
-    expect(phoneEditor).toContain("min-height: 50dvh");
-    expect(phoneEditor).toContain("flex: 0 0 auto");
+    const compactBody = ruleBody(
+      '.page-workspace[data-compact-editor="true"] .editor-grid',
+      compactEditorStyles,
+    );
+    expect(compactBody).toContain("flex: 1 1 auto");
+    expect(compactBody).toContain("min-height: 80px");
   });
 
   it("hides the topbar's middle slot below 1024px, for both auth states", () => {

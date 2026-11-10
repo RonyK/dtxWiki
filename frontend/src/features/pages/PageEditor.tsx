@@ -37,19 +37,29 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import {
+  AlertCircle,
+  AlertTriangle,
   AtSign,
+  BookOpen,
   Bold,
   Brackets,
   CheckCircle2,
+  CircleDashed,
   Code,
   Images,
   Italic,
   Keyboard,
   Link2,
+  Loader2,
   Maximize2,
   MessageSquarePlus,
   Minimize2,
+  MoreHorizontal,
+  Pencil,
+  Save,
+  Send,
   Settings2,
+  Share2,
   Strikethrough,
   Wand2,
   X,
@@ -194,7 +204,8 @@ import {
 } from "./codeFenceBalance";
 import { PagePublicShareControl } from "./PagePublicShareControl";
 import { useLinkTargetPreview } from "./useLinkTargetPreview";
-import { ReferencePicker, ReferencesControl, type ReferenceAction, type ReferenceChoice } from "./ReferenceEditor";
+import { EditorCompactBar, EditorOverflowPanel, type EditorOverflowEntry } from "./EditorCompactChrome";
+import { ReferencePicker, ReferencesControl, referencesNeedAttention, type ReferenceAction, type ReferenceChoice } from "./ReferenceEditor";
 import { inlineCitationOccurrences, previewReferences, referenceHref, referenceKey, referenceTarget, selectedDocumentLink, unresolvedCitations } from "./documentReferences";
 import { changePageReferences, type ReferenceRemoval, type ReferenceView } from "../../shared/api/references";
 import {
@@ -337,6 +348,18 @@ const EDITOR_MODES: EditorMode[] = ["source", "reading", "split"];
 const CONTEXT_RAIL_DRAWER_MAX_WIDTH = 1024;
 const COMPACT_ACTION_BAR_MAX_WIDTH = 720;
 const SINGLE_PANE_EDITOR_MAX_WIDTH = 640;
+// The phone and tablet editor. A mouse-driven desktop at 1025px or wider keeps
+// the full layout; touch tablets up to 1366px wide get this one as well.
+const COMPACT_EDITOR_MAX_WIDTH = 1024;
+const COMPACT_EDITOR_MAX_HEIGHT = 480;
+const COMPACT_EDITOR_TOUCH_MAX_WIDTH = 1366;
+const COARSE_POINTER_QUERY = "(pointer: coarse)";
+const COMPACT_TITLE_IN_BAR_MIN_WIDTH = 900;
+// Landscape only: portrait phones must not move the title (and lose its focus)
+// when a browser shrinks the layout viewport for the keyboard.
+const COMPACT_TITLE_IN_BAR_SHORT_MIN_WIDTH = 640;
+// Larger than any browser-chrome collapse, smaller than any keyboard.
+const COMPACT_KEYBOARD_MIN_HEIGHT = 120;
 const TITLE_TEXTAREA_MIN_HEIGHT = 44;
 const TITLE_TEXTAREA_MAX_HEIGHT = 132;
 const TITLE_MAX_LENGTH = 256;
@@ -453,7 +476,7 @@ export function PageEditor({
   mode,
   autosaveCheckpointMs = AUTOSAVE_CHECKPOINT_MS,
 }: PageEditorProps) {
-  const { t } = useTranslation("pages");
+  const { i18n, t } = useTranslation("pages");
   const { user: authUser } = useAuth();
   const actorId = authUser?.user_id ?? null;
   const translationRef = useRef(t);
@@ -539,7 +562,25 @@ export function PageEditor({
   const [contextRailDrawerViewport, setContextRailDrawerViewport] = useState(
     isContextRailDrawerViewport,
   );
-  const [focusMode, setFocusMode] = useState(false);
+  const [compactEditorViewport, setCompactEditorViewport] = useState(
+    isCompactEditorViewport,
+  );
+  const [compactTitleInBarViewport, setCompactTitleInBarViewport] = useState(
+    isCompactTitleInBarViewport,
+  );
+  const [compactKeyboardOpen, setCompactKeyboardOpen] = useState(false);
+  const [compactReviewInMenu, setCompactReviewInMenu] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [overflowAnchorLeft, setOverflowAnchorLeft] = useState(0);
+  // Pages that failed to load keep the normal app shell so its navigation stays
+  // available; everything else on a phone or tablet is the compact editor.
+  const compactChrome =
+    compactEditorViewport &&
+    pageLoadState !== "error" &&
+    !(mode === "edit" && pageLoadState === "not_found");
+  const contextRailUsesDrawer = contextRailDrawerViewport || compactChrome;
+  const [focusModeRequested, setFocusMode] = useState(false);
+  const focusMode = focusModeRequested && !compactChrome;
   const [contextRailOpen, setContextRailOpen] = useState(false);
   const contextRail = useWorkspaceRailState("context");
   const [mediaContentUrls, setMediaContentUrls] = useState<Record<string, string>>({});
@@ -592,6 +633,14 @@ export function PageEditor({
   const slugTouchedRef = useRef(mode === "edit");
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const propertiesButtonRef = useRef<HTMLButtonElement | null>(null);
+  const compactMoreButtonRef = useRef<HTMLButtonElement | null>(null);
+  // The overflow button stands in for the Properties button in the compact
+  // editor: the popover anchors to it and returns focus to it.
+  const setCompactMoreButton = useCallback((element: HTMLButtonElement | null) => {
+    compactMoreButtonRef.current = element;
+    propertiesButtonRef.current = element;
+  }, []);
+  const closeOverflow = useCallback(() => setOverflowOpen(false), []);
   const propertiesPopoverRef = useRef<HTMLDivElement | null>(null);
   const propertiesDestinationMenuRef = useRef<HTMLDivElement | null>(null);
   const setPropertiesDestinationMenu = useCallback((element: HTMLDivElement | null) => {
@@ -1340,7 +1389,9 @@ export function PageEditor({
             { action: t("editor.shortcutSaveDraft"), keys: ["Ctrl/Cmd", "S"] },
             { action: t("editor.shortcut.modeSwitch"), keys: ["Ctrl/Cmd", "E"] },
             { action: t("editor.shortcut.splitMode"), keys: ["Ctrl/Cmd", "\\"] },
-            { action: t("editor.shortcut.focusMode"), keys: ["Ctrl/Cmd", "Shift", "O"] },
+            ...(compactChrome
+              ? []
+              : [{ action: t("editor.shortcut.focusMode"), keys: ["Ctrl/Cmd", "Shift", "O"] }]),
             { action: t("editor.shortcut.showPanel"), keys: ["?"] },
           ],
         },
@@ -1369,7 +1420,7 @@ export function PageEditor({
         },
       ];
     },
-    [t],
+    [compactChrome, t],
   );
 
   useLayoutEffect(() => {
@@ -1521,7 +1572,7 @@ export function PageEditor({
     };
   }, [focusMode]);
 
-  useLayoutEffect(() => {
+  const fitTitleHeight = useCallback(() => {
     const titleElement = titleRef.current;
     if (!titleElement) {
       return;
@@ -1534,7 +1585,11 @@ export function PageEditor({
     titleElement.style.height = `${nextHeight}px`;
     titleElement.style.overflowY =
       titleElement.scrollHeight > TITLE_TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
-  }, [title]);
+  }, []);
+
+  useLayoutEffect(() => {
+    fitTitleHeight();
+  }, [compactChrome, compactTitleInBarViewport, fitTitleHeight, title]);
 
   useEffect(() => {
     if (!propertiesOpen) {
@@ -1901,23 +1956,88 @@ export function PageEditor({
       setStackedSplitViewport(isStackedSplitEditorViewport());
       setCompactActionBarViewport(isCompactActionBarViewport());
       setContextRailDrawerViewport(isContextRailDrawerViewport());
+      setCompactEditorViewport(isCompactEditorViewport());
+      setCompactTitleInBarViewport(isCompactTitleInBarViewport());
     }
     updateResponsiveViewports();
     window.addEventListener("resize", updateResponsiveViewports);
-    return () => window.removeEventListener("resize", updateResponsiveViewports);
+    // Attaching or removing a mouse changes the primary pointer without a resize.
+    const coarsePointer = window.matchMedia?.(COARSE_POINTER_QUERY);
+    coarsePointer?.addEventListener?.("change", updateResponsiveViewports);
+    return () => {
+      window.removeEventListener("resize", updateResponsiveViewports);
+      coarsePointer?.removeEventListener?.("change", updateResponsiveViewports);
+    };
   }, []);
 
   useEffect(() => {
-    if (!contextRailDrawerViewport || focusMode) {
+    if (!compactChrome) {
+      return undefined;
+    }
+    const { body } = document;
+    const visualViewport = window.visualViewport;
+    body.dataset.compactEditor = "true";
+    function fitToVisualViewport() {
+      // Pinch zoom also shrinks the visual viewport; only a keyboard should
+      // resize the editor.
+      if (!visualViewport || visualViewport.scale > 1.01) {
+        return;
+      }
+      body.style.setProperty("--editor-visual-height", `${visualViewport.height}px`);
+      body.style.setProperty("--editor-visual-top", `${visualViewport.offsetTop}px`);
+      setCompactKeyboardOpen(
+        window.innerHeight - visualViewport.height >= COMPACT_KEYBOARD_MIN_HEIGHT,
+      );
+    }
+    fitToVisualViewport();
+    visualViewport?.addEventListener("resize", fitToVisualViewport);
+    visualViewport?.addEventListener("scroll", fitToVisualViewport);
+    return () => {
+      visualViewport?.removeEventListener("resize", fitToVisualViewport);
+      visualViewport?.removeEventListener("scroll", fitToVisualViewport);
+      delete body.dataset.compactEditor;
+      body.style.removeProperty("--editor-visual-height");
+      body.style.removeProperty("--editor-visual-top");
+      setCompactKeyboardOpen(false);
+    };
+  }, [compactChrome]);
+
+  useEffect(() => {
+    if (!compactKeyboardOpen) {
+      return undefined;
+    }
+    // The editor just got shorter; keep the caret line above the keyboard.
+    const frame = window.requestAnimationFrame(() => {
+      const view = editorViewRef.current;
+      if (view?.hasFocus) {
+        view.dispatch({
+          effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "nearest" }),
+        });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [compactKeyboardOpen]);
+
+  useEffect(() => {
+    if (!compactChrome) {
+      setOverflowOpen(false);
+    }
+  }, [compactChrome]);
+
+  useEffect(() => {
+    if (!contextRailUsesDrawer || focusMode) {
       closeContextRail();
     }
-  }, [closeContextRail, contextRailDrawerViewport, focusMode]);
+  }, [closeContextRail, contextRailUsesDrawer, focusMode]);
 
   useMobileModalFocus({
-    active: contextRailDrawerViewport && contextRailOpen && !focusMode,
+    active: contextRailUsesDrawer && contextRailOpen && !focusMode,
     containerRef: contextRailRef,
     onClose: closeContextRail,
-    restoreFocusRef: contextRailToggleRef,
+    // On phones the explorer opens from the overflow button.
+    restoreFocusRef: compactChrome && compactActionBarViewport
+      ? compactMoreButtonRef
+      : contextRailToggleRef,
   });
 
   useEffect(() => {
@@ -2713,7 +2833,9 @@ export function PageEditor({
         event.key.toLowerCase() === "o"
       ) {
         event.preventDefault();
-        setFocusMode((current) => !current);
+        if (!isCompactEditorViewport()) {
+          setFocusMode((current) => !current);
+        }
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -4736,26 +4858,29 @@ export function PageEditor({
   const contextRailLabel = t("editor.rail.context", { defaultValue: "Context" });
   const contextExplorerLabel = t("editor.explorer", { defaultValue: "Explorer" });
   const contextRailStyle = { "--workspace-left-w": `${contextRail.width}px` } as CSSProperties;
+  const openContextRail = () => {
+    contextRail.setOpen(true);
+    setContextRailOpen(true);
+  };
   const navigationRail = focusMode ? null : (
     <>
-      <button
-        aria-controls="page-editor-context-rail"
-        aria-expanded={contextRailOpen}
-        aria-label={t("editor.openExplorer", {
-          defaultValue: "Open Context explorer",
-        })}
-        className="workspace-mobile-drawer-toggle icon-button text-button"
-        onClick={() => {
-          contextRail.setOpen(true);
-          setContextRailOpen(true);
-        }}
-        ref={contextRailToggleRef}
-        type="button"
-      >
-        <PanelVisibilityIcon side="left" action="show" size={16} />
-        <span>{contextExplorerLabel}</span>
-      </button>
-      {contextRailDrawerViewport && contextRailOpen ? (
+      {compactChrome ? null : (
+        <button
+          aria-controls="page-editor-context-rail"
+          aria-expanded={contextRailOpen}
+          aria-label={t("editor.openExplorer", {
+            defaultValue: "Open Context explorer",
+          })}
+          className="workspace-mobile-drawer-toggle icon-button text-button"
+          onClick={openContextRail}
+          ref={contextRailToggleRef}
+          type="button"
+        >
+          <PanelVisibilityIcon side="left" action="show" size={16} />
+          <span>{contextExplorerLabel}</span>
+        </button>
+      )}
+      {contextRailUsesDrawer && contextRailOpen ? (
         <button
           aria-label={t("editor.closeExplorer", {
             defaultValue: "Close Context explorer",
@@ -4765,15 +4890,15 @@ export function PageEditor({
           type="button"
         />
       ) : null}
-      {contextRail.open || contextRailDrawerViewport ? <MobileDrawer
+      {contextRail.open || contextRailUsesDrawer ? <MobileDrawer
         id="page-editor-context-rail"
         label={contextRailLabel}
-        mobileLayout={contextRailDrawerViewport}
-        mobileOpen={contextRailDrawerViewport ? contextRailOpen : true}
+        mobileLayout={contextRailUsesDrawer}
+        mobileOpen={contextRailUsesDrawer ? contextRailOpen : true}
         ref={contextRailRef}
       >
         <div className="editor-navigation-drawer-content">
-          {contextRailDrawerViewport ? (
+          {contextRailUsesDrawer ? (
             <header className="editor-navigation-drawer-header">
               <strong>{contextRailLabel}</strong>
               <button
@@ -4803,12 +4928,12 @@ export function PageEditor({
             expandWidthLabel={contextRail.expandWidthAtMax
               ? t("shell:panel.resetWidth", { defaultValue: "Reset Explorer width", label: contextExplorerLabel })
               : t("shell:panel.widen", { defaultValue: "Widen Explorer", label: contextExplorerLabel })}
-            onExpandWidth={contextRailDrawerViewport ? undefined : contextRail.expandWidth}
-            onClose={contextRailDrawerViewport ? undefined : () => contextRail.setOpen(false)}
+            onExpandWidth={contextRailUsesDrawer ? undefined : contextRail.expandWidth}
+            onClose={contextRailUsesDrawer ? undefined : () => contextRail.setOpen(false)}
             onExpandedNodeIdsChange={setContextExpandedNodeIds}
             onRefresh={refreshContextTree}
             onSelectTarget={(node) => {
-              if (contextRailDrawerViewport) {
+              if (contextRailUsesDrawer) {
                 closeContextRail();
               }
               selectContextTreeNode(node);
@@ -4833,6 +4958,7 @@ export function PageEditor({
     return (
       <div
         className={`page-workspace ${focusMode ? "focus-mode" : ""}`}
+        data-compact-editor={compactChrome ? "true" : undefined}
         data-focus-mode={focusMode ? "on" : "off"}
         style={contextRailStyle}
       >
@@ -4977,15 +5103,381 @@ export function PageEditor({
     );
   }
 
+  const editorModeTabs = (
+    <div
+      className="segmented-control compact editor-mode-tabs"
+      role="tablist"
+      aria-label={t("editor.editorModeAria", { defaultValue: "Editor mode" })}
+      onKeyDown={handleModeTabKeyDown}
+      tabIndex={-1}
+    >
+      <button
+        aria-controls="page-editor-source-panel"
+        aria-selected={activeEditorMode === "source"}
+        className={activeEditorMode === "source" ? "active" : ""}
+        id="page-editor-source-tab"
+        onClick={() => setEditorMode("source")}
+        role="tab"
+        tabIndex={activeEditorMode === "source" ? 0 : -1}
+        title={t("editor.sourceModeTitle", { defaultValue: "Source mode (Ctrl+E)" })}
+        type="button"
+      >
+        {t("editor.sourceModeLabel", { defaultValue: "Source" })}
+      </button>
+      <button
+        aria-controls="page-editor-reading-panel"
+        aria-selected={activeEditorMode === "reading"}
+        className={activeEditorMode === "reading" ? "active" : ""}
+        id="page-editor-reading-tab"
+        onClick={() => setEditorMode("reading")}
+        role="tab"
+        tabIndex={activeEditorMode === "reading" ? 0 : -1}
+        title={t("editor.readingModeTitle", { defaultValue: "Reading mode (Ctrl+E)" })}
+        type="button"
+      >
+        {t("editor.readingModeLabel", { defaultValue: "Reading" })}
+      </button>
+      {!singlePaneViewport ? (
+        <button
+          aria-controls="page-editor-source-panel page-editor-reading-panel"
+          aria-selected={activeEditorMode === "split"}
+          className={activeEditorMode === "split" ? "active" : ""}
+          id="page-editor-split-tab"
+          onClick={() => setEditorMode("split")}
+          role="tab"
+          tabIndex={activeEditorMode === "split" ? 0 : -1}
+          title={t("editor.splitModeTitle", { defaultValue: "Split mode (Ctrl+E)" })}
+          type="button"
+        >
+          {t("editor.splitModeLabel", { defaultValue: "Split" })}
+        </button>
+      ) : null}
+    </div>
+  );
+  const referencesControl = (
+    <ReferencesControl
+      anchorRef={compactChrome ? compactMoreButtonRef : undefined}
+      references={editorReferences}
+      unresolved={unresolvedInlineCitations}
+      checkingLocators={previewLinks.checking}
+      open={referencesOpen}
+      onOpenChange={setReferencesOpen}
+      disabled={!isEditorReady || isSaving || referenceBusy || referenceRetryAvailable}
+      retryDisabled={isSaving || referenceBusy}
+      onRetry={referenceRetryAvailable ? () => {
+        const pending = pendingReferenceCommandRef.current;
+        if (pending) void mutateReferences(pending.target, pending.operation);
+      } : undefined}
+      onReconcile={referenceRetryAvailable ? () => { void reconcileReferenceCommand(); } : undefined}
+      onAdd={() => { setReferencesOpen(false); setReferenceQuery(""); openReferencePicker("metadata"); }}
+      onInsert={(reference) => {
+        setReferencesOpen(false);
+        referenceRangeRef.current = null;
+        if (reference) insertReference(reference); else { setReferenceQuery(""); openReferencePicker("inline"); }
+      }}
+      onRemove={(reference) => {
+        const target = reference.metadata_id ? { reference_id: reference.metadata_id }
+          : reference.target_id ? { target_kind: reference.target_kind, target_id: reference.target_id } : null;
+        if (target) void mutateReferences(target, "remove");
+      }}
+      onConvertLink={() => { setReferencesOpen(false); convertSelectedReference(); }}
+      onLocate={(offset) => {
+        setReferencesOpen(false);
+        if (activeEditorMode === "reading") setEditorMode("source");
+        const view = editorViewRef.current;
+        if (view) { view.dispatch({ selection: { anchor: Math.min(offset, view.state.doc.length) }, scrollIntoView: true }); view.focus(); }
+      }}
+    />
+  );
+  const editorActionBar = (
+    <EditorActionBar
+      commandStates={activeCommandStates}
+      isMobile={compactActionBarViewport}
+      labels={{
+        more: t("editor.actionBar.more", { defaultValue: "More editor actions" }),
+        moreMenu: t("editor.actionBar.moreMenu", { defaultValue: "More editor actions" }),
+        moreShort: t("editor.actionBar.moreShort", { defaultValue: "More" }),
+        readingDisabledReason: t("editor.actionBar.readingDisabled", {
+          defaultValue: "Editing commands are unavailable in Reading mode.",
+        }),
+        toolbar: t("editor.actionBar.toolbar", { defaultValue: "Editor actions" }),
+      }}
+      mode={activeEditorMode}
+      onCommand={(commandId) => executeEditorCommand(commandId)}
+      resolveLabel={(labelKey, fallbackLabel) =>
+        t(labelKey, { defaultValue: fallbackLabel })
+      }
+    />
+  );
+  const draftSaving = saveState === "saving" || saveState === "saving_with_newer_edits";
+  const canSaveDraft = !saveBlockedReason && saveState === "dirty";
+  const renderSyncPill = (compact: boolean) => (
+    <SyncPill
+      state={saveState}
+      publicationState={publicationState}
+      isReady={isEditorReady}
+      hasPersistedPage={Boolean(page)}
+      lastSavedAt={lastSavedAt}
+      now={saveRelativeNow}
+      onRetry={() => void save({ publish: false })}
+      blockedReason={saveBlockedReason}
+      compact={compact}
+    />
+  );
+  const closeEditorButton = (
+    <button
+      aria-label={t("editor.close")}
+      className="icon-button"
+      onClick={closeEditor}
+      type="button"
+    >
+      <X size={16} aria-hidden="true" />
+    </button>
+  );
+  const titleInCompactBar = compactChrome && compactTitleInBarViewport;
+  const titleField = (
+    <textarea
+      aria-describedby={titleValidationMessage ? "editor-title-validation" : undefined}
+      aria-invalid={
+        titleValidationMessage && title.trim().length === 0 ? "true" : undefined
+      }
+      aria-label={t("editor.titleAria", { defaultValue: "Title" })}
+      className="editor-title-input"
+      data-testid="page-title-editor"
+      {...textInputLimit(TITLE_MAX_LENGTH)}
+      onBlur={() => setTitleValidationRequested(true)}
+      onChange={(event) => updateTitle(event.currentTarget.value)}
+      onFocus={compactChrome ? fitTitleHeight : undefined}
+      onKeyDown={handleTitleKeyDown}
+      placeholder={t("editor.titlePlaceholder", { defaultValue: "Untitled" })}
+      ref={titleRef}
+      rows={1}
+      value={title}
+    />
+  );
+  const pageShareControl = page ? (
+    <PagePublicShareControl
+      canPublish={
+        workspaceRole === "owner" ||
+        (workspaceVisibility === "public" && workspaceRole === "editor")
+      }
+      canUnpublish={
+        workspaceRole === "owner" || workspaceRole === "editor"
+      }
+      isPublic={Boolean(page.is_public)}
+      onPublicChange={(isPublic) =>
+        setPage((current) => current ? { ...current, is_public: isPublic } : current)
+      }
+      pageId={page.id}
+      publishDisabledReason={
+        !page.current_published_version_id
+          ? t("reader.visibilityNeedsPublishedVersion")
+          : null
+      }
+      publishedVersionId={page.current_published_version_id ?? null}
+      publishedVersionNo={page.published_version_no ?? null}
+      workspaceId={workspaceId}
+      slug={page.slug}
+      workspaceSlug={workspaceSlug}
+      workspaceVisibility={workspaceVisibility}
+    />
+  ) : null;
+  const shareLabel = t("editor.share", { defaultValue: "Share" });
+  const referencesAttention = referencesNeedAttention(
+    editorReferences,
+    unresolvedInlineCitations,
+    previewLinks.checking,
+    referenceRetryAvailable,
+  );
+  const overflowGroups: EditorOverflowEntry[][] = [
+    [
+      {
+        ariaDisabled: Boolean(saveBlockedReason),
+        disabled: (!canSaveDraft && !saveBlockedReason) || draftSaving,
+        icon: <Save aria-hidden="true" size={18} />,
+        id: "save",
+        label: t("editor.saveDraft", { defaultValue: "Save draft" }),
+        onSelect: () => void save({ publish: false }),
+        title: saveBlockedReason ?? undefined,
+      },
+      ...(compactReviewInMenu
+        ? [{
+            disabled: !canRequestReview || draftSaving,
+            icon: <Send aria-hidden="true" size={18} />,
+            id: "review",
+            label: t("editor.requestReview"),
+            onSelect: () => void requestReview(),
+          }]
+        : []),
+      ...(pageShareControl
+        ? [{
+            id: "share",
+            node: (
+              <details className="editor-share-control">
+                <summary className="editor-overflow-row">
+                  <Share2 aria-hidden="true" size={18} />
+                  <span>{shareLabel}</span>
+                </summary>
+                {pageShareControl}
+              </details>
+            ),
+          }]
+        : []),
+    ],
+    [
+      ...(compactActionBarViewport
+        ? [{
+            icon: <PanelVisibilityIcon side="left" action="show" size={18} />,
+            id: "explorer",
+            label: contextExplorerLabel,
+            onSelect: openContextRail,
+          }]
+        : []),
+      {
+        icon: <Settings2 aria-hidden="true" size={18} />,
+        id: "properties",
+        label: t("editor.pageProperties", { defaultValue: "Page properties" }),
+        onSelect: () => setPropertiesOpen(true),
+      },
+      {
+        disabled: formatting || isSaving,
+        icon: <Wand2 aria-hidden="true" size={18} />,
+        id: "format",
+        label: t("editor.formatDocumentAria", { defaultValue: "Format document" }),
+        onSelect: () => void handleFormatNow(),
+      },
+      {
+        ariaLabel: t(referencesAttention ? "references.triggerAttention" : "references.trigger", {
+          count: editorReferences.length,
+        }),
+        attention: referencesAttention,
+        badge: editorReferences.length,
+        icon: <BookOpen aria-hidden="true" size={18} />,
+        id: "references",
+        label: t("references.title"),
+        onSelect: () => setReferencesOpen(true),
+      },
+      ...(page
+        ? [{
+            icon: <Images aria-hidden="true" size={18} />,
+            id: "media",
+            label: t("editor.managePageMedia", { defaultValue: "Manage page media" }),
+            onSelect: () => setMediaManagerOpen(true),
+          }]
+        : []),
+      {
+        icon: <Keyboard aria-hidden="true" size={18} />,
+        id: "shortcuts",
+        label: t("editor.keyboardShortcutsAria", { defaultValue: "Keyboard shortcuts" }),
+        onSelect: () => setShortcutHelpOpen(true),
+      },
+      ...(activeEditorMode === "split"
+        ? [{
+            icon: <Link2 aria-hidden="true" size={18} />,
+            id: "linked-scrolling",
+            label: t("editor.linkedScrolling", { defaultValue: "Linked scrolling" }),
+            onSelect: () => setLinkedScrolling((current) => !current),
+            pressed: linkedScrolling,
+          }]
+        : []),
+    ],
+  ];
+
   return (
     <div
       className={`page-workspace ${focusMode ? "focus-mode" : ""}`}
+      data-compact-editor={compactChrome ? "true" : undefined}
       data-focus-mode={focusMode ? "on" : "off"}
+      data-keyboard-open={compactChrome && compactKeyboardOpen && !propertiesOpen ? "true" : undefined}
       style={contextRailStyle}
       data-save-state={saveState}
     >
       {navigationRail}
-      <section className="editor-panel">
+      {overflowOpen && compactChrome ? (
+        <EditorOverflowPanel
+          anchorLeft={overflowAnchorLeft}
+          closeLabel={t("editor.overflow.close")}
+          groups={overflowGroups}
+          header={(
+            <>
+              <strong className="editor-overflow-title">
+                {title.trim() || t("editor.titlePlaceholder", { defaultValue: "Untitled" })}
+              </strong>
+              <Breadcrumbs
+                ariaLabel={t("editor.location", { defaultValue: "Page location" })}
+                items={editorBreadcrumbItems}
+              />
+              {renderSyncPill(false)}
+              <p className="meta-line">
+                {editorMeta(page, hasUnsavedChanges, t, savedJustNow)}
+              </p>
+            </>
+          )}
+          label={t("editor.overflow.label")}
+          onClose={closeOverflow}
+          presentation={compactActionBarViewport ? "sheet" : "menu"}
+          triggerRef={compactMoreButtonRef}
+        />
+      ) : null}
+      <section className="editor-panel" data-title-placement={titleInCompactBar ? "bar" : undefined}>
+        {compactChrome ? (
+          <EditorCompactBar
+            actions={(
+              <EditorPublicationActions
+                actions={["publish", "review"]}
+                canRequestReview={Boolean(canRequestReview)}
+                onRequestReview={() => void requestReview()}
+                canPublish={canPublishFromEditor}
+                canSave={canSaveDraft}
+                saveDisabledReason={saveBlockedReason}
+                saving={draftSaving}
+                onPublish={() => void save({ publish: true })}
+                onSave={() => void save({ publish: false })}
+              />
+            )}
+            close={closeEditorButton}
+            fitKey={`${saveState}:${publicationState}:${isEditorReady}:${savedJustNow}:${i18n.language}:${titleInCompactBar}:${activeEditorMode}`}
+            lead={(
+              <>
+                {compactActionBarViewport ? null : (
+                  <button
+                    aria-controls="page-editor-context-rail"
+                    aria-expanded={contextRailOpen}
+                    aria-label={t("editor.openExplorer", {
+                      defaultValue: "Open Context explorer",
+                    })}
+                    className="icon-button editor-compact-explorer"
+                    onClick={openContextRail}
+                    ref={contextRailToggleRef}
+                    title={contextExplorerLabel}
+                    type="button"
+                  >
+                    <PanelVisibilityIcon side="left" action="show" size={16} />
+                  </button>
+                )}
+                <button
+                  aria-expanded={overflowOpen}
+                  aria-haspopup="dialog"
+                  aria-label={t("editor.overflow.open")}
+                  className="icon-button editor-compact-more"
+                  onClick={(event) => {
+                    setOverflowAnchorLeft(Math.round(event.currentTarget.getBoundingClientRect().left));
+                    setOverflowOpen((current) => !current);
+                  }}
+                  ref={setCompactMoreButton}
+                  title={t("editor.overflow.open")}
+                  type="button"
+                >
+                  <MoreHorizontal aria-hidden="true" size={18} />
+                </button>
+                {editorModeTabs}
+              </>
+            )}
+            message={renderSyncPill(true)}
+            onReviewInMenuChange={setCompactReviewInMenu}
+            title={titleInCompactBar ? <span aria-hidden="true" className="editor-compact-bar-title-slot" /> : null}
+          />
+        ) : (
         <header className="editor-header">
           <div className="editor-header-lead">
             <Breadcrumbs
@@ -4997,26 +5489,15 @@ export function PageEditor({
             </p>
           </div>
           <div className="reader-actions">
-            {!focusMode ? (
-              <SyncPill
-                state={saveState}
-                publicationState={publicationState}
-                isReady={isEditorReady}
-                hasPersistedPage={Boolean(page)}
-                lastSavedAt={lastSavedAt}
-                now={saveRelativeNow}
-                onRetry={() => void save({ publish: false })}
-                blockedReason={saveBlockedReason}
-              />
-            ) : null}
+            {!focusMode ? renderSyncPill(false) : null}
             {!focusMode ? (
               <EditorPublicationActions
                 canRequestReview={Boolean(canRequestReview)}
                 onRequestReview={() => void requestReview()}
                 canPublish={canPublishFromEditor}
-                canSave={!saveBlockedReason && saveState === "dirty"}
+                canSave={canSaveDraft}
                 saveDisabledReason={saveBlockedReason}
-                saving={saveState === "saving" || saveState === "saving_with_newer_edits"}
+                saving={draftSaving}
                 onPublish={() => void save({ publish: true })}
                 onSave={() => void save({ publish: false })}
               />
@@ -5024,45 +5505,15 @@ export function PageEditor({
             {!focusMode && page ? (
               <details className="editor-share-control">
                 <summary className="icon-button text-button">
-                  {t("editor.share", { defaultValue: "Share" })}
+                  {shareLabel}
                 </summary>
-                <PagePublicShareControl
-                  canPublish={
-                    workspaceRole === "owner" ||
-                    (workspaceVisibility === "public" && workspaceRole === "editor")
-                  }
-                  canUnpublish={
-                    workspaceRole === "owner" || workspaceRole === "editor"
-                  }
-                  isPublic={Boolean(page.is_public)}
-                  onPublicChange={(isPublic) =>
-                    setPage((current) => current ? { ...current, is_public: isPublic } : current)
-                  }
-                  pageId={page.id}
-                  publishDisabledReason={
-                    !page.current_published_version_id
-                      ? t("reader.visibilityNeedsPublishedVersion")
-                      : null
-                  }
-                  publishedVersionId={page.current_published_version_id ?? null}
-                  publishedVersionNo={page.published_version_no ?? null}
-                  workspaceId={workspaceId}
-                  slug={page.slug}
-                  workspaceSlug={workspaceSlug}
-                  workspaceVisibility={workspaceVisibility}
-                />
+                {pageShareControl}
               </details>
             ) : null}
-            <button
-              aria-label={t("editor.close")}
-              className="icon-button"
-              onClick={closeEditor}
-              type="button"
-            >
-              <X size={16} aria-hidden="true" />
-            </button>
+            {closeEditorButton}
           </div>
         </header>
+        )}
         {status ? <StatusBanner tone="warning">{status}</StatusBanner> : null}
         {stalePublishState !== "idle" ? (
           <StatusBanner
@@ -5160,23 +5611,9 @@ export function PageEditor({
         ) : null}
         <div className="editor-page-header">
           <div className="editor-title-row">
-            <textarea
-              aria-describedby={titleValidationMessage ? "editor-title-validation" : undefined}
-              aria-invalid={
-                titleValidationMessage && title.trim().length === 0 ? "true" : undefined
-              }
-              aria-label={t("editor.titleAria", { defaultValue: "Title" })}
-              className="editor-title-input"
-              data-testid="page-title-editor"
-              {...textInputLimit(TITLE_MAX_LENGTH)}
-              onBlur={() => setTitleValidationRequested(true)}
-              onChange={(event) => updateTitle(event.currentTarget.value)}
-              onKeyDown={handleTitleKeyDown}
-              placeholder={t("editor.titlePlaceholder", { defaultValue: "Untitled" })}
-              ref={titleRef}
-              rows={1}
-              value={title}
-            />
+            {titleField}
+            {compactChrome ? null : (
+            <>
             <button
               aria-label={t("editor.formatDocumentAria", { defaultValue: "Format document" })}
               className="editor-format-button icon-button"
@@ -5201,6 +5638,8 @@ export function PageEditor({
             >
               <Settings2 size={16} aria-hidden="true" />
             </button>
+            </>
+            )}
           </div>
           {titleValidationMessage ? (
             <p className="field-error editor-title-validation" id="editor-title-validation">
@@ -5376,56 +5815,9 @@ export function PageEditor({
             tabIndex={-1}
             type="file"
           />
-          <div
-            className="segmented-control compact editor-mode-tabs"
-            role="tablist"
-            aria-label={t("editor.editorModeAria", { defaultValue: "Editor mode" })}
-            onKeyDown={handleModeTabKeyDown}
-            tabIndex={-1}
-          >
-            <button
-              aria-controls="page-editor-source-panel"
-              aria-selected={activeEditorMode === "source"}
-              className={activeEditorMode === "source" ? "active" : ""}
-              id="page-editor-source-tab"
-              onClick={() => setEditorMode("source")}
-              role="tab"
-              tabIndex={activeEditorMode === "source" ? 0 : -1}
-              title={t("editor.sourceModeTitle", { defaultValue: "Source mode (Ctrl+E)" })}
-              type="button"
-            >
-              {t("editor.sourceModeLabel", { defaultValue: "Source" })}
-            </button>
-            <button
-              aria-controls="page-editor-reading-panel"
-              aria-selected={activeEditorMode === "reading"}
-              className={activeEditorMode === "reading" ? "active" : ""}
-              id="page-editor-reading-tab"
-              onClick={() => setEditorMode("reading")}
-              role="tab"
-              tabIndex={activeEditorMode === "reading" ? 0 : -1}
-              title={t("editor.readingModeTitle", { defaultValue: "Reading mode (Ctrl+E)" })}
-              type="button"
-            >
-              {t("editor.readingModeLabel", { defaultValue: "Reading" })}
-            </button>
-            {!singlePaneViewport ? (
-              <button
-                aria-controls="page-editor-source-panel page-editor-reading-panel"
-                aria-selected={activeEditorMode === "split"}
-                className={activeEditorMode === "split" ? "active" : ""}
-                id="page-editor-split-tab"
-                onClick={() => setEditorMode("split")}
-                role="tab"
-                tabIndex={activeEditorMode === "split" ? 0 : -1}
-                title={t("editor.splitModeTitle", { defaultValue: "Split mode (Ctrl+E)" })}
-                type="button"
-              >
-                {t("editor.splitModeLabel", { defaultValue: "Split" })}
-              </button>
-            ) : null}
-          </div>
-          {activeEditorMode === "split" ? (
+          {compactChrome ? referencesControl : null}
+          {compactChrome ? null : editorModeTabs}
+          {!compactChrome && activeEditorMode === "split" ? (
             <button
               aria-pressed={linkedScrolling}
               className={`compact-button editor-linked-scroll-toggle ${linkedScrolling ? "active" : ""}`}
@@ -5435,40 +5827,10 @@ export function PageEditor({
               {t("editor.linkedScrolling", { defaultValue: "Linked scrolling" })}
             </button>
           ) : null}
+          {compactChrome ? null : (
           <div className="editor-command-cluster editor-command-cluster-trailing">
             <div className="editor-command-actions">
-              <ReferencesControl
-                references={editorReferences}
-                unresolved={unresolvedInlineCitations}
-                checkingLocators={previewLinks.checking}
-                open={referencesOpen}
-                onOpenChange={setReferencesOpen}
-                disabled={!isEditorReady || isSaving || referenceBusy || referenceRetryAvailable}
-                retryDisabled={isSaving || referenceBusy}
-                onRetry={referenceRetryAvailable ? () => {
-                  const pending = pendingReferenceCommandRef.current;
-                  if (pending) void mutateReferences(pending.target, pending.operation);
-                } : undefined}
-                onReconcile={referenceRetryAvailable ? () => { void reconcileReferenceCommand(); } : undefined}
-                onAdd={() => { setReferencesOpen(false); setReferenceQuery(""); openReferencePicker("metadata"); }}
-                onInsert={(reference) => {
-                  setReferencesOpen(false);
-                  referenceRangeRef.current = null;
-                  if (reference) insertReference(reference); else { setReferenceQuery(""); openReferencePicker("inline"); }
-                }}
-                onRemove={(reference) => {
-                  const target = reference.metadata_id ? { reference_id: reference.metadata_id }
-                    : reference.target_id ? { target_kind: reference.target_kind, target_id: reference.target_id } : null;
-                  if (target) void mutateReferences(target, "remove");
-                }}
-                onConvertLink={() => { setReferencesOpen(false); convertSelectedReference(); }}
-                onLocate={(offset) => {
-                  setReferencesOpen(false);
-                  if (activeEditorMode === "reading") setEditorMode("source");
-                  const view = editorViewRef.current;
-                  if (view) { view.dispatch({ selection: { anchor: Math.min(offset, view.state.doc.length) }, scrollIntoView: true }); view.focus(); }
-                }}
-              />
+              {referencesControl}
             <button
               aria-label={focusModeLabel}
               aria-pressed={focusMode}
@@ -5506,58 +5868,26 @@ export function PageEditor({
             ) : null}
             </div>
           </div>
-          <EditorActionBar
-            commandStates={activeCommandStates}
-            isMobile={compactActionBarViewport}
-            labels={{
-              more: t("editor.actionBar.more", { defaultValue: "More editor actions" }),
-              moreMenu: t("editor.actionBar.moreMenu", { defaultValue: "More editor actions" }),
-              moreShort: t("editor.actionBar.moreShort", { defaultValue: "More" }),
-              readingDisabledReason: t("editor.actionBar.readingDisabled", {
-                defaultValue: "Editing commands are unavailable in Reading mode.",
-              }),
-              toolbar: t("editor.actionBar.toolbar", { defaultValue: "Editor actions" }),
-            }}
-            mode={activeEditorMode}
-            onCommand={(commandId) => executeEditorCommand(commandId)}
-            resolveLabel={(labelKey, fallbackLabel) =>
-              t(labelKey, { defaultValue: fallbackLabel })
-            }
-          />
+          )}
+          {compactChrome ? null : editorActionBar}
         </div>
         {focusMode ? (
           <div className="editor-focus-meta">
-            <SyncPill
-              state={saveState}
-              publicationState={publicationState}
-              isReady={isEditorReady}
-              hasPersistedPage={Boolean(page)}
-              lastSavedAt={lastSavedAt}
-              now={saveRelativeNow}
-              onRetry={() => void save({ publish: false })}
-              blockedReason={saveBlockedReason}
-            />
+            {renderSyncPill(false)}
             <EditorPublicationActions
               canRequestReview={Boolean(canRequestReview)}
               onRequestReview={() => void requestReview()}
               canPublish={canPublishFromEditor}
-              canSave={!saveBlockedReason && saveState === "dirty"}
+              canSave={canSaveDraft}
               saveDisabledReason={saveBlockedReason}
-              saving={saveState === "saving" || saveState === "saving_with_newer_edits"}
+              saving={draftSaving}
               onPublish={() => void save({ publish: true })}
               onSave={() => void save({ publish: false })}
             />
             <span className="meta-line">
               {editorMeta(page, hasUnsavedChanges, t, savedJustNow)}
             </span>
-            <button
-              aria-label={t("editor.close")}
-              className="icon-button"
-              onClick={closeEditor}
-              type="button"
-            >
-              <X size={16} aria-hidden="true" />
-            </button>
+            {closeEditorButton}
           </div>
         ) : null}
         {blockMenuOpen ? (
@@ -5796,6 +6126,7 @@ export function PageEditor({
             </div>
           ) : null}
         </div>
+        {compactChrome ? editorActionBar : null}
         {referencePickerMode && referencePickerScopeRef.current === referenceCacheScope && workspaceId ? <ReferencePicker key={referenceCacheScope} workspaceId={workspaceId} busy={referenceBusy} mode={referencePickerMode === "inline" ? "inline" : "metadata"} references={editorReferences} initialQuery={referenceQuery}
           onClose={() => { setReferencePickerMode(null); referenceRangeRef.current = null; }}
           onSelect={(choice: ReferenceChoice, action: ReferenceAction) => {
@@ -6566,6 +6897,7 @@ function SyncPill({
   now: _now,
   onRetry,
   blockedReason: _blockedReason = null,
+  compact = false,
 }: {
   state: SaveState;
   publicationState: PublicationState;
@@ -6575,9 +6907,12 @@ function SyncPill({
   now: number;
   onRetry: () => void;
   blockedReason?: string | null;
+  /** The compact top row may reduce the message to its icon, so every state has one. */
+  compact?: boolean;
 }) {
   const { t } = useTranslation("pages");
   const savedJustNow = isRecentTimestamp(lastSavedAt, _now);
+  const iconProps = { "aria-hidden": true, size: 15 } as const;
   const statusProps = {
     "aria-atomic": true,
     "aria-live": "polite" as const,
@@ -6586,7 +6921,8 @@ function SyncPill({
   if (!isReady) {
     return (
       <span className="sync-pill" {...statusProps}>
-        {t("editor.syncLoading")}
+        {compact ? <Loader2 {...iconProps} /> : null}
+        <span className="sync-pill-text">{t("editor.syncLoading")}</span>
       </span>
     );
   }
@@ -6594,9 +6930,12 @@ function SyncPill({
     return (
       <span className="sync-pill sync-pill-error" {...statusProps}>
         <button className="sync-pill-action" onClick={onRetry} type="button">
-          {t("editor.syncPillError", {
-            defaultValue: "Couldn't save or publish · Retry",
-          })}
+          {compact ? <AlertCircle {...iconProps} /> : null}
+          <span className="sync-pill-text">
+            {t("editor.syncPillError", {
+              defaultValue: "Couldn't save or publish · Retry",
+            })}
+          </span>
         </button>
       </span>
     );
@@ -6604,38 +6943,50 @@ function SyncPill({
   if (state === "conflict") {
     return (
       <span className="sync-pill sync-pill-conflict" {...statusProps}>
-        {t("editor.syncPillConflict", { defaultValue: "Out of date · Resolve" })}
+        {compact ? <AlertTriangle {...iconProps} /> : null}
+        <span className="sync-pill-text">
+          {t("editor.syncPillConflict", { defaultValue: "Out of date · Resolve" })}
+        </span>
       </span>
     );
   }
   if (state === "saving") {
     return (
       <span className="sync-pill sync-pill-saving" {...statusProps}>
-        {t("editor.syncSavingDraft", { defaultValue: "Saving…" })}
+        {compact ? <Loader2 {...iconProps} /> : null}
+        <span className="sync-pill-text">
+          {t("editor.syncSavingDraft", { defaultValue: "Saving…" })}
+        </span>
       </span>
     );
   }
   if (state === "saving_with_newer_edits") {
     return (
       <span className="sync-pill sync-pill-saving" {...statusProps}>
-        {t("editor.syncSavingWithNewerEdits", {
-          defaultValue: "Saving · newer changes pending",
-        })}
+        {compact ? <Loader2 {...iconProps} /> : null}
+        <span className="sync-pill-text">
+          {t("editor.syncSavingWithNewerEdits", {
+            defaultValue: "Saving · newer changes pending",
+          })}
+        </span>
       </span>
     );
   }
   if (state === "dirty") {
     return (
       <span className="sync-pill" {...statusProps}>
-        {t("editor.syncPillEditing", { defaultValue: "Editing" })}
+        {compact ? <Pencil {...iconProps} /> : null}
+        <span className="sync-pill-text">
+          {t("editor.syncPillEditing", { defaultValue: "Editing" })}
+        </span>
       </span>
     );
   }
   if (state === "clean" && hasPersistedPage) {
     return (
       <span className="sync-pill sync-pill-saved" {...statusProps}>
-        <CheckCircle2 size={14} aria-hidden="true" />
-        <span>
+        <CheckCircle2 size={compact ? 15 : 14} aria-hidden="true" />
+        <span className="sync-pill-text">
           {publicationState === "staged"
             ? t("editor.syncPillDraftSaved", {
                 defaultValue: "Unpublished draft saved",
@@ -6653,12 +7004,18 @@ function SyncPill({
   }
   return (
     <span className="sync-pill" {...statusProps}>
-      {t("editor.syncPillNeverPublished", { defaultValue: "Not published yet" })}
+      {compact ? <CircleDashed {...iconProps} /> : null}
+      <span className="sync-pill-text">
+        {t("editor.syncPillNeverPublished", { defaultValue: "Not published yet" })}
+      </span>
     </span>
   );
 }
 
+type EditorPublicationAction = "publish" | "review" | "save";
+
 function EditorPublicationActions({
+  actions = ["save", "review", "publish"],
   canRequestReview,
   onRequestReview,
   canPublish,
@@ -6668,6 +7025,7 @@ function EditorPublicationActions({
   onPublish,
   onSave,
 }: {
+  actions?: readonly EditorPublicationAction[];
   canRequestReview: boolean;
   onRequestReview: () => void;
   canPublish: boolean;
@@ -6678,18 +7036,38 @@ function EditorPublicationActions({
   onSave: () => void;
 }) {
   const { t } = useTranslation("pages");
-  return (
-    <div
-      aria-label={t("editor.publicationActions", {
-        defaultValue: "Draft and publication actions",
-      })}
-      className="editor-publication-actions"
-      role="group"
-    >
+  const buttons: Record<EditorPublicationAction, ReactNode> = {
+    publish: (
+      <button
+        className={`icon-button text-button ${canPublish ? "primary" : ""}`}
+        data-publication-action="publish"
+        disabled={!canPublish || saving}
+        key="publish"
+        onClick={onPublish}
+        type="button"
+      >
+        {t("editor.publish", { defaultValue: "Publish" })}
+      </button>
+    ),
+    review: (
+      <button
+        className="icon-button text-button"
+        data-publication-action="review"
+        disabled={!canRequestReview || saving}
+        key="review"
+        onClick={onRequestReview}
+        type="button"
+      >
+        {t("editor.requestReview")}
+      </button>
+    ),
+    save: (
       <button
         aria-disabled={saveDisabledReason ? true : undefined}
         className={`icon-button text-button ${canSave ? "primary" : ""}`}
+        data-publication-action="save"
         disabled={(!canSave && !saveDisabledReason) || saving}
+        key="save"
         onClick={onSave}
         title={saveDisabledReason ?? undefined}
         type="button"
@@ -6698,22 +7076,17 @@ function EditorPublicationActions({
           ? t("editor.syncSavingDraft", { defaultValue: "Saving…" })
           : t("editor.saveDraft", { defaultValue: "Save draft" })}
       </button>
-      <button
-        className="icon-button text-button"
-        disabled={!canRequestReview || saving}
-        onClick={onRequestReview}
-        type="button"
-      >
-        {t("editor.requestReview")}
-      </button>
-      <button
-        className={`icon-button text-button ${canPublish ? "primary" : ""}`}
-        disabled={!canPublish || saving}
-        onClick={onPublish}
-        type="button"
-      >
-        {t("editor.publish", { defaultValue: "Publish" })}
-      </button>
+    ),
+  };
+  return (
+    <div
+      aria-label={t("editor.publicationActions", {
+        defaultValue: "Draft and publication actions",
+      })}
+      className="editor-publication-actions"
+      role="group"
+    >
+      {actions.map((action) => buttons[action])}
     </div>
   );
 }
@@ -7153,6 +7526,33 @@ function isContextRailDrawerViewport() {
   return (
     (window.innerWidth || document.documentElement.clientWidth) <=
     CONTEXT_RAIL_DRAWER_MAX_WIDTH
+  );
+}
+
+function isCompactEditorViewport() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const width = window.innerWidth || document.documentElement.clientWidth;
+  const height = window.innerHeight || document.documentElement.clientHeight;
+  if (width <= COMPACT_EDITOR_MAX_WIDTH || height <= COMPACT_EDITOR_MAX_HEIGHT) {
+    return true;
+  }
+  return (
+    width <= COMPACT_EDITOR_TOUCH_MAX_WIDTH &&
+    window.matchMedia?.(COARSE_POINTER_QUERY).matches === true
+  );
+}
+
+function isCompactTitleInBarViewport() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const width = window.innerWidth || document.documentElement.clientWidth;
+  const height = window.innerHeight || document.documentElement.clientHeight;
+  return (
+    width >= COMPACT_TITLE_IN_BAR_MIN_WIDTH ||
+    (width >= COMPACT_TITLE_IN_BAR_SHORT_MIN_WIDTH && height <= COMPACT_EDITOR_MAX_HEIGHT)
   );
 }
 

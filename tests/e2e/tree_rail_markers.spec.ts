@@ -628,9 +628,16 @@ async function openRail(page: Page, width: number) {
   const rail = page.locator(".workspace-left-panel");
   if (width <= 1024) {
     if (await rail.getAttribute("data-mobile-open") !== "true") {
-      const toggle = page.locator(".workspace-mobile-drawer-toggle");
-      await expect(toggle).toBeVisible();
-      await toggle.click();
+      // The compact editor keeps the explorer in its top-row overflow on phones.
+      const overflow = page.locator(".editor-compact-more");
+      if (await overflow.count()) {
+        await overflow.click();
+        await page.locator(".editor-overflow-panel").getByRole("button", { name: "Explorer", exact: true }).click();
+      } else {
+        const toggle = page.locator(".workspace-mobile-drawer-toggle");
+        await expect(toggle).toBeVisible();
+        await toggle.click();
+      }
     }
     await expect(rail).toHaveAttribute("data-mobile-open", "true");
     await expect.poll(() => rail.evaluate((element) => {

@@ -631,11 +631,23 @@ async function verifyF10ContextLocationPicker(
 
   await page.setViewportSize(viewport);
   await page.goto(workspaceUrl(workspaceId, "context/pages/new"), { waitUntil: "networkidle" });
+  // The compact editor reaches Properties through the top-row overflow, which
+  // then takes focus back when the popover closes.
+  const compactEditor = viewport.width <= 1024;
   const propertiesTrigger = page.getByRole("button", {
-    name: "Page properties",
+    name: compactEditor ? "More page actions" : "Page properties",
     exact: true,
   });
-  await propertiesTrigger.click();
+  const openProperties = async () => {
+    await propertiesTrigger.click();
+    if (compactEditor) {
+      await page
+        .locator(".editor-overflow-panel")
+        .getByRole("button", { name: "Page properties", exact: true })
+        .click();
+    }
+  };
+  await openProperties();
   const properties = page.getByRole("region", { name: "Page properties" });
   await expect(properties).toBeVisible();
   const destination = properties.getByRole("button", {
@@ -655,7 +667,7 @@ async function verifyF10ContextLocationPicker(
   await page.keyboard.press("Escape");
   await expect(properties).toHaveCount(0);
   await expect(propertiesTrigger).toBeFocused();
-  await propertiesTrigger.click();
+  await openProperties();
   await destination.click();
   await expect(tree).toBeVisible();
   await expect(search).toBeFocused();

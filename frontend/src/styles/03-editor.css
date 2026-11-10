@@ -5465,15 +5465,17 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 }
 
 /* Tablet widths retain both split panes but stack them so neither column is
-   squeezed below a useful reading measure. Phones and short visual viewports
-   remove Split from the mode control in PageEditor and render one pane. */
+   squeezed below a useful reading measure. Phones remove Split from the mode
+   control in PageEditor and render one pane. PageEditor's panes have no minimum
+   height: they share whatever the body has and scroll inside themselves, so the
+   toolbar docked under the body can never cover them. */
 @media (min-width: 641px) and (max-width: 1023px) {
   .editor-grid[data-layout="split"] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows:
-      minmax(280px, var(--editor-split-start, 50fr))
+      minmax(0, var(--editor-split-start, 50fr))
       44px
-      minmax(280px, var(--editor-split-end, 50fr));
+      minmax(0, var(--editor-split-end, 50fr));
     gap: 0;
   }
 
