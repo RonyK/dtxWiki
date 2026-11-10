@@ -161,9 +161,7 @@
     "discardReason": "Discard reason",
     "discardBlocked": "The review state changed. Close this dialog and refresh the queue before continuing.",
     "discarding": "Discarding",
-    "confirmDiscard": "Discard selected branches",
     "discardResult": "Discarded {{discarded}} branches. Skipped {{skipped}}.",
-    "cancel": "Cancel",
     "approvalImpact": "{{count}} other reviews of this version or its earlier drafts will also be settled.",
     "confirmSelectedBody": "{{count}} of {{total}} selected reviews can be approved. Review automatic settlements and excluded items below."
   },
@@ -184,16 +182,14 @@
     "chatOwnerUnavailable": "This change has no resolvable chat owner.",
     "chatOwnerUnresolvable": "This change has no resolvable chat owner — route to you or all editors instead.",
     "reasonRequired": "Enter a decision reason before requesting changes.",
-    "submit": "Request changes",
-    "cancel": "Cancel"
+    "submit": "Request changes"
   },
   "reject": {
     "confirmTitle": "Reject this review?",
     "confirmBody": "Confirm the target version and its document effect before rejecting.",
     "checkingImpact": "Checking the current rejection impact…",
     "recheckImpact": "Check again",
-    "confirming": "Rejecting",
-    "cancel": "Cancel"
+    "confirming": "Rejecting"
   },
   "editDirectly": {
     "action": "Edit directly",

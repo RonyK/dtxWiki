@@ -107,7 +107,7 @@ describe("NewItemDialog", () => {
       ".dialog-panel",
       ".dialog-form",
       ".dialog-form > *",
-      ".dialog-header > :first-child",
+      ".dialog-titlebar h2",
       ".form-field",
     ]) {
       expect(cssRule(dialogStyles, selector)).toMatch(/min-inline-size:\s*0/);
@@ -163,27 +163,28 @@ describe("NewItemDialog", () => {
     ).toHaveAttribute("title", "Close new item dialog");
   });
 
-  it("uses the localized upload fallback instead of rendering an arbitrary error", async () => {
-    const onPickFiles = vi.fn().mockRejectedValue(new Error("raw upload-secret"));
+  it("hands every chosen file to the caller and closes without waiting for the batch", async () => {
+    const onPickFiles = vi.fn(() => new Promise<void>(() => undefined));
+    const onClose = vi.fn();
+    const files = ["a.md", "b.md"].map(
+      (name) => new File(["content"], name, { type: "text/markdown" }),
+    );
 
     render(
       <NewItemDialog
         canUpload
         initialItemType="upload"
         parentLabel="Library"
-        onClose={() => undefined}
+        onClose={onClose}
         onPickFiles={onPickFiles}
         onSubmit={() => undefined}
       />,
     );
 
-    await userEvent.upload(
-      screen.getByLabelText("Upload file"),
-      new File(["content"], "source.md", { type: "text/markdown" }),
-    );
+    await userEvent.upload(screen.getByLabelText("Upload files", { selector: "input" }), files);
 
-    expect(await screen.findByText("Failed to upload file")).toBeInTheDocument();
-    expect(screen.queryByText("raw upload-secret")).toBeNull();
+    expect(onPickFiles).toHaveBeenCalledWith(files, null);
+    expect(onClose).toHaveBeenCalledWith("success");
   });
 
   it("keeps the result surface mounted while creation is pending", async () => {
@@ -529,7 +530,7 @@ describe("NewItemDialog", () => {
       "aria-checked",
       "true",
     );
-    expect(screen.getByLabelText("Upload file")).toBeInTheDocument();
+    expect(screen.getByLabelText("Upload files", { selector: "input" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Upload files" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create folder" })).toBeNull();
   });

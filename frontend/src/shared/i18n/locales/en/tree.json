@@ -46,7 +46,6 @@
     "noMatches": "No matching parent folders"
   },
   "dialogs": {
-    "eyebrow": "Tree node",
     "close": "Close",
     "closeDialog": "Close dialog",
     "cancel": "Cancel",
@@ -61,7 +60,6 @@
       "failed": "Rename failed"
     },
     "move": {
-      "eyebrow": "Tree move",
       "title": "Move {{title}}",
       "childBranchNotice": "Its child branch moves with it.",
       "targetParent": "Target parent",
@@ -77,34 +75,24 @@
       "title": "Delete {{title}}",
       "body": "This archives the node: it leaves the tree, search, and public exposure. Version history is kept.",
       "childWarning": "The whole branch below it is archived too.",
-      "submit": "Delete",
       "submitting": "Deleting",
       "failed": "Delete failed"
     }
   },
   "newItem": {
-    "eyebrow": "New item",
     "headings": {
       "page": "New page",
       "folder": "New folder",
       "upload": "Upload files"
-    },
-    "subtitleUpload": "Upload a source file or add a folder.",
-    "subtitleCreate": "Choose whether this branch should hold a page or a folder.",
-    "subtitleSingle": {
-      "page": "Create a page in this location.",
-      "folder": "Create a folder in this location.",
-      "upload": "Upload source files to this location."
     },
     "close": "Close new item dialog",
     "itemType": "Item type",
     "location": "Location",
     "locationRoot": "Top level",
     "parent": "Parent: {{parent}}",
-    "file": "File",
-    "uploadFile": "Upload file",
-    "uploading": "Uploading…",
-    "pickSourceFile": "Pick a source file to add to the Library.",
+    "file": "Files",
+    "uploadFile": "Upload files",
+    "pickSourceFile": "Pick one or more source files to add to the Library.",
     "pageTitle": "Page title",
     "folderName": "Folder name",
     "titleLength": "Enter 1-{{maximum}} characters.",
@@ -123,7 +111,6 @@
     },
     "errors": {
       "create": "Failed to create {{itemType}}",
-      "upload": "Failed to upload file",
       "duplicateSlug": "Slug already in use under this folder"
     }
   },
@@ -140,7 +127,6 @@
   },
   "navSummary": {
     "edit": "Edit summary",
-    "save": "Save",
     "cancel": "Cancel",
     "inputLabel": "Folder routing summary",
     "placeholder": "Describe which queries belong in this folder — and which do not ('see X for ~').",
@@ -157,7 +143,6 @@
     "previewLoading": "Loading…",
     "previewUpdated": "Index updated.",
     "previewError": "Could not load the index preview.",
-    "previewRefresh": "Refresh",
     "previewOverflow": "…and {{count}} more",
     "previewEmpty": "This index has no entries."
   },

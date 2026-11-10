@@ -8,7 +8,7 @@ import type {
   AdminUserWorkspace,
 } from "../../shared/api/adminUsers";
 import { ActionMenu, type ActionMenuItem } from "../../shared/components/ActionMenu";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { Dialog } from "../../shared/components/Dialog";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { writeTextToClipboard } from "../../shared/lib/clipboard";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
@@ -87,6 +87,7 @@ export function AdminUserAccountRow({
       label: t("userDeletion.action"),
       icon: <Trash2 size={15} aria-hidden="true" />,
       onSelect: onDelete,
+      tone: "danger",
     });
   }
 
@@ -178,9 +179,8 @@ export function AdminUserAccountDetails({ user, recovery, onClose }: {
   const headingId = useId();
   const active = user.status === "active";
   return (
-    <Dialog className="admin-account-details" labelledBy={headingId} onClose={onClose}
-      header={<><h2 id={headingId}>{t("userRecovery.accountDetails.title")}</h2>
-        <DialogCloseButton label={t("userRecovery.accountDetails.close")} onClick={onClose} /></>}>
+    <Dialog className="admin-account-details" closeLabel={t("userRecovery.accountDetails.close")} labelledBy={headingId} onClose={onClose}
+      title={t("userRecovery.accountDetails.title")}>
       <dl className="admin-account-details-fields">
         <div><dt>{t("userRecovery.accountDetails.displayName")}</dt><dd>{user.display_name}</dd></div>
         <div><dt>{t("userRecovery.accountDetails.userId")}</dt><dd><code>{user.user_id}</code></dd></div>

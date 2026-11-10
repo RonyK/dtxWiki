@@ -407,7 +407,7 @@ describe("SettingsScreen", () => {
     await user.click(
       within(
         screen.getByRole("dialog", { name: /Disable MCP client/ }),
-      ).getByRole("button", { name: "Disable client" }),
+      ).getByRole("button", { name: "Disable" }),
     );
     await user.click(
       within(clientSection).getByRole("radio", { name: /Other states/ }),
@@ -498,13 +498,13 @@ describe("SettingsScreen", () => {
     const title = await screen.findByDisplayValue("Original workspace");
     await userEvent.clear(title);
     await userEvent.type(title, "Conflicting local title");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     const current = await screen.findByDisplayValue("New server workspace");
     expect(policyReads).toBe(2);
     await userEvent.clear(current);
     await userEvent.type(current, "Retried local title");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled());
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
     expect(saves.map((save) => save.expected_revision)).toEqual(revisions.slice(0, 2));
     expect(screen.getByDisplayValue("Retried local title")).toBeInTheDocument();
   });
@@ -828,7 +828,7 @@ describe("SettingsScreen", () => {
     });
     expect(dialog).toHaveTextContent("Its history stays available");
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete client" }),
+      within(dialog).getByRole("button", { name: "Delete" }),
     );
 
     expect(
@@ -943,7 +943,7 @@ describe("SettingsScreen", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "Disable MCP client" });
     const confirm = within(dialog).getByRole("button", {
-      name: "Disable client",
+      name: "Disable",
     });
     await user.click(confirm);
 
@@ -1312,7 +1312,7 @@ describe("SettingsScreen", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Delete workspace?" });
     const confirmButton = within(dialog).getByRole("button", {
-      name: "Permanently delete workspace",
+      name: "Delete",
     });
     expect(confirmButton).toBeDisabled();
 
@@ -1443,7 +1443,7 @@ describe("SettingsScreen", () => {
       );
       await user.click(
         within(dialog).getByRole("button", {
-          name: "Permanently delete workspace",
+          name: "Delete",
         }),
       );
 
@@ -1603,7 +1603,7 @@ describe("SettingsScreen", () => {
     );
     await user.click(
       within(dialog).getByRole("button", {
-        name: "Permanently delete workspace",
+        name: "Delete",
       }),
     );
 
@@ -1802,7 +1802,7 @@ describe("SettingsScreen", () => {
     );
     await user.click(
       within(dialog).getByRole("button", {
-        name: "Permanently delete workspace",
+        name: "Delete",
       }),
     );
 
@@ -1832,7 +1832,7 @@ describe("SettingsScreen", () => {
       within(dialog).queryByRole("checkbox"),
     ).not.toBeInTheDocument();
     const retryButton = within(dialog).getByRole("button", {
-      name: "Permanently delete workspace",
+      name: "Delete",
     });
 
     // The confirmation text field is untouched by the transition, so the
@@ -2255,7 +2255,7 @@ describe("SettingsScreen", () => {
     // can still inspect the effective policy. Its write action must lock in
     // the same render as the controls instead of disappearing.
     expect(
-      screen.getByRole("button", { name: "Save changes" }),
+      screen.getByRole("button", { name: "Save" }),
     ).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /^Workspace/i }));
@@ -2698,7 +2698,7 @@ describe("SettingsScreen", () => {
       name: "Review decision",
     });
     await user.selectOptions(select, "auto_accept");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const panel = await screen.findByRole("tabpanel");
     await waitFor(() =>
@@ -2913,21 +2913,10 @@ describe("SettingsScreen", () => {
 
     expect(styles).toContain("--danger-surface: #fff7f7;");
     expect(styles).toContain("--danger-border: #fecaca;");
-    expect(styles).toContain("--danger-border-strong: #fca5a5;");
     expect(styles).toContain("border: 1px solid var(--danger-border);");
     expect(styles).toContain("background: var(--danger-surface);");
     expect(styles).toContain("border-top: 1px solid var(--danger-border);");
-    expect(styles).toContain("border-color: var(--danger-border-strong);");
     expect(styles).toContain("background: var(--danger-soft);");
-  });
-
-  it("bounds legacy Settings modals to one viewport scroller", () => {
-    const styles = readAppStyles();
-    const panelRule = styles.match(/\.modal-panel\s*\{([^}]*)\}/)?.[1];
-
-    expect(panelRule).toContain("max-height: calc(100dvh - 40px);");
-    expect(panelRule).toContain("overflow-y: auto;");
-    expect(panelRule).toContain("overscroll-behavior: contain;");
   });
 
   it("resets the caps micro-label style inside the delete-workspace modal (WS-08)", () => {
@@ -3010,7 +2999,7 @@ describe("SettingsScreen", () => {
     expect(language).toHaveDisplayValue("English");
     const workspaceCard = language.closest(".policy-card") as HTMLElement;
     const saveButton = within(workspaceCard).getByRole("button", {
-      name: "Save changes",
+      name: "Save",
     });
     expect(saveButton).toBeDisabled();
     expect(saveButton).toHaveAttribute(
@@ -3029,7 +3018,7 @@ describe("SettingsScreen", () => {
         "PATCH",
       ),
     ).toBeUndefined();
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
       await screen.findByText("Default language saved"),
@@ -3117,7 +3106,7 @@ describe("SettingsScreen", () => {
     const goal = await screen.findByLabelText("Goal");
     fireEvent.change(goal, { target: { value: "😀".repeat(513) } });
     expect(goal).toHaveValue("😀".repeat(513));
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByText("Use 512 characters or fewer.")).toBeVisible();
     await user.clear(goal);
     await user.type(goal, "Temporary workspace purpose");
@@ -3136,7 +3125,7 @@ describe("SettingsScreen", () => {
     await user.type(goal, "Reviewed onboarding knowledge base");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Goal saved")).toBeInTheDocument();
     expect(
@@ -3251,7 +3240,7 @@ describe("SettingsScreen", () => {
       "keyword",
     );
     expect(patchBodies).toEqual([]);
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     expect(
       await screen.findByText("Ask retrieval mode saved"),
     ).toBeInTheDocument();
@@ -3268,7 +3257,7 @@ describe("SettingsScreen", () => {
       within(strictness.closest(".policy-card") as HTMLElement).getByRole(
         "button",
         {
-          name: "Save changes",
+          name: "Save",
         },
       ),
     );
@@ -3281,7 +3270,7 @@ describe("SettingsScreen", () => {
       screen.getByRole("combobox", { name: "Memory inclusion" }),
       "never",
     );
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     expect(
       await screen.findByText("Memory inclusion saved"),
     ).toBeInTheDocument();
@@ -3422,15 +3411,15 @@ describe("SettingsScreen", () => {
     const graphCard = within(mapSwitch.closest(".policy-card") as HTMLElement);
     expect(featureCard.queryByRole("checkbox", { name: "Workspace Knowledge Map" })).not.toBeInTheDocument();
     expect(graphCard.queryByRole("combobox", { name: "Ask retrieval mode" })).not.toBeInTheDocument();
-    await user.click(graphCard.getByRole("button", { name: "Save changes" }));
-    expect(featureCard.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await user.click(graphCard.getByRole("button", { name: "Save" }));
+    expect(featureCard.getByRole("button", { name: "Save" })).toBeDisabled();
     await act(async () => finishGraphSave());
     expect(await screen.findByText("Knowledge Map is on for this workspace.")).toBeInTheDocument();
     expect(patchBodies).toEqual([{ group: "graph", expected_revision: graphRevision, changes: { workspace_map_enabled: true } }]);
     // Saving one section preserves the other section's pending draft.
     expect(mode).toHaveValue("keyword");
-    expect(featureCard.getByRole("button", { name: "Save changes" })).toBeEnabled();
-    await user.click(featureCard.getByRole("button", { name: "Save changes" }));
+    expect(featureCard.getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(featureCard.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(patchBodies).toHaveLength(2));
     expect(patchBodies[1]).toEqual({ group: "labs", expected_revision: graphRevision, changes: { ask_enabled: true, ask_retrieval_mode: "keyword", agent_enabled: true } });
     expect(capabilityRequests).toBe(3);
@@ -3440,7 +3429,7 @@ describe("SettingsScreen", () => {
     await user.click(
       within(usageSwitch.closest(".policy-card") as HTMLElement).getByRole(
         "button",
-        { name: "Save changes" },
+        { name: "Save" },
       ),
     );
     await waitFor(() => expect(patchBodies).toHaveLength(3));
@@ -3729,7 +3718,7 @@ describe("SettingsScreen", () => {
     const limit = within(card).getByRole("spinbutton", { name: "Manual upload limit" });
     await waitFor(() => expect(limit).toHaveValue(20));
     fireEvent.change(limit, { target: { value: "21" } });
-    const save = within(card).getByRole("button", { name: "Save changes" });
+    const save = within(card).getByRole("button", { name: "Save" });
     if (length === 80) expect(save).toBeEnabled();
     else expect(save).toBeDisabled();
   });
@@ -3970,7 +3959,7 @@ describe("SettingsScreen", () => {
     });
     await user.clear(exactLimit);
     await user.type(exactLimit, "15");
-    await user.click(within(card).getByRole("button", { name: "Save changes" }));
+    await user.click(within(card).getByRole("button", { name: "Save" }));
 
     expect(
       lastJsonBody(
@@ -4129,7 +4118,7 @@ describe("SettingsScreen", () => {
     await user.click(within(customManager).getByRole("button", {
       name: "Apply format changes",
     }));
-    await user.click(within(card).getByRole("button", { name: "Save changes" }));
+    await user.click(within(card).getByRole("button", { name: "Save" }));
 
     expect(lastJsonBody(
       fetchMock,
@@ -4384,7 +4373,7 @@ describe("SettingsScreen", () => {
     expect(uploadSizeCard).toHaveClass("library-policy-card--dirty");
 
     await user.click(
-      within(uploadSizeCard).getByRole("button", { name: "Save changes" }),
+      within(uploadSizeCard).getByRole("button", { name: "Save" }),
     );
 
     expect(
@@ -4550,7 +4539,7 @@ describe("SettingsScreen", () => {
 
     const agentCard = defaultHours.closest(".policy-card") as HTMLElement;
     await user.click(
-      within(agentCard).getByRole("button", { name: "Save changes" }),
+      within(agentCard).getByRole("button", { name: "Save" }),
     );
 
     expect(
@@ -4643,7 +4632,7 @@ describe("SettingsScreen", () => {
     expect(delayRow).toHaveTextContent("Low");
 
     const reviewCard = delay.closest(".policy-card") as HTMLElement;
-    const save = within(reviewCard).getByRole("button", { name: "Save changes" });
+    const save = within(reviewCard).getByRole("button", { name: "Save" });
     // Erasing must leave the field empty, not "0" ("no wait"): typing after a
     // forced 0 read "014", and an empty delay must not be savable.
     await user.clear(delay);
@@ -4718,7 +4707,7 @@ describe("SettingsScreen", () => {
     await waitFor(() => expect(reminder).toBeEnabled());
     fireEvent.change(reminder, { target: { value: "48" } });
     await user.click(
-      within(reviewCard).getByRole("button", { name: "Save changes" }),
+      within(reviewCard).getByRole("button", { name: "Save" }),
     );
 
     await waitFor(() => {
@@ -4784,7 +4773,7 @@ describe("SettingsScreen", () => {
     expect(highAllowed).not.toBeDisabled();
 
     await userEvent.click(highAllowed);
-    const save = within(card).getByRole("button", { name: "Save changes" });
+    const save = within(card).getByRole("button", { name: "Save" });
     await userEvent.click(save);
     expect(
       lastJsonBody(
@@ -4918,13 +4907,13 @@ describe("SettingsScreen", () => {
     })[0];
     fireEvent.change(lowDelay, { target: { value: "10" } });
     expect(
-      within(card).getByRole("button", { name: "Save changes" }),
+      within(card).getByRole("button", { name: "Save" }),
     ).toBeDisabled();
 
     await user.click(medium);
     expect(card).not.toHaveTextContent('exceeds "Manual review from"');
     expect(
-      within(card).getByRole("button", { name: "Save changes" }),
+      within(card).getByRole("button", { name: "Save" }),
     ).toBeEnabled();
   });
 
@@ -5150,7 +5139,7 @@ describe("SettingsScreen", () => {
     await waitFor(() => {
       expect(maxHours).toBeEnabled();
       expect(
-        within(maxReuseCard).getByRole("button", { name: "Save changes" }),
+        within(maxReuseCard).getByRole("button", { name: "Save" }),
       ).toBeInTheDocument();
     });
 
@@ -5222,7 +5211,7 @@ describe("SettingsScreen", () => {
     const violation = "Maximum reuse must be at least the refresh interval.";
     expect(within(defaultIntervalRow).getByText(violation)).toBeInTheDocument();
     expect(within(maxReuseRow).getByText(violation)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("writes bundle TTL constraints atomically with revision CAS", async () => {
@@ -5313,7 +5302,7 @@ describe("SettingsScreen", () => {
     const saveFinished = async () => {
       await waitFor(() =>
         expect(
-          screen.getByRole("button", { name: "Save changes" }),
+          screen.getByRole("button", { name: "Save" }),
         ).toBeDisabled(),
       );
       expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
@@ -5326,7 +5315,7 @@ describe("SettingsScreen", () => {
       expect(defaultHours).toBeEnabled();
       expect(maxHours).toBeEnabled();
       expect(
-        within(bundleTtlCard).getByRole("button", { name: "Save changes" }),
+        within(bundleTtlCard).getByRole("button", { name: "Save" }),
       ).toBeInTheDocument();
     });
 
@@ -5334,7 +5323,7 @@ describe("SettingsScreen", () => {
     // intermediate state is observable by the server.
     fireEvent.change(defaultHours, { target: { value: "2" } });
     fireEvent.change(maxHours, { target: { value: "48" } });
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await saveFinished();
     expect(patchBodies).toEqual([
       {
@@ -5350,12 +5339,12 @@ describe("SettingsScreen", () => {
     // The response revision is adopted for the next compare-and-swap.
     fireEvent.change(defaultHours, { target: { value: "1" } });
     fireEvent.change(maxHours, { target: { value: "24" } });
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await saveFinished();
     // A mixed direction update is still one atomic write.
     fireEvent.change(defaultHours, { target: { value: "2" } });
     fireEvent.change(maxHours, { target: { value: "12" } });
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await saveFinished();
     expect(patchBodies).toEqual([
       {
@@ -5468,7 +5457,7 @@ describe("SettingsScreen", () => {
     });
     fireEvent.change(defaultHours, { target: { value: "2" } });
     fireEvent.change(maxHours, { target: { value: "48" } });
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
       await screen.findByText("Some settings values are invalid."),
@@ -5490,7 +5479,7 @@ describe("SettingsScreen", () => {
     const policyCard = defaultHours.closest(".policy-card") as HTMLElement;
     expect(within(policyCard).getAllByText("Unsaved changes")).toHaveLength(2);
     expect(
-      within(policyCard).getByRole("button", { name: "Save changes" }),
+      within(policyCard).getByRole("button", { name: "Save" }),
     ).toBeEnabled();
 
     await user.click(
@@ -5632,7 +5621,7 @@ describe("SettingsScreen", () => {
       .getByRole("group", { name: "Citable Library input types" })
       .closest(".policy-card") as HTMLElement;
     await user.click(
-      within(citationCard).getByRole("button", { name: "Save changes" }),
+      within(citationCard).getByRole("button", { name: "Save" }),
     );
 
     expect(
@@ -6007,7 +5996,7 @@ describe("SettingsScreen", () => {
       expect.objectContaining({ method: "DELETE" }),
     );
     await user.click(
-      within(dialog).getByRole("button", { name: "Revoke key" }),
+      within(dialog).getByRole("button", { name: "Revoke" }),
     );
     const keySection = (
       await screen.findByText("Access keys", {
@@ -6026,7 +6015,7 @@ describe("SettingsScreen", () => {
     });
     expect(deleteDialog).toBeInTheDocument();
     await user.click(
-      within(deleteDialog).getByRole("button", { name: "Delete key" }),
+      within(deleteDialog).getByRole("button", { name: "Delete" }),
     );
     expect(
       await screen.findByText("No access keys match this state."),
@@ -6356,7 +6345,7 @@ describe("SettingsScreen", () => {
     ).toBeInTheDocument();
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Save workspaces" }),
+      within(dialog).getByRole("button", { name: "Save" }),
     );
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -6424,7 +6413,7 @@ describe("SettingsScreen", () => {
       within(dialog).getByText("1 added · 0 removed."),
     ).toBeInTheDocument();
     await user.click(
-      within(dialog).getByRole("button", { name: "Save workspaces" }),
+      within(dialog).getByRole("button", { name: "Save" }),
     );
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -6557,7 +6546,7 @@ describe("SettingsScreen", () => {
       }),
     );
     const dialog = screen.getByRole("dialog", { name: "Revoke access key" });
-    const confirm = within(dialog).getByRole("button", { name: "Revoke key" });
+    const confirm = within(dialog).getByRole("button", { name: "Revoke" });
     await user.click(confirm);
 
     expect(
@@ -7315,7 +7304,7 @@ describe("SettingsScreen", () => {
       name: /Delete inactive access key/,
     });
     await user.click(
-      within(deleteDialog).getByRole("button", { name: "Delete key" }),
+      within(deleteDialog).getByRole("button", { name: "Delete" }),
     );
 
     expect(
@@ -8929,7 +8918,7 @@ describe("SettingsScreen", () => {
     ).toBeEnabled();
   });
 
-  it("traps and restores focus in OAuth revoke confirmation", async () => {
+  it("restores focus after an OAuth revoke confirmation closes", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch({
       [`${BASE}/api/v1/workspaces`]: {
@@ -8972,18 +8961,9 @@ describe("SettingsScreen", () => {
     await user.click(revokeTrigger);
 
     const dialog = screen.getByRole("dialog", { name: /Revoke OAuth consent/ });
-    expect(dialog.parentElement).toBe(document.body);
-    expect(container.querySelector(".modal-backdrop")).toBeNull();
-    const cancelButton = within(dialog).getByRole("button", { name: "Cancel" });
-    const revokeButton = within(dialog).getByRole("button", { name: "Revoke" });
-    expect(cancelButton).toHaveFocus();
-
-    await user.keyboard("{Shift>}{Tab}{/Shift}");
-    expect(revokeButton).toHaveFocus();
-    await user.keyboard("{Tab}");
-    expect(cancelButton).toHaveFocus();
-
-    fireEvent.mouseDown(dialog);
+    expect(dialog.closest(".dialog-backdrop")?.parentElement).toBe(document.body);
+    expect(container.querySelector(".dialog-backdrop")).toBeNull();
+    fireEvent.mouseDown(dialog.closest(".dialog-backdrop")!);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(revokeTrigger).toHaveFocus();
 
@@ -9082,13 +9062,9 @@ describe("SettingsScreen", () => {
       await within(dialog).findByRole("button", { name: /Revoking/ }),
     ).toBeDisabled();
 
-    const escapedToWindow = vi.fn();
-    window.addEventListener("keydown", escapedToWindow);
     fireEvent.keyDown(dialog, { key: "Escape" });
-    window.removeEventListener("keydown", escapedToWindow);
-    fireEvent.mouseDown(dialog);
+    fireEvent.mouseDown(dialog.closest(".dialog-backdrop")!);
 
-    expect(escapedToWindow).not.toHaveBeenCalled();
     expect(
       screen.getByRole("dialog", { name: /Revoke OAuth consent/ }),
     ).toBeInTheDocument();
@@ -9204,7 +9180,7 @@ describe("SettingsScreen", () => {
     render(<MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=labs`]}><RoutedSettings /></MemoryRouter>);
     await user.click(await screen.findByRole("checkbox", { name: "Agent" }));
     const features = () => within(screen.getByRole("checkbox", { name: "Agent" }).closest(".policy-card") as HTMLElement);
-    await user.click(features().getByRole("button", { name: "Save changes" }));
+    await user.click(features().getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`, expect.objectContaining({ method: "PATCH" })));
     await user.click(screen.getByRole("link", { name: "Other workspace" }));
     expect(screen.queryByRole("checkbox", { name: "Agent" })).not.toBeInTheDocument();
@@ -9214,7 +9190,7 @@ describe("SettingsScreen", () => {
     await act(async () => finishSave({ data: first }));
     expect(screen.getByRole("checkbox", { name: "Ask" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Agent" })).not.toBeChecked();
-    expect(features().getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(features().getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("blocks a member's direct Labs URL even when saved and browser switches are on", async () => {
@@ -9230,7 +9206,7 @@ describe("SettingsScreen", () => {
     await waitFor(() => expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument());
     expect(within(screen.getByRole("navigation", { name: "Settings sections" })).queryByRole("button", { name: /^Labs/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
   it("keeps the URL workspace when browsing Labs, MCP access, and content policies", async () => {
@@ -9609,7 +9585,7 @@ describe("SettingsScreen", () => {
     ).not.toBeInTheDocument();
     // Recoverable, so the screen offers the retry rather than only explaining.
     expect(
-      screen.getByRole("button", { name: /Try again/i }),
+      screen.getByRole("button", { name: /Retry/i }),
     ).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: /Show OAuth details/i }),

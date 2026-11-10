@@ -115,10 +115,8 @@ export function SettingsSectionPicker({
           // The trigger survives the dialog, but resolving it explicitly means
           // focus still lands somewhere sensible if a re-render replaces it.
           restoreFocusFallback={() => triggerRef.current}
+          title={t("nav.pickerTitle", { defaultValue: "Go to a settings section" })}
         >
-          <h2 id="settings-section-picker-title">
-            {t("nav.pickerTitle", { defaultValue: "Go to a settings section" })}
-          </h2>
           <SearchField
             ariaLabel={t("nav.searchLabel", {
               defaultValue: "Filter settings sections",

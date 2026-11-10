@@ -164,7 +164,7 @@ describe("PolicyGroupView drafts", () => {
     fireEvent.change(spinbutton(view.container, MAX_LABEL), {
       target: { value: "48" },
     });
-    fireEvent.click(card.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(card.getByRole("button", { name: "Save" }));
 
     expect(savedChanges(save)).toEqual({
       group: "agent_injection",
@@ -189,7 +189,7 @@ describe("PolicyGroupView drafts", () => {
     expect(spinbutton(view.container, DEFAULT_LABEL)).toHaveDisplayValue("2");
     // The new baseline is adopted for the field that was not edited.
     expect(spinbutton(view.container, MAX_LABEL)).toHaveDisplayValue("48");
-    fireEvent.click(card.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(card.getByRole("button", { name: "Save" }));
 
     expect(savedChanges(save)).toEqual({
       group: "agent_injection",
@@ -214,7 +214,7 @@ describe("PolicyGroupView drafts", () => {
       spinbutton(view.container, `${DEFAULT_LABEL} Minutes`),
     ).toHaveDisplayValue("30");
     expect(card.queryByText("Unsaved changes")).not.toBeInTheDocument();
-    expect(card.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(card.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("keeps an unsaved draft when a parent rebuilds equivalent fields", () => {
@@ -230,7 +230,7 @@ describe("PolicyGroupView drafts", () => {
     view.rerender(ttlCard(3600, 86400, save));
 
     expect(spinbutton(view.container, DEFAULT_LABEL)).toHaveDisplayValue("2");
-    expect(card.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    expect(card.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 });
 
@@ -286,7 +286,7 @@ describe("ReviewAutoApproveByRiskSettings drafts", () => {
     fireEvent.change(delay(view.container, "medium"), {
       target: { value: "21" },
     });
-    fireEvent.click(card.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(card.getByRole("button", { name: "Save" }));
 
     expect(savedChanges(save)).toEqual({
       group: "review",
@@ -312,7 +312,7 @@ describe("ReviewAutoApproveByRiskSettings drafts", () => {
     });
     expect(highAllowed).toBeEnabled();
     fireEvent.click(highAllowed);
-    fireEvent.click(card.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(card.getByRole("button", { name: "Save" }));
 
     expect(savedChanges(save)).toEqual({
       group: "review",
@@ -332,7 +332,7 @@ describe("ReviewAutoApproveByRiskSettings drafts", () => {
     expect(delay(view.container, "medium")).toHaveDisplayValue("21");
     // The new baseline is adopted for the row that was not edited.
     expect(delay(view.container, "low")).toHaveDisplayValue("10");
-    fireEvent.click(card.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(card.getByRole("button", { name: "Save" }));
 
     expect(savedChanges(save)).toEqual({
       group: "review",
@@ -350,7 +350,7 @@ describe("ReviewAutoApproveByRiskSettings drafts", () => {
       row(view.container, "high").getByRole("checkbox", { name: "High" }),
     );
     fireEvent.change(delay(view.container, "low"), { target: { value: "3" } });
-    expect(card.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    expect(card.getByRole("button", { name: "Save" })).toBeEnabled();
 
     view.rerender(reviewCard(10, save));
 
@@ -359,7 +359,7 @@ describe("ReviewAutoApproveByRiskSettings drafts", () => {
     expect(
       row(view.container, "high").getByRole("checkbox", { name: "High" }),
     ).not.toBeChecked();
-    expect(card.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(card.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("keeps an unsaved draft when the policy is rebuilt with the same values", () => {
@@ -371,7 +371,7 @@ describe("ReviewAutoApproveByRiskSettings drafts", () => {
     view.rerender(reviewCard(7, save));
 
     expect(delay(view.container, "low")).toHaveDisplayValue("3");
-    expect(card.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    expect(card.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 });
 
@@ -486,7 +486,7 @@ describe("LibraryPolicyView drafts", () => {
 
     expect(limitOf(view.container)).toHaveDisplayValue("5");
     fireEvent.click(
-      within(view.container).getByRole("button", { name: "Save changes" }),
+      within(view.container).getByRole("button", { name: "Save" }),
     );
 
     expect(save).toHaveBeenCalledTimes(1);
@@ -508,7 +508,7 @@ describe("LibraryPolicyView drafts", () => {
     fireEvent.change(card.getByLabelText("Add an individual format limit"), {
       target: { value: "pdf" },
     });
-    expect(card.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    expect(card.getByRole("button", { name: "Save" })).toBeEnabled();
 
     view.rerender(libraryCard(libraryPolicyCard(3_000_000), save));
 
@@ -516,7 +516,7 @@ describe("LibraryPolicyView drafts", () => {
     expect(
       card.getByLabelText("Add an individual format limit"),
     ).toHaveDisplayValue("");
-    expect(card.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(card.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("keeps an unsaved draft when the same card renders again", async () => {
@@ -532,6 +532,6 @@ describe("LibraryPolicyView drafts", () => {
     view.rerender(libraryCard(policyCard, save));
 
     expect(limitOf(view.container)).toHaveDisplayValue("5");
-    expect(card.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    expect(card.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 });

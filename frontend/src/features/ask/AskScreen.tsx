@@ -352,7 +352,7 @@ const ASK_COPY = {
       acceptPlacement: "Accept placement",
       rejectReason: "Reject reason",
       rejecting: "Rejecting…",
-      rejectPlacement: "Reject placement",
+      rejectPlacement: "Reject",
       selectDestination: "Select destination",
       noPreview: "No preview available",
       defaultTitlePrefix: "Turn",
@@ -511,7 +511,7 @@ const ASK_COPY = {
       acceptPlacement: "배치 수락",
       rejectReason: "거절 사유",
       rejecting: "거절 중…",
-      rejectPlacement: "배치 거절",
+      rejectPlacement: "거절",
       selectDestination: "저장 위치 선택",
       noPreview: "미리볼 내용 없음",
       defaultTitlePrefix: "턴",
@@ -2029,7 +2029,7 @@ function PlacementPanel({
           </span>
         </button>
         <button
-          className="icon-button primary"
+          className="icon-button success"
           disabled={!proposal || !canSubmit || actionBusy}
           type="button"
           onClick={async () => {
@@ -2066,7 +2066,7 @@ function PlacementPanel({
             />
           </label>
           <button
-            className="icon-button"
+            className="icon-button danger"
             disabled={!rejectReason.trim() || actionBusy}
             type="button"
             onClick={async () => {

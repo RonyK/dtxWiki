@@ -508,9 +508,9 @@ function ContentError({ reason, onRetry }: { reason: ReadFailure; onRetry: () =>
         : t("content.loadFailed", { defaultValue: "Could not load this review version." });
   return (
     <StatusBanner tone="warning" action={reason !== "too_large" ? (
-      <button className="icon-button" onClick={onRetry} type="button">
+      <button aria-label={t("content.retry", { defaultValue: "Reload content" })} className="icon-button" onClick={onRetry} type="button">
         <RefreshCcw aria-hidden="true" size={14} />
-        {t("content.retry", { defaultValue: "Reload content" })}
+        {t("shell:actions.refresh")}
       </button>
     ) : undefined}>
       {message}

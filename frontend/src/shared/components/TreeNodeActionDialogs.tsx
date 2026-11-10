@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next";
 
 import { apiErrorMessage } from "../api/client";
 import type { TreeNodePayload } from "../api/workspace";
-import { Dialog, DialogCloseButton } from "./Dialog";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { Dialog } from "./Dialog";
 import { StatusBanner } from "./StatusBanner";
 import { TreePickerDropdown } from "./TreePickerDropdown";
 
@@ -52,18 +53,13 @@ export function RenameTreeNodeDialog({
       labelledBy="rename-tree-node-title"
       onClose={requestClose}
       restoreFocusFallback={restoreFocusFallback}
+      closeLabel={t("dialogs.closeDialog")}
+      title={t("dialogs.rename.title")}
     >
       <form className="dialog-form" onSubmit={submit}>
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">{t("dialogs.eyebrow")}</p>
-            <h2 id="rename-tree-node-title">{t("dialogs.rename.title")}</h2>
-            {node.slug ? (
-              <p className="feature-subtitle">{t("dialogs.rename.slug", { slug: node.slug })}</p>
-            ) : null}
-          </div>
-          <DialogCloseButton disabled={submitting} label={t("dialogs.closeDialog")} onClick={requestClose} />
-        </header>
+        {node.slug ? (
+          <p className="dialog-description">{t("dialogs.rename.slug", { slug: node.slug })}</p>
+        ) : null}
         <label className="form-field">
           <span>{t("dialogs.rename.displayName")}</span>
           <input
@@ -147,18 +143,13 @@ export function MoveTreeNodeDialog({
       labelledBy="move-tree-node-title"
       onClose={requestClose}
       restoreFocusFallback={restoreFocusFallback}
+      closeLabel={t("dialogs.closeDialog")}
+      title={t("dialogs.move.title", { title: node.title })}
     >
       <form className="dialog-form" onSubmit={submit}>
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">{t("dialogs.move.eyebrow")}</p>
-            <h2 id="move-tree-node-title">{t("dialogs.move.title", { title: node.title })}</h2>
-            {node.children_count > 0 ? (
-              <p className="feature-subtitle">{t("dialogs.move.childBranchNotice")}</p>
-            ) : null}
-          </div>
-          <DialogCloseButton disabled={submitting} label={t("dialogs.closeDialog")} onClick={requestClose} />
-        </header>
+        {node.children_count > 0 ? (
+          <p className="dialog-description">{t("dialogs.move.childBranchNotice")}</p>
+        ) : null}
         <label className="form-field">
           <span>{t("dialogs.move.targetParent")}</span>
           <TreePickerDropdown
@@ -236,40 +227,24 @@ export function DeleteTreeNodeDialog({
   }
 
   return (
-    <Dialog
-      dismissible={!submitting}
+    <ConfirmDialog
+      busy={submitting}
+      busyLabel={t("dialogs.delete.submitting")}
+      closeLabel={t("dialogs.closeDialog")}
+      confirmLabel={t("shell:actions.delete")}
+      error={error}
       labelledBy="delete-tree-node-title"
-      onClose={requestClose}
+      onCancel={requestClose}
+      onConfirm={() => void submit()}
       restoreFocusFallback={restoreFocusFallback}
+      title={t("dialogs.delete.title", { title: node.title })}
+      tone="danger"
     >
-      <div className="dialog-form">
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">{t("dialogs.eyebrow")}</p>
-            <h2 id="delete-tree-node-title">{t("dialogs.delete.title", { title: node.title })}</h2>
-            <p className="feature-subtitle">{t("dialogs.delete.body")}</p>
-          </div>
-          <DialogCloseButton disabled={submitting} label={t("dialogs.closeDialog")} onClick={requestClose} />
-        </header>
-        {node.children_count > 0 ? (
-          <StatusBanner tone="warning">{t("dialogs.delete.childWarning")}</StatusBanner>
-        ) : null}
-        {error ? <p className="form-error">{error}</p> : null}
-        <div className="dialog-actions">
-          <button
-            className="icon-button text-button"
-            disabled={submitting}
-            type="button"
-            onClick={requestClose}
-          >
-            {t("dialogs.cancel")}
-          </button>
-          <button className="icon-button danger" disabled={submitting} type="button" onClick={submit}>
-            {submitting ? t("dialogs.delete.submitting") : t("dialogs.delete.submit")}
-          </button>
-        </div>
-      </div>
-    </Dialog>
+      <p className="dialog-description">{t("dialogs.delete.body")}</p>
+      {node.children_count > 0 ? (
+        <StatusBanner tone="warning">{t("dialogs.delete.childWarning")}</StatusBanner>
+      ) : null}
+    </ConfirmDialog>
   );
 }
 

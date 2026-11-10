@@ -928,7 +928,7 @@
   display: none;
 }
 
-.history-graph-card-content .history-card-actions .danger-action {
+.history-graph-card-content .history-card-actions .danger {
   margin-inline-start: auto;
 }
 
@@ -1037,7 +1037,6 @@
   flex: 0 0 auto;
 }
 
-.context-reconciliation-header,
 .context-reconciliation-footer,
 .context-reconciliation-summary,
 .context-reconciliation-block-strip,
@@ -1047,7 +1046,6 @@
   align-items: center;
 }
 
-.context-reconciliation-header,
 .context-reconciliation-footer {
   justify-content: space-between;
   gap: 16px;
@@ -1354,7 +1352,6 @@
     flex: 0 0 min(164px, 42vw);
   }
 
-  .context-reconciliation-header,
   .context-reconciliation-footer {
     align-items: stretch;
   }

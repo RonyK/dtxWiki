@@ -212,7 +212,7 @@ export function WorkspaceDirectoryScreen() {
                 onClick={() => setReloadVersion((current) => current + 1)}
                 type="button"
               >
-                {t("workspaceDirectory.retry", { defaultValue: "Retry" })}
+                {t("shell:actions.retry")}
               </button>
             }
             tone="warning"

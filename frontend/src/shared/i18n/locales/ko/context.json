@@ -47,7 +47,6 @@
   },
   "share": {
     "action": "공유",
-    "eyebrow": "읽기 전용 공유",
     "title": "{{title}} 공유",
     "close": "닫기",
     "closeDialog": "대화상자 닫기",
@@ -58,7 +57,7 @@
     "workspaceLink": {
       "title": "워크스페이스 링크",
       "description": "dtxWiki 내부의 Context 페이지를 여는 링크입니다. 접근 권한이 있는 로그인 워크스페이스 멤버만 사용할 수 있습니다.",
-      "copy": "워크스페이스 링크 복사"
+      "copy": "링크 복사"
     },
     "web": {
       "title": "웹에 게시",
@@ -275,11 +274,8 @@
     "restoring": "새 초안 만드는 중",
     "readerVisibleVersion": "독자가 보는 버전",
     "reviewLabel": "리뷰",
-    "discard": "폐기",
     "discardConfirm": "대체 버전 v{{version, josaEulReul}} 폐기할까요? 이 작업은 되돌릴 수 없습니다.",
     "discardReason": "폐기 사유",
-    "cancelDiscard": "취소",
-    "confirmDiscard": "브랜치 영구 폐기",
     "discarded": "대체 버전 v{{version, josaEulReul}} 폐기했습니다.",
     "discarding": "폐기 중",
     "visibleHead": "현재 표시 버전",
@@ -319,7 +315,6 @@
     }
   },
   "reconciliation": {
-    "eyebrow": "브랜치 화해",
     "title": "브랜치 화해",
     "open": "화해하기",
     "close": "닫기",
@@ -368,10 +363,8 @@
     "submitting": "초안 만드는 중",
     "discardTitle": "브랜치 폐기",
     "discardReason": "폐기 사유",
-    "discard": "브랜치 폐기",
     "discarding": "폐기 중",
     "cancelDiscard": "취소",
-    "confirmDiscard": "브랜치 영구 폐기",
     "cleanChangesTitle": "브랜치에만 있는 변경",
     "cleanChangesHint": "이 변경은 기본으로 포함됩니다. 화해 초안에서 제외하려면 선택을 해제하세요.",
     "includeCleanChange": "{{label}} 포함",
@@ -398,7 +391,6 @@
     "risk": "위험도 {{risk}}",
     "viewReview": "리뷰 보기",
     "viewChanges": "변경 보기",
-    "approve": "승인",
     "requestChanges": "변경 요청",
     "reasonPlaceholder": "승인 전 무엇을 바꿔야 하나요?",
     "submitChanges": "요청 보내기",

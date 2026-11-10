@@ -617,12 +617,12 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
         {status === "error" ? (
           <div className="graph-canvas-status graph-canvas-error">
             <p role="status">{failureMessage}</p>
-            <button
+            <button aria-label={t("workspaceGraph.mapRendererRetry", { defaultValue: "Retry interactive map" })}
               className="icon-button text-button"
               onClick={() => setRendererRevision((revision) => revision + 1)}
               type="button"
             >
-              {t("workspaceGraph.mapRendererRetry", { defaultValue: "Retry interactive map" })}
+              {t("shell:actions.retry")}
             </button>
           </div>
         ) : null}

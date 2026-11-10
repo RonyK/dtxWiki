@@ -139,7 +139,24 @@ def test_keyboard_shortcut_dialog_keeps_wide_layout_contract():
 
     assert shortcut_dialog["width"] == "min(960px, 100%)"
     assert shortcut_dialog["max-height"] == "min(760px, calc(100vh - 40px))"
-    assert shortcut_dialog["overflow"] == "auto"
+    # The shared title bar stays outside the one scrolling content region.
+    shortcut_source = (
+        ROOT / "frontend/src/shared/components/KeyboardShortcutsModal.tsx"
+    ).read_text(encoding="utf-8")
+    titlebar_panel = declarations_for_selector(
+        stylesheet, ".dialog-panel.dialog-with-titlebar"
+    )
+    scroll_region = declarations_for_selector(stylesheet, ".dialog-scroll-region")
+    titlebar_content = declarations_for_selector(
+        stylesheet, ":where(.dialog-with-titlebar) > .dialog-scroll-region"
+    )
+    assert 'className="editor-shortcut-dialog"' in shortcut_source
+    assert 'title={t("editor.shortcutsModalTitle"' in shortcut_source
+    assert titlebar_panel["display"] == "flex"
+    assert titlebar_panel["flex-direction"] == "column"
+    assert scroll_region["overflow"] == "auto"
+    assert titlebar_content["min-height"] == "0"
+    assert titlebar_content["flex"] == "1 1 auto"
     assert shortcut_labels["overflow-wrap"] == "break-word"
     assert shortcut_labels["word-break"] == "normal"
 
@@ -491,13 +508,21 @@ def test_workspace_tree_rail_default_width_leaves_header_room():
     layout_source = (
         ROOT / "frontend/src/shared/components/WorkspaceLayout.tsx"
     ).read_text(encoding="utf-8")
+    rail_source = (
+        ROOT / "frontend/src/shared/components/useWorkspaceRailState.ts"
+    ).read_text(encoding="utf-8")
 
     workspace_screen = declarations_for_selector(stylesheet, ".workspace-screen")
     ask_screen = declarations_for_selector(stylesheet, ".workspace-screen.ask-screen")
 
     assert workspace_screen["--workspace-left-w"] == "280px"
     assert ask_screen["--workspace-left-w"] == "300px"
-    assert "const DEFAULT_LEFT_WIDTHS = [280, 420, 560] as const;" in layout_source
+    assert "export const DEFAULT_RAIL_WIDTHS = [280, 420, 560] as const;" in rail_source
+    assert "widths: readonly number[] = DEFAULT_RAIL_WIDTHS," in rail_source
+    assert ": DEFAULT_RAIL_WIDTHS;" in layout_source
+    assert (
+        "useWorkspaceRailState(layoutKey, defaultLeftOpen, leftWidths)" in layout_source
+    )
     assert "const ASK_LEFT_WIDTHS = [300, 420, 560] as const;" in layout_source
 
 
@@ -514,10 +539,18 @@ def test_workspace_explorer_rails_default_open_on_browse_surfaces():
     layout_source = (
         ROOT / "frontend/src/shared/components/WorkspaceLayout.tsx"
     ).read_text(encoding="utf-8")
+    rail_source = (
+        ROOT / "frontend/src/shared/components/useWorkspaceRailState.ts"
+    ).read_text(encoding="utf-8")
 
     assert "defaultLeftOpen?: boolean;" in layout_source
     assert "defaultLeftOpen = true," in layout_source
-    assert "readStoredPanelState(`${layoutKey}:left`, defaultLeftOpen)" in layout_source
+    assert (
+        "useWorkspaceRailState(layoutKey, defaultLeftOpen, leftWidths)" in layout_source
+    )
+    assert "defaultOpen = true," in rail_source
+    assert "readWorkspacePanelState(`${layoutKey}:left`, defaultOpen)" in rail_source
+    assert "writeWorkspacePanelState(`${layoutKey}:left`, open);" in rail_source
     assert "defaultLeftOpen" in agent
     assert "defaultLeftOpen={false}" not in agent
     assert "defaultLeftOpen" not in context

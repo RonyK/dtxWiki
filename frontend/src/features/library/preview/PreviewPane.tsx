@@ -247,8 +247,8 @@ export function PreviewPane({
     return (
       <div className="library-preview-error" role="alert">
         <p>{t("reader.preview.loadError")}</p>
-        <button className="icon-button text-button" type="button" onClick={() => setRetry((value) => value + 1)}>
-          {t("reader.preview.retry")}
+        <button aria-label={t("reader.preview.retry")} className="icon-button text-button" type="button" onClick={() => setRetry((value) => value + 1)}>
+          {t("shell:actions.retry")}
         </button>
       </div>
     );

@@ -77,7 +77,7 @@ export function IdentityVerificationPanel({ scope, returnTo, token = "", onVerif
         <>
           <p>{t("verification.restartHint")}</p>
           <div className="auth-actions">
-            <button type="button" className="icon-button" onClick={() => setRevision((value) => value + 1)}>{t("verification.retry")}</button>
+            <button type="button" className="icon-button" onClick={() => setRevision((value) => value + 1)}>{t("shell:actions.retry")}</button>
             <a href="/login">{t("verification.restart")}</a>
           </div>
         </>

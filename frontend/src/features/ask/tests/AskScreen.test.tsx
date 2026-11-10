@@ -425,7 +425,7 @@ describe("AskScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
     await userEvent.click(screen.getByRole("button", { name: "Propose placement" }));
     await userEvent.type(screen.getByLabelText("Reject reason"), "Wrong target");
-    await userEvent.click(screen.getByRole("button", { name: "Reject placement" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reject" }));
 
     expect(rejectedBody).toEqual({ reason: "Wrong target" });
     expect(await screen.findByText("Placement rejected")).toBeInTheDocument();

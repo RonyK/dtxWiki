@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -136,9 +136,9 @@ it("protects the final external method and refreshes methods after setting a pas
   fireEvent.click(screen.getByRole("button", { name: "Set password" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Unlink" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Unlink" }));
-  expect(screen.getByRole("dialog", { name: "Unlink Example?" })).toBeInTheDocument();
+  const unlinkDialog = screen.getByRole("dialog", { name: "Unlink Example?" });
   expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/identities/identity-1") && init?.method === "DELETE")).toBe(false);
-  fireEvent.click(screen.getByRole("button", { name: "Confirm unlink" }));
+  fireEvent.click(within(unlinkDialog).getByRole("button", { name: "Unlink" }));
   expect(await screen.findByRole("button", { name: "Link Example" })).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("link", { name: "Add login method" })).toHaveFocus());
   expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/identities/identity-1") && init?.method === "DELETE")).toBe(true);

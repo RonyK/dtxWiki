@@ -22,7 +22,6 @@
   },
   "provenance": {
     "title": "Chats",
-    "retry": "Retry",
     "loading": "Loading chats…",
     "loadFailed": "Failed to load chat references",
     "empty": "No chat has touched this item yet.",
@@ -216,7 +215,6 @@
     "action": "Archive",
     "submitting": "Archiving",
     "pending": "Archiving this chat. Other archive actions are paused until it finishes.",
-    "cancel": "Cancel",
     "close": "Close archive dialog",
     "error": "Failed to archive chat"
   },
@@ -262,7 +260,6 @@
     "breadcrumb": "Detail",
     "editTitle": "Edit title",
     "titleLabel": "Chat title",
-    "saveTitle": "Save title",
     "savingTitle": "Saving title",
     "titleSaveSuccess": "Title saved. Focus moved to the updated heading.",
     "cancelTitleEdit": "Cancel title edit",
@@ -453,10 +450,8 @@
       "open": "Delete edit previews",
       "title": "Delete the edit previews in {{title}}?",
       "body": "Deletes the stored text previews of every edit in this chat. Sizes, operation kinds and statuses stay. This cannot be undone.",
-      "action": "Delete previews",
       "submitting": "Deleting",
       "pending": "Deleting the previews. This dialog stays open until it finishes.",
-      "cancel": "Cancel",
       "close": "Close delete previews dialog",
       "error": "Failed to delete the edit previews",
       "success_one": "Deleted the edit previews of {{count}} call.",
@@ -471,7 +466,6 @@
       "search_match": "Search match",
       "unknown": "Linked"
     },
-    "retry": "Retry",
     "backToChats": "Back to Chats",
     "archive": "Archive",
     "errors": {

@@ -76,7 +76,7 @@ export function SetupScreen() {
                 onClick={reload}
                 type="button"
               >
-                {t("loadRetry", { defaultValue: "Retry" })}
+                {t("shell:actions.retry")}
               </button>
             }
             tone="warning"

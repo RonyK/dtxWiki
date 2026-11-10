@@ -11,15 +11,12 @@ import {
 } from "lucide-react";
 import {
   type FormEvent,
-  type KeyboardEvent,
-  type ReactNode,
   useEffect,
   useRef,
   useState,
 } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { createPortal } from "react-dom";
 
 import {
   addHeldWorkspaceMember,
@@ -47,6 +44,7 @@ import { AdminAuditLogPanel, EmailConflictReviewPanel } from "./AdminAccountRevi
 import { AdminUserAccountRow, AdminUserAccountDetails } from "./AdminUserAccountRow";
 import { IdentityVerificationPanel } from "../auth/IdentityVerificationPanel";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
+import { Dialog } from "../../shared/components/Dialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { UserDeletionImpact } from "../../shared/components/UserDeletionImpact";
 import {
@@ -749,9 +747,8 @@ function IdentityRebindDialog({ target, onCancel, onReauthenticationRequired, on
     } finally { setBusy(false); }
   }
 
-  return <AccessibleDialog busy={busy} labelledBy="admin-identity-rebind-title" onCancel={onCancel}>
-    <form className="modal-panel admin-recovery-modal" onSubmit={(event) => void submit(event)}>
-      <h2 id="admin-identity-rebind-title">{t("userRecovery.rebind.title")}</h2>
+  return <Dialog className="admin-recovery-modal" dismissible={!busy} labelledBy="admin-identity-rebind-title" onClose={onCancel} title={t("userRecovery.rebind.title")}>
+    <form className="dialog-form" onSubmit={(event) => void submit(event)}>
       <StatusBanner tone="warning">{t("userRecovery.rebind.warning")}</StatusBanner>
       <p>{target.display_name || target.user_id}</p><code>{target.user_id}</code>
       {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
@@ -779,12 +776,12 @@ function IdentityRebindDialog({ target, onCancel, onReauthenticationRequired, on
       <label className="field-stack">{t("userRecovery.rebind.confirmUser")}
         <input required autoComplete="off" disabled={busy} {...textInputLimit(36)} value={confirmedUserId} onChange={(event) => setConfirmedUserId(event.target.value)} />
       </label>
-      <div className="modal-actions">
+      <div className="dialog-actions">
         <button type="button" className="icon-button" disabled={busy} onClick={onCancel}>{t("userRecovery.dialog.cancel", { defaultValue: "Cancel" })}</button>
         <button type="submit" className="icon-button primary" disabled={busy || !current || confirmedUserId.trim() !== target.user_id}>{t("userRecovery.rebind.action")}</button>
       </div>
     </form>
-  </AccessibleDialog>;
+  </Dialog>;
 }
 
 function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onReauthenticationRequired }: {
@@ -902,9 +899,8 @@ function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onRea
   }
 
   return (
-    <AccessibleDialog busy={busy} labelledBy="admin-user-deletion-title" onCancel={onClose}>
-      <form className="modal-panel admin-recovery-modal" onSubmit={submit}>
-        <h2 id="admin-user-deletion-title">{t("userDeletion.confirmTitle")}</h2>
+    <Dialog className="admin-recovery-modal" dismissible={!busy} labelledBy="admin-user-deletion-title" onClose={onClose} title={t("userDeletion.confirmTitle")}>
+      <form className="dialog-form" onSubmit={submit}>
         <p>{t("userDeletion.confirmDescription", { account: target.email ?? (target.display_name || target.user_id) })}</p>
         {preview !== null ? <><StatusBanner tone="warning">{t("userDeletion.retention", { count: preview.retention_days })}</StatusBanner><UserDeletionImpact preview={preview} /></> : null}
         {preview !== null && needsApproval ? (
@@ -916,7 +912,7 @@ function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onRea
         <p className="meta-line">{t("userDeletion.sharedContent")}</p>
         {needsVerification ? <StatusBanner tone="info">{t("userDeletion.verifyToLoad")}</StatusBanner> : null}
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        {error && canReload ? <button className="icon-button" disabled={busy} onClick={() => setPolicyAttempt((value) => value + 1)} type="button">{t("userDeletion.reloadPolicy")}</button> : null}
+        {error && canReload ? <button aria-label={t("userDeletion.reloadPolicy")} className="icon-button" disabled={busy} onClick={() => setPolicyAttempt((value) => value + 1)} type="button">{t("shell:actions.refresh")}</button> : null}
         {needsVerification || target.email === null ? null : (
           <label className="field-stack" htmlFor="admin-user-deletion-email"><span>{t("userDeletion.confirmEmail", { email: target.email })}</span>
             <input id="admin-user-deletion-email" autoComplete="off" disabled={busy} onChange={(event) => setConfirmationEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={confirmationEmail} />
@@ -927,16 +923,16 @@ function UserDeletionDialog({ target, requirePassword, onClose, onDeleted, onRea
             <input id="admin-user-deletion-password" autoComplete="current-password" disabled={busy} maxLength={128} onChange={(event) => setPassword(event.target.value)} onKeyDown={preventCompositionSubmit} required type="password" value={password} />
           </label>
         ) : null}
-        <div className="modal-actions">
+        <div className="dialog-actions">
           <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
           {needsVerification ? (
             <button className="icon-button primary" disabled={busy || !password} type="submit">{t("userDeletion.verify")}</button>
           ) : (
-            <button className="icon-button danger-action" disabled={busy || retentionDays === null || !emailConfirmed || (requirePassword && !password) || (needsApproval && !approved)} type="submit">{t(busy ? "userDeletion.submitting" : "userDeletion.submit")}</button>
+            <button className="icon-button danger" disabled={busy || retentionDays === null || !emailConfirmed || (requirePassword && !password) || (needsApproval && !approved)} type="submit">{busy ? t("userDeletion.submitting") : t("shell:actions.delete")}</button>
           )}
         </div>
       </form>
-    </AccessibleDialog>
+    </Dialog>
   );
 }
 
@@ -1011,9 +1007,7 @@ function HeldWorkspaceDialog({ workspace, onClose, onReopened, onReauthenticatio
     }
   }
   return (
-    <AccessibleDialog busy={busy} labelledBy="admin-held-workspace-title" onCancel={onClose}>
-      <div className="modal-panel admin-recovery-modal">
-        <h2 id="admin-held-workspace-title">{t("userDeletion.heldTitle", { title: workspace.title })}</h2>
+    <Dialog className="admin-recovery-modal" dismissible={!busy} labelledBy="admin-held-workspace-title" onClose={onClose} title={t("userDeletion.heldTitle", { title: workspace.title })}>
         <p>{t("userDeletion.heldDescription")}</p>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
         {members === null && !error ? <p role="status">{t("userDeletion.heldLoading")}</p> : null}
@@ -1031,7 +1025,7 @@ function HeldWorkspaceDialog({ workspace, onClose, onReopened, onReauthenticatio
             ))}
           </ul>
         ) : null}
-        <form className="admin-held-add" onSubmit={addMember}>
+        <form className="dialog-form admin-held-add" onSubmit={addMember}>
           <label className="field-stack" htmlFor="admin-held-member-email"><span>{t("userDeletion.heldAddEmail")}</span>
             <input id="admin-held-member-email" autoComplete="off" disabled={busy} onChange={(event) => setEmail(event.target.value)} onKeyDown={preventCompositionSubmit} required type="email" value={email} />
           </label>
@@ -1041,13 +1035,12 @@ function HeldWorkspaceDialog({ workspace, onClose, onReopened, onReauthenticatio
               <option value="editor">{t("userRecovery.roles.editor", { defaultValue: "editor" })}</option>
             </select>
           </label>
-          <div className="modal-actions">
+          <div className="dialog-actions">
             <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
             <button className="icon-button" disabled={busy || !email} type="submit">{t("userDeletion.heldAdd")}</button>
           </div>
         </form>
-      </div>
-    </AccessibleDialog>
+    </Dialog>
   );
 }
 
@@ -1097,9 +1090,8 @@ function UserRestoreDialog({ target, requirePassword, onClose, onRestored, onRea
   }
 
   return (
-    <AccessibleDialog busy={busy} labelledBy="admin-user-restore-title" onCancel={onClose}>
-      <form className="modal-panel admin-recovery-modal" onSubmit={submit}>
-        <h2 id="admin-user-restore-title">{t("userDeletion.restoreTitle")}</h2>
+    <Dialog className="admin-recovery-modal" dismissible={!busy} labelledBy="admin-user-restore-title" onClose={onClose} title={t("userDeletion.restoreTitle")}>
+      <form className="dialog-form" onSubmit={submit}>
         <p>{t("userDeletion.restoreDescription", { email: target.email ?? target.display_name })}</p>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
         {requirePassword ? (
@@ -1107,12 +1099,12 @@ function UserRestoreDialog({ target, requirePassword, onClose, onRestored, onRea
             <input id="admin-user-restore-password" autoComplete="current-password" disabled={busy} maxLength={128} onChange={(event) => setPassword(event.target.value)} onKeyDown={preventCompositionSubmit} required type="password" value={password} />
           </label>
         ) : null}
-        <div className="modal-actions">
+        <div className="dialog-actions">
           <button className="icon-button" disabled={busy} onClick={onClose} type="button">{t("userDeletion.cancel")}</button>
           <button className="icon-button primary" disabled={busy || (requirePassword && !password)} type="submit">{t(busy ? "userDeletion.restoring" : "userDeletion.restore")}</button>
         </div>
       </form>
-    </AccessibleDialog>
+    </Dialog>
   );
 }
 
@@ -1153,24 +1145,16 @@ function RecoveryConfirmationDialog({
     }
   }, [error]);
   return (
-    <AccessibleDialog
-      busy={busy}
+    <Dialog
+      className="admin-recovery-modal"
+      dismissible={!busy}
       labelledBy="admin-recovery-confirm-title"
-      onCancel={onCancel}
+      onClose={onCancel}
+      title={t("userRecovery.dialog.title", {
+        defaultValue: "Issue a password reset?",
+      })}
     >
-      <form className="modal-panel admin-recovery-modal" onSubmit={onSubmit}>
-        <div>
-          <p className="eyebrow">
-            {t("userRecovery.dialog.eyebrow", {
-              defaultValue: "Confirm privileged action",
-            })}
-          </p>
-          <h2 id="admin-recovery-confirm-title">
-            {t("userRecovery.dialog.title", {
-              defaultValue: "Issue a password reset?",
-            })}
-          </h2>
-        </div>
+      <form className="dialog-form" onSubmit={onSubmit}>
         <p>
           {t("userRecovery.dialog.description", {
             defaultValue:
@@ -1325,7 +1309,7 @@ function RecoveryConfirmationDialog({
             </small>
           </span>
         </label>
-        <div className="modal-actions">
+        <div className="dialog-actions">
           <button
             className="icon-button"
             disabled={busy}
@@ -1349,7 +1333,7 @@ function RecoveryConfirmationDialog({
           </button>
         </div>
       </form>
-    </AccessibleDialog>
+    </Dialog>
   );
 }
 
@@ -1406,6 +1390,12 @@ function OneTimeLinkDialog({
   const [revealed, setRevealed] = useState(false);
   const maskedUrl = maskRecoveryUrl(link.resetUrl);
 
+  // This dialog replaces the confirmation in one commit, and closing that
+  // confirmation returns focus to its opener after autoFocus would have run.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
   // Last resort only: both programmatic copy paths failed, so the operator has
   // to select the link by hand or leave a locked-out user locked out. Focus and
   // native selection have to wait for the render that swaps the masked value
@@ -1447,25 +1437,15 @@ function OneTimeLinkDialog({
   }
 
   return (
-    <AccessibleDialog
-      busy={false}
+    <Dialog
+      className="admin-recovery-modal"
       dismissible={false}
       labelledBy="admin-recovery-link-title"
-      onCancel={onClose}
+      onClose={onClose}
+      title={t("userRecovery.linkDialog.title", {
+        defaultValue: "Copy this recovery link now",
+      })}
     >
-      <div className="modal-panel admin-recovery-modal">
-        <div>
-          <p className="eyebrow">
-            {t("userRecovery.linkDialog.eyebrow", {
-              defaultValue: "One-time reveal",
-            })}
-          </p>
-          <h2 id="admin-recovery-link-title">
-            {t("userRecovery.linkDialog.title", {
-              defaultValue: "Copy this recovery link now",
-            })}
-          </h2>
-        </div>
         <StatusBanner tone="warning">
           {t("userRecovery.linkDialog.warning", {
             defaultValue:
@@ -1511,7 +1491,7 @@ function OneTimeLinkDialog({
         <p aria-live="polite" className="meta-line">
           {copyStatus}
         </p>
-        <div className="modal-actions">
+        <div className="dialog-actions">
           <button
             className="icon-button"
             onClick={() => void copyLink()}
@@ -1530,109 +1510,8 @@ function OneTimeLinkDialog({
             })}
           </button>
         </div>
-      </div>
-    </AccessibleDialog>
+    </Dialog>
   );
-}
-
-function AccessibleDialog({
-  busy,
-  children,
-  dismissible = true,
-  labelledBy,
-  onCancel,
-}: {
-  busy: boolean;
-  children: ReactNode;
-  dismissible?: boolean;
-  labelledBy: string;
-  onCancel: () => void;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    const focusable = focusableElements(containerRef.current);
-    focusable[0]?.focus();
-    return () => {
-      const previous = previousFocusRef.current;
-      if (previous && document.contains(previous)) {
-        previous.focus();
-      }
-    };
-  }, []);
-
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      if (dismissible && !busy) {
-        onCancel();
-      }
-      return;
-    }
-    if (event.key !== "Tab") {
-      return;
-    }
-    const focusable = focusableElements(containerRef.current);
-    if (focusable.length === 0) {
-      event.preventDefault();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
-  const dialog = (
-    // Keyboard handling is scoped to the focus-trapped modal boundary.
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
-    <div
-      aria-labelledby={labelledBy}
-      aria-modal="true"
-      className="modal-backdrop"
-      onKeyDown={onKeyDown}
-      onMouseDown={(event) => {
-        if (
-          event.target === event.currentTarget &&
-          dismissible &&
-          !busy
-        ) {
-          onCancel();
-        }
-      }}
-      ref={containerRef}
-      role="dialog"
-      tabIndex={-1}
-    >
-      {children}
-    </div>
-  );
-
-  return typeof document === "undefined"
-    ? dialog
-    : createPortal(dialog, document.body);
-}
-
-function focusableElements(root: HTMLElement | null) {
-  if (!root) {
-    return [];
-  }
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ),
-  ).filter((element) => !element.hasAttribute("hidden"));
 }
 
 function adminRecoveryErrorMessage(error: unknown, t: TFunction<"settings">) {

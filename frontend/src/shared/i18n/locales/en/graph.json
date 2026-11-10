@@ -673,7 +673,6 @@
       "buildingBody": "Calculating an actor-visible, bounded published-head scene.",
       "unavailable": "Knowledge Map unavailable.",
       "requestFailed": "The map could not be loaded. Retry or reset saved state.",
-      "retry": "Retry",
       "resetSavedState": "Reset saved map state",
       "rendererFailed": "The interactive renderer failed. The complete list remains available.",
       "focusInCluster": "The selected document is grouped in the highlighted cluster because this map is over its size limit. Expand the cluster to see it. Saved map filters have not changed.",

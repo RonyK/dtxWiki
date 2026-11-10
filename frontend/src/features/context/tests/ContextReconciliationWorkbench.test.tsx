@@ -355,11 +355,11 @@ describe("ContextReconciliationWorkbench", () => {
     expect(discardSection).not.toBeNull();
     await user.click(
       within(discardSection as HTMLElement).getByRole("button", {
-        name: "Discard branch",
+        name: "Discard",
       }),
     );
     const confirm = within(discardSection as HTMLElement).getByRole("button", {
-      name: "Discard branch permanently",
+      name: "Discard",
     });
     expect(confirm).toBeDisabled();
     await user.type(
@@ -392,7 +392,7 @@ describe("ContextReconciliationWorkbench", () => {
       .closest("section");
     await user.click(
       within(discardSection as HTMLElement).getByRole("button", {
-        name: "Discard branch",
+        name: "Discard",
       }),
     );
     await user.type(
@@ -401,7 +401,7 @@ describe("ContextReconciliationWorkbench", () => {
     );
     await user.click(
       within(discardSection as HTMLElement).getByRole("button", {
-        name: "Discard branch permanently",
+        name: "Discard",
       }),
     );
 

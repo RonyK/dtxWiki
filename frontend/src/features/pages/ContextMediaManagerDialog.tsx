@@ -1,4 +1,4 @@
-import { RefreshCw, Trash2, X } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -123,25 +123,13 @@ export function ContextMediaManagerDialog({
       dismissible={!deletingAssetId}
       labelledBy="context-media-dialog-title"
       onClose={requestClose}
+      closeLabel={t("mediaManager.closeAria")}
+      title={t("mediaManager.title")}
     >
       <section className="context-media-dialog-body">
-        <header className="dialog-header">
-          <div>
-            <h2 id="context-media-dialog-title">{t("mediaManager.title")}</h2>
-            <p className="feature-subtitle">
-              {t("mediaManager.subtitle")}
-            </p>
-          </div>
-          <button
-            aria-label={t("mediaManager.closeAria")}
-            className="icon-button"
-            disabled={Boolean(deletingAssetId)}
-            onClick={requestClose}
-            type="button"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </header>
+        <p className="dialog-description">
+          {t("mediaManager.subtitle")}
+        </p>
 
         {pendingDeleteAsset ? (
           <StatusBanner
@@ -160,7 +148,7 @@ export function ContextMediaManagerDialog({
                   onClick={() => void confirmDelete()}
                   type="button"
                 >
-                  {t("mediaManager.confirmDelete.confirm")}
+                  {t("shell:actions.delete")}
                 </button>
               </div>
             }
@@ -191,7 +179,7 @@ export function ContextMediaManagerDialog({
                 type="button"
               >
                 <RefreshCw size={14} aria-hidden="true" />
-                {t("mediaManager.actions.refresh")}
+                {t("shell:actions.refresh")}
               </button>
             }
             tone="warning"
@@ -208,7 +196,7 @@ export function ContextMediaManagerDialog({
                 type="button"
               >
                 <RefreshCw size={14} aria-hidden="true" />
-                {t("mediaManager.actions.retry")}
+                {t("shell:actions.retry")}
               </button>
             }
             tone="warning"
@@ -326,7 +314,7 @@ function MediaGroup({
                   aria-label={t("mediaManager.actions.deleteAria", {
                     filename: asset.original_filename,
                   })}
-                  className="icon-button text-button context-media-delete"
+                  className="icon-button text-button danger context-media-delete"
                   disabled={Boolean(deletingAssetId || confirmingAssetId)}
                   onClick={() => void onDelete(asset)}
                   type="button"
@@ -334,7 +322,7 @@ function MediaGroup({
                   <Trash2 size={14} aria-hidden="true" />
                   {deletingAssetId === asset.id
                     ? t("mediaManager.actions.deleting")
-                    : t("mediaManager.actions.delete")}
+                    : t("shell:actions.delete")}
                 </button>
               ) : null}
             </li>

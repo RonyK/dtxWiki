@@ -760,6 +760,12 @@ describe("ContextScreen", () => {
     ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/new`);
     expect(screen.queryByRole("link", { name: "Context home" })).toBeNull();
     expect(screen.getByText("Unpublished draft")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create Context item" }));
+    const createDialog = screen.getByRole("dialog");
+    expect(within(createDialog).getByRole("textbox", { name: "Page title" })).toBeVisible();
+    expect(within(createDialog).getByRole("radio", { name: "Folder" })).toBeVisible();
+    await userEvent.click(within(createDialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("shows a publish arrival notice once and clears navigation state", async () => {
@@ -1522,7 +1528,7 @@ describe("ContextScreen", () => {
       name: "Discard alternative v1? This cannot be undone.",
     });
     const confirm = within(dialog).getByRole("button", {
-      name: "Discard branch permanently",
+      name: "Discard",
     });
     expect(confirm).toBeDisabled();
     await userEvent.type(
@@ -2520,7 +2526,7 @@ describe("ContextScreen", () => {
     expect(within(dialog).getByText("Ready")).toBeInTheDocument();
 
     await userEvent.click(
-      within(dialog).getByRole("button", { name: "Copy workspace link" }),
+      within(dialog).getByRole("button", { name: "Copy link" }),
     );
     expect(writeText).toHaveBeenCalledWith(
       expect.stringMatching(
@@ -3492,8 +3498,9 @@ describe("ContextScreen", () => {
       screen.getByLabelText("Mobile workspace actions"),
     );
     expect(
-      mobileActions.getByRole("button", { name: "Create Context item" }),
-    ).toBeInTheDocument();
+      mobileActions.getByRole("link", { name: "New Context page" }),
+    ).toHaveClass("icon-button", "primary");
+    expect(mobileActions.queryByRole("button", { name: "New Context page" })).toBeNull();
   });
 
   it("shows the setup sequence and writing CTA when Context is empty", async () => {

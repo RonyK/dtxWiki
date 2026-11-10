@@ -53,7 +53,7 @@ import { ApiError } from "../../shared/api/client";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { CountChip } from "../../shared/components/CountChip";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
-import { Dialog } from "../../shared/components/Dialog";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { FormField } from "../../shared/components/FormField";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { RouteLoading } from "../../shared/components/RouteLoading";
@@ -1652,7 +1652,10 @@ export function ReviewScreen() {
               {selectedBulkIds.size > 0 ? (
                 <div className="review-bulk-actions">
                   {selectedBulkCount > 0 ? (
-                    <button
+                    <button aria-label={t("bulk.approveSelected", {
+                          count: selectedBulkCount,
+                          defaultValue: "Approve selected",
+                        })}
                       className="icon-button success"
                       disabled={!canBulkApproveSelected}
                       onClick={() => void openBulkApproveDialog()}
@@ -1660,15 +1663,15 @@ export function ReviewScreen() {
                     >
                       <Check size={14} aria-hidden="true" />
                       <span>
-                        {t("bulk.approveSelected", {
-                          count: selectedBulkCount,
-                          defaultValue: "Approve selected",
-                        })}
+                        {t("shell:actions.approve")}
                       </span>
                     </button>
                   ) : null}
                   {selectedReconciliationCount > 0 ? (
-                    <button
+                    <button aria-label={t("bulk.discardReconciliations", {
+                          count: selectedReconciliationCount,
+                          defaultValue: "Discard selected branches",
+                        })}
                       className="icon-button danger"
                       disabled={bulkDiscardBlocked}
                       onClick={() => {
@@ -1679,10 +1682,7 @@ export function ReviewScreen() {
                     >
                       <X size={14} aria-hidden="true" />
                       <span>
-                        {t("bulk.discardReconciliations", {
-                          count: selectedReconciliationCount,
-                          defaultValue: "Discard selected branches",
-                        })}
+                        {t("shell:actions.discard")}
                       </span>
                     </button>
                   ) : null}
@@ -1830,11 +1830,11 @@ export function ReviewScreen() {
             />
             {error || showUncertainDecision ? <StatusBanner tone="warning" action={refreshFailed || showUncertainDecision ? (
               <div className="review-recovery-actions">
-                <button className="icon-button" disabled={refreshing || Boolean(busyId)} onClick={() => void refreshQueue()} type="button">
-                  {t("workflow.refreshQueue")}
+                <button aria-label={t("workflow.refreshQueue")} className="icon-button" disabled={refreshing || Boolean(busyId)} onClick={() => void refreshQueue()} type="button">
+                  {t("shell:actions.refresh")}
                 </button>
-                {uncertainDecision ? <button className="icon-button" disabled={refreshing || Boolean(busyId)} onClick={() => void retryPendingDecision()} type="button">
-                  {t("workflow.retrySameDecision")}
+                {uncertainDecision ? <button aria-label={t("workflow.retrySameDecision")} className="icon-button" disabled={refreshing || Boolean(busyId)} onClick={() => void retryPendingDecision()} type="button">
+                  {t("shell:actions.retry")}
                 </button> : null}
               </div>
             ) : undefined}>{error || t("workflow.decisionOutcomeUnknown")}</StatusBanner> : null}
@@ -1849,11 +1849,11 @@ export function ReviewScreen() {
               <StatusBanner tone="info">{t(`undo.done.${undoneDecision.decisionType}`)}</StatusBanner>
             ) : null}
             {detailError ? <StatusBanner tone="warning" action={
-              <div className="review-recovery-actions"><button className="icon-button" onClick={() => setDetailReload((value) => value + 1)} type="button">{t("workflow.retryDetail")}</button></div>
+              <div className="review-recovery-actions"><button aria-label={t("workflow.retryDetail")} className="icon-button" onClick={() => setDetailReload((value) => value + 1)} type="button">{t("shell:actions.retry")}</button></div>
             }>{detailError}</StatusBanner> : null}
             {bulkResult ? (
               <StatusBanner tone="info" action={bulkStopped && refreshFailed ? (
-                <div className="review-recovery-actions"><button className="icon-button" disabled={refreshing || bulkBusy} onClick={() => void refreshQueue()} type="button">{t("workflow.refreshQueue")}</button></div>
+                <div className="review-recovery-actions"><button aria-label={t("workflow.refreshQueue")} className="icon-button" disabled={refreshing || bulkBusy} onClick={() => void refreshQueue()} type="button">{t("shell:actions.refresh")}</button></div>
               ) : undefined}>
                 {bulkStopped ? <p>{t("workflow.bulkStopped", { processed: bulkResult.processed_count ?? 0, total: bulkResult.total ?? 0 })}</p> : null}
                 <span>
@@ -1935,159 +1935,116 @@ export function ReviewScreen() {
         }
       />
       {bulkDialog ? (
-        <Dialog
+        <ConfirmDialog
+          busy={bulkBusy}
+          busyLabel={t("bulk.approving", { defaultValue: "Approving" })}
           className="review-bulk-dialog"
-          dismissible={!bulkBusy}
+          confirmDisabled={bulkDialog.count === 0}
+          confirmLabel={t("bulk.confirmApproveCount", {
+            count: bulkDialog.count,
+            defaultValue: "Approve {{count}}",
+          })}
           labelledBy="review-bulk-dialog-title"
-          onClose={closeBulkDialog}
+          onCancel={closeBulkDialog}
+          onConfirm={() => void runBulkApprove()}
+          title={t("bulk.confirmTitle", { defaultValue: "Review bulk approval" })}
+          tone="success"
         >
-          <div className="dialog-form">
-            <h2 id="review-bulk-dialog-title">
-              {t("bulk.confirmTitle", { defaultValue: "Review bulk approval" })}
-            </h2>
-            <p>
-              {t("bulk.confirmSelectedBody", {
-                count: bulkDialog.count,
-                total: bulkDialog.selection.total,
-                defaultValue:
-                  "{{count}} of {{total}} selected reviews can be approved. Review automatic settlements and excluded items below.",
+          <p>
+            {t("bulk.confirmSelectedBody", {
+              count: bulkDialog.count,
+              total: bulkDialog.selection.total,
+              defaultValue:
+                "{{count}} of {{total}} selected reviews can be approved. Review automatic settlements and excluded items below.",
+            })}
+          </p>
+          <div className="review-bulk-preview" role="status">
+            <span>
+              {t("bulk.previewEligible", {
+                count: bulkDialog.selection.eligible_count,
+                defaultValue: "{{count}} eligible",
               })}
-            </p>
-            <div className="review-bulk-preview" role="status">
-              <span>
-                {t("bulk.previewEligible", {
-                  count: bulkDialog.selection.eligible_count,
-                  defaultValue: "{{count}} eligible",
-                })}
-              </span>
-              <span>
-                {t("bulk.previewSkipped", {
-                  count: bulkDialog.selection.items.filter((item) => !item.eligible && !item.will_auto_settle).length,
-                  defaultValue: "{{count}} skipped",
-                })}
-              </span>
-            </div>
-            {bulkDialog.settlementCount != null
-            && bulkDialog.settlementCount > 0 ? (
-              <StatusBanner tone="warning">
-                {t("bulk.approvalImpact", {
-                  count: bulkDialog.settlementCount,
-                  defaultValue:
-                    "Approving the selected page versions will also settle {{count}} earlier pending reviews.",
-                })}
-              </StatusBanner>
-            ) : null}
-            <p className="field-hint">{t("workflow.fixedSelection", { count: bulkDialog.selection.total, expires: formatVersionTimestamp(bulkDialog.selection.expires_at) })}</p>
-            <ul className="review-bulk-preview-items">
-              {bulkDialog.selection.items.map((item) => (
-                <li key={item.id}>
-                  <strong>{item.target_title ?? t("workflow.unavailableReview")}{item.target_version_no != null ? ` · v${item.target_version_no}` : ""}</strong>
-                  <span>{item.will_auto_settle ? t("workflow.autoSettled") : item.eligible ? t("workflow.eligible") : reviewOutcomeReason(item.reason_code, item.reason, t)}</span>
-                  {item.eligible && !item.will_auto_settle && (item.auto_settled_review_item_ids?.length ?? 0) > 0 ? (
-                    <span className="review-bulk-item-impact">
-                      {t("bulk.approvalImpact", { count: item.auto_settled_review_item_ids?.length ?? 0 })}
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-            <div className="dialog-actions">
-              <button
-                className="icon-button"
-                disabled={bulkBusy}
-                onClick={closeBulkDialog}
-                type="button"
-              >
-                {t("actions.cancel", { defaultValue: "Cancel" })}
-              </button>
-              <button
-                className="icon-button success"
-                disabled={bulkBusy || bulkDialog.count === 0}
-                onClick={() => void runBulkApprove()}
-                type="button"
-              >
-                {bulkBusy
-                  ? t("bulk.approving", { defaultValue: "Approving" })
-                  : t("bulk.confirmApproveCount", {
-                      count: bulkDialog.count,
-                      defaultValue: "Approve {{count}}",
-                    })}
-              </button>
-            </div>
+            </span>
+            <span>
+              {t("bulk.previewSkipped", {
+                count: bulkDialog.selection.items.filter((item) => !item.eligible && !item.will_auto_settle).length,
+                defaultValue: "{{count}} skipped",
+              })}
+            </span>
           </div>
-        </Dialog>
+          {bulkDialog.settlementCount != null
+          && bulkDialog.settlementCount > 0 ? (
+            <StatusBanner tone="warning">
+              {t("bulk.approvalImpact", {
+                count: bulkDialog.settlementCount,
+                defaultValue:
+                  "Approving the selected page versions will also settle {{count}} earlier pending reviews.",
+              })}
+            </StatusBanner>
+          ) : null}
+          <p className="field-hint">{t("workflow.fixedSelection", { count: bulkDialog.selection.total, expires: formatVersionTimestamp(bulkDialog.selection.expires_at) })}</p>
+          <ul className="review-bulk-preview-items">
+            {bulkDialog.selection.items.map((item) => (
+              <li key={item.id}>
+                <strong>{item.target_title ?? t("workflow.unavailableReview")}{item.target_version_no != null ? ` · v${item.target_version_no}` : ""}</strong>
+                <span>{item.will_auto_settle ? t("workflow.autoSettled") : item.eligible ? t("workflow.eligible") : reviewOutcomeReason(item.reason_code, item.reason, t)}</span>
+                {item.eligible && !item.will_auto_settle && (item.auto_settled_review_item_ids?.length ?? 0) > 0 ? (
+                  <span className="review-bulk-item-impact">
+                    {t("bulk.approvalImpact", { count: item.auto_settled_review_item_ids?.length ?? 0 })}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </ConfirmDialog>
       ) : null}
       {bulkDiscardOpen ? (
-        <Dialog
+        <ConfirmDialog
+          busy={bulkBusy}
+          busyLabel={t("bulk.discarding", { defaultValue: "Discarding" })}
           className="review-bulk-dialog"
-          dismissible={!bulkBusy}
+          confirmDisabled={
+            bulkDiscardBlocked
+            || bulkDiscardReason.trim().length === 0
+            || selectedReconciliationCount === 0
+          }
+          confirmLabel={t("shell:actions.discard")}
           labelledBy="review-bulk-discard-title"
-          onClose={() => {
-            if (!bulkBusy) {
-              setBulkDiscardOpen(false);
-              setBulkDiscardReason("");
-            }
+          onCancel={() => {
+            setBulkDiscardOpen(false);
+            setBulkDiscardReason("");
           }}
+          onConfirm={() => void runBulkReconciliationDiscard()}
+          title={t("bulk.discardTitle", {
+            defaultValue: "Discard selected reconciliation branches?",
+          })}
+          tone="danger"
         >
-          <div className="dialog-form">
-            <h2 id="review-bulk-discard-title">
-              {t("bulk.discardTitle", {
-                defaultValue: "Discard selected reconciliation branches?",
-              })}
-            </h2>
-            <p>
-              {t("bulk.discardBody", {
-                count: selectedReconciliationCount,
-                defaultValue:
-                  "Only explicitly eligible branches will be discarded. Ineligible or stale items are returned with an error code.",
-              })}
-            </p>
-            {bulkDiscardBlocked && !bulkBusy ? (
-              <StatusBanner tone="warning">{t("bulk.discardBlocked")}</StatusBanner>
-            ) : null}
-            <label>
-              <span>
-                {t("bulk.discardReason", { defaultValue: "Discard reason" })}
-              </span>
-              <textarea
-              {...textInputLimit(2000, false)}
-                autoFocus
-                required
-                value={bulkDiscardReason}
-                onChange={(event) =>
-                  setBulkDiscardReason(event.currentTarget.value)
-                }
-              />
-            </label>
-            <div className="dialog-actions">
-              <button
-                className="icon-button text-button"
-                disabled={bulkBusy}
-                onClick={() => setBulkDiscardOpen(false)}
-                type="button"
-              >
-                {t("bulk.cancel", { defaultValue: "Cancel" })}
-              </button>
-              <button
-                className="danger"
-                disabled={
-                  bulkDiscardBlocked
-                  || bulkDiscardReason.trim().length === 0
-                  || selectedReconciliationCount === 0
-                }
-                onClick={() => void runBulkReconciliationDiscard()}
-                type="button"
-              >
-                {bulkBusy
-                  ? t("bulk.discarding", { defaultValue: "Discarding" })
-                  : t("bulk.confirmDiscard", {
-                      count: selectedReconciliationCount,
-                      defaultValue: "Discard selected branches",
-                    })}
-              </button>
-            </div>
-          </div>
-        </Dialog>
+          <p>
+            {t("bulk.discardBody", {
+              count: selectedReconciliationCount,
+              defaultValue:
+                "Only explicitly eligible branches will be discarded. Ineligible or stale items are returned with an error code.",
+            })}
+          </p>
+          {bulkDiscardBlocked && !bulkBusy ? (
+            <StatusBanner tone="warning">{t("bulk.discardBlocked")}</StatusBanner>
+          ) : null}
+          <label className="form-field">
+            <span>
+              {t("bulk.discardReason", { defaultValue: "Discard reason" })}
+            </span>
+            <textarea
+            {...textInputLimit(2000, false)}
+              autoFocus
+              required
+              value={bulkDiscardReason}
+              onChange={(event) =>
+                setBulkDiscardReason(event.currentTarget.value)
+              }
+            />
+          </label>
+        </ConfirmDialog>
       ) : null}
     </>
   );
@@ -2984,7 +2941,7 @@ function ReviewDetail({
             })}
           >
           <button
-            className="icon-button primary"
+            className="icon-button success"
             disabled={!canApprove}
             onClick={() => onDecision("approve")}
             title={
@@ -2997,7 +2954,7 @@ function ReviewDetail({
             type="button"
           >
             <Check size={15} aria-hidden="true" />
-            <span>{t("actions.approve", { defaultValue: "Approve" })}</span>
+            <span>{t("shell:actions.approve")}</span>
           </button>
           <button
             className="icon-button warning"
@@ -3047,7 +3004,7 @@ function ReviewDetail({
             type="button"
           >
             <X size={15} aria-hidden="true" />
-            <span>{t("actions.reject", { defaultValue: "Reject" })}</span>
+            <span>{t("shell:actions.reject")}</span>
           </button>
           {review.undo?.available ? (
             <button className="icon-button danger" disabled={busy} onClick={() => onUndo(review.undo!)} type="button">
@@ -3264,160 +3221,121 @@ function ReviewDetail({
         </div>
       </div>
       {!isReadOnly && rejectOpen ? (
-        <Dialog
+        <ConfirmDialog
+          busy={busy}
+          busyLabel={t("reject.confirming", { defaultValue: "Rejecting" })}
           className="review-reject-dialog"
-          dismissible={!busy}
+          confirmDisabled={!canReject || rejectBlocked || rejectChecking || !rejectPreviewReady}
+          confirmLabel={t("shell:actions.reject")}
           labelledBy={rejectTitleId}
-          onClose={closeReject}
+          onCancel={closeReject}
+          onConfirm={() => void confirmReject()}
+          title={t("reject.confirmTitle", { defaultValue: "Reject this review?" })}
+          tone="danger"
         >
-          <div className="dialog-form">
-            <h2 id={rejectTitleId}>
-              {t("reject.confirmTitle", { defaultValue: "Reject this review?" })}
-            </h2>
-            <p>
-              {t("reject.confirmBody", {
-                defaultValue:
-                  "Confirm the target version and its effect before rejecting.",
-              })}
-            </p>
-            <ReviewRejectImpact review={review} />
-            {rejectChecking ? <p role="status">{t("reject.checkingImpact")}</p> : null}
-            <FormField htmlFor={`${rejectTitleId}-reason`} label={t("detail.reasonLabel")} hint={decisionReasonHint}>
-              <textarea {...textInputLimit(2000, false)} id={`${rejectTitleId}-reason`} value={decisionReason} onChange={(event) => onReasonChange(event.currentTarget.value)} />
-            </FormField>
-            {rejectBlocked || rejectError ? <StatusBanner tone="warning" action={
-              <button className="icon-button" disabled={busy || decisionsBlocked || rejectChecking}
-                onClick={() => void reloadRejectPreview()} type="button">{t("reject.recheckImpact")}</button>
-            }>{rejectBlocked ? t("workflow.reasons.review_reject_blocked_by_private_edit") : rejectError}</StatusBanner> : null}
-            <div className="dialog-actions">
-              <button
-                className="icon-button"
-                disabled={busy}
-                onClick={closeReject}
-                type="button"
-              >
-                {t("reject.cancel", { defaultValue: "Cancel" })}
-              </button>
-              <button
-                className="icon-button danger"
-                disabled={!canReject || rejectBlocked || rejectChecking || !rejectPreviewReady}
-                onClick={() => void confirmReject()}
-                type="button"
-              >
-                {busy
-                  ? t("reject.confirming", { defaultValue: "Rejecting" })
-                  : t("actions.reject", { defaultValue: "Reject" })}
-              </button>
-            </div>
-          </div>
-        </Dialog>
+          <p>
+            {t("reject.confirmBody", {
+              defaultValue:
+                "Confirm the target version and its effect before rejecting.",
+            })}
+          </p>
+          <ReviewRejectImpact review={review} />
+          {rejectChecking ? <p role="status">{t("reject.checkingImpact")}</p> : null}
+          <FormField htmlFor={`${rejectTitleId}-reason`} label={t("detail.reasonLabel")} hint={decisionReasonHint}>
+            <textarea {...textInputLimit(2000, false)} id={`${rejectTitleId}-reason`} value={decisionReason} onChange={(event) => onReasonChange(event.currentTarget.value)} />
+          </FormField>
+          {rejectBlocked || rejectError ? <StatusBanner tone="warning" action={
+            <button className="icon-button" disabled={busy || decisionsBlocked || rejectChecking}
+              onClick={() => void reloadRejectPreview()} type="button">{t("reject.recheckImpact")}</button>
+          }>{rejectBlocked ? t("workflow.reasons.review_reject_blocked_by_private_edit") : rejectError}</StatusBanner> : null}
+        </ConfirmDialog>
       ) : null}
       {!isReadOnly && routingOpen ? (
-        <Dialog
+        <ConfirmDialog
+          busy={busy}
           className="review-routing-dialog"
-          dismissible={!busy}
+          confirmDisabled={actionBusy || routingReason.trim().length === 0}
+          confirmLabel={t("routing.submit", { defaultValue: "Request changes" })}
+          error={routingError}
           labelledBy={routingTitleId}
-          onClose={closeRouting}
+          onCancel={closeRouting}
+          onConfirm={() => void submitRouting()}
+          title={t("routing.title", { defaultValue: "Request changes" })}
+          tone="warning"
         >
-          <div className="dialog-form">
-            <h2 id={routingTitleId}>
-              {t("routing.title", { defaultValue: "Request changes" })}
-            </h2>
-            <p>
-              {t("routing.intro", {
-                defaultValue: "Choose who should act on these changes.",
+          <p>
+            {t("routing.intro", {
+              defaultValue: "Choose who should act on these changes.",
+            })}
+          </p>
+          <fieldset className="review-routing-options">
+            <legend className="visually-hidden">
+              {t("routing.legend", {
+                defaultValue: "Who should act on these changes",
               })}
-            </p>
-            <fieldset className="review-routing-options">
-              <legend className="visually-hidden">
-                {t("routing.legend", {
-                  defaultValue: "Who should act on these changes",
-                })}
-              </legend>
-              <RoutingRadio
-                checked={routingAudience === "chat_owner"}
-                disabled={!chatOwnerAvailable}
-                hint={
-                  chatOwnerAvailable
-                    ? t("routing.optionHints.chat_owner", {
-                        defaultValue:
-                          "Routes to the chat owner and their AI for revision.",
-                      })
-                    : t("routing.chatOwnerUnavailable", {
-                        defaultValue:
-                          "This change has no resolvable chat owner.",
-                      })
-                }
-                label={t("routing.options.chat_owner", {
-                  defaultValue: "Chat owner",
-                })}
-                onSelect={() => setRoutingAudience("chat_owner")}
-                value="chat_owner"
-              />
-              <RoutingRadio
-                checked={routingAudience === "requester"}
-                hint={t("routing.optionHints.requester", {
-                  defaultValue: "Routes to you for direct revision.",
-                })}
-                label={t("routing.options.requester", { defaultValue: "Me" })}
-                onSelect={() => setRoutingAudience("requester")}
-                value="requester"
-              />
-              <RoutingRadio
-                checked={routingAudience === "workspace_editors"}
-                hint={t("routing.optionHints.workspace_editors", {
-                  defaultValue: "Routes to all workspace editors.",
-                })}
-                label={t("routing.options.workspace_editors", {
-                  defaultValue: "All editors",
-                })}
-                onSelect={() => setRoutingAudience("workspace_editors")}
-                value="workspace_editors"
-              />
-            </fieldset>
-            <FormField
-              className="review-reason-field"
-              hint={decisionReasonHint}
-              htmlFor={`${routingTitleId}-reason`}
-              label={t("detail.reasonLabel", { defaultValue: "Decision reason" })}
-            >
-              <textarea
-              {...textInputLimit(2000, false)}
-                id={`${routingTitleId}-reason`}
-                placeholder={t("detail.reasonPlaceholder", {
-                  defaultValue:
-                "Add context for this decision. Required for Request changes.",
-                })}
-                value={routingReason}
-                onChange={(event) => {
-                  setRoutingReason(event.currentTarget.value);
-                  onReasonChange(event.currentTarget.value);
-                }}
-              />
-            </FormField>
-            {routingError ? (
-              <StatusBanner tone="warning">{routingError}</StatusBanner>
-            ) : null}
-            <div className="dialog-actions">
-              <button
-                className="icon-button"
-                disabled={busy}
-                onClick={closeRouting}
-                type="button"
-              >
-                {t("routing.cancel", { defaultValue: "Cancel" })}
-              </button>
-              <button
-                className="icon-button warning"
-                disabled={actionBusy || routingReason.trim().length === 0}
-                onClick={() => void submitRouting()}
-                type="button"
-              >
-                {t("routing.submit", { defaultValue: "Request changes" })}
-              </button>
-            </div>
-          </div>
-        </Dialog>
+            </legend>
+            <RoutingRadio
+              checked={routingAudience === "chat_owner"}
+              disabled={!chatOwnerAvailable}
+              hint={
+                chatOwnerAvailable
+                  ? t("routing.optionHints.chat_owner", {
+                      defaultValue:
+                        "Routes to the chat owner and their AI for revision.",
+                    })
+                  : t("routing.chatOwnerUnavailable", {
+                      defaultValue:
+                        "This change has no resolvable chat owner.",
+                    })
+              }
+              label={t("routing.options.chat_owner", {
+                defaultValue: "Chat owner",
+              })}
+              onSelect={() => setRoutingAudience("chat_owner")}
+              value="chat_owner"
+            />
+            <RoutingRadio
+              checked={routingAudience === "requester"}
+              hint={t("routing.optionHints.requester", {
+                defaultValue: "Routes to you for direct revision.",
+              })}
+              label={t("routing.options.requester", { defaultValue: "Me" })}
+              onSelect={() => setRoutingAudience("requester")}
+              value="requester"
+            />
+            <RoutingRadio
+              checked={routingAudience === "workspace_editors"}
+              hint={t("routing.optionHints.workspace_editors", {
+                defaultValue: "Routes to all workspace editors.",
+              })}
+              label={t("routing.options.workspace_editors", {
+                defaultValue: "All editors",
+              })}
+              onSelect={() => setRoutingAudience("workspace_editors")}
+              value="workspace_editors"
+            />
+          </fieldset>
+          <FormField
+            className="review-reason-field"
+            hint={decisionReasonHint}
+            htmlFor={`${routingTitleId}-reason`}
+            label={t("detail.reasonLabel", { defaultValue: "Decision reason" })}
+          >
+            <textarea
+            {...textInputLimit(2000, false)}
+              id={`${routingTitleId}-reason`}
+              placeholder={t("detail.reasonPlaceholder", {
+                defaultValue:
+              "Add context for this decision. Required for Request changes.",
+              })}
+              value={routingReason}
+              onChange={(event) => {
+                setRoutingReason(event.currentTarget.value);
+                onReasonChange(event.currentTarget.value);
+              }}
+            />
+          </FormField>
+        </ConfirmDialog>
       ) : null}
     </section>
   );
@@ -4065,7 +3983,7 @@ function ReviewDocumentGroup({
       {canSelect && (selectedCount > 0 || busy) ? (
         <div className="review-document-group-footer">
           <span role="status">{busy ? t("workflow.selectingGroup") : t("workflow.groupSelected", { count: selectedCount })}</span>
-          {selectedCount > 0 ? <button className="icon-button primary" disabled={disabled} onClick={onApprove} type="button">{t("workflow.approveGroupSelection")}</button> : null}
+          {selectedCount > 0 ? <button aria-label={t("workflow.approveGroupSelection")} className="icon-button success" disabled={disabled} onClick={onApprove} type="button">{t("shell:actions.approve")}</button> : null}
         </div>
       ) : null}
     </section>
@@ -4104,7 +4022,7 @@ function ReviewRejectImpact({ review }: { review: ReviewItem }) {
       ) : (
         <ul className="review-bulk-outcome-list">
           <li>
-            <StatusPill compact status="rejected" tone="danger" label={t("actions.reject")} />
+            <StatusPill compact status="rejected" tone="danger" label={t("shell:actions.reject")} />
             <span>{t("workflow.rejectImpact.candidate", { version: candidate })}</span>
           </li>
           {effect.cascaded_versions?.length ? (
@@ -4176,7 +4094,7 @@ function ReviewBulkOutcomes({ result, onOpen, onUndo, undoneDecisionId, busy }: 
             <button className="icon-button" onClick={() => onOpen(item.id)} type="button">{t("workflow.openReview")}</button>
             {item.outcome === "approved" && "decision_id" in item && item.decision_id ? (
               undone.has(item.decision_id) ? <span>{t("undo.undone")}</span> : (
-                <button className="icon-button" disabled={busy} onClick={() => void onUndo(item.id, item.decision_id!, "approve").then((ok) => {
+                <button className="icon-button danger" disabled={busy} onClick={() => void onUndo(item.id, item.decision_id!, "approve").then((ok) => {
                   if (!mountedRef.current) return;
                   if (ok) setUndone((current) => new Set([...current, item.decision_id!]));
                   else onOpen(item.id);

@@ -254,7 +254,7 @@ describe("ReviewScreen", () => {
     });
     const rejectButton = screen.getByRole("button", { name: "Reject" });
     expect(approveButton).toBeEnabled();
-    expect(approveButton).toHaveClass("primary");
+    expect(approveButton).toHaveClass("success");
     expect(requestChangesButton).toBeEnabled();
     expect(requestChangesButton).toHaveClass("warning");
     // Reject is now always clickable; a missing reason opens a prompt instead
@@ -1482,7 +1482,6 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Request changes" }));
 
     const dialog = screen.getByRole("dialog");
-    expect(dialog.querySelector(".dialog-form")).not.toBeNull();
     expect(
       within(dialog).getByRole("group", {
         name: "Who should act on these changes",
@@ -2347,9 +2346,7 @@ describe("ReviewScreen", () => {
     const dialog = screen.getByRole("dialog", {
       name: "Discard selected reconciliation branches?",
     });
-    const confirm = within(dialog).getByRole("button", {
-      name: "Discard selected branches",
-    });
+    const confirm = within(dialog).getByRole("button", { name: "Discard" });
     expect(confirm).toBeDisabled();
     await userEvent.type(
       within(dialog).getByLabelText("Discard reason"),

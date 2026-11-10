@@ -159,12 +159,12 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
           <p className="field-hint">{t("deletion.sharedContent")}</p>
           {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
           {error && canReload && preview === null ? (
-            <button
+            <button aria-label={t("deletion.reloadPolicy")}
               className="icon-button"
               disabled={busy || loading}
               onClick={() => setPolicyAttempt((value) => value + 1)}
               type="button"
-            >{t("deletion.reloadPolicy")}</button>
+            >{t("shell:actions.refresh")}</button>
           ) : null}
           {email !== null ? (
             <label className="field-stack" htmlFor="account-deletion-email">
@@ -213,18 +213,18 @@ export function AccountDeletionPanel({ email, hasPassword = true }: {
               {t("deletion.cancel")}
             </button>
             <button
-              className="icon-button danger-action"
+              className="icon-button danger"
               disabled={
                 busy || loading || retentionDays === null || blocked || !emailConfirmed
                 || !credentialConfirmed
               }
               type="submit"
-            >{t(busy ? "deletion.submitting" : "deletion.submit")}</button>
+            >{busy ? t("deletion.submitting") : t("shell:actions.delete")}</button>
           </div>
         </form>
       ) : (
         <button
-          className="icon-button danger-action"
+          className="icon-button danger"
           onClick={() => setOpen(true)}
           type="button"
           aria-expanded={false}

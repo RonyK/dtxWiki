@@ -66,7 +66,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await expect(deleteDialog).toContainText(
       "history stays available, but this binding cannot be reactivated",
     );
-    await deleteDialog.getByRole("button", { name: "Delete client" }).click();
+    await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(deleteDialog).toBeHidden();
     await expect(deleteRow).toHaveCount(0);
     await expect(filters.getByRole("radio", { name: "Other states 23" }))
@@ -94,7 +94,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await expect(section.getByText("Inactive UI key 01")).toBeVisible();
     await expect(section.getByRole("button", { name: "Delete key" }).first())
       .toBeVisible();
-    await expect(section.getByRole("button", { name: "Revoke key" })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Revoke" })).toHaveCount(0);
 
     const search = section.getByRole("searchbox", { name: "Search access keys" });
     await search.fill("Inactive UI key 01");
@@ -127,7 +127,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await expect(deleteDialog).toContainText(
       "already revoked or expired and cannot be used to connect",
     );
-    await deleteDialog.getByRole("button", { name: "Delete key" }).click();
+    await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(deleteDialog).toBeHidden();
     await expect(deleteRow).toHaveCount(0);
     await expect(filters.getByRole("radio", { name: "Inactive 24" })).toBeVisible();
@@ -308,9 +308,9 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     const keySection = page.locator(".mcp-keys-section");
     const issuedRow = keyRow(keySection, "E2E Codex laptop");
     await expect(issuedRow).toBeVisible();
-    await issuedRow.getByRole("button", { name: "Revoke key" }).click();
+    await issuedRow.getByRole("button", { name: "Revoke" }).click();
     const revokeDialog = page.getByRole("dialog", { name: "Revoke access key" });
-    await revokeDialog.getByRole("button", { name: "Revoke key" }).click();
+    await revokeDialog.getByRole("button", { name: "Revoke" }).click();
     await expect(revokeDialog).toBeHidden();
 
     await keySection
@@ -321,7 +321,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await expect(revokedRow).toContainText(/revoked/i);
     await revokedRow.getByRole("button", { name: "Delete key" }).click();
     dialog = page.getByRole("dialog", { name: "Delete inactive access key" });
-    await dialog.getByRole("button", { name: "Delete key" }).click();
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(revokedRow).toHaveCount(0);
 
@@ -495,7 +495,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
       .getByRole("option", { name: new RegExp(secondTitle) })
       .click();
     await expect(editDialog.getByText(/access stops immediately/)).toBeVisible();
-    await editDialog.getByRole("button", { name: "Save workspaces" }).click();
+    await editDialog.getByRole("button", { name: "Save" }).click();
     await expect(editDialog).toBeHidden();
 
     // Immediately reflected, with no re-issue and no page reload.

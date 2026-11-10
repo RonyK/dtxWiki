@@ -37,7 +37,7 @@ import {
 } from "../../shared/api/workspace";
 import { useAuth } from "../../shared/auth/AuthContext";
 import { CountChip } from "../../shared/components/CountChip";
-import { Dialog } from "../../shared/components/Dialog";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { formatDisplayDateTime } from "../../shared/lib/datetime";
@@ -686,7 +686,7 @@ export function WorkspaceMembersSection() {
                     {memberRoleOptions(t)}
                   </select>
                   <button
-                    className="icon-button danger-action workspace-member-remove"
+                    className="icon-button danger workspace-member-remove"
                     aria-label={t("workspaceMembers.removeFor", { name: member.display_name || member.email || member.user_id })}
                     title={t("workspaceMembers.removeFor", { name: member.display_name || member.email || member.user_id })}
                     disabled={memberBusyId === member.user_id}
@@ -766,15 +766,15 @@ export function WorkspaceMembersSection() {
                     </div>
                     <div className="workspace-member-actions">
                       <button
-                        className="icon-button text-button"
+                        className="icon-button text-button danger"
                         disabled={joinBusyId === request.request_id}
                         onClick={() => void decideJoinRequest(request, "reject")}
                         type="button"
                       >
-                        {t("workspaceMembers.join.reject")}
+                        {t("shell:actions.reject")}
                       </button>
                       <button
-                        className="icon-button primary"
+                        className="icon-button success"
                         disabled={joinBusyId === request.request_id}
                         onClick={() => void decideJoinRequest(request, "approve")}
                         type="button"
@@ -1284,7 +1284,7 @@ function ReadOnlyMembershipSummary({ target }: { target: WorkspaceSettingsTarget
         ) : null}
         <div className="workspace-member-actions">
           <button
-            className="icon-button danger-action"
+            className="icon-button danger"
             disabled={busy || !currentUserId}
             onClick={() => setConfirmOpen(true)}
             type="button"
@@ -1327,38 +1327,22 @@ function LeaveWorkspaceDialog({
     }
   }
   return (
-    <Dialog
+    <ConfirmDialog
+      busy={busy}
+      busyLabel={t("workspaceMembers.dialog.updating")}
       className="workspace-settings-dialog"
-      dismissible={!busy}
+      confirmLabel={t("workspaceMembers.leave.confirm")}
       labelledBy="workspace-leave-title"
-      onClose={requestCancel}
+      onCancel={requestCancel}
+      onConfirm={onConfirm}
+      title={t("workspaceMembers.leave.title")}
+      tone="danger"
     >
-      <h2 id="workspace-leave-title">{t("workspaceMembers.leave.title")}</h2>
       <StatusBanner tone="warning">
         {t("workspaceMembers.leave.warning", { workspace: workspaceTitle })}
       </StatusBanner>
       <p>{t("workspaceMembers.leave.body")}</p>
-      <div className="dialog-actions">
-        <button
-          className="icon-button text-button"
-          disabled={busy}
-          onClick={requestCancel}
-          type="button"
-        >
-          {t("workspaceMembers.dialog.cancel")}
-        </button>
-        <button
-          className="icon-button danger-action"
-          disabled={busy}
-          onClick={onConfirm}
-          type="button"
-        >
-          {busy
-            ? t("workspaceMembers.dialog.updating")
-            : t("workspaceMembers.leave.confirm")}
-        </button>
-      </div>
-    </Dialog>
+    </ConfirmDialog>
   );
 }
 
@@ -1398,14 +1382,26 @@ function MemberActionDialog({
     }
   }
   return (
-    <Dialog
+    <ConfirmDialog
+      busy={busy}
+      busyLabel={t("workspaceMembers.dialog.updating")}
       className="workspace-settings-dialog"
-      dismissible={!busy}
+      confirmLabel={
+        isFirstShare
+          ? t("workspaceMembers.dialog.confirmShare")
+          : isRemove
+            ? t("shell:actions.remove")
+            : isSelfDemote
+              ? t("workspaceMembers.dialog.confirmSelfDemote")
+              : t("workspaceMembers.dialog.confirmOwner")
+      }
       labelledBy="workspace-member-action-title"
-      onClose={requestCancel}
+      onCancel={requestCancel}
+      onConfirm={onConfirm}
       restoreFocusFallback={restoreFocusFallback}
+      title={title}
+      tone={isRemove || isSelfDemote ? "danger" : "primary"}
     >
-      <h2 id="workspace-member-action-title">{title}</h2>
       {isFirstShare ? (
         <>
           <StatusBanner tone="warning">
@@ -1443,37 +1439,7 @@ function MemberActionDialog({
           <p>{t("workspaceMembers.dialog.ownerBody")}</p>
         </>
       )}
-      <div className="dialog-actions">
-        <button
-          className="icon-button text-button"
-          disabled={busy}
-          onClick={requestCancel}
-          type="button"
-        >
-          {t("workspaceMembers.dialog.cancel")}
-        </button>
-        <button
-          className={
-            isRemove || isSelfDemote
-              ? "icon-button danger-action"
-              : "icon-button primary"
-          }
-          disabled={busy}
-          onClick={onConfirm}
-          type="button"
-        >
-          {busy
-            ? t("workspaceMembers.dialog.updating")
-            : isFirstShare
-              ? t("workspaceMembers.dialog.confirmShare")
-              : isRemove
-                ? t("workspaceMembers.dialog.confirmRemove")
-                : isSelfDemote
-                  ? t("workspaceMembers.dialog.confirmSelfDemote")
-                  : t("workspaceMembers.dialog.confirmOwner")}
-        </button>
-      </div>
-    </Dialog>
+    </ConfirmDialog>
   );
 }
 
@@ -1513,15 +1479,16 @@ function AccessChangeDialog({
     }
   }
   return (
-    <Dialog
+    <ConfirmDialog
+      busy={busy}
+      busyLabel={t("workspaceAccess.dialog.saving")}
       className="workspace-settings-dialog"
-      dismissible={!busy}
+      confirmLabel={t("workspaceAccess.dialog.confirm")}
       labelledBy="workspace-access-change-title"
-      onClose={requestCancel}
+      onCancel={requestCancel}
+      onConfirm={onConfirm}
+      title={t("workspaceAccess.dialog.title")}
     >
-      <h2 id="workspace-access-change-title">
-        {t("workspaceAccess.dialog.title")}
-      </h2>
       <p>
         {t("workspaceAccess.dialog.workspace", { workspace: workspaceTitle })}
       </p>
@@ -1565,27 +1532,7 @@ function AccessChangeDialog({
       <StatusBanner tone="warning">
         {t("workspaceAccess.dialog.wholeWorkspaceWarning")}
       </StatusBanner>
-      <div className="dialog-actions">
-        <button
-          className="icon-button text-button"
-          disabled={busy}
-          onClick={requestCancel}
-          type="button"
-        >
-          {t("workspaceAccess.dialog.cancel")}
-        </button>
-        <button
-          className="icon-button primary"
-          disabled={busy}
-          onClick={onConfirm}
-          type="button"
-        >
-          {busy
-            ? t("workspaceAccess.dialog.saving")
-            : t("workspaceAccess.dialog.confirm")}
-        </button>
-      </div>
-    </Dialog>
+    </ConfirmDialog>
   );
 }
 

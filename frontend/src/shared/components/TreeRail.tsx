@@ -4,7 +4,6 @@ import {
   ChevronRight,
   FileText,
   Folder,
-  FolderPlus,
   MoreHorizontal,
   Plus,
   Search,
@@ -32,7 +31,7 @@ import {
   type TreeFavoriteScope,
 } from "../api/treeFavorites";
 import { CountChip } from "./CountChip";
-import type { NewItemType } from "./NewItemDialog";
+import { useTreeCreation, type TreeCreationActions } from "./useTreeCreation";
 import { TreeNodeContextMenu } from "./TreeNodeContextMenu";
 import type { TreeNodeContextMenuAction } from "./TreeNodeContextMenu";
 import { collectHiddenSystemRootNodeIds } from "./treeSectionRoot";
@@ -84,15 +83,8 @@ type TreeRailProps = {
    */
   forceActivePathExpanded?: boolean;
   hideSystemRootNodes?: boolean;
-  canCreateFolder?: boolean;
-  canCreatePage?: boolean;
-  canUpload?: boolean;
+  creation?: TreeCreationActions;
   onExpandedNodeIdsChange?: (nodeIds: string[]) => void;
-  onCreateFolder?: (parentNodeId: string | null) => void;
-  onCreateItem?: (input: {
-    itemType: NewItemType;
-    parentNodeId: string | null;
-  }) => void;
   onCopyNodeLink?: (node: TreeNodePayload) => void;
   onDeleteNode?: (node: TreeNodePayload) => void;
   onDropNode?: (
@@ -138,12 +130,8 @@ export function TreeRail({
   expandedNodeIds,
   emptyLabel = "No tree nodes",
   hideSystemRootNodes = false,
-  canCreateFolder,
-  canCreatePage,
-  canUpload,
+  creation,
   onExpandedNodeIdsChange,
-  onCreateFolder,
-  onCreateItem,
   onCopyNodeLink,
   onDeleteNode,
   onDropNode,
@@ -161,6 +149,7 @@ export function TreeRail({
   headerSlot,
 }: TreeRailProps) {
   const { t, i18n } = useTranslation("tree");
+  const create = useTreeCreation(creation, { nodes, rootLabel: title });
   const relativeNow = useNowTick();
   const [expiryNow, setExpiryNow] = useState(() => Date.now());
   const now = Math.max(relativeNow, expiryNow);
@@ -287,13 +276,6 @@ export function TreeRail({
   );
   const filterPlaceholder = t("filter", { title });
   const treeLabel = t("treeLabel", { title });
-  const createFolderEnabled = Boolean(
-    onCreateFolder && canCreateFolder === true,
-  );
-  const createItemEnabled = Boolean(
-    onCreateItem &&
-    (canCreatePage === true || canCreateFolder === true || canUpload === true),
-  );
   const anchoredReorderEnabled = Boolean(onReorderNodeAt);
   const reorderableNodeIds = useMemo(() => {
     const available = new Set<string>();
@@ -316,8 +298,7 @@ export function TreeRail({
       (!node.is_system_node && (onDeleteNode || onMoveNode)) ||
       reorderableNodeIds.has(node.id) ||
       (node.can_have_children && (
-        ((onCreateItem || onCreateFolder) && canCreateFolder === true) ||
-        (onCreateItem && canCreatePage === true)
+        create.canCreateFolder || create.canCreatePage
       )) ||
       (favoriteScope && favoriteTargetKind(node)),
     );
@@ -689,14 +670,7 @@ export function TreeRail({
     contextMenuInvokerRef.current = null;
     setContextMenu(null);
     if (action.type === "new-item") {
-      if (onCreateItem) {
-        onCreateItem({
-          itemType: action.itemType,
-          parentNodeId: action.node.id,
-        });
-      } else if (action.itemType === "folder") {
-        onCreateFolder?.(action.node.id);
-      }
+      create.open({ itemType: action.itemType, parentNodeId: action.node.id });
       return;
     }
     if (action.type === "rename") {
@@ -878,35 +852,15 @@ export function TreeRail({
           />
         </div>
         <div className="tree-rail-header-actions">
-          {createItemEnabled ? (
+          {create.enabled ? (
             <button
               aria-label={t("createItem", { title })}
               className="icon-button"
-              onClick={() =>
-                onCreateItem?.({
-                  itemType:
-                    canCreatePage === true
-                      ? "page"
-                      : canUpload === true
-                        ? "upload"
-                        : "folder",
-                  parentNodeId: null,
-                })
-              }
+              onClick={() => create.open()}
               title={t("createItem", { title })}
               type="button"
             >
               <Plus size={14} aria-hidden="true" />
-            </button>
-          ) : createFolderEnabled ? (
-            <button
-              aria-label={t("createFolder", { title })}
-              className="icon-button"
-              onClick={() => onCreateFolder?.(null)}
-              title={t("createFolder", { title })}
-              type="button"
-            >
-              <FolderPlus size={14} aria-hidden="true" />
             </button>
           ) : null}
           {uploadAction ? (
@@ -994,16 +948,11 @@ export function TreeRail({
                 }
                 activePath={activePath.nodeIds.has(node.id)}
                 actionsOpen={contextMenu?.node.id === node.id}
-                canCreateFolder={createFolderEnabled}
-                canCreateItem={createItemEnabled}
-                canCreatePage={canCreatePage === true}
                 canOpenContextMenu={canOpenNodeContextMenu(node)}
                 canToggleExpanded={Boolean(onExpandedNodeIdsChange)}
                 draggable={draggableNode(node)}
                 dragState={dragState}
                 expanded={expandedNodeIdSet.has(node.id)}
-                onCreateFolder={onCreateFolder}
-                onCreateItem={onCreateItem}
                 onDragEnd={handleRowDragEnd}
                 onDragLeave={handleRowDragLeave}
                 onDragOver={handleRowDragOver}
@@ -1034,10 +983,8 @@ export function TreeRail({
         : null}
       {contextMenu ? (
         <TreeNodeContextMenu
-          canCreateFolder={Boolean(
-            (onCreateItem || onCreateFolder) && canCreateFolder === true,
-          )}
-          canCreatePage={Boolean(onCreateItem && canCreatePage === true)}
+          canCreateFolder={create.canCreateFolder}
+          canCreatePage={create.canCreatePage}
           canCopyLink={Boolean(onCopyNodeLink)}
           canDelete={Boolean(onDeleteNode && !contextMenu.node.is_system_node)}
           canMove={Boolean(onMoveNode && !contextMenu.node.is_system_node)}
@@ -1067,6 +1014,7 @@ export function TreeRail({
           }}
         />
       ) : null}
+      {create.dialog}
     </aside>
   );
 }
@@ -1077,17 +1025,12 @@ function TreeRow({
   active,
   activePath,
   actionsOpen,
-  canCreateFolder,
-  canCreateItem,
-  canCreatePage,
   canOpenContextMenu,
   canToggleExpanded,
   draggable,
   dragState,
   expanded,
   onToggleExpanded,
-  onCreateFolder,
-  onCreateItem,
   onDragEnd,
   onDragLeave,
   onDragOver,
@@ -1107,20 +1050,12 @@ function TreeRow({
   active: boolean;
   activePath: boolean;
   actionsOpen: boolean;
-  canCreateFolder: boolean;
-  canCreateItem: boolean;
-  canCreatePage: boolean;
   canOpenContextMenu: boolean;
   canToggleExpanded: boolean;
   draggable: boolean;
   dragState: TreeDragState | null;
   expanded: boolean;
   onToggleExpanded: (nodeId: string) => void;
-  onCreateFolder?: (parentNodeId: string | null) => void;
-  onCreateItem?: (input: {
-    itemType: NewItemType;
-    parentNodeId: string | null;
-  }) => void;
   onDragEnd: () => void;
   onDragLeave: (
     node: TreeNodePayload,
@@ -1354,40 +1289,8 @@ function TreeRow({
         ) : null}
       </span>
       {statusDescription ? <span className="visually-hidden tree-row-description" id={statusId}>{statusDescription}</span> : null}
-      {(canCreateItem && onCreateItem && node.can_have_children) ||
-      (canCreateFolder && onCreateFolder && node.can_have_children) ||
-      canOpenContextMenu ? (
+      {canOpenContextMenu ? (
         <span className="tree-row-actions">
-          {canCreateItem && onCreateItem && node.can_have_children ? (
-            <button
-              aria-label={t("createUnder", { title: node.title })}
-              className="tree-row-add"
-              onClick={(event) => {
-                event.stopPropagation();
-                onCreateItem({
-                  itemType: canCreatePage ? "page" : "folder",
-                  parentNodeId: node.id,
-                });
-              }}
-              title={t("createUnder", { title: node.title })}
-              type="button"
-            >
-              <Plus size={13} aria-hidden="true" />
-            </button>
-          ) : canCreateFolder && onCreateFolder && node.can_have_children ? (
-            <button
-              aria-label={t("createFolderUnder", { title: node.title })}
-              className="tree-row-add"
-              onClick={(event) => {
-                event.stopPropagation();
-                onCreateFolder(node.id);
-              }}
-              title={t("createFolderUnder", { title: node.title })}
-              type="button"
-            >
-              <Plus size={13} aria-hidden="true" />
-            </button>
-          ) : null}
           {canOpenContextMenu ? (
             <button
               aria-label={t("openActions", { title: node.title })}

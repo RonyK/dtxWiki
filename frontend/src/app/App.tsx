@@ -149,6 +149,20 @@ const WorkspaceDirectoryScreen = lazy(() =>
   })),
 );
 
+// Every Library route has this one element shape, so React keeps a single
+// screen across them. The upload queue lives in that screen, and an upload
+// keeps running while navigation moves between the list, an item and the
+// create dialog.
+function libraryRoute({ editorOnly = false }: { editorOnly?: boolean } = {}) {
+  return (
+    <RequireAuth>
+      <RequireEditor enabled={editorOnly}>
+        <LibraryScreen />
+      </RequireEditor>
+    </RequireAuth>
+  );
+}
+
 // Exported so route-level tests can mount the REAL config (e.g. assert the
 // public /w/:workspaceSlug/pages/:slug route is NOT under RequireAuth).
 export function createAppRoutes() {
@@ -179,12 +193,12 @@ export function createAppRoutes() {
       <Route path="/workspaces/:workspaceId/context/pages/new" element={<RequireAuth><RequireEditor><RoutedPageEditor mode="create" /></RequireEditor></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/context/pages/:pageId" element={<RequireAuth><ContextScreen /></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RequireAuth><RequireEditor><RoutedPageEditor mode="edit" /></RequireEditor></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/library" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/library/items/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/library/items/:itemId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/library/artifacts/:artifactId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/library/folders/new" element={<RequireAuth><RequireEditor><LibraryScreen /></RequireEditor></RequireAuth>} />
-      <Route path="/workspaces/:workspaceId/library/folders/:nodeId" element={<RequireAuth><LibraryScreen /></RequireAuth>} />
+      <Route path="/workspaces/:workspaceId/library" element={libraryRoute()} />
+      <Route path="/workspaces/:workspaceId/library/items/new" element={libraryRoute({ editorOnly: true })} />
+      <Route path="/workspaces/:workspaceId/library/items/:itemId" element={libraryRoute()} />
+      <Route path="/workspaces/:workspaceId/library/artifacts/:artifactId" element={libraryRoute()} />
+      <Route path="/workspaces/:workspaceId/library/folders/new" element={libraryRoute({ editorOnly: true })} />
+      <Route path="/workspaces/:workspaceId/library/folders/:nodeId" element={libraryRoute()} />
       <Route path="/workspaces/:workspaceId/agent" element={<RequireAuth><RequireAgentEnabled><AgentScreen /></RequireAgentEnabled></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/agent/pages/new" element={<RequireAuth><RequireAgentEnabled><RequireEditor><AgentScreen /></RequireEditor></RequireAgentEnabled></RequireAuth>} />
       <Route path="/workspaces/:workspaceId/agent/pages/:agentPageId" element={<RequireAuth><RequireAgentEnabled><AgentScreen /></RequireAgentEnabled></RequireAuth>} />
@@ -398,7 +412,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
               onClick={() => void refreshSession()}
               type="button"
             >
-              {t("session.retry", { defaultValue: "Retry" })}
+              {t("shell:actions.retry")}
             </button>
           }
           tone="warning"
@@ -444,11 +458,25 @@ export function RequireAskEnabled({ children }: { children: ReactNode }) {
 // RBAC, so this is UI-only, but it stops a viewer from being dropped into an
 // editor that will only fail on save. Waits for the workspace list to resolve
 // before deciding so an editor is never wrongly bounced during initial load.
-export function RequireEditor({ children }: { children: ReactNode }) {
+export function RequireEditor({
+  children,
+  enabled = true,
+}: {
+  children: ReactNode;
+  /**
+   * False lets a read route share this element with its write routes, so React
+   * keeps one screen instance when navigation moves between them.
+   */
+  enabled?: boolean;
+}) {
   const { t } = useTranslation("shell");
   const { selectedWorkspace, loading, initialized, error, refreshWorkspaces } =
     useWorkspaceContext();
   const location = useLocation();
+
+  if (!enabled) {
+    return children;
+  }
 
   // Wait for the first fetch (loading, or not yet initialized) before deciding:
   // on a full-page load to a write route the list is empty pre-fetch, and gating
@@ -474,7 +502,7 @@ export function RequireEditor({ children }: { children: ReactNode }) {
               onClick={() => void refreshWorkspaces()}
               type="button"
             >
-              {t("accessGuard.retry")}
+              {t("shell:actions.retry")}
             </button>
           }
           tone="warning"

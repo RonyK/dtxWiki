@@ -75,7 +75,7 @@ export function VerifyEmailScreen() {
                   onClick={() => void verify()}
                   type="button"
                 >
-                  {t("verifyEmail.retry")}
+                  {t("shell:actions.retry")}
                 </button>
               ) : undefined
             }

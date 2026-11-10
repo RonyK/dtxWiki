@@ -10,7 +10,6 @@ import {
   RotateCcw,
   Settings2,
   ShieldAlert,
-  X,
 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -95,6 +94,7 @@ import {
   type VersionPair,
 } from "../../shared/lib/historyVersionPair";
 import { agentHistoryNodes } from "./agentHistory";
+import { FAB } from "../../shared/components/FAB";
 import { NewItemDialog } from "../../shared/components/NewItemDialog";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { RouteLoading } from "../../shared/components/RouteLoading";
@@ -1080,8 +1080,9 @@ export function AgentScreen() {
       : href;
   }
 
-  function openCreateAgentPage(category: string, parentNodeId?: string | null) {
+  function openCreateAgentPage(category: string, parentNodeId?: string | null, title?: string) {
     const params = new URLSearchParams({ category });
+    if (title) params.set("title", title);
     if (parentNodeId) {
       params.set("parent", parentNodeId);
     }
@@ -1322,18 +1323,13 @@ export function AgentScreen() {
         layoutKey="agent"
         leftLabel={t("layout.explorer", { defaultValue: "Explorer" })}
         mobileAction={
-          canEdit && agentPolicy?.allow_user_folder_create === true
-            ? {
-                ariaLabel: t("layout.createFolder", {
-                  defaultValue: "Create Agent folder",
-                }),
-                label: t("layout.newFolder", { defaultValue: "New folder" }),
-                onClick: () => openFolderDialog(newItemParentNodeId),
-                title: t("layout.createFolder", {
-                  defaultValue: "Create Agent folder",
-                }),
-              }
-            : undefined
+          canEdit && agentPolicy?.allow_user_folder_create === true ? (
+            <FAB
+              ariaLabel={t("layout.createFolder", { defaultValue: "Create Agent folder" })}
+              label={t("layout.newFolder", { defaultValue: "New folder" })}
+              onClick={() => openFolderDialog(newItemParentNodeId)}
+            />
+          ) : null
         }
         left={({
           expandWidthLabel,
@@ -1356,31 +1352,13 @@ export function AgentScreen() {
             hideSystemRootNodes
             expandWidthLabel={expandWidthLabel}
             expandWidthAtMax={expandWidthAtMax}
-            canCreateFolder={
-              canEdit && agentPolicy?.allow_user_folder_create === true
-            }
-            canCreatePage={canEdit}
-            onCreateItem={
-              canEdit
-                ? ({ itemType, parentNodeId }) => {
-                    // F-11: an Agent page opens the dedicated "New Agent page"
-                    // editor directly; the rail dialog is folder-only.
-                    if (itemType === "page" && state) {
-                      const parentNode = parentNodeId
-                        ? (state.tree.find(
-                            (node) => node.id === parentNodeId,
-                          ) ?? null)
-                        : null;
-                      openCreateAgentPage(
-                        categoryForTreeParent(parentNode, state.pages),
-                        parentNodeId,
-                      );
-                      return;
-                    }
-                    openFolderDialog(parentNodeId);
-                  }
-                : undefined
-            }
+            creation={canEdit ? {
+              page: (input) => {
+                const parent = state.tree.find((node) => node.id === input.parentNodeId);
+                openCreateAgentPage(categoryForTreeParent(parent ?? null, state.pages), input.parentNodeId, input.title);
+              },
+              folder: agentPolicy?.allow_user_folder_create === true ? createFolder : undefined,
+            } : undefined}
             onCopyNodeLink={copyTreeNodeLink}
             onDeleteNode={canEdit ? setDeleteNode : undefined}
             onDropNode={canEdit ? moveTreeNodeByDrop : undefined}
@@ -1611,17 +1589,11 @@ export function AgentScreen() {
           parentNodes={agentFolderNodes}
           rootLabel={t("title", { defaultValue: "Agent" })}
           onClose={(reason) => {
-            if (reason === "cancel") {
+            if (reason === "cancel" && activeFolderDialog) {
               navigate(workspacePath(routeWorkspaceId, "agent"), { replace: true });
             }
           }}
-          onSubmit={(input) =>
-            createFolder({
-              parentNodeId: input.parentNodeId,
-              slug: input.slug,
-              title: input.title,
-            })
-          }
+          onSubmit={(input) => createFolder(input)}
         />
       ) : null}
       {renameNode ? (
@@ -1662,6 +1634,7 @@ export function AgentScreen() {
           categories={state.categories}
           defaultCategory={creationCategory}
           mode="create"
+          initialTitle={searchParams.get("title") ?? ""}
           parentNodeId={creationParentNodeId}
           onClose={closeCreateAgentPage}
           onSubmit={createAgentPage}
@@ -1684,32 +1657,14 @@ export function AgentScreen() {
           className="agent-editor-dialog agent-editor-loading-dialog"
           labelledBy="agent-edit-loading-title"
           onClose={closeEditAgentPage}
+          closeLabel={t("dialog.closeAria", {
+            defaultValue: "Close agent dialog",
+          })}
+          title={t("dialog.loadingDraftTitle", {
+            defaultValue: "Loading pending draft",
+          })}
         >
           <div className="dialog-form">
-            <header className="dialog-header">
-              <div>
-                <p className="eyebrow">
-                  {t("dialog.existingPage", {
-                    defaultValue: "Existing Agent page",
-                  })}
-                </p>
-                <h2 id="agent-edit-loading-title">
-                  {t("dialog.loadingDraftTitle", {
-                    defaultValue: "Loading pending draft",
-                  })}
-                </h2>
-              </div>
-              <button
-                aria-label={t("dialog.closeAria", {
-                  defaultValue: "Close agent dialog",
-                })}
-                className="icon-button"
-                onClick={closeEditAgentPage}
-                type="button"
-              >
-                <X size={16} aria-hidden="true" />
-              </button>
-            </header>
             {editDraftError ? (
               <>
                 <StatusBanner tone="warning">{editDraftError}</StatusBanner>
@@ -1720,7 +1675,7 @@ export function AgentScreen() {
                     type="button"
                   >
                     <RefreshCw size={16} aria-hidden="true" />
-                    <span>{t("dialog.retry", { defaultValue: "Retry" })}</span>
+                    <span>{t("shell:actions.retry")}</span>
                   </button>
                 </div>
               </>
@@ -1841,6 +1796,7 @@ function AgentCreationModal({
   categories,
   defaultCategory,
   initialPage,
+  initialTitle = "",
   mode = "create",
   parentNodeId,
   onClose,
@@ -1849,6 +1805,7 @@ function AgentCreationModal({
   categories: AgentCategoryEntry[];
   defaultCategory: string;
   initialPage?: AgentPageDetail | null;
+  initialTitle?: string;
   mode?: "create" | "edit";
   parentNodeId?: string | null;
   onClose: () => void;
@@ -1859,7 +1816,7 @@ function AgentCreationModal({
   const [category, setCategory] = useState(
     initialPage?.category ?? defaultCategory,
   );
-  const [title, setTitle] = useState(initialPage?.title ?? "");
+  const [title, setTitle] = useState(initialPage?.title ?? initialTitle);
   const [customSlug, setCustomSlug] = useState(initialPage?.slug ?? "");
   const [showAdvanced, setShowAdvanced] = useState(false);
   // F-10: a NEW agent page whose category has a bundled template defaults to it
@@ -1873,7 +1830,7 @@ function AgentCreationModal({
   const defaultNewBody = () =>
     initialPage?.body_markdown ??
     defaultNewTemplate?.body ??
-    defaultAgentBody(defaultCategory, "");
+    defaultAgentBody(defaultCategory, title);
   const [body, setBody] = useState(defaultNewBody);
   const [templateId, setTemplateId] = useState(
     defaultNewTemplate ? defaultNewTemplate.id : BLANK_TEMPLATE_ID,
@@ -2069,37 +2026,18 @@ function AgentCreationModal({
       dismissible={!submitting}
       labelledBy="agent-create-title"
       onClose={requestClose}
+      closeLabel={t("dialog.closeAria", {
+        defaultValue: "Close agent dialog",
+      })}
+      title={
+        isEdit
+          ? t("dialog.editTitle", { defaultValue: "Edit Agent draft" })
+          : t("dialog.createTitle", {
+              defaultValue: "Create Agent draft",
+            })
+      }
     >
       <form className="dialog-form agent-create-form" onSubmit={submit}>
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">
-              {isEdit
-                ? t("dialog.existingPage", {
-                    defaultValue: "Existing Agent page",
-                  })
-                : t("dialog.newPage", { defaultValue: "New Agent page" })}
-            </p>
-            <h2 id="agent-create-title">
-              {isEdit
-                ? t("dialog.editTitle", { defaultValue: "Edit Agent draft" })
-                : t("dialog.createTitle", {
-                    defaultValue: "Create Agent draft",
-                  })}
-            </h2>
-          </div>
-          <button
-            aria-label={t("dialog.closeAria", {
-              defaultValue: "Close agent dialog",
-            })}
-            className="icon-button"
-            disabled={submitting}
-            onClick={requestClose}
-            type="button"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </header>
         {isEdit ? (
           <div className="form-field">
             <span className="form-field-label">

@@ -3,31 +3,19 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { BottomSheet } from "./BottomSheet";
-import { FAB } from "./FAB";
 import { MobileDrawer } from "./MobileDrawer";
 import { PanelVisibilityIcon } from "./PanelVisibilityIcon";
 import { useMobileModalFocus } from "./useMobileModalFocus";
+import { COLLAPSED_RAIL_WIDTH, DEFAULT_RAIL_WIDTHS, readWorkspacePanelState, useWorkspaceRailState, writeWorkspacePanelState } from "./useWorkspaceRailState";
 
-const DEFAULT_LEFT_WIDTHS = [280, 420, 560] as const;
 const ASK_LEFT_WIDTHS = [300, 420, 560] as const;
 // Review rail starts one step wider than other rails (no narrow 280px step) so
 // the lifecycle tabs + audience facet + queue rows have room by default.
 const REVIEW_LEFT_WIDTHS = [420, 560] as const;
-const COLLAPSED_PANEL_WIDTH = 44;
 const INSPECTOR_WIDTH = 300;
 const SWIPE_DISMISS_THRESHOLD = 64;
 /** Below this width the inspector is a bottom sheet and the left rail a drawer. */
 export const WORKSPACE_SHEET_LAYOUT_QUERY = "(max-width: 1024px)";
-
-type MobileAction = {
-  ariaLabel: string;
-  busy?: boolean;
-  disabled?: boolean;
-  icon?: ReactNode;
-  label: string;
-  onClick: () => Promise<void> | void;
-  title?: string;
-};
 
 type WorkspaceLayoutProps = {
   defaultInspectorOpen?: boolean;
@@ -44,12 +32,14 @@ type WorkspaceLayoutProps = {
     expandWidthLabel: string;
     expandWidthAtMax: boolean;
     onClose: () => void;
+    /** Closes only the mobile drawer, leaving the desktop panel in place. */
+    onCloseDrawer: () => void;
     onExpandWidth?: () => void;
   }) => ReactNode;
   leftLabel?: string;
   leftRestoreLabel?: string;
   main: ReactNode;
-  mobileAction?: MobileAction;
+  mobileAction?: ReactNode;
   variant?: "default" | "ask" | "context" | "review";
 };
 
@@ -82,13 +72,10 @@ export function WorkspaceLayout({
   const drawerSwipeLatestXRef = useRef<number | null>(null);
   const sheetSwipeStartYRef = useRef<number | null>(null);
   const sheetSwipeLatestYRef = useRef<number | null>(null);
-  const [leftOpen, setLeftOpen] = useState(() =>
-    readStoredPanelState(`${layoutKey}:left`, defaultLeftOpen),
-  );
   const [mobileLeftOpen, setMobileLeftOpen] = useState(false);
   const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(() =>
-    readStoredPanelState(`${layoutKey}:inspector`, defaultInspectorOpen),
+    readWorkspacePanelState(`${layoutKey}:inspector`, defaultInspectorOpen),
   );
   const hasLeft = left !== undefined;
   const hasInspector = inspector !== undefined && inspector !== null;
@@ -99,19 +86,18 @@ export function WorkspaceLayout({
       ? ASK_LEFT_WIDTHS
       : variant === "review"
         ? REVIEW_LEFT_WIDTHS
-        : DEFAULT_LEFT_WIDTHS;
-  const [leftWidthStep, setLeftWidthStep] = useState(() =>
-    readStoredNumber(`${layoutKey}:leftWidthStep`, 0, leftWidths.length - 1),
-  );
-  const normalizedLeftWidthStep = Math.min(leftWidthStep, leftWidths.length - 1);
-  const leftWidth = leftWidths[normalizedLeftWidthStep];
-  const effectiveLeftWidth = hasLeft ? leftOpen ? leftWidth : COLLAPSED_PANEL_WIDTH : 0;
+        : DEFAULT_RAIL_WIDTHS;
+  const {
+    open: leftOpen,
+    setOpen: setLeftOpen,
+    width: leftWidth,
+    expandWidth: expandLeftWidth,
+    expandWidthAtMax,
+  } = useWorkspaceRailState(layoutKey, defaultLeftOpen, leftWidths);
+  const effectiveLeftWidth = hasLeft ? leftWidth : 0;
   const effectiveRightWidth = hasInspector
-    ? inspectorOpen
-      ? INSPECTOR_WIDTH
-      : COLLAPSED_PANEL_WIDTH
+    ? inspectorOpen ? INSPECTOR_WIDTH : COLLAPSED_RAIL_WIDTH
     : 0;
-  const expandWidthAtMax = normalizedLeftWidthStep === leftWidths.length - 1;
   const expandWidthLabel = expandWidthAtMax
     ? t("panel.resetWidth", {
         defaultValue: `Reset ${leftLabel} width`,
@@ -197,10 +183,6 @@ export function WorkspaceLayout({
   }
 
   useEffect(() => {
-    writeStoredPanelState(`${layoutKey}:left`, leftOpen);
-  }, [layoutKey, leftOpen]);
-
-  useEffect(() => {
     if (!leftOpen) {
       setMobileLeftOpen(false);
     }
@@ -208,7 +190,7 @@ export function WorkspaceLayout({
 
   useEffect(() => {
     if (hasInspector) {
-      writeStoredPanelState(`${layoutKey}:inspector`, inspectorOpen);
+      writeWorkspacePanelState(`${layoutKey}:inspector`, inspectorOpen);
     }
   }, [hasInspector, inspectorOpen, layoutKey]);
 
@@ -230,10 +212,6 @@ export function WorkspaceLayout({
       setMobileInspectorOpen(false);
     }
   }, [mobileLayout]);
-
-  useEffect(() => {
-    writeStoredNumber(`${layoutKey}:leftWidthStep`, normalizedLeftWidthStep);
-  }, [layoutKey, normalizedLeftWidthStep]);
 
   useEffect(() => {
     if (hasInspector && inspectorAutoOpenKey) {
@@ -310,17 +288,7 @@ export function WorkspaceLayout({
             defaultValue: "Mobile workspace actions",
           })}
         >
-          {mobileAction ? (
-            <FAB
-              ariaLabel={mobileAction.ariaLabel}
-              busy={mobileAction.busy}
-              disabled={mobileAction.disabled}
-              icon={mobileAction.icon}
-              label={mobileAction.label}
-              onClick={mobileAction.onClick}
-              title={mobileAction.title}
-            />
-          ) : null}
+          {mobileAction}
           {hasInspector ? (
             <button
               aria-controls={inspectorPanelId}
@@ -372,11 +340,10 @@ export function WorkspaceLayout({
               setMobileLeftOpen(false);
               setLeftOpen(false);
             },
+            onCloseDrawer: closeMobileLeft,
             onExpandWidth: mobileLayout
               ? undefined
-              : () => {
-                  setLeftWidthStep((current) => (current + 1) % leftWidths.length);
-                },
+              : expandLeftWidth,
           })}
         </MobileDrawer>
       ) : hasLeft ? (
@@ -448,56 +415,6 @@ export function WorkspaceLayout({
       ) : null}
     </div>
   );
-}
-
-function readStoredPanelState(key: string, fallback: boolean) {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-  const value = window.localStorage.getItem(storageKey(key));
-  if (value === null) {
-    return fallback;
-  }
-  return value === "true";
-}
-
-function writeStoredPanelState(key: string, value: boolean) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(storageKey(key), String(value));
-}
-
-function readStoredNumber(key: string, fallback: number, max: number) {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-  const value = Number(window.localStorage.getItem(storageKey(key)));
-  if (!Number.isInteger(value) || value < 0 || value > max) {
-    return fallback;
-  }
-  return value;
-}
-
-function writeStoredNumber(key: string, value: number) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(storageKey(key), String(value));
-}
-
-function storageKey(key: string) {
-  // Browse-screen LEFT rails now default open, so their state keys are versioned:
-  // a stale "false" from the former collapsed default must not win before the new
-  // default is read. Other preferences keep their original keys.
-  if (
-    key === "context:left" ||
-    key === "library:left" ||
-    key === "agent:left"
-  ) {
-    return `dtxwiki:workspace-layout:v2:${key}`;
-  }
-  return `dtxwiki:workspace-layout:${key}`;
 }
 
 function useMediaQuery(query: string) {

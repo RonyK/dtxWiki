@@ -1,4 +1,3 @@
-import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Dialog } from "./Dialog";
@@ -26,27 +25,11 @@ export function KeyboardShortcutsModal({
       className="editor-shortcut-dialog"
       labelledBy="keyboard-shortcuts-title"
       onClose={onClose}
+      closeLabel={t("editor.shortcutsModalCloseAria", {
+        defaultValue: "Close keyboard shortcuts",
+      })}
+      title={t("editor.shortcutsModalTitle", { defaultValue: "Keyboard shortcuts" })}
     >
-      <header className="editor-shortcut-dialog-header">
-        <div>
-          <p className="eyebrow">
-            {t("editor.shortcutsModalEyebrow", { defaultValue: "Editor" })}
-          </p>
-          <h2 id="keyboard-shortcuts-title">
-            {t("editor.shortcutsModalTitle", { defaultValue: "Keyboard shortcuts" })}
-          </h2>
-        </div>
-        <button
-          aria-label={t("editor.shortcutsModalCloseAria", {
-            defaultValue: "Close keyboard shortcuts",
-          })}
-          className="icon-button"
-          onClick={onClose}
-          type="button"
-        >
-          <X size={16} aria-hidden="true" />
-        </button>
-      </header>
       <div className="editor-shortcut-grid">
         {groups.map((group) => (
           <section className="editor-shortcut-group" key={group.label}>

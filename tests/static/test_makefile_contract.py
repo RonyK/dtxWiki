@@ -1,6 +1,69 @@
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_frontend_ci_stops_on_shared_static_contract_failure(tmp_path):
+    """A green Vitest run cannot hide the shared UI contracts in another CI job."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    frontend_steps = workflow["jobs"]["frontend"]["steps"]
+    assert any(
+        step.get("run") == "VENV=.venv make check-frontend"
+        for step in frontend_steps
+    )
+
+    invocation_log = tmp_path / "invocations"
+    tools_dir = tmp_path / "bin"
+    tools_dir.mkdir()
+    # Stub the gate's subprocesses, rather than running the suites recursively.
+    # The static checker fails while every other subprocess would succeed.
+    probe = os.linesep.join(
+        [
+            f"#!{sys.executable}",
+            "import os, sys",
+            "with open(os.environ['GATE_INVOCATIONS'], 'a') as log:",
+            "    print(os.path.basename(sys.argv[0]), *sys.argv[1:], file=log)",
+            "sys.exit(23 if 'test-static' in sys.argv[1:] else 0)",
+            "",
+        ]
+    )
+    for name in ("make", "npm", "node"):
+        tool = tools_dir / name
+        tool.write_text(probe)
+        tool.chmod(0o755)
+
+    make = shutil.which("make")
+    assert make is not None
+    result = subprocess.run(
+        [
+            make,
+            "-f",
+            str(ROOT / "Makefile"),
+            "check-frontend",
+            f"MAKE={tools_dir / 'make'}",
+        ],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{tools_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "GATE_INVOCATIONS": str(invocation_log),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert invocation_log.exists(), result.stdout + result.stderr
+    assert invocation_log.read_text().splitlines() == [
+        "make verify-generated-schemas",
+        "make test-static",
+    ], result.stdout + result.stderr
 
 
 def test_public_makefile_keeps_registry_push_out_of_tracked_contract():

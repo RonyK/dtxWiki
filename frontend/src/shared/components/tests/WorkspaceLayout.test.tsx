@@ -699,11 +699,7 @@ describe("WorkspaceLayout", () => {
         left={() => <aside aria-label="Explorer">Explorer content</aside>}
         leftLabel="Explorer"
         main={<main>Main content</main>}
-        mobileAction={{
-          ariaLabel: "Create workspace item",
-          label: "New",
-          onClick: onCreate,
-        }}
+        mobileAction={<button type="button" aria-label="Create workspace item" onClick={onCreate}>New</button>}
       />,
     );
 
@@ -723,11 +719,7 @@ describe("WorkspaceLayout", () => {
         left={() => <aside aria-label="Explorer">Explorer content</aside>}
         leftLabel="Explorer"
         main={<main className="feature-main">Wide diagram content</main>}
-        mobileAction={{
-          ariaLabel: "Create Context item",
-          label: "New",
-          onClick: () => undefined,
-        }}
+        mobileAction={<button type="button" aria-label="Create Context item">New</button>}
         variant="context"
       />,
     );

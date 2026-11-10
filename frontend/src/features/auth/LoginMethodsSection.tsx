@@ -19,7 +19,7 @@ import {
   normalizeAccountEmail,
   validateAccountPassword,
 } from "../../shared/auth/identityPolicy";
-import { Dialog } from "../../shared/components/Dialog";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { textInputLimit } from "../../shared/lib/inputPolicy";
@@ -200,10 +200,10 @@ export function LoginMethodsSection() {
                       <Check size={12} aria-hidden="true" />
                       {t(identity.provider_slug === user?.session_provider_slug ? "loginMethods.currentBadge" : "loginMethods.connectedBadge")}
                     </span>
-                    <button type="button" className="icon-button login-method-unlink"
+                    <button type="button" className="icon-button danger login-method-unlink"
                       disabled={busy || !identity.can_unlink}
                       onClick={() => { setError(null); setPendingUnlink(identity); }}>
-                      <Unlink size={14} aria-hidden="true" />{t("loginMethods.unlink")}
+                      <Unlink size={14} aria-hidden="true" />{t("shell:actions.unlink")}
                     </button>
                   </li>
                 );
@@ -286,18 +286,20 @@ export function LoginMethodsSection() {
         <p role="status">{t("loginMethods.loading")}</p>
       ) : null}
       {pendingUnlink ? (
-        <Dialog labelledBy="unlink-login-method-title" className="login-method-unlink-dialog" dismissible={!busy}
-          onClose={() => setPendingUnlink(null)}
+        <ConfirmDialog
+          busy={busy}
+          className="login-method-unlink-dialog"
+          confirmLabel={t("shell:actions.unlink")}
+          error={error}
+          labelledBy="unlink-login-method-title"
+          onCancel={() => setPendingUnlink(null)}
+          onConfirm={() => void unlinkIdentity(pendingUnlink.id)}
           restoreFocusFallback={() => document.querySelector<HTMLElement>("#login-methods-add-action")}
-          header={<h2 id="unlink-login-method-title">{t("loginMethods.unlinkTitle", { provider: providerName(pendingUnlink.provider_slug) })}</h2>}
-          footer={<>
-            <button type="button" className="icon-button" disabled={busy} onClick={() => setPendingUnlink(null)}>{t("loginMethods.cancel")}</button>
-            <button type="button" className="icon-button login-method-unlink-confirm" disabled={busy}
-              onClick={() => void unlinkIdentity(pendingUnlink.id)}>{t("loginMethods.confirmUnlink")}</button>
-          </>}>
+          title={t("loginMethods.unlinkTitle", { provider: providerName(pendingUnlink.provider_slug) })}
+          tone="danger"
+        >
           <p>{t("loginMethods.unlinkDescription", { provider: providerName(pendingUnlink.provider_slug) })}</p>
-          {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-        </Dialog>
+        </ConfirmDialog>
       ) : null}
     </section>
   );

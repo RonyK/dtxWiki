@@ -380,7 +380,6 @@
 .diff-dialog {
   display: grid;
   gap: 14px;
-  padding: 18px;
   min-width: 0;
 }
 
@@ -398,22 +397,11 @@
   gap: 14px;
   min-inline-size: 0;
   max-inline-size: 100%;
-  padding: 18px;
 }
 
 .dialog-form > * {
   min-inline-size: 0;
   max-inline-size: 100%;
-}
-
-/* Panels whose direct child already supplies its own 18px padding (.dialog-form,
-   .diff-dialog above) opt back out of .dialog-panel's default, so it doesn't
-   double-pad them -- it only reaches panels that render their content bare
-   (e.g. workspace-settings-dialog, lint dismiss), which previously sat flush
-   against the border. */
-.dialog-panel:has(> .dialog-form),
-.dialog-panel:has(> .diff-dialog) {
-  padding: 0;
 }
 
 .agent-create-form textarea {
@@ -424,31 +412,6 @@
 .dialog-panel.agent-editor-dialog {
   width: min(880px, 100%);
   overflow: hidden;
-}
-
-.agent-editor-dialog .agent-create-form {
-  max-height: calc(100vh - 40px);
-  overflow-y: auto;
-}
-
-.agent-editor-dialog .dialog-header {
-  position: sticky;
-  z-index: 2;
-  top: -18px;
-  margin: -18px -18px 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  padding: 18px 18px 12px;
-}
-
-.agent-editor-dialog .dialog-actions {
-  position: sticky;
-  z-index: 2;
-  bottom: -18px;
-  margin: 0 -18px -18px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  padding: 12px 18px 18px;
 }
 
 /* `.form-field` is dual-purpose: a bordered read-only value card (shared with
@@ -487,7 +450,6 @@
   width: min(560px, 100%);
 }
 
-.dialog-header,
 .dialog-actions {
   display: flex;
   align-items: flex-start;
@@ -495,12 +457,6 @@
   gap: 12px;
 }
 
-.dialog-header > :first-child {
-  min-inline-size: 0;
-  max-inline-size: 100%;
-}
-
-.dialog-header :is(h2, p),
 .dialog-form :is(.field-hint, .form-error),
 .form-field > span {
   overflow-wrap: anywhere;
@@ -509,6 +465,101 @@
 .dialog-actions {
   align-items: center;
   justify-content: flex-end;
+}
+
+/* Shared title bar. Dialog renders it whenever a `title` is given, so titled
+   dialogs change together here: the panel adds no padding of its own, the bar
+   is a full-bleed band, and the content region below it supplies the inset and
+   rhythm. The :where() defaults let a dialog override one by naming its panel. */
+.dialog-panel.dialog-with-titlebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+.dialog-titlebar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 45px;
+  padding: 10px 10px 10px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dialog-titlebar h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+/* Stays below the shared <=1024px icon-button rule's specificity so that rule
+   still raises the close button to its 44px touch target; the negative margin
+   keeps either size from growing a one-line bar. */
+.dialog-titlebar .dialog-close-button {
+  flex: 0 0 auto;
+  width: 32px;
+  min-height: 32px;
+  margin-block: -10px;
+  padding: 0;
+  border-color: transparent;
+}
+
+:where(.dialog-with-titlebar) > .dialog-scroll-region {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  max-height: none;
+  padding: 14px 18px 18px;
+}
+
+/* The action row is one pinned band in every titled dialog, whether it sits in
+   Dialog's `footer` slot or as the last row of the scrolling content, so a long
+   body can never push the buttons out of view. */
+:where(.dialog-with-titlebar) > .dialog-footer,
+:where(.dialog-with-titlebar) > .dialog-scroll-region > :is(.dialog-actions, .modal-actions),
+:where(.dialog-with-titlebar) > .dialog-scroll-region > .dialog-form > :is(.dialog-actions, .modal-actions) {
+  flex: 0 0 auto;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+
+:where(.dialog-with-titlebar) > .dialog-scroll-region > :is(.dialog-actions, .modal-actions),
+:where(.dialog-with-titlebar) > .dialog-scroll-region > .dialog-form > :is(.dialog-actions, .modal-actions) {
+  position: sticky;
+  z-index: 2;
+  /* Sticky insets resolve against the scroller's content box, so this reaches
+     past the region's 18px bottom padding to sit flush with the panel edge. */
+  bottom: -18px;
+  margin: 0 -18px -18px;
+  max-inline-size: none;
+  border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px);
+  background: var(--surface);
+}
+
+.dialog-description {
+  margin: 0;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1024px) {
+  /* Keeps the 44px touch target's centred glyph on the content's right edge. */
+  .dialog-titlebar {
+    padding-inline-end: 4px;
+  }
 }
 
 .detail-heading {
@@ -1871,35 +1922,6 @@ button.history-card {
   opacity: 0.7;
 }
 
-.danger-action {
-  border-color: var(--danger-border);
-  background: var(--surface);
-  color: var(--danger);
-}
-
-.danger-action:hover {
-  border-color: var(--danger-border-strong);
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.warning-action {
-  border-color: #fed7aa;
-  background: #fff;
-  color: #b45309;
-}
-
-.warning-action:hover {
-  border-color: #fdba74;
-  background: #fff7ed;
-  color: #92400e;
-}
-
-.danger-confirm-button {
-  border-color: var(--danger);
-  background: var(--danger);
-}
-
 .danger-modal-panel strong {
   color: var(--ink);
 }
@@ -2898,37 +2920,6 @@ button.history-card {
   color: var(--ink-muted);
 }
 
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-dialog);
-  display: grid;
-  place-items: center;
-  background: rgb(15 23 42 / 38%);
-  padding: 20px;
-  overflow-y: auto;
-}
-
-.modal-panel {
-  display: grid;
-  gap: 14px;
-  width: min(440px, 100%);
-  max-height: calc(100vh - 40px);
-  max-height: calc(100dvh - 40px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: var(--shadow-2);
-  padding: 18px;
-}
-
-.modal-panel p {
-  margin: 0;
-  color: var(--ink-muted);
-}
-
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -3401,7 +3392,9 @@ button.history-card {
     align-self: center;
     justify-self: end;
     flex-direction: row;
-    margin: 8px 16px 8px auto;
+    gap: 6px;
+    margin: 8px 8px 8px auto;
+    max-width: calc(100% - 112px);
   }
 
   .context-screen > .feature-main {
@@ -4115,8 +4108,6 @@ button.history-card {
 }
 
 .dialog-panel.workspace-settings-dialog {
-  display: grid;
-  gap: 14px;
   width: min(560px, calc(100vw - 32px));
 }
 
@@ -4133,7 +4124,6 @@ button.history-card {
 }
 
 @media (max-width: 640px) {
-  .context-screen .workspace-mobile-actions .fab-label,
   .context-screen .workspace-mobile-inspector-toggle span {
     display: none;
   }
@@ -4691,4 +4681,11 @@ button.history-card {
   .lint-dirty-summary {
     flex-basis: 100%;
   }
+}
+
+@media (max-width: 1024px) {
+  .context-create-desktop {
+    display: none;
+  }
+
 }

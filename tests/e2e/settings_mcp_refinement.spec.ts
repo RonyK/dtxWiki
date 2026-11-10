@@ -310,22 +310,22 @@ for (const [language, width] of LAYOUTS) {
       '[role="dialog"][aria-labelledby="connection-cleanup-modal-title"]',
     );
     await expect(
-      cleanupDialog.locator(".modal-actions .primary"),
+      cleanupDialog.locator(".dialog-actions .primary"),
     ).toBeDisabled();
-    await cleanupDialog.locator(".modal-actions button").first().click();
+    await cleanupDialog.locator(".dialog-actions button").first().click();
     await expect(cleanupTrigger).toBeFocused();
     previewCount = 2;
     await cleanupTrigger.click();
     await expect(cleanupDialog).toContainText("2");
     await evidenceScreenshot(page, testInfo, `cleanup-${language}-${width}-confirm`);
-    await cleanupDialog.locator(".modal-actions button").first().click();
+    await cleanupDialog.locator(".dialog-actions button").first().click();
     expect(cleanupPosts).toBe(0);
     await cleanupTrigger.click();
-    await cleanupDialog.locator(".modal-actions .primary").click();
+    await cleanupDialog.locator(".dialog-actions .primary").click();
     await expect(cleanupDialog.getByRole("alert")).toBeVisible();
     expect(cleanupPosts).toBe(1);
     await evidenceScreenshot(page, testInfo, `cleanup-${language}-${width}-error`);
-    await cleanupDialog.locator(".modal-actions .primary").click();
+    await cleanupDialog.locator(".dialog-actions .primary").click();
     await expect(cleanupDialog).toBeHidden();
     await expect(cleanupTrigger).toBeFocused();
     expect(cleanupPosts).toBe(2);
@@ -475,15 +475,15 @@ for (const [language, width] of LAYOUTS) {
       localStorage.setItem("dtxwiki.uiLanguage", locale);
     }, language);
     await page.goto(`${workspaceUrl(targetWorkspace.id, "settings")}?section=workspace`);
-    await page.locator(".workspace-danger-item button.danger-action").click();
-    await page.locator(".modal-panel input").fill(slug);
+    await page.locator(".workspace-danger-item button.danger").click();
+    await page.locator(".danger-modal-panel input").fill(slug);
     const rejected = page.waitForResponse(
       (response) =>
         response.request().method() === "DELETE" &&
         new URL(response.url()).pathname ===
           `/api/v1/workspaces/${targetWorkspace.id}`,
     );
-    await page.locator(".modal-panel .modal-actions .primary").click();
+    await page.locator(".danger-modal-panel .dialog-actions .danger").click();
     expect((await rejected).status()).toBe(409);
     await expect(
       page.locator(".workspace-delete-purge-ack input"),

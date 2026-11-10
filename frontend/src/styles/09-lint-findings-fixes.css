@@ -379,7 +379,7 @@ a.lint-target-chip:focus-visible {
 }
 
 .action-menu__item.is-danger {
-  color: var(--danger);
+  color: var(--danger-strong);
 }
 
 .action-menu__item:disabled {

@@ -291,13 +291,11 @@
     "body": "무시한 항목은 미해결 큐에서 빠지고 처리 이력에 남습니다.",
     "reason": "사유",
     "reasonOptional": "사유 (선택)",
-    "cancel": "취소",
     "confirm": "항목 무시"
   },
   "fixDialog": {
     "title": "수정됨으로 기록",
     "body": "이 동작은 린트 항목의 상태만 변경하며 페이지 내용을 수정하지 않습니다.",
-    "cancel": "취소",
     "confirm": "수정됨으로 기록"
   },
   "mutation": {

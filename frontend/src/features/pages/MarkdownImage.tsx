@@ -103,7 +103,7 @@ function MarkdownImageState({
             type="button"
             onClick={retry}
           >
-            {t("image.retry", { defaultValue: "Retry" })}
+            {t("shell:actions.retry")}
           </button>
         ) : src && managedState !== "unavailable" ? (
           <span className="markdown-image-retry-limit">

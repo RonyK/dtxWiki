@@ -53,7 +53,7 @@ export function WorkspaceGraphGate({ children }: { children: ReactNode }) {
             onClick={() => invalidateWorkspaceGraphCapability(selectedId)}
             type="button"
           >
-            {t("workspaceGraph.ui.retry")}
+            {t("shell:actions.retry")}
           </button>
         )}
       >

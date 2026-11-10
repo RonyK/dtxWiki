@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Dialog, DialogCloseButton } from "./Dialog";
+import { Dialog } from "./Dialog";
 import { listCredentialWorkspaces } from "../api/credentialWorkspaces";
 
 import { Check } from "lucide-react";
@@ -430,7 +430,7 @@ export function WorkspaceScopePicker({
               className="icon-button text-button"
               onClick={() => setRetry((n) => n + 1)}
             >
-              {t("workspacePicker.retry")}
+              {t("shell:actions.retry")}
             </button>
           </div>
         ) : null}
@@ -576,15 +576,8 @@ export function WorkspaceScopeSelector(props: WorkspaceScopePickerProps) {
       {open ? (
         <Dialog
           className="workspace-picker-dialog"
-          header={
-            <div className="workspace-picker-heading">
-              <h2 id={titleId}>{props.labels.listLabel}</h2>
-              <DialogCloseButton
-                label={t("workspacePicker.close")}
-                onClick={() => setOpen(false)}
-              />
-            </div>
-          }
+          closeLabel={t("workspacePicker.close")}
+          title={props.labels.listLabel}
           labelledBy={titleId}
           onClose={() => setOpen(false)}
           footer={
@@ -729,15 +722,8 @@ export function WorkspaceScopeChips({
       {open ? (
         <Dialog
           className="workspace-picker-dialog"
-          header={
-            <div className="workspace-picker-heading">
-              <h2 id={titleId}>{labels.popoverLabel}</h2>
-              <DialogCloseButton
-                label={t("workspacePicker.close")}
-                onClick={() => setOpen(false)}
-              />
-            </div>
-          }
+          closeLabel={t("workspacePicker.close")}
+          title={labels.popoverLabel}
           labelledBy={titleId}
           onClose={() => setOpen(false)}
           footer={

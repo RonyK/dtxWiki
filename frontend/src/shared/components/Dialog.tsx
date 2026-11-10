@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 
 import { trapTabFocus } from "../lib/trapTabFocus";
@@ -16,6 +17,8 @@ import { trapTabFocus } from "../lib/trapTabFocus";
 type DialogProps = {
   children: ReactNode;
   className?: string;
+  /** Accessible name of the title bar's close button. */
+  closeLabel?: string;
   /**
    * Controls implicit dismissal (Escape and backdrop press). Explicit action
    * buttons may still call `onClose`, which lets mutation dialogs keep their
@@ -24,7 +27,7 @@ type DialogProps = {
    */
   dismissible?: boolean;
   footer?: ReactNode;
-  header?: ReactNode;
+  /** Id of the element naming the dialog; the title bar heading when `title` is set. */
   labelledBy: string;
   onClose: () => void;
   /**
@@ -34,6 +37,13 @@ type DialogProps = {
    * outside an inert subtree before it receives focus.
    */
   restoreFocusFallback?: () => HTMLElement | null;
+  /**
+   * Visible heading. Renders the shared one-line title bar (heading, close
+   * button, divider) above the scrolling content; the close button follows
+   * `dismissible` and calls `onClose`. Omit only for a surface with no visible
+   * heading or a navigational header of its own.
+   */
+  title?: ReactNode;
 };
 
 export type DialogOverlayScope = {
@@ -110,13 +120,15 @@ function lockDocumentScroll() {
 export function Dialog({
   children,
   className = "",
+  closeLabel,
   dismissible = true,
   footer,
-  header,
   labelledBy,
   onClose,
   restoreFocusFallback,
+  title,
 }: DialogProps) {
+  const { t } = useTranslation("shell");
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [panel, setPanel] = useState<HTMLDivElement | null>(null);
   const [scrollRegion, setScrollRegion] = useState<HTMLDivElement | null>(null);
@@ -150,13 +162,23 @@ export function Dialog({
   }, [restoreFocusFallback]);
 
   useEffect(() => {
-    const previousFocus = previousFocusRef.current;
+    let previousFocus = previousFocusRef.current;
     const panel = panelRef.current;
     // React applies a descendant autoFocus during commit before passive
     // effects run. Remember it so development StrictMode's effect cleanup and
     // replay can restore that explicit caller intent instead of ending on the
     // panel. Use the panel itself only when no descendant requested focus.
     const activeElement = document.activeElement;
+    // A dialog that replaces another in one commit recorded the outgoing
+    // dialog's button during render. That dialog has just returned focus to
+    // its own opener, which is where this one should return it too.
+    if (
+      previousFocus?.isConnected === false
+      && activeElement instanceof HTMLElement
+      && !panel?.contains(activeElement)
+    ) {
+      previousFocus = activeElement;
+    }
     if (
       panel
       && activeElement instanceof HTMLElement
@@ -225,13 +247,24 @@ export function Dialog({
       <div
         aria-labelledby={labelledBy}
         aria-modal="true"
-        className={`dialog-panel ${className}`.trim()}
+        className={["dialog-panel", title == null ? "" : "dialog-with-titlebar", className]
+          .filter(Boolean)
+          .join(" ")}
         ref={setPanelRef}
         role="dialog"
         tabIndex={-1}
       >
         <DialogOverlayContext.Provider value={overlayScope}>
-          {header == null ? null : <div className="dialog-header">{header}</div>}
+          {title == null ? null : (
+            <header className="dialog-titlebar">
+              <h2 id={labelledBy}>{title}</h2>
+              <DialogCloseButton
+                disabled={!dismissible}
+                label={closeLabel ?? t("dialog.close", { defaultValue: "Close" })}
+                onClick={onClose}
+              />
+            </header>
+          )}
           <div className="dialog-scroll-region" ref={setScrollRegion}>
             {children}
           </div>

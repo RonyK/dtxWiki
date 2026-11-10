@@ -54,6 +54,9 @@
       "ko": "한국어"
     }
   },
+  "dialog": {
+    "close": "Close"
+  },
   "mobileNav": {
     "aria": "Mobile navigation",
     "listAria": "Mobile"
@@ -75,7 +78,8 @@
     "newContextPage": "New Context page",
     "newFolder": "New folder",
     "newAsk": "New Ask session",
-    "addLibraryItem": "Open Setup"
+    "addLibraryItem": "Open Setup",
+    "newLibrary": "New Library item"
   },
   "workspace": {
     "loading": "Loading",
@@ -127,7 +131,6 @@
   },
   "accessGuard": {
     "checking": "Checking access",
-    "retry": "Retry",
     "loadFailed": "Could not load your workspaces."
   },
   "workspaceDirectory": {
@@ -143,7 +146,6 @@
     "loading": "Loading workspace directory",
     "loadingMore": "Loading more",
     "loadMore": "Load more",
-    "retry": "Retry",
     "results": "Workspace results",
     "visibility": {
       "team": "Team",
@@ -185,7 +187,6 @@
   },
   "session": {
     "checking": "Checking session",
-    "retry": "Retry",
     "verifyFailed": "Could not verify your session.",
     "checkFailed": "Session check failed."
   },
@@ -406,7 +407,6 @@
     "unknownDate": "Unknown date"
   },
   "diff": {
-    "eyebrow": "Version history",
     "viewMode": "Diff view mode",
     "split": "Split",
     "unified": "Unified",
@@ -479,5 +479,19 @@
     "selectWorkspace": "Select a workspace",
     "closeChooser": "Close workspace chooser",
     "openWorkspace": "Open {{title}} dashboard"
+  },
+  "actions": {
+    "approve": "Approve",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "disable": "Disable",
+    "discard": "Discard",
+    "refresh": "Refresh",
+    "reject": "Reject",
+    "remove": "Remove",
+    "retry": "Retry",
+    "revoke": "Revoke",
+    "save": "Save",
+    "unlink": "Unlink"
   }
 }

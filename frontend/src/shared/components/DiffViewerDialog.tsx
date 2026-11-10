@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Dialog, DialogCloseButton } from "./Dialog";
+import { Dialog } from "./Dialog";
 import { DiffViewer } from "./DiffViewer";
 import type { DiffViewerDiff, DiffViewerMode } from "./DiffViewer";
 import { Spinner } from "./Spinner";
@@ -61,21 +61,10 @@ export function DiffViewerDialog({
       dismissible={!restoreDisabled}
       labelledBy="diff-dialog-title"
       onClose={requestClose}
+      closeLabel={closeLabel}
+      title={title}
     >
       <section className="diff-dialog">
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">
-              {t("diff.eyebrow", { defaultValue: "Version history" })}
-            </p>
-            <h2 id="diff-dialog-title">{title}</h2>
-          </div>
-          <DialogCloseButton
-            disabled={restoreDisabled}
-            onClick={requestClose}
-            label={closeLabel}
-          />
-        </header>
         {controls}
         {publishedVersionLabel && !diff ? (
           <p className="diff-viewer-published-version">

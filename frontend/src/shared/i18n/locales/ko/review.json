@@ -161,9 +161,7 @@
     "discardReason": "폐기 사유",
     "discardBlocked": "리뷰 상태가 바뀌었습니다. 이 창을 닫고 대기열을 새로고침한 뒤 다시 진행하세요.",
     "discarding": "폐기 중",
-    "confirmDiscard": "선택 브랜치 폐기",
     "discardResult": "브랜치 {{discarded}}개를 폐기했습니다. {{skipped}}개는 건너뛰었습니다.",
-    "cancel": "취소",
     "approvalImpact": "이 버전과 그 이전 초안의 다른 리뷰 {{count}}건도 함께 정리됩니다.",
     "confirmSelectedBody": "선택한 {{total}}건 중 승인 가능한 리뷰는 {{count}}건입니다. 자동 정리와 제외 대상은 아래에서 확인하세요."
   },
@@ -184,16 +182,14 @@
     "chatOwnerUnavailable": "이 변경에는 확인 가능한 채팅 소유자가 없습니다.",
     "chatOwnerUnresolvable": "이 변경에는 확인 가능한 채팅 소유자가 없습니다 — 나 또는 모든 편집자에게 보내세요.",
     "reasonRequired": "변경 요청 전에 결정 사유를 입력하세요.",
-    "submit": "변경 요청",
-    "cancel": "취소"
+    "submit": "변경 요청"
   },
   "reject": {
     "confirmTitle": "이 리뷰를 거절하시겠습니까?",
     "confirmBody": "대상 버전과 문서에 미치는 영향을 확인한 후 거절하세요.",
     "checkingImpact": "현재 거절 영향을 확인하고 있습니다…",
     "recheckImpact": "다시 확인",
-    "confirming": "거절 중",
-    "cancel": "취소"
+    "confirming": "거절 중"
   },
   "editDirectly": {
     "action": "직접 편집",

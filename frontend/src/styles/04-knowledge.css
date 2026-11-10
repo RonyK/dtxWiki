@@ -1785,7 +1785,7 @@
 }
 
 .tree-node-menu-item.danger {
-  color: var(--danger);
+  color: var(--danger-strong);
 }
 
 .tree-node-menu-separator {
@@ -2366,11 +2366,6 @@ body:has(.tree-node-menu) .tree-row-tooltip {
 
 .context-share-dialog :is(h2, h3, p) {
   margin: 0;
-}
-
-.context-share-dialog-heading h2 {
-  margin-top: 3px;
-  overflow-wrap: anywhere;
 }
 
 .context-share-section {
@@ -4815,7 +4810,6 @@ details.advanced-section summary {
   width: min(720px, 100%);
   max-height: 90dvh;
 }
-.workspace-picker-heading,
 .workspace-scope-pagination,
 .workspace-scope-view-actions {
   display: flex;
@@ -4823,8 +4817,6 @@ details.advanced-section summary {
   gap: 8px;
   flex-wrap: wrap;
 }
-.workspace-picker-heading { justify-content: space-between; }
-.workspace-picker-heading h2 { min-width: 0; overflow-wrap: anywhere; }
 .workspace-scope-pagination { padding-block: 12px; }
 .workspace-scope-pagination > span { margin-inline-end: auto; }
 .workspace-grant-details { list-style: none; margin: 0; padding: 0; }
@@ -4893,7 +4885,6 @@ details.advanced-section summary {
 .workspace-picker-dialog .workspace-scope-search,
 .workspace-picker-dialog .workspace-scope-pagination,
 .workspace-picker-dialog .workspace-scope-view-actions { flex-shrink: 0; }
-.workspace-picker-dialog .dialog-header { flex-shrink: 0; padding-bottom: 12px; }
 .dialog-panel.workspace-picker-dialog {
   display: flex;
   flex-direction: column;
@@ -4908,7 +4899,6 @@ details.advanced-section summary {
 }
 
 /* The compact summary truncates names; the full picker must reveal them. */
-.workspace-picker-dialog .workspace-picker-heading { width: 100%; }
 .workspace-picker-dialog .workspace-scope-copy strong {
   white-space: normal;
   overflow: visible;
@@ -5125,12 +5115,10 @@ details.advanced-section summary {
   height: min(720px, calc(100dvh - 40px));
   overflow: hidden;
 }
-.reference-picker-dialog .dialog-header { flex-shrink: 0; padding-bottom: 12px; }
-.reference-picker-dialog .dialog-header h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16px; }
 .reference-picker-dialog > .dialog-scroll-region { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .reference-picker-dialog > .dialog-footer {
   flex-shrink: 0;
-  margin: 12px -18px -18px;
+  margin: 0;
   padding: 12px 18px;
   border-top: 1px solid var(--border);
   background: var(--surface-subtle);

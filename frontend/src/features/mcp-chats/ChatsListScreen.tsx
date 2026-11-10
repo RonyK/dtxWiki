@@ -455,7 +455,7 @@ export function ChatsListScreen() {
                 type="button"
                 onClick={reload}
               >
-                {t("retry")}
+                {t("shell:actions.retry")}
               </button>
             }
             tone="warning"
@@ -471,7 +471,7 @@ export function ChatsListScreen() {
                 type="button"
                 onClick={() => void loadMore()}
               >
-                {t("retry")}
+                {t("shell:actions.retry")}
               </button>
             }
             tone="warning"

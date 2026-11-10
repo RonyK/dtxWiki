@@ -315,16 +315,16 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
         {policyError ? (
           <StatusBanner tone="warning">
             <span>{t("lint.policyLoadError")}</span>{" "}
-            <button className="text-button" type="button" onClick={() => setPolicyAttempt((value) => value + 1)}>
-              {t("lint.retryPolicies")}
+            <button aria-label={t("lint.retryPolicies")} className="text-button" type="button" onClick={() => setPolicyAttempt((value) => value + 1)}>
+              {t("shell:actions.retry")}
             </button>
           </StatusBanner>
         ) : !policyReady ? <SettingsLoadingRow>{t("lint.policyLoading")}</SettingsLoadingRow> : null}
         {rulesError ? (
           <StatusBanner tone="warning">
             <span>{t("lint.loadError")}</span>{" "}
-            <button className="text-button" type="button" onClick={() => setRulesAttempt((value) => value + 1)}>
-              {t("lint.retryRules")}
+            <button aria-label={t("lint.retryRules")} className="text-button" type="button" onClick={() => setRulesAttempt((value) => value + 1)}>
+              {t("shell:actions.retry")}
             </button>
           </StatusBanner>
         ) : null}
@@ -583,7 +583,7 @@ function WorkspaceLintRules({ readOnly, workspaceId }: { readOnly: boolean; work
             <button className="icon-button primary" type="button" disabled={disabled || !dirtyCount}
               title={t(busy ? "saveTitle.busy" : dirtyCount ? "saveTitle.ready" : "saveTitle.clean")}
               onClick={() => void saveDrafts()}>
-              {busy ? t("actions.saving") : t("actions.save")}
+              {busy ? t("actions.saving") : t("shell:actions.save")}
             </button>
           </div>
         ) : null}

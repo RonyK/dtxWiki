@@ -13,6 +13,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { i18n } from "../../../shared/i18n";
+import { WorkspaceLayout } from "../../../shared/components/WorkspaceLayout";
 import {
   AUTOSAVE_CHECKPOINT_MS,
   editorMeta,
@@ -339,6 +340,42 @@ describe("PageEditor", () => {
     // jsdom has no sendBeacon; the tests that need one install a stub. Left in
     // place it would carry the next test's unload flush away from fetch.
     Reflect.deleteProperty(window.navigator, "sendBeacon");
+  });
+
+  it("shares Context rail width and visibility between the reader and editor", async () => {
+    const reader = () => render(
+      <WorkspaceLayout
+        layoutKey="context"
+        leftLabel="Explorer"
+        left={({ onExpandWidth, expandWidthLabel }) => (
+          <button type="button" onClick={onExpandWidth}>{expandWidthLabel}</button>
+        )}
+        main={<main>Context reader</main>}
+      />,
+    );
+    const readerView = reader();
+    await typist().click(screen.getByRole("button", { name: "Widen Explorer" }));
+    expect(readerView.container.querySelector(".workspace-screen"))
+      .toHaveStyle({ "--workspace-left-w": "420px" });
+    readerView.unmount();
+
+    mockEditorPage("# Hello");
+    renderWithRouter("/pages/hello/edit", <></>);
+    await expectEditorTitle("Hello");
+    const editor = document.querySelector(".page-workspace");
+    expect(editor).toHaveStyle({ "--workspace-left-w": "420px" });
+    await typist().click(screen.getByRole("button", { name: "Widen Explorer" }));
+    expect(editor).toHaveStyle({ "--workspace-left-w": "560px" });
+    await typist().click(screen.getByRole("button", { name: "Hide Context explorer" }));
+    expect(editor).toHaveStyle({ "--workspace-left-w": "44px" });
+    expect(editor?.querySelector(".workspace-left-panel")).toBeNull();
+    await typist().click(screen.getByRole("button", { name: "Show Explorer" }));
+    expect(editor).toHaveStyle({ "--workspace-left-w": "560px" });
+    cleanup();
+
+    const reopenedReader = reader();
+    expect(reopenedReader.container.querySelector(".workspace-screen"))
+      .toHaveStyle({ "--workspace-left-w": "560px" });
   });
 
   it("retries a reference command exactly and reconciles ambiguous results without losing newer writing", async () => {
@@ -2852,7 +2889,7 @@ describe("PageEditor", () => {
     ).toHaveLength(1);
 
     await typist().click(
-      screen.getByRole("button", { name: "Reload current draft" }),
+      screen.getByRole("button", { name: "Refresh" }),
     );
     await waitFor(() =>
       expect(

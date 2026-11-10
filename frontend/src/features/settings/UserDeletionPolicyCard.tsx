@@ -87,7 +87,7 @@ export function UserDeletionPolicyCard() {
           className="icon-button"
           onClick={() => setAttempt((value) => value + 1)}
           type="button"
-        >{t("userDeletion.policy.retry")}</button>
+        >{t("shell:actions.retry")}</button>
       ) : null}
       {loaded ? (
         <form className="user-deletion-policy-form" onSubmit={save}>
@@ -120,11 +120,11 @@ export function UserDeletionPolicyCard() {
               value={password}
             />
           </label>
-          <button
+          <button aria-label={t("userDeletion.policy.save")}
             className="icon-button"
             disabled={busy || !password || !days}
             type="submit"
-          >{t(busy ? "userDeletion.policy.saving" : "userDeletion.policy.save")}</button>
+          >{busy ? t("userDeletion.policy.saving") : t("shell:actions.save")}</button>
         </form>
       ) : null}
     </section>

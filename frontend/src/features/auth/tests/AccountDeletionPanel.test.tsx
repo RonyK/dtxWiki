@@ -52,7 +52,7 @@ it("waits for shared workspaces and the confirmed retention period before withdr
   expect(await screen.findByText(/retained for 30 days/)).toBeInTheDocument();
   expect(screen.getByText("My notes")).toBeInTheDocument();
   expect(screen.getByText("Team handbook (2 other members)")).toBeInTheDocument();
-  const submit = screen.getByRole("button", { name: "Confirm account deletion" });
+  const submit = screen.getByRole("button", { name: "Delete" });
   // The server normalizes the address, so a different case still confirms.
   await user.type(screen.getByLabelText("Type user@example.com to confirm"), " User@Example.com ");
   await user.type(screen.getByLabelText("Current password for account deletion"), "current-password");
@@ -115,7 +115,7 @@ it("confirms an account without a password or email through recent verification"
   expect(await screen.findByText("Your recent sign-in allows this action.")).toBeInTheDocument();
   expect(screen.queryByLabelText(/to confirm/)).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Current password for account deletion")).not.toBeInTheDocument();
-  const submit = screen.getByRole("button", { name: "Confirm account deletion" });
+  const submit = screen.getByRole("button", { name: "Delete" });
   await waitFor(() => expect(submit).toBeEnabled());
   await user.click(submit);
   // An expired confirmation asks for a new one before the next attempt.

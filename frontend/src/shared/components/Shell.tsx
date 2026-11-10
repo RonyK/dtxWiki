@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   Command,
   FileText,
-  FolderPlus,
   Inbox,
   LayoutDashboard,
   Library,
@@ -118,7 +117,7 @@ type ShellLabels = {
   create: string;
   createTitle: string;
   newContextPage: string;
-  newFolder: string;
+  newLibrary: string;
   addLibraryItem: string;
   sidebarAria: string;
   sidebarCollapse: string;
@@ -328,7 +327,7 @@ function shellLabelsFromT(t: TFunction<"shell">): ShellLabels {
     newContextPage: t("create.newContextPage", {
       defaultValue: "New Context page",
     }),
-    newFolder: t("create.newFolder", { defaultValue: "New folder" }),
+    newLibrary: t("create.newLibrary", { defaultValue: "New Library item" }),
     addLibraryItem: t("create.addLibraryItem", {
       defaultValue: "Add first Library item",
     }),
@@ -824,7 +823,7 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
         <section className="workspace-resolution-card">
           <StatusBanner tone="warning">{error}</StatusBanner>
           <button className="icon-button" data-testid="workspace-resolution-retry" onClick={() => void refreshWorkspaces()} type="button">
-            {t("workspaceResolution.retry", { defaultValue: "Retry" })}
+            {t("shell:actions.retry")}
           </button>
         </section>
       );
@@ -843,7 +842,7 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
         <h1 id="workspace-resolution-error-title">{t("workspaceResolution.loadErrorTitle", { defaultValue: "Could not load your workspaces" })}</h1>
         <StatusBanner tone="warning">{error}</StatusBanner>
         <button className="icon-button primary" data-testid="workspace-resolution-retry" onClick={() => void refreshWorkspaces()} type="button">
-          {t("workspaceResolution.retry", { defaultValue: "Retry" })}
+          {t("shell:actions.retry")}
         </button>
       </section>
     );
@@ -856,7 +855,7 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
         <p>{t("workspaceResolution.emptyDescription", { defaultValue: "This account has no workspace membership. Find a workspace to join, or create one from the workspace switcher." })}</p>
         <p className="meta-line">{t("workspaceResolution.emptySupport", { defaultValue: "If access was just granted, retry to refresh your workspace list." })}</p>
         <div className="workspace-resolution-actions">
-          <button className="icon-button" onClick={() => void refreshWorkspaces()} type="button">{t("workspaceResolution.retry", { defaultValue: "Retry" })}</button>
+          <button className="icon-button" onClick={() => void refreshWorkspaces()} type="button">{t("shell:actions.retry")}</button>
           <Link className="icon-button primary" to="/workspaces/find">{t("workspaceResolution.find", { defaultValue: "Find workspaces" })}</Link>
         </div>
       </section>
@@ -1453,11 +1452,12 @@ function CreateMenu({ labels }: { labels: ShellLabels }) {
             onClick={() => closeMenu()}
             role="menuitem"
             tabIndex={-1}
-            to={workspaceId ? workspacePath(workspaceId, "context/folders/new") : "/workspaces/find"}
+            to={workspaceId ? workspacePath(workspaceId, "library/items/new") : "/workspaces/find"}
           >
-            <FolderPlus size={15} aria-hidden="true" />
-            <span>{labels.newFolder}</span>
+            <Library size={15} aria-hidden="true" />
+            <span>{labels.newLibrary}</span>
           </Link>
+          <div className="create-menu-separator" role="separator" />
           <Link
             className="create-menu-item"
             onClick={() => closeMenu()}

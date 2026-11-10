@@ -7,7 +7,7 @@ import { previewLinkTargets } from "../../shared/api/linkTargets";
 import { newIdempotencyKey } from "../../shared/api/pages";
 import type { DocumentReferenceKind, DocumentReferenceTarget, ReferenceView } from "../../shared/api/references";
 import { apiErrorMessage } from "../../shared/api/client";
-import { Dialog, DialogCloseButton } from "../../shared/components/Dialog";
+import { Dialog } from "../../shared/components/Dialog";
 import { presentLocation, resultLocation, searchPreview } from "../search/searchResultText";
 import { kindLabel, referenceKey } from "./documentReferences";
 
@@ -142,7 +142,7 @@ export function ReferencesControl({
           {onRetry ? (
             <div className="editor-references-retry" role="status">
               <p>{t("references.ambiguous")}</p>
-              <button className="icon-button text-button" disabled={retryDisabled} onClick={onRetry} type="button">{t("references.retry")}</button>
+              <button aria-label={t("references.retry")} className="icon-button text-button" disabled={retryDisabled} onClick={onRetry} type="button">{t("shell:actions.retry")}</button>
               {onReconcile ? <button className="icon-button text-button" disabled={retryDisabled} onClick={onReconcile} type="button">{t("references.reconcile")}</button> : null}
             </div>
           ) : null}
@@ -383,8 +383,8 @@ export function ReferencePicker({ workspaceId, references, mode, onClose, onSele
   );
 
   return (
-    <Dialog className="reference-picker-dialog" labelledBy={`${id}-title`} onClose={onClose} dismissible={!busy}
-      header={<><h2 id={`${id}-title`}><BookOpen aria-hidden="true" size={18} />{t("references.choose")}</h2><DialogCloseButton disabled={busy} label={t("references.close")} onClick={onClose} /></>}
+    <Dialog className="reference-picker-dialog" closeLabel={t("references.close")} labelledBy={`${id}-title`} onClose={onClose} dismissible={!busy}
+      title={<><BookOpen aria-hidden="true" size={18} />{t("references.choose")}</>}
       footer={
         <div className="reference-picker-confirm">
           {selected ? (

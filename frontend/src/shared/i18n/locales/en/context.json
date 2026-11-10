@@ -47,7 +47,6 @@
   },
   "share": {
     "action": "Share",
-    "eyebrow": "Readonly sharing",
     "title": "Share {{title}}",
     "close": "Close",
     "closeDialog": "Close dialog",
@@ -58,7 +57,7 @@
     "workspaceLink": {
       "title": "Workspace link",
       "description": "This link opens the Context page inside dtxWiki. Only signed-in workspace members with access can use it.",
-      "copy": "Copy workspace link"
+      "copy": "Copy link"
     },
     "web": {
       "title": "Publish to web",
@@ -229,11 +228,8 @@
     "restoring": "Creating draft",
     "readerVisibleVersion": "Readers see this version",
     "reviewLabel": "Review",
-    "discard": "Discard",
     "discardConfirm": "Discard alternative v{{version}}? This cannot be undone.",
     "discardReason": "Discard reason",
-    "cancelDiscard": "Cancel",
-    "confirmDiscard": "Discard branch permanently",
     "discarded": "Alternative v{{version}} was discarded.",
     "discarding": "Discarding",
     "visibleHead": "Visible head",
@@ -319,7 +315,6 @@
     "outbound": "Outbound links"
   },
   "reconciliation": {
-    "eyebrow": "Branch reconciliation",
     "title": "Reconcile branch",
     "open": "Reconcile",
     "close": "Close",
@@ -368,10 +363,8 @@
     "submitting": "Creating draft",
     "discardTitle": "Discard branch",
     "discardReason": "Discard reason",
-    "discard": "Discard branch",
     "discarding": "Discarding",
     "cancelDiscard": "Cancel",
-    "confirmDiscard": "Discard branch permanently",
     "cleanChangesTitle": "Branch-only changes",
     "cleanChangesHint": "These changes are included by default. Clear a change to leave it out of the reconciled draft.",
     "includeCleanChange": "Include {{label}}",
@@ -398,7 +391,6 @@
     "risk": "risk {{risk}}",
     "viewReview": "View review",
     "viewChanges": "View changes",
-    "approve": "Approve",
     "requestChanges": "Request changes",
     "reasonPlaceholder": "What should change before this is approved?",
     "submitChanges": "Send request",

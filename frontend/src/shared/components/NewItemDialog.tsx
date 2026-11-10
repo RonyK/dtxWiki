@@ -8,7 +8,7 @@ import type { TreeNodePayload } from "../api/workspace";
 import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { normalizeSlugInput, slugify } from "../text/slug";
 import { AdvancedSection } from "./AdvancedSection";
-import { Dialog, DialogCloseButton } from "./Dialog";
+import { Dialog } from "./Dialog";
 import { FormField } from "./FormField";
 import { SegmentedControl } from "./SegmentedControl";
 import { TreePickerDropdown } from "./TreePickerDropdown";
@@ -38,6 +38,11 @@ type NewItemDialogProps = {
     slug?: string;
     title: string;
   }) => Promise<void> | void;
+  /**
+   * Receives every chosen file. The dialog closes as soon as they are handed
+   * over: a batch can take a while, and the caller's page shows its per-file
+   * progress, retries and failures.
+   */
   onPickFiles?: (
     files: File[],
     parentNodeId: string | null,
@@ -181,80 +186,34 @@ export function NewItemDialog({
     }
   }
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
     if (files.length === 0) {
       return;
     }
-    setSubmitting(true);
-    setError(null);
-    try {
-      await onPickFiles?.(files, parentId || null);
-      onClose("success");
-    } catch (exc) {
-      setError(
-        apiErrorMessage(
-          exc,
-          t("newItem.errors.upload", {
-            defaultValue: "Failed to upload file",
-          }),
-        ),
-      );
-      setSubmitting(false);
-    }
+    void onPickFiles?.(files, parentId || null);
+    onClose("success");
   }
 
   return (
     <Dialog
+      closeLabel={t("newItem.close", {
+        defaultValue: "Close new item dialog",
+      })}
       dismissible={!submitting}
       labelledBy="new-item-title"
       onClose={requestClose}
+      title={t(`newItem.headings.${itemType}`, {
+        defaultValue:
+          itemType === "page"
+            ? "New page"
+            : itemType === "folder"
+              ? "New folder"
+              : "Upload files",
+      })}
     >
       <form className="dialog-form" onSubmit={submit}>
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">
-              {t("newItem.eyebrow", { defaultValue: "New item" })}
-            </p>
-            <h2 id="new-item-title">
-              {t(`newItem.headings.${itemType}`, {
-                defaultValue:
-                  itemType === "page"
-                    ? "New page"
-                    : itemType === "folder"
-                      ? "New folder"
-                      : "Upload files",
-              })}
-            </h2>
-            <p className="feature-subtitle">
-              {availableTypes.length === 1
-                ? t(`newItem.subtitleSingle.${availableTypes[0]}`, {
-                    defaultValue:
-                      availableTypes[0] === "page"
-                        ? "Create a page in this location."
-                        : availableTypes[0] === "folder"
-                          ? "Create a folder in this location."
-                          : "Upload source files to this location.",
-                  })
-                : canUpload
-                ? t("newItem.subtitleUpload", {
-                    defaultValue: "Upload a source file or add a folder.",
-                  })
-                : t("newItem.subtitleCreate", {
-                    defaultValue:
-                      "Choose whether this branch should hold a page or a folder.",
-                  })}
-            </p>
-          </div>
-          <DialogCloseButton
-            label={t("newItem.close", {
-              defaultValue: "Close new item dialog",
-            })}
-            disabled={submitting}
-            onClick={requestClose}
-          />
-        </header>
         {availableTypes.length > 1 ? (
           <SegmentedControl
             compact
@@ -294,20 +253,19 @@ export function NewItemDialog({
         ) : null}
         {itemType === "upload" ? (
           <label className="form-field">
-            <span>{t("newItem.file", { defaultValue: "File" })}</span>
+            <span>{t("newItem.file", { defaultValue: "Files" })}</span>
             <input
               accept={uploadAccept}
-              aria-label={t("newItem.uploadFile", { defaultValue: "Upload file" })}
+              aria-label={t("newItem.uploadFile", { defaultValue: "Upload files" })}
               disabled={submitting}
+              multiple
               onChange={handleFileChange}
               type="file"
             />
             <small className="field-hint">
-              {submitting
-                ? t("newItem.uploading", { defaultValue: "Uploading…" })
-                : t("newItem.pickSourceFile", {
-                    defaultValue: "Pick a source file to add to the Library.",
-                  })}
+              {t("newItem.pickSourceFile", {
+                defaultValue: "Pick one or more source files to add to the Library.",
+              })}
             </small>
           </label>
         ) : (

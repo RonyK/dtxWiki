@@ -40,10 +40,6 @@
   justify-content: flex-end;
 }
 
-.library-reader-actions .library-delete-action {
-  color: var(--danger, #b42318);
-}
-
 /* WorkspaceLayout exposes the single floating Upload action at this same
    breakpoint. Hide only the duplicate inline Upload; destructive item actions
    remain reachable in the reader. */
@@ -337,7 +333,6 @@
   box-sizing: border-box;
   gap: 16px;
   min-block-size: 100%;
-  padding: 22px;
 }
 
 .library-family-editor > * {
@@ -354,7 +349,7 @@
   border-top: 1px solid var(--border);
   background: var(--surface);
   box-shadow: 0 -8px 20px rgb(26 20 46 / 8%);
-  padding: 12px 22px 18px;
+  padding: 12px 18px 18px;
 }
 
 .library-family-editor-dialog > .dialog-footer > .modal-actions {
@@ -383,7 +378,7 @@
   min-block-size: 44px;
 }
 
-.library-family-editor-heading :is(h2, p) {
+.library-family-editor-heading p {
   margin: 0;
   overflow-wrap: anywhere;
 }

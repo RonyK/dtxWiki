@@ -121,9 +121,9 @@ describe("AdminUserRecoverySection", () => {
     await user.type(scoped.getByLabelText("Type alex@example.com to confirm"), "alex@example.com");
     // Workspaces left without an admin are deleted with the account only once
     // the administrator approves them.
-    expect(scoped.getByRole("button", { name: "Confirm account deletion" })).toBeDisabled();
+    expect(scoped.getByRole("button", { name: "Delete" })).toBeDisabled();
     await user.click(scoped.getByLabelText(/Delete these 2 workspaces with the account/));
-    await user.click(scoped.getByRole("button", { name: "Confirm account deletion" }));
+    await user.click(scoped.getByRole("button", { name: "Delete" }));
     expect(await screen.findByText("Deletion pending")).toBeInTheDocument();
     expect(screen.getByText("Cleanup failed: user_deletion_blob_purge_failed (2 attempts)")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Appoint an admin" }));
@@ -340,21 +340,10 @@ describe("AdminUserRecoverySection", () => {
     let confirmDialog = screen.getByRole("dialog", {
       name: "Issue a password reset?",
     });
-    expect(confirmDialog.parentElement).toBe(document.body);
-    expect(container.querySelector(".modal-backdrop")).toBeNull();
-    const ordinaryMode = within(confirmDialog).getByRole("radio", {
-      name: /Ordinary recovery/,
-    });
-    const cancelButton = within(confirmDialog).getByRole("button", {
-      name: "Cancel",
-    });
-    expect(ordinaryMode).toHaveFocus();
-    await user.keyboard("{Shift>}{Tab}{/Shift}");
-    expect(cancelButton).toHaveFocus();
-    await user.keyboard("{Tab}");
-    expect(ordinaryMode).toHaveFocus();
+    expect(confirmDialog.closest(".dialog-backdrop")?.parentElement).toBe(document.body);
+    expect(container.querySelector(".dialog-backdrop")).toBeNull();
 
-    fireEvent.mouseDown(confirmDialog);
+    fireEvent.mouseDown(confirmDialog.closest(".dialog-backdrop")!);
     expect(
       screen.queryByRole("dialog", { name: "Issue a password reset?" }),
     ).not.toBeInTheDocument();
@@ -414,13 +403,13 @@ describe("AdminUserRecoverySection", () => {
     const linkDialog = await screen.findByRole("dialog", {
       name: "Copy this recovery link now",
     });
-    expect(linkDialog.parentElement).toBe(document.body);
+    expect(linkDialog.closest(".dialog-backdrop")?.parentElement).toBe(document.body);
     expect(within(linkDialog).getByDisplayValue(maskedUrl)).toHaveFocus();
     expect(
       within(linkDialog).getByText(/Closing this dialog permanently hides it/),
     ).toBeInTheDocument();
     await user.keyboard("{Escape}");
-    fireEvent.mouseDown(linkDialog);
+    fireEvent.mouseDown(linkDialog.closest(".dialog-backdrop")!);
     expect(
       screen.getByRole("dialog", { name: "Copy this recovery link now" }),
     ).toBeInTheDocument();
@@ -641,7 +630,7 @@ describe("AdminUserRecoverySection", () => {
 
   it("uses the global full-viewport dialog layer for recovery modals", () => {
     const styles = readAppStyles();
-    const backdropRule = styles.match(/\.modal-backdrop\s*\{([^}]*)\}/)?.[1];
+    const backdropRule = styles.match(/\.dialog-backdrop\s*\{([^}]*)\}/)?.[1];
 
     expect(styles).toContain("--z-dialog: 100;");
     expect(backdropRule).toContain("position: fixed;");

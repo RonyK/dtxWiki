@@ -22,7 +22,6 @@
   },
   "provenance": {
     "title": "채팅",
-    "retry": "다시 시도",
     "loading": "채팅 불러오는 중…",
     "loadFailed": "채팅 참조를 불러오지 못했습니다",
     "empty": "아직 이 항목을 다룬 채팅이 없습니다.",
@@ -216,7 +215,6 @@
     "action": "보관",
     "submitting": "보관 중",
     "pending": "채팅을 보관하는 중입니다. 완료될 때까지 다른 보관 동작은 일시 중지됩니다.",
-    "cancel": "취소",
     "close": "보관 대화상자 닫기",
     "error": "채팅을 보관하지 못했습니다"
   },
@@ -262,7 +260,6 @@
     "breadcrumb": "상세",
     "editTitle": "제목 편집",
     "titleLabel": "채팅 제목",
-    "saveTitle": "제목 저장",
     "savingTitle": "제목 저장 중",
     "titleSaveSuccess": "제목을 저장했습니다. 수정된 제목으로 포커스를 이동했습니다.",
     "cancelTitleEdit": "제목 편집 취소",
@@ -453,10 +450,8 @@
       "open": "편집 미리보기 삭제",
       "title": "{{title}}의 편집 미리보기를 삭제할까요?",
       "body": "이 채팅의 모든 편집 호출에 저장된 텍스트 미리보기를 삭제합니다. 크기·연산 종류·상태는 남습니다. 되돌릴 수 없습니다.",
-      "action": "미리보기 삭제",
       "submitting": "삭제 중",
       "pending": "미리보기를 삭제하는 중입니다. 끝날 때까지 이 대화상자는 열려 있습니다.",
-      "cancel": "취소",
       "close": "미리보기 삭제 대화상자 닫기",
       "error": "편집 미리보기를 삭제하지 못했습니다",
       "success_one": "호출 {{count}}건의 편집 미리보기를 삭제했습니다.",
@@ -471,7 +466,6 @@
       "search_match": "검색 일치",
       "unknown": "연결"
     },
-    "retry": "다시 시도",
     "backToChats": "채팅으로 돌아가기",
     "archive": "보관",
     "errors": {
