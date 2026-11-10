@@ -311,7 +311,7 @@ test("Local folder info stays painted inside a narrow reader on a wide viewport"
 });
 
 for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
-  test(`Local ${locale} ${mode} details at ${viewport.width}px overlay a stable full-width native canvas`, async ({ page }, testInfo) => {
+  test(`Local ${locale} ${mode} details at ${viewport.width}px keep a stable full-width native canvas`, async ({ page }, testInfo) => {
     const errors = await mount(page, "complete", locale, mode, viewport);
     const graph = page.getByTestId("graph-view");
     const details = graph.locator(".graph-details");
@@ -327,7 +327,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await page.mouse.click(seed.x, seed.y);
     await expect(details.locator("h5.graph-details-title")).toHaveText("Decision Log");
     await expect(graph).toBeFocused();
-    await expectLocalDetailsBounds(graph, viewport.width > 760 ? "drawer" : "sheet");
+    await expectLocalDetailsBounds(graph, viewport.width > 760 ? "drawer" : "below");
     expect(await localStageGeometry(graph)).toEqual(idle);
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
     await expect(graph.getByRole("dialog")).toHaveCount(0);
@@ -355,7 +355,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     // A normal input on uncovered native canvas clears selection without
     // touching pins; an input inside the non-modal details does not.
     const canvasBounds = await graph.locator(".graph-canvas-frame").boundingBox();
-    // Canvas chrome ends at44px and an expanded sheet leaves64px clear.
+    // Canvas chrome ends at 44px.
     const blank = { x: canvasBounds!.x + 8, y: canvasBounds!.y + 52 };
     expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".graph-canvas")), blank)).toBe(true);
     await page.mouse.click(blank.x, blank.y);
@@ -380,7 +380,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
   });
 }
 
-// The 760/761 pair owns the container boundary. The narrower 320px sheet in
+// The 760/761 pair owns the container boundary. The narrower 320px layout in
 // the same wide viewport is reached by the long-title 320px reader case.
 for (const hostWidth of [784, 785]) {
   test(`Local details use the ${hostWidth - 24}px reader boundary inside a wide viewport`, async ({ page }, testInfo) => {
@@ -393,7 +393,7 @@ for (const hostWidth of [784, 785]) {
     const seed = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
     await page.mouse.click(seed.x, seed.y);
     await expect(graph.locator("h5.graph-details-title")).toHaveText("Decision Log");
-    await expectLocalDetailsBounds(graph, hostWidth - 24 <= 760 ? "sheet" : "drawer");
+    await expectLocalDetailsBounds(graph, hostWidth - 24 <= 760 ? "below" : "drawer");
     expect(await localStageGeometry(graph)).toEqual(before);
     await evidenceScreenshot(page, testInfo, `local-details-reader-${hostWidth - 24}.png`);
     expect(errors).toEqual([]);
@@ -412,36 +412,37 @@ test("Local en short-screen details keep actions and full long evidence availabl
   const seed = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
   await page.mouse.click(seed.x, seed.y);
   await expect(details.locator("h5.graph-details-title")).toContainText("full title stays available");
-  await expectLocalDetailsBounds(graph, "sheet");
-  const actionBounds = await details.locator(".graph-details-footer").boundingBox();
-  const panelBounds = await details.boundingBox();
-  expect(actionBounds!.y + actionBounds!.height).toBeLessThanOrEqual(panelBounds!.y + panelBounds!.height);
+  await expectLocalDetailsBounds(graph, "below");
   await expect(details).toContainText("end of evidence");
+  // Below the canvas the page scrolls Details and its actions stay on screen.
+  const footer = details.locator(".graph-details-footer");
+  await expect(footer).toBeInViewport({ ratio: 1 });
   const dimensions = await details.evaluate((element) => ({ client: element.clientHeight, scroll: element.scrollHeight }));
-  expect(dimensions.scroll).toBeGreaterThan(dimensions.client);
+  expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client + 1);
   await details.focus();
   const scrollY = await page.evaluate(() => window.scrollY);
   await page.keyboard.press("End");
-  await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(scrollY);
+  await expect(footer).toBeInViewport({ ratio: 1 });
+  // Native key scrolling animates; read the position once it has settled.
+  const { outerScrollY: scrolled } = await settleLocalAsideScroll(footer);
   await page.evaluate(() => window.__localCoverageFixture.replacePayload());
-  await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
   expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
   await page.keyboard.press("Escape");
   await expect(details).toBeHidden();
   expect(await localStageGeometry(graph)).toEqual(before);
+  await graph.locator(".graph-local-stage").scrollIntoViewIfNeeded();
   const reselection = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
   await page.mouse.click(reselection.x, reselection.y);
   await expect(details).toBeVisible();
-  expect(await details.evaluate((element) => element.scrollTop)).toBe(0);
   await (await openLocalDetailsMore(details)).getByRole("button", { name: "Center", exact: true }).click();
+  await graph.locator(".graph-local-stage").scrollIntoViewIfNeeded();
   await expect.poll(async () => {
     const point = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
     const frame = await graph.locator(".graph-canvas-frame").boundingBox();
-    const sheet = await details.boundingBox();
-    // Center now targets the visible canvas between60px top chrome and
-    // the selected sheet plus12px separation, preserving its full content.
-    return Math.abs(point.y - (frame!.y + (frame!.height + 60 - sheet!.height - 12) / 2));
+    // Center targets the canvas under its 60px top chrome; Details covers none of it.
+    return Math.abs(point.y - (frame!.y + (frame!.height + 60) / 2));
   }).toBeLessThanOrEqual(1);
   const centered = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
   expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".graph-canvas")), centered)).toBe(true);
@@ -463,13 +464,18 @@ async function localStageGeometry(graph: Locator) {
   });
 }
 
-async function expectLocalDetailsBounds(graph: Locator, mode: "drawer" | "sheet") {
+async function expectLocalDetailsBounds(graph: Locator, mode: "drawer" | "below") {
   const geometry = await graph.locator(".graph-details").evaluate((element) => {
     const panel = element.getBoundingClientRect();
-    const owner = element.closest(".graph-local-stage")!.getBoundingClientRect();
+    const stage = element.closest(".graph-frame")!.querySelector(".graph-local-stage")!;
+    const owner = (element.closest(".graph-local-stage") ?? element.closest(".graph-frame"))!.getBoundingClientRect();
+    const stageBottom = stage.getBoundingClientRect().bottom;
+    // A panel below the canvas can run past the viewport; only its start is on screen.
+    const corners = element.closest(".graph-local-stage") ? [[panel.left + 4, panel.top + 4], [panel.right - 4, panel.bottom - 4]] : [[panel.left + 4, panel.top + 4]];
     return { left: panel.left, right: panel.right, top: panel.top, bottom: panel.bottom, width: panel.width, height: panel.height,
+      insideStage: !!element.closest(".graph-local-stage"), stageBottom,
       owner: { left: owner.left, right: owner.right, top: owner.top, bottom: owner.bottom, width: owner.width, height: owner.height },
-      painted: [[panel.left + 4, panel.top + 4], [panel.right - 4, panel.bottom - 4]].every(([x, y]) => element.contains(document.elementFromPoint(x, y))) };
+      painted: corners.every(([x, y]) => element.contains(document.elementFromPoint(x, y))) };
   });
   expect(geometry.painted).toBe(true);
   expect(geometry.left).toBeGreaterThanOrEqual(geometry.owner.left);
@@ -480,11 +486,10 @@ async function expectLocalDetailsBounds(graph: Locator, mode: "drawer" | "sheet"
     expect(Math.abs(geometry.right - (geometry.owner.right - 12))).toBeLessThanOrEqual(1);
     expect(Math.abs(geometry.top - (geometry.owner.top + 60))).toBeLessThanOrEqual(1);
   } else {
+    expect(geometry.insideStage).toBe(false);
+    expect(geometry.top).toBeGreaterThanOrEqual(geometry.stageBottom - 1);
     expect(Math.abs(geometry.right - geometry.owner.right)).toBeLessThanOrEqual(1);
     expect(Math.abs(geometry.left - geometry.owner.left)).toBeLessThanOrEqual(1);
-    expect(geometry.top).toBeGreaterThan(geometry.owner.top + geometry.owner.height / 2);
-    expect(geometry.height).toBeLessThanOrEqual(geometry.owner.height * 0.45 + 1);
-    expect(Math.abs(geometry.bottom - geometry.owner.bottom)).toBeLessThanOrEqual(1);
   }
 }
 
@@ -860,7 +865,9 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     await graph.locator(".graph-local-stage").scrollIntoViewIfNeeded();
     await evidenceScreenshot(page, testInfo, `local-${locale}-${viewport.width}-keyboard-selected-relation.png`);
     expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
-    expect(await localStageGeometry(graph)).toEqual(idleGeometry);
+    // A narrow List grows in the page with its opened groups; the canvas under it does not.
+    const { frame, backing } = await localStageGeometry(graph);
+    expect({ frame, backing }).toEqual({ frame: idleGeometry.frame, backing: idleGeometry.backing });
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(idleState);
 
     // Text fallback preserves all original rows and does not attempt a
@@ -1067,9 +1074,6 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   const geometry = await localStageGeometry(graph);
   const native = await graph.locator("canvas.sigma-nodes").elementHandle();
 
-  // Pinning from More expanded the phone sheet over all but the list's top
-  // band; a reader collapses it to return to the list.
-  await details.getByRole("button", { name: "Collapse details", exact: true }).click();
   await nodes.locator('button[data-local-graph-id="node:folder"]').click();
   await expect(details.locator("h5.graph-details-title")).toHaveText("Visible Source Folder");
   // A folder's members are its outgoing relations (folder → member).
@@ -1121,7 +1125,7 @@ for (const { locale, size } of [
   { locale: "en", size: { name: "320px reader", viewport: { width: 1440, height: 900 }, hostWidth: 344 } },
   { locale: "ko", size: { name: "390px short screen", viewport: { width: 390, height: 640 }, hostWidth: 1100 } },
 ] as const) {
-  test(`Local ${locale} ${size.name} exposes all long-title actions before Tab and preserves native aside scrolling`, async ({ page }, testInfo) => {
+  test(`Local ${locale} ${size.name} exposes all long-title actions before Tab and keeps the page as the Details scroller`, async ({ page }, testInfo) => {
     const errors = await mount(page, "details-actions-long", locale, "light", size.viewport, size.hostWidth);
     const graph = page.getByTestId("graph-view");
     const details = graph.locator(".graph-details");
@@ -1140,7 +1144,7 @@ for (const { locale, size } of [
     await expect(nodes.locator('button[data-local-graph-id="node:related"]')).toHaveAttribute("aria-pressed", "true");
     await expect(details.locator(".graph-details-title-row")).toBeInViewport({ ratio: 1 });
     const firstActions = await expectAllLocalDetailsActions(details, "long-title-all-actions-before-next-tab");
-    expect(firstActions.actions).toHaveLength(5);
+    expect(firstActions.actions).toHaveLength(4);
     const expand = details.getByRole("button", { name: words.expand, exact: true });
     await expect(expand).toBeEnabled();
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
@@ -1173,22 +1177,17 @@ for (const { locale, size } of [
     const evidence = details.locator("dd").filter({ hasText: "end of evidence" });
     await expect(title).toContainText("end of full title");
     await expect(evidence).toContainText("end of evidence");
+    // Below the canvas Details has no inner scroller; the page reaches its end.
     const dimensions = await details.evaluate((element) => ({ client: element.clientHeight, scroll: element.scrollHeight }));
-    expect(dimensions.scroll).toBeGreaterThan(dimensions.client);
+    expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client + 1);
     await details.focus();
-    const outerScroll = await page.evaluate(() => window.scrollY);
     await page.keyboard.press("End");
-    await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    expect(await page.evaluate(() => window.scrollY)).toBe(outerScroll);
-    await expectLocalTextTailReachable(page, evidence, "end of evidence");
-    await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-evidence-native-scroll.png`);
-    await expectLocalTextTailReachable(page, title, "end of full title");
-    await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-title-native-scroll.png`);
-    const scrolled = await details.evaluate((element) => element.scrollTop);
-    expect(scrolled).toBeGreaterThan(0);
+    await expect(evidence).toBeInViewport();
+    // Native key scrolling animates; read the position once it has settled.
+    const { outerScrollY: scrolled } = await settleLocalAsideScroll(evidence);
+    await evidenceScreenshot(page, testInfo, `local-${locale}-${size.hostWidth}-long-evidence-page-scroll.png`);
     await page.evaluate(() => window.__localCoverageFixture.replacePayload());
-    expect(await details.evaluate((element) => element.scrollTop)).toBe(scrolled);
-    expect(await page.evaluate(() => window.scrollY)).toBe(outerScroll);
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(expanded);
     expect(await localStageGeometry(graph)).toEqual(geometry);
 
@@ -1198,7 +1197,6 @@ for (const { locale, size } of [
     await focusLocalRowWithKeyboard(page, nodes, "node:related");
     await page.keyboard.press("Enter");
     await expect(details).toBeFocused();
-    expect(await details.evaluate((element) => element.scrollTop)).toBe(0);
     await expect(details.getByRole("button", { name: words.unpin, exact: true, includeHidden: true })).toHaveCount(1);
     await expectAllLocalDetailsActions(details);
     // SAME-ID activation still hands off, with the original selected node
@@ -1210,10 +1208,10 @@ for (const { locale, size } of [
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(expanded);
     expect(await localStageGeometry(graph)).toEqual(geometry);
     expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
-    await expectLocalDetailsBounds(graph, "sheet");
+    await expectLocalDetailsBounds(graph, "below");
     const invariantPath = testInfo.outputPath("long-title-native-invariants.json");
     await writeFile(invariantPath, JSON.stringify({ locale, size, firstActions, initial, expanded,
-      geometry, outerScroll, sameIdMetadataScroll: scrolled, reselectionScroll: 0 }, null, 2));
+      geometry, sameIdMetadataScroll: scrolled }, null, 2));
     await testInfo.attach("long-title-native-invariants.json", { path: invariantPath, contentType: "application/json" });
     expect(errors).toEqual([]);
   });
@@ -1343,9 +1341,11 @@ for (const { locale, mode } of [
       for (const kind of ["context", "library", "conversation", "folder"] as const) {
         const cue = buttons.locator(`:scope > .relation-list-flow-name > svg[data-node-visual-kind="${kind}"]`).first();
         await cue.scrollIntoViewIfNeeded();
-        // Native sticky title/toggle/footer can cover a minimally revealed
-        // row. Center its real SVG within the scrollport before pixel proof.
-        if (region === "neighbors") {
+        // Sticky rows can cover a minimally revealed row. Center its real SVG
+        // within the scrollport before pixel proof.
+        if (region === "main") {
+          await cue.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest" }));
+        } else {
           await cue.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest" }));
           await settleLocalAsideScroll(cue);
           await revealLocalCue(page, cue);
@@ -1362,7 +1362,7 @@ for (const { locale, mode } of [
         await testInfo.attach(`local-${locale}-${mode}-${region}-${kind}-cue.png`, { body: screenshot, contentType: "image/png" });
       }
     };
-    // List rows first: on a phone the opened Details sheet overlays the list.
+    // List rows first, before Details opens.
     await proveSilhouettes("main", mainButtons);
 
     const members = NODE_CUE_ROWS.filter((node) => node.kind !== "folder");

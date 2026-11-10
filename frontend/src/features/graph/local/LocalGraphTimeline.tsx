@@ -31,11 +31,16 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
 }) {
   const { t } = useTranslation("graph");
   const axisRef = useRef<HTMLDivElement>(null);
-  const [axisWidth, setAxisWidth] = useState(400);
+  const [axis, setAxis] = useState({ width: 400, markWidth: 44 });
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   useEffect(() => {
     if (!axisRef.current || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => setAxisWidth(Math.max(1, entry.contentRect.width)));
+    // Marks closer than one hit width (--history-mark-width, set per layout in
+    // the stylesheet) merge into a group so their buttons never overlap.
+    const observer = new ResizeObserver(([entry]) => {
+      const markWidth = Number.parseFloat(getComputedStyle(entry.target).getPropertyValue("--history-mark-width"));
+      setAxis({ width: Math.max(1, entry.contentRect.width), markWidth: markWidth > 0 ? markWidth : 44 });
+    });
     observer.observe(axisRef.current);
     return () => observer.disconnect();
   }, [timeline.length]);
@@ -51,7 +56,7 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
       if (item.lane !== lane) return;
       const left = position(item);
       const previous = result[result.length - 1];
-      if (previous && (left - previous.left) / 100 * axisWidth < 48) previous.indices.push(index);
+      if (previous && (left - previous.left) / 100 * axis.width < axis.markWidth) previous.indices.push(index);
       else result.push({ id: item.id, left, indices: [index] });
     });
     return result;
@@ -80,6 +85,7 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
         <p>{payload.history.coverage_from ? formatVersionTimestamp(payload.history.coverage_from).split(" ")[0] : t("graph.timeline.unknown")}
           {" – "}{payload.history.watermark ? formatVersionTimestamp(payload.history.watermark).split(" ")[0] : t("graph.timeline.now")}
           <span aria-hidden="true"> · </span>{t("graph.historyUi.records", { count: timeline.length })}</p>
+        {payload.history.status !== "complete" ? <p className="local-history-partial"><Info size={12} aria-hidden="true" />{t("graph.historyUi.partial")}</p> : null}
         {digest ? <p className="local-history-digest" data-testid="graph-session-digest">{digest}</p> : null}
       </div>
       <div className="local-history-controls" role="group" aria-label={t("graph.timeline.heading")}>
@@ -94,15 +100,13 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
         </select>
       </div>
     </header>
-    {payload.history.status !== "complete" ? <p className="local-history-note"><Info size={13} aria-hidden="true" />{t("graph.historyUi.partial")}</p> : null}
     {restoredLatest ? <p className="local-history-restored" role="status">{t("graph.historyUi.restoredLatest")}</p> : null}
     {!timeline.length ? <p className="local-history-empty">{t("graph.timeline.noEvents")}</p> : <>
       <div className="local-history-chart">
         <div className="local-history-lane-labels">{lanes.map((lane) => <span key={lane}>{t(`graph.historyUi.${lane}`)}</span>)}</div>
         <div className="local-history-plot">
           <div className="local-history-axis" ref={axisRef}>
-            <div className="local-history-grid" aria-hidden="true">{[0, 25, 50, 75, 100].map((left) => <i key={left} style={{ left: `${left}%` }} />)}</div>
-            <div className="local-history-future" style={{ left: `${playhead}%` }} aria-hidden="true" />
+            <div className="local-history-future" style={event ? { left: `${playhead}%` } : undefined} aria-hidden="true" />
             <div className="local-history-playhead" style={{ left: `${playhead}%` }} aria-hidden="true" />
             {groups.map((lane, laneIndex) => <div key={lanes[laneIndex]} className="local-history-lane" role="group" aria-label={t(`graph.historyUi.${lanes[laneIndex]}`)}>
               {lane.map((group) => {
@@ -147,11 +151,14 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
       <div className="local-history-event" aria-live={playing ? "off" : "polite"}>
         {event ? <>
           <span className={`local-history-symbol is-${event.mark}`}><MarkIcon kind={event.mark} /></span>
-          <div className="local-history-event-copy"><div><strong>{event.summary}</strong><span>{cursor + 1} / {timeline.length}</span></div>
-            <p>{event.detail}</p><time dateTime={event.occurred_at}>{formatVersionTimestamp(event.occurred_at)}</time>
+          <div className="local-history-event-copy"><strong title={event.summary}>{event.summary}</strong>
+            <p title={event.detail}>{event.detail}</p><time dateTime={event.occurred_at}>{formatVersionTimestamp(event.occurred_at)}</time>
+            <span className="local-history-event-position">{cursor + 1} / {timeline.length}</span>
             {!event.visible_change ? <small>{t("graph.timeline.filteredEvent")}</small> : null}</div>
-          <button type="button" disabled={!event.visible_change} onClick={onShowEvent}>{t("graph.historyUi.showInGraph")}<ArrowUpRight size={14} aria-hidden="true" /></button>
-        </> : <><span className="local-history-position">0 / {timeline.length}</span>{t("graph.timeline.start")}</>}
+          <button type="button" disabled={!event.visible_change} onClick={onShowEvent} aria-label={t("graph.historyUi.showInGraph")}>
+            <span className="local-history-label-long">{t("graph.historyUi.showInGraph")}</span>
+            <span className="local-history-label-short">{t("graph.historyUi.show")}</span><ArrowUpRight size={14} aria-hidden="true" /></button>
+        </> : <p className="local-history-start"><span className="local-history-position">0 / {timeline.length}</span>{t("graph.timeline.start")}</p>}
       </div>
       {reducedMotion ? <p className="local-history-note">{t("graph.timeline.reducedMotion")}</p> : null}
     </>}

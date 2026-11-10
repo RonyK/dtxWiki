@@ -92,10 +92,6 @@ for (const viewport of viewports) {
       await details.getByRole("button", { name: "Pin", exact: true }).click();
       await expect(details.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
       await details.locator(".graph-details-more > summary").click();
-      // More reveals an expanded mobile sheet; inspect the default sheet
-      // geometry after returning through its visible collapse control.
-      const collapseSheet = details.getByRole("button", { name: "Collapse details", exact: true });
-      if (await collapseSheet.isVisible()) await collapseSheet.click();
       await stage.scrollIntoViewIfNeeded();
       const selectedGeometry = await graph.evaluate((element) => {
         const owner = element.querySelector(".graph-local-stage")!.getBoundingClientRect();
@@ -109,17 +105,24 @@ for (const viewport of viewports) {
           painted: element.querySelector(".graph-details")!.contains(document.elementFromPoint(panel.left + 4, panel.top + 4)) };
       });
       expect(selectedGeometry.stageWidth).toBe(geometry.stageWidth);
-      expect(selectedGeometry.stageHeight).toBe(geometry.stageHeight);
+      // A narrow List takes its full length in the page; only its canvas keeps a size.
+      if (selectedGeometry.stageWidth > 760) expect(selectedGeometry.stageHeight).toBe(geometry.stageHeight);
       expect(selectedGeometry.canvasWidth).toBe(geometry.canvasWidth);
       expect(selectedGeometry.canvasHeight).toBe(geometry.canvasHeight);
       expect(selectedGeometry.panelLeft).toBeGreaterThanOrEqual(0);
       expect(selectedGeometry.panelRight).toBeLessThanOrEqual(0);
-      expect(selectedGeometry.panelBottom).toBeLessThanOrEqual(1);
       expect(selectedGeometry.painted).toBe(true);
       if (selectedGeometry.stageWidth <= 760) {
-        expect(selectedGeometry.panelTop).toBeGreaterThan(geometry.stageHeight * 0.4);
-        expect(selectedGeometry.panelHeight).toBeLessThanOrEqual(geometry.stageHeight * 0.45 + 1);
+        // Details follows the canvas in the page and leaves it uncovered;
+        // the pinned actions stay clear of its title row and close control.
+        expect(selectedGeometry.panelTop).toBeGreaterThanOrEqual(selectedGeometry.stageHeight);
+        const closeHit = await details.getByRole("button", { name: "Clear selection", exact: true }).evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          return element.contains(document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2));
+        });
+        expect(closeHit).toBe(true);
       } else {
+        expect(selectedGeometry.panelBottom).toBeLessThanOrEqual(1);
         expect(selectedGeometry.panelTop).toBe(60);
         expect(selectedGeometry.panelRight).toBe(-12);
       }

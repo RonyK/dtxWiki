@@ -496,6 +496,13 @@ export function createSigmaGraphAdapter(
       context.save();
       context.font = "600 11px sans-serif";
       const width = Math.min(180, context.measureText(text).width + 16);
+      const textRoom = width - 12;
+      const characters = Array.from(text);
+      let visible = text;
+      while (characters.length > 0 && context.measureText(visible).width > textRoom) {
+        characters.pop();
+        visible = `${characters.join("")}…`;
+      }
       context.fillStyle = edge.color;
       context.beginPath();
       context.roundRect(x - width / 2, y - 11, width, 22, 7);
@@ -503,7 +510,7 @@ export function createSigmaGraphAdapter(
       context.fillStyle = tokens.surface;
       context.textAlign = "center";
       context.textBaseline = "middle";
-      context.fillText(text, x, y, width - 12);
+      context.fillText(visible, x, y);
       context.restore();
     },
     labelColor: { color: ink },

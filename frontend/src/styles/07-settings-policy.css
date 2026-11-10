@@ -3223,6 +3223,8 @@ button.history-card {
   }
 
   .workspace-screen[data-mobile-action-reserve="true"] .feature-main {
+    /* Sticky children stop at this padding edge; the variable lets them offset it. */
+    --feature-main-bottom-padding: calc(180px + env(safe-area-inset-bottom));
     padding-bottom: calc(180px + env(safe-area-inset-bottom));
   }
 
@@ -3403,6 +3405,7 @@ button.history-card {
   }
 
   .context-screen .feature-main {
+    --feature-main-bottom-padding: calc(32px + env(safe-area-inset-bottom));
     padding-bottom: calc(32px + env(safe-area-inset-bottom));
   }
 

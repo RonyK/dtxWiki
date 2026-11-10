@@ -104,6 +104,28 @@ vi.mock("../../pages/MarkdownView", () => ({
 }));
 
 describe("GraphView", () => {
+  it("restores the chosen canvas ratio when opening a different Context page", () => {
+    const key = "dtxwiki.contextGraph.aspectRatio";
+    localStorage.setItem(key, "unsupported-ratio");
+    try {
+      const first = renderGraph({ openContents: false });
+      expect(first.container.querySelector(".graph-height-picker > summary")).toHaveTextContent("16:11");
+      fireEvent.click(first.container.querySelector(".graph-height-picker > summary")!);
+      fireEvent.click(screen.getByRole("button", { name: "4:3" }));
+      first.unmount();
+
+      const payload = graphFixture();
+      payload.query.seeds[0].id = payload.nodes[1].entity_id;
+      payload.nodes = payload.nodes.map((node, index) => ({ ...node, is_seed: index === 1 }));
+      const second = renderGraph({ openContents: false, payload });
+      expect(second.container.querySelector(".graph-height-picker > summary")).toHaveTextContent("4:3");
+      fireEvent.click(second.container.querySelector(".graph-height-picker > summary")!);
+      expect(screen.getByRole("button", { name: "4:3" })).toHaveAttribute("aria-pressed", "true");
+    } finally {
+      localStorage.removeItem(key);
+    }
+  });
+
   it("loads the graph namespace without Context-owned graph strings", () => {
     const getFixedT = vi.spyOn(i18n, "getFixedT");
     try {

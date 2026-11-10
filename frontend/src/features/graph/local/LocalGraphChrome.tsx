@@ -1,7 +1,8 @@
-import { Activity, History, Info, Network, Scan, ZoomIn, ZoomOut } from "lucide-react";
+import { Activity, History, Info, Network, Ratio, Scan, ZoomIn, ZoomOut } from "lucide-react";
 import { useId, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphEdge, GraphHistoryMode, GraphRange, GraphTimelineEvent } from "../../../shared/api/graph";
+import { GRAPH_CANVAS_RATIOS, type GraphCanvasRatio } from "./canvasRatio";
 import { PreviewBadge } from "../../../shared/components/PreviewBadge";
 
 export function GraphPreviewBadge() {
@@ -32,9 +33,10 @@ export function GraphTypeSelector({ mode, busy, onChange }: {
       <div className="graph-type-options" role="radiogroup" aria-label={t("graph.view.heading")} aria-busy={busy}>
         {modes.map((value) => {
           const Icon = icons[value];
-          return <button key={value} type="button" role="radio" aria-checked={mode === value} aria-disabled={busy} tabIndex={mode === value ? 0 : -1}
+          return <button key={value} type="button" role="radio" aria-checked={mode === value} aria-disabled={busy} aria-label={t(`graph.view.${value}.name`)} tabIndex={mode === value ? 0 : -1}
             onClick={() => { if (!busy) onChange(value); }} onKeyDown={navigateChoices}>
-            <Icon size={17} aria-hidden="true" /><span>{t(`graph.view.${value}.name`)}</span>
+            <Icon size={17} aria-hidden="true" /><span className="graph-type-full">{t(`graph.view.${value}.name`)}</span>
+            <span className="graph-type-short">{t(`graph.view.${value}.short`)}</span>
             {value !== "current" ? <GraphPreviewBadge /> : null}
           </button>;
         })}
@@ -88,7 +90,8 @@ export function GraphScopeSelector({ range, historical, busy, onChange }: {
   </div>;
 }
 
-export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled }: {
+export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled, canvasRatio, heightDisabled, onHeightChange }: {
+  canvasRatio: GraphCanvasRatio; heightDisabled: boolean; onHeightChange: (ratio: GraphCanvasRatio) => void;
   disabled: boolean;
   onZoomIn: () => void; onZoomOut: () => void; onFit: () => void;
 }) {
@@ -101,6 +104,21 @@ export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled }: {
         <ButtonIcon size={17} aria-hidden="true" />
       </button>;
     })}
+    {!heightDisabled ? <details className="graph-height-picker">
+      <summary title={t("graph.view.canvasHeight")}><Ratio size={16} aria-hidden="true" />
+        {t("graph.view.height")} · {canvasRatio}
+      </summary>
+      <div className="graph-height-options" role="group" aria-label={t("graph.view.canvasHeight")}>
+        <p>{t("graph.view.canvasAspectRatio")}</p>
+        {GRAPH_CANVAS_RATIOS.map((ratio) => <button className="graph-height-option" key={ratio} type="button"
+          aria-pressed={canvasRatio === ratio} onClick={(event) => {
+            onHeightChange(ratio);
+            const picker = event.currentTarget.closest("details");
+            picker?.removeAttribute("open");
+            picker?.querySelector("summary")?.focus();
+          }}>{ratio}</button>)}
+      </div>
+    </details> : null}
   </div>;
 }
 

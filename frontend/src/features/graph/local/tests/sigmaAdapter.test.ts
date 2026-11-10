@@ -505,6 +505,27 @@ describe("Local Sigma interactions", () => {
     expect(reducer("context_page:other", other).label).toBeNull();
   });
 
+  it("ellipsizes long history edge captions without compressing their text", () => {
+    const context = {
+      save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), roundRect: vi.fn(), fill: vi.fn(),
+      fillText: vi.fn(), measureText: (text: string) => ({ width: Array.from(text).length * 11 }),
+    };
+    const draw = state.sigma.settings.defaultDrawEdgeLabel as (
+      context: unknown, edge: Record<string, unknown>, source: { x: number; y: number },
+      target: { x: number; y: number },
+    ) => void;
+    const label = "문서 제목이 아주 길 때 변경 사항을 표시하는 라벨 🔎";
+    const edge = { forceLabel: true, label, color: "purple" };
+    draw(context, edge, { x: 100, y: 100 }, { x: 300, y: 100 });
+    const visible = context.fillText.mock.calls[0][0] as string;
+    expect(visible).toMatch(/…$/u);
+    expect(label.startsWith(visible.slice(0, -1))).toBe(true);
+    expect(context.measureText(visible).width).toBeLessThanOrEqual(168);
+    expect(context.fillText).toHaveBeenLastCalledWith(visible, 200, 100);
+    draw(context, { ...edge, label: "짧은 제목" }, { x: 100, y: 100 }, { x: 300, y: 100 });
+    expect(context.fillText).toHaveBeenLastCalledWith("짧은 제목", 200, 100);
+  });
+
   it("separates nearby forced labels instead of painting seed and selected text over one another", () => {
     const context = {
       save: vi.fn(), restore: vi.fn(), strokeText: vi.fn(), fillText: vi.fn(),
