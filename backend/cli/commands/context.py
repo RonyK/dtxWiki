@@ -152,6 +152,8 @@ def context_block_map_audit(
     try:
         with session_factory() as session:
             for status, body_md, block_map in iter_version_block_maps(session):
+                if body_md is None:
+                    continue
                 bucket = totals.setdefault(
                     status, {"total": 0, "missing": 0, "drifted": 0}
                 )

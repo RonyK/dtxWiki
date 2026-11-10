@@ -8,6 +8,7 @@ from sqlalchemy.exc import OperationalError
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
+from backend.services.context_version_storage import ContextStorageServiceError
 from backend.tests.utils.environment import clear_ambient_dtxwiki_env
 
 
@@ -82,6 +83,21 @@ def test_unhandled_exception_returns_envelope_500(tmp_path, monkeypatch):
     )
     assert response.json()["message"] == "internal server error"
     assert "kaboom" not in response.text
+
+    # A storage failure raised by any body reader uses the existing mapping
+    # even when that route has no local storage-error handler.
+    def storage_unavailable(_session_factory):
+        raise ContextStorageServiceError("context_repository_unavailable") from OSError(
+            "/private/context-repository"
+        )
+
+    monkeypatch.setattr("backend.api.health.database_ping", storage_unavailable)
+    response = client.get("/health/ready")
+    assert response.status_code == 503
+    _assert_envelope(
+        response.json(), error_code="context_repository_unavailable", status="failed"
+    )
+    assert "/private/context-repository" not in response.text
 
 
 def test_schema_mismatch_exception_returns_actionable_envelope(tmp_path, monkeypatch):

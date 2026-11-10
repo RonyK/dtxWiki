@@ -12,6 +12,7 @@ from backend.context_versions.adapters.git_libgit2 import (
 )
 from backend.context_versions.domain import ContentDescriptor, ContentPayload
 from backend.models.context import ContextPage, ContextPageVersion
+from backend.services.context_version_storage import align_publication
 from backend.services.ops.runtime_lock import RuntimeLock, lock_path
 
 
@@ -22,7 +23,8 @@ def seed_offline_context_snapshots(
 
     This fixture-only batch runs before web servers/workers start. A durable
     full pack replaces per-object fsync; packed refs are made durable before
-    the caller may start a runtime. Database bodies and maps stay untouched.
+    the caller may start a runtime. Only after all packs and refs are durable,
+    apply runtime's current-body/history-map rules to the seeded rows.
     """
     root = repositories_root.resolve()
     if (
@@ -35,9 +37,13 @@ def seed_offline_context_snapshots(
         )
     store, writer = build_context_storage(root)
     workspaces = set()
+    pages_to_align = set()
     try:
         pygit2.settings.enable_fsync_gitdir(False)
         with session_factory.begin() as session:
+            session.info.update(
+                context_snapshot_store=store, context_version_writer=writer
+            )
             page_ids = session.scalars(select(ContextPage.id).order_by(ContextPage.id))
             for page_id in page_ids.yield_per(100):
                 page = session.get(ContextPage, page_id)
@@ -70,6 +76,12 @@ def seed_offline_context_snapshots(
                     != 1
                 ):
                     raise RuntimeError("offline Context fixture has inconsistent heads")
+                if any(
+                    version.version_status == "superseded_snapshot"
+                    or version._body_md is None
+                    for version in versions
+                ):
+                    pages_to_align.add(page.id)
                 versions.sort(key=lambda version: version.id == current.id)
                 parents = []
                 for version in versions:
@@ -127,6 +139,15 @@ def seed_offline_context_snapshots(
                     _sync_repository_metadata(repository_path)
                     _verify_workspace(session, store, workspace_id)
                     store.prune_packed(workspace_id, packed)
+            # No SQL source copy is released during the fsync-disabled batch.
+            # The complete packs and refs above are durable before this shared
+            # runtime operation verifies bytes and releases historical copies.
+            for page_id in sorted(pages_to_align, key=str):
+                page = session.get(ContextPage, page_id)
+                current = session.get(
+                    ContextPageVersion, page.current_published_version_id
+                )
+                align_publication(session, page, current.commit_oid, writer)
     finally:
         pygit2.settings.enable_fsync_gitdir(True)
 

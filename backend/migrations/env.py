@@ -1,6 +1,7 @@
 from collections import Counter
 from logging.config import fileConfig
 
+import pygit2
 from alembic import context
 from alembic.migration import MigrationContext
 from alembic.util import CommandError
@@ -19,6 +20,11 @@ from backend.services.ops.migration_preflight import (
     evaluate_connection_preflight,
 )
 from backend.services.ops.read_only_database import inspect_revision_snapshot
+
+# Update/rollback runs as root against the service user's repositories. Configure
+# the native library once here, including before frozen migration helpers run.
+pygit2.settings.owner_validation = False
+pygit2.settings.enable_strict_hash_verification(True)
 
 config = context.config
 

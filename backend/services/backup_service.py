@@ -741,15 +741,23 @@ def _verify_repository_database_references(database: Path, root: Path | None) ->
                 for workspace_id in _repository_workspace_ids(root)
             }
         columns = {
-            row[1]
+            row[1]: row
             for row in connection.execute("PRAGMA table_info(context_page_version)")
         }
         if "commit_oid" not in columns:
             return
+        # Older PR1 checkpoints legitimately retain historical DB bodies.
+        # The nullable column identifies the PR2 storage contract.
+        nullable_bodies = not columns["body_md"][3]
+        body_condition = "version_status!='superseded_snapshot' AND body_md IS NULL"
+        if nullable_bodies:
+            body_condition = (
+                "(version_status='superseded_snapshot') != (body_md IS NULL)"
+            )
         invalid = connection.execute(
             "SELECT 1 FROM context_page_version WHERE "
-            "(version_status IN ('published_snapshot', 'superseded_snapshot')) "
-            "!= (commit_oid IS NOT NULL) LIMIT 1"
+            "((version_status IN ('published_snapshot', 'superseded_snapshot')) "
+            "!= (commit_oid IS NOT NULL)) OR (" + body_condition + ") LIMIT 1"
         ).fetchone()
         invalid_pointer = connection.execute(
             "SELECT 1 FROM context_page p LEFT JOIN context_page_version v "
@@ -765,7 +773,8 @@ def _verify_repository_database_references(database: Path, root: Path | None) ->
             )
         rows = connection.execute(
             "SELECT workspace_id, page_id, id, commit_oid, content_format, "
-            "format_version, media_type, encoding, content_byte_size, body_md "
+            "format_version, media_type, encoding, content_byte_size, "
+            "body_md, content_hash "
             "FROM context_page_version WHERE commit_oid IS NOT NULL"
         ).fetchall()
         if root is None:
@@ -787,9 +796,10 @@ def _verify_repository_database_references(database: Path, root: Path | None) ->
                 media_type=row["media_type"],
                 encoding=row["encoding"],
             )
-            content = store.read(
+            content = store.verify_snapshot(
                 workspace_id=workspace_id,
                 page_id=page_id,
+                version_id=UUID(row["id"]),
                 commit_oid=row["commit_oid"],
                 descriptor=descriptor,
             )
@@ -797,6 +807,17 @@ def _verify_repository_database_references(database: Path, root: Path | None) ->
                 raise BackupIntegrityError("Git snapshot size differs from database")
             if row["body_md"] is not None and content != row["body_md"].encode("utf-8"):
                 raise BackupIntegrityError("Git snapshot bytes differ from database")
+            if row["body_md"] is None:
+                from backend.context_versions.codecs import codec_for
+                from backend.utils.content_hash import content_hash
+
+                if (
+                    content_hash(codec_for(descriptor).decode(content))
+                    != row["content_hash"]
+                ):
+                    raise BackupIntegrityError(
+                        "Git snapshot hash differs from database"
+                    )
             commits[(workspace_id, page_id, UUID(row["id"]))] = row["commit_oid"]
             workspaces.add(workspace_id)
         expected = {

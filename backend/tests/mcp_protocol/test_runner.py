@@ -2,12 +2,14 @@ import copy
 import json
 import logging
 from dataclasses import replace
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import anyio
 import pytest
 from sqlalchemy import func, select
 
+from backend.mcp import router as router_module
 from backend.mcp.envelope import ERROR_CODE_GUIDANCE
 from backend.mcp.protocol import runner as runner_module
 from backend.mcp.protocol.output_validation import (
@@ -27,7 +29,9 @@ from backend.models.workspace_credential_grant import WorkspaceCredentialGrant
 from backend.policy.auth import ActorContext
 from backend.policy.rbac import grant_workspace_membership
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.mcp_client_service import runtime_binding_key_for_actor
+from backend.services.mcp_read_projection import record_served_read
 from backend.tests.conftest import captured_log_messages
 
 
@@ -711,6 +715,7 @@ def test_call_tool_async_unexpected_dispatch_error_is_sanitized_and_traced(
     def _boom(*_args, **_kwargs):
         raise RuntimeError("INSERT INTO pages (secret) VALUES ('do-not-leak')")
 
+    original_dispatch = runner_module.dispatch
     monkeypatch.setattr(runner_module, "dispatch", _boom)
 
     async def run():
@@ -747,6 +752,60 @@ def test_call_tool_async_unexpected_dispatch_error_is_sanitized_and_traced(
     assert trace.result_status == "failed"
     assert trace.error_code == "internal_error"
     assert "do-not-leak" not in str(trace.result_summary)
+
+    # Known storage errors travel through dispatch's common boundary and then
+    # the normal runner trace path, without retaining a partial served read.
+    monkeypatch.setattr(runner_module, "dispatch", original_dispatch)
+    page_id = uuid4()
+
+    def _storage_boom(_payload, _ctx):
+        record_served_read(
+            "context_page",
+            page_id,
+            SimpleNamespace(
+                id=uuid4(), version_status="superseded_snapshot", body_md="partial"
+            ),
+        )
+        raise ContextStorageServiceError("context_repository_unavailable") from OSError(
+            "/private/context-repository"
+        )
+
+    monkeypatch.setitem(
+        router_module.TOOL_HANDLERS, "read_context_outline", _storage_boom
+    )
+
+    async def storage_run():
+        return await call_tool_async(
+            "read_context_outline",
+            {
+                "workspace_id": str(workspace_id),
+                "target": {"page_id": str(page_id)},
+                "conversation_token": payload["envelope"]["conversation_token"],
+            },
+            actor=_pat_actor(
+                mcp_default_actor, actor_id="trace-fault-client", scopes=("*",)
+            ),
+            page_service=page_service,
+            session_factory=page_service.session_factory,
+        )
+
+    storage_result = anyio.run(storage_run)
+    storage_payload = json.loads(storage_result.content[0].text)
+    assert storage_result.isError is True
+    assert storage_payload["envelope"]["error_code"] == "context_repository_unavailable"
+    assert storage_payload["envelope"]["result_status"] == "failed"
+    assert (
+        storage_payload["envelope"]["conversation_token"]
+        == payload["envelope"]["conversation_token"]
+    )
+    assert "/private/context-repository" not in storage_result.content[0].text
+    with page_service.session_factory() as session:
+        storage_trace = session.scalar(
+            select(MCPToolCall).where(MCPToolCall.tool_name == "read_context_outline")
+        )
+    assert storage_trace.result_status == "failed"
+    assert storage_trace.error_code == "context_repository_unavailable"
+    assert storage_trace.result_detail is None
 
 
 class _StubResponse:

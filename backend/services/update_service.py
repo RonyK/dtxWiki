@@ -28,7 +28,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import ArgumentError
+from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
 from backend.app import bootstrap, versioning
 from backend.app import data_dir as data_dir_paths
@@ -98,6 +98,98 @@ def run_check(
     return update_check_service.check_for_update(
         target, force=True, allow_network=True, data_dir=data_dir
     )
+
+
+def run_backup(
+    settings: Settings,
+    *,
+    method: str = "auto",
+    dry_run: bool = False,
+    data_dir: Path | None = None,
+    env_file: str | None = None,
+    echo=print,
+) -> UpdateResult:
+    """Create the existing verified checkpoint and restore paused services."""
+    current = settings.app_version
+    install = install_method.detect_install_method(
+        override=None if method == "auto" else method
+    )
+    database = backup_service.db_path_from_url(settings.database_url)
+    if database is None or not database.is_file():
+        echo("ERROR: dtxwiki backup requires an existing SQLite database file.")
+        if _non_sqlite_database(settings.database_url):
+            echo("Back up the external database and its data directory together.")
+        return UpdateResult(
+            False, 2, current, None, None, "SQLite database unavailable"
+        )
+    if dry_run:
+        backups_root = (data_dir or data_dir_paths.data_dir()) / "backups"
+        echo("DRY RUN — create a verified DB + Library + Git + secrets backup:")
+        if install.services:
+            echo("  - stop only currently running managed services")
+        echo("  - take the exclusive runtime lock and create the checkpoint")
+        echo("  - release the lock, then restart only services paused here")
+        echo(f"  - backup directory: {backups_root}")
+        return UpdateResult(True, 0, current, current, None, "dry-run")
+
+    # The configured unit list does not record which units were running. Keep
+    # only that small set so a manual backup never starts an intentionally
+    # stopped worker. Record it before stop, which can fail after partial work.
+    paused = replace(install, services=())
+    held = None
+    backup_dir = None
+    failure = None
+    try:
+        active = []
+        for service in install.services:
+            status = svc.run_systemctl("is-active", (service,), check=False)
+            if status.returncode == 0:
+                active.append(service)
+            elif status.returncode not in (3, 4):
+                raise UpdateStepError(f"could not inspect service {service}")
+        paused = replace(install, services=tuple(active))
+        if paused.services:
+            svc.run_systemctl("stop", paused.services)
+        resources = RuntimeResources.for_settings(settings)
+        if data_dir is not None:
+            resources = replace(resources, root=Path(data_dir).resolve())
+        held = resources.acquire_activity("exclusive")
+        db_lock.probe_sqlite_writable(settings.database_url)
+        backup_dir = backup_service.create_backup(
+            settings,
+            version=current,
+            alembic_revision=bootstrap.current_db_alembic_revision(settings),
+            install_method=install.kind,
+            data_dir=data_dir,
+            env_file=_effective_env_file(install, env_file),
+        )
+    except _BACKUP_IO_ERRORS + (
+        runtime_lock.RuntimeLockHeldError,
+        db_lock.SqliteLockedError,
+        subprocess.SubprocessError,
+        UpdateStepError,
+        SQLAlchemyError,
+    ) as exc:
+        failure = str(exc)
+    finally:
+        restarted = _release_lock_and_start_services(held, paused, echo)
+
+    echo(
+        f"backup: complete — {backup_dir}"
+        if backup_dir is not None
+        else "backup: failed (no completed checkpoint)"
+    )
+    if failure is not None:
+        echo(f"ERROR: backup failed — {failure}")
+    if not restarted:
+        echo("Restart the paused services manually:")
+        echo(f"  sudo systemctl start {' '.join(paused.services)}")
+        return UpdateResult(
+            False, 3, current, current, backup_dir, "service restart failed"
+        )
+    if failure is not None:
+        return UpdateResult(False, 2, current, current, backup_dir, failure)
+    return UpdateResult(True, 0, current, current, backup_dir, "backed up")
 
 
 def run_update(
@@ -236,8 +328,7 @@ def run_update(
     def restart_old_services() -> None:
         # The new code never ran: give the lock back first, or the restarted
         # services would refuse to start while this process still holds it.
-        held.release()
-        _start_services(install, echo)
+        _release_lock_and_start_services(held, install, echo)
 
     try:
         # 2. fail fast if a writer still holds the SQLite lock (solo path).
@@ -465,6 +556,12 @@ def run_rollback(
         )
     )
 
+    echo("This restores dtxWiki from a backup.")
+    echo(f"  backup:  {backup_dir.resolve()}")
+    echo(f"  created: {manifest.get('created_utc') or 'unknown'}")
+    echo(f"  version: {current} -> {target_version}")
+    echo("Everything written after this backup will be lost.")
+
     if dry_run:
         echo(
             f"DRY RUN — rollback ({install.kind}) -> {target_version} "
@@ -488,13 +585,7 @@ def run_rollback(
             "WARNING: no database snapshot will be restored from this backup — "
             "restore the database yourself if needed (e.g. pg_restore)."
         )
-    if (
-        not yes
-        and confirm is not None
-        and not confirm(
-            f"Roll back dtxWiki to {target_version} from {backup_dir.name}?"
-        )
-    ):
+    if not yes and confirm is not None and not confirm("Continue?"):
         return UpdateResult(False, 2, current, None, backup_dir, "aborted by operator")
 
     if install.services:
@@ -631,10 +722,10 @@ def _take_runtime_lock(
             resources = replace(resources, root=Path(data_dir).resolve())
         return resources.acquire_activity("exclusive"), None
     except runtime_lock.RuntimeLockHeldError as exc:
-        _start_services(install, echo)
+        _release_lock_and_start_services(None, install, echo)
         return None, _fail(2, str(exc), None, current, echo, None, operation=operation)
     except (OSError, ValueError) as exc:
-        _start_services(install, echo)
+        _release_lock_and_start_services(None, install, echo)
         return None, _fail(
             2,
             "could not take the dtxWiki runtime lock",
@@ -732,13 +823,21 @@ def _run_argv(
         )
 
 
-def _start_services(install, echo) -> None:
+def _release_lock_and_start_services(held, install, echo) -> bool:
+    if held is not None:
+        held.release()
+    return _start_services(install, echo)
+
+
+def _start_services(install, echo) -> bool:
     if not install.services:
-        return
+        return True
     try:
         svc.run_systemctl("start", install.services)
     except (OSError, subprocess.SubprocessError) as exc:
         echo(f"WARNING: could not restart services: {exc}")
+        return False
+    return True
 
 
 def _installed_version(install) -> str | None:

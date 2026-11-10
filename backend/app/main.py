@@ -1,3 +1,4 @@
+import logging
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from backend.api.auth_sso import router as auth_sso_router
 from backend.api.auth_verification import router as auth_verification_router
 from backend.api.context_media import router as context_media_router
 from backend.api.context_pages import router as context_pages_router
+from backend.api.deps import read_service_error_response
 from backend.api.graph import router as graph_router
 from backend.api.health import health_root_router
 from backend.api.inbox import router as inbox_router
@@ -72,6 +74,9 @@ from backend.catalog.library_family_presets import (
 from backend.catalog.mcp_apps import get_mcp_app_catalog_repository
 from backend.domain.input_policy import InputPolicyError
 from backend.services.auth.provider_registry import ProviderRegistry
+from backend.services.context_version_storage import ContextStorageServiceError
+
+logger = logging.getLogger(__name__)
 
 
 async def http_exception_handler(
@@ -119,6 +124,14 @@ async def input_policy_exception_handler(
         message=str(exc),
         status_code=422,
     )
+
+
+async def context_storage_exception_handler(
+    _request: Request,
+    exc: ContextStorageServiceError,
+) -> JSONResponse:
+    logger.error("Context version storage operation failed", exc_info=exc)
+    return read_service_error_response(exc)
 
 
 async def unhandled_exception_handler(
@@ -359,6 +372,9 @@ def create_app(
     )
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.add_exception_handler(InputPolicyError, input_policy_exception_handler)
+    app.add_exception_handler(
+        ContextStorageServiceError, context_storage_exception_handler
+    )
     include_shared_router(app, health_root_router)
     mount_storage_topology_health(app, resolved_container)
     include_shared_router(app, auth_router, prefix="/api/v1")

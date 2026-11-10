@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from alembic import command
 from sqlalchemy import create_engine, event, inspect, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from backend.migrations.revision_modules.v0_1.content_event_backfill_v1 import (
     backfill_content_event_times,
@@ -17,7 +17,12 @@ from backend.models.audit import AuditEvent
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.integration.test_release_schema_migration import _config
+from backend.tests.utils.context_git import (
+    configure_test_context_storage,
+    seed_published_snapshot,
+)
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
+from backend.utils.content_hash import content_hash
 
 FIRST_EVENT = datetime(2026, 1, 3, 4, tzinfo=UTC)
 SECOND_EVENT = FIRST_EVENT + timedelta(days=12)
@@ -37,9 +42,14 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
     database = tmp_path / "tree-metadata.sqlite"
     url = shared_templates(tmp_path_factory).clone("head", database)
     engine = create_engine(url)
+    config = _config(url)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    configure_test_context_storage(
+        session_factory, config.attributes["context_repositories_root"]
+    )
     ids = {}
     private_version_ids = []
-    with Session(engine) as session, session.begin():
+    with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
         for hard_break, kind in product((False, True), ("context_page", "agent_page")):
             suffix = "hard" if hard_break else "soft"
@@ -85,6 +95,8 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
                     created_by_actor_id="test",
                     version_status="published_snapshot",
                 )
+                old.content_hash = content_hash(old.body_md)
+                latest.content_hash = content_hash(latest.body_md)
             else:
                 old = AgentPageVersion(
                     workspace_id=workspace.id,
@@ -134,6 +146,8 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
             private_version_ids.append(private.id.hex)
             if kind == "context_page":
                 page.current_version_id = page.current_published_version_id = latest.id
+                seed_published_snapshot(session, old)
+                seed_published_snapshot(session, latest, parents=[old.commit_oid])
                 previous_key, action = (
                     "previous_published_version_id",
                     "context_page.draft.publish",
@@ -218,7 +232,6 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
             )
         batch_page_ids = [page.id for page in batch_pages]
     engine.dispose()
-    config = _config(url)
     # The actual previous release schema is the upgrade's starting point;
     # ORM/model construction above is only a convenient legacy data fixture.
     command.downgrade(config, "efcbcf724889")

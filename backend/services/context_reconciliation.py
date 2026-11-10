@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from hashlib import sha256
 from uuid import UUID
@@ -46,6 +47,7 @@ from backend.services.context_push import (
     target_ids_for_operations,
     text_by_id,
 )
+from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.context_visibility import editable_context_version_id
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.lint.autofix import safe_normalize_markdown_legacy_v1
@@ -61,6 +63,8 @@ from backend.utils.block_identity import (
 from backend.utils.block_map import compute_blocks
 from backend.utils.content_hash import content_hash as calculate_content_hash
 from backend.utils.markdown_parser import parse_markdown
+
+logger = logging.getLogger(__name__)
 
 _DIVERGED_MANIFEST_SCHEMA = "context_push_diverged_manifest.v1"
 _BODY_TRANSFORM_SCHEMA = "context_body_transform.v1"
@@ -179,15 +183,15 @@ def reconciliation_branch_is_available(version: ContextPageVersion) -> bool:
     )
 
 
-def verified_reconciliation_branch_is_available(
+def available_reconciliation_snapshot(
     session: Session,
     *,
     page: ContextPage,
     version: ContextPageVersion,
     actor_kind: str | None = None,
     actor_id: str | None = None,
-) -> bool:
-    """Fail-closed availability for list/history surfaces.
+):
+    """The branch snapshot, or None when a surface must show it unavailable.
 
     Pass ``actor_kind``/``actor_id`` (the viewing actor) so an "available"
     badge cannot promise a detail view that would then refuse to disclose a
@@ -196,18 +200,45 @@ def verified_reconciliation_branch_is_available(
     """
 
     if not reconciliation_branch_is_available(version):
-        return False
+        return None
     try:
-        load_reconciliation_snapshot(
+        return load_reconciliation_snapshot(
             session,
             page=page,
             branch_id=version.id,
             actor_kind=actor_kind,
             actor_id=actor_id,
         )
+    except ContextStorageServiceError as exc:
+        logger.exception(
+            "Context storage failed during reconciliation availability check: %s",
+            exc.error_code,
+        )
+        return None
     except ReadServiceError:
-        return False
-    return True
+        return None
+
+
+def verified_reconciliation_branch_is_available(
+    session: Session,
+    *,
+    page: ContextPage,
+    version: ContextPageVersion,
+    actor_kind: str | None = None,
+    actor_id: str | None = None,
+) -> bool:
+    """Fail-closed availability for list/history surfaces."""
+
+    return (
+        available_reconciliation_snapshot(
+            session,
+            page=page,
+            version=version,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+        is not None
+    )
 
 
 def load_verified_reconciliation_manifest(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from dataclasses import replace
 from uuid import UUID
@@ -27,12 +28,16 @@ from backend.schemas.context_edit import (
 )
 from backend.services.body_preparer import BodyPreparer
 from backend.services.context_reconciliation import discard_reconciliation_branch
+from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.context_write_service import ContextWriteService
 from backend.services.lint.autofix import safe_normalize_markdown_legacy_v1
 from backend.services.lint.base import FixResult, LintModule
 from backend.services.lint.registry import LintRegistry
 from backend.services.read_errors import ReadValidationError
-from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.conftest import (
+    authenticate_test_client_in_workspace,
+    captured_log_records,
+)
 from backend.tests.utils.prepared_body import prepare_context_body
 from backend.utils.block_identity import block_map_for_version
 
@@ -1308,17 +1313,61 @@ def test_page_reconciliation_summary_is_bounded_and_reports_truncation(page_serv
     assert detail["reconciliation_available"] is True
 
 
-def test_malformed_reconciliation_review_projection_fails_closed(page_service):
+def test_malformed_reconciliation_review_projection_fails_closed(
+    page_service, monkeypatch
+):
     page, _head, diverged = _create_paragraph_conflict(
         page_service,
         slug="reconciliation-malformed-review",
     )
     branch_id = diverged.alternative_draft_id
+    workspace_id = _workspace_id(page_service)
+    client = _client(page_service, email="malformed-review-owner@example.com")
+
+    def storage_unavailable(*_args, **_kwargs):
+        raise ContextStorageServiceError("context_repository_unavailable") from OSError(
+            "/private/context-repository"
+        )
+
+    # Alembic's fileConfig can disable existing module loggers. Capture the
+    # named logger with the shared isolation helper rather than the root sink.
+    with captured_log_records(
+        "backend.services.context_reconciliation", logging.ERROR
+    ) as records:
+        with monkeypatch.context() as context:
+            context.setattr(
+                "backend.services.context_reconciliation.load_reconciliation_snapshot",
+                storage_unavailable,
+            )
+            response = client.get(
+                f"/api/v1/workspaces/{workspace_id}/context/pages/{page.id}/versions"
+            )
+            review_response = client.get(
+                f"/api/v1/workspaces/{workspace_id}/reviews/{diverged.review_item_id}"
+            )
+    assert response.status_code == 200, response.text
+    branch_entry = next(
+        entry
+        for entry in response.json()["data"]
+        if entry["version_id"] == str(branch_id)
+    )
+    assert branch_entry["reconciliation_available"] is False
+    assert "/private/context-repository" not in response.text
+    assert review_response.status_code == 200, review_response.text
+    assert review_response.json()["data"]["reconciliation_available"] is False
+    assert len(records) == 2
+    assert records[1].getMessage() == records[0].getMessage()
+    assert records[0].getMessage() == (
+        "Context storage failed during reconciliation availability check: "
+        "context_repository_unavailable"
+    )
+    assert records[0].exc_info is not None
+    assert isinstance(records[0].exc_info[1], ContextStorageServiceError)
+    assert isinstance(records[0].exc_info[1].__cause__, OSError)
+
     with page_service.session_factory.begin() as session:
         branch = session.get(ContextPageVersion, branch_id)
         branch.reconcile_manifest = {"schema": "context_push_diverged_manifest.v1"}
-    workspace_id = _workspace_id(page_service)
-    client = _client(page_service, email="malformed-review-owner@example.com")
     response = client.get(
         f"/api/v1/workspaces/{workspace_id}/reviews/{diverged.review_item_id}"
     )

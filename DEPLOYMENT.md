@@ -606,7 +606,24 @@ Settings → Deployment의 `Identity & Recovery`는 provider·발신자·canonic
 
 SQLite DB만 복사하면 충분하지 않습니다. DB, 업로드/Library 파일, Context의 `repositories/`, session secret, OAuth signing
 key(내부 CA를 쓰면 Caddy `pki` 디렉터리 포함)를 한 세트로 보관해야 합니다. Docker의 `--tls internal`
-스택은 `caddy_data` volume도 같은 방식으로 보관합니다. 아래는 쓰기를 잠시 멈추고 일관된 수동 백업을 만드는 예입니다.
+스택은 `caddy_data` volume도 같은 방식으로 보관합니다.
+
+SQLite 설치에서는 업데이트 없이도 기존 검증 백업을 만들 수 있습니다.
+
+```bash
+sudo dtxwiki backup --dry-run
+sudo dtxwiki backup
+```
+
+명령은 production env와 설치 형태를 판별하고 `<data_dir>/backups/`에 DB·Library·Git·secret
+checkpoint를 만듭니다. 실행 중인 systemd 관리 서비스만 잠시 멈추며, 성공·실패·잠금 거부
+모두 runtime 잠금을 해제한 뒤 명령이 중지한 서비스만 다시 시작합니다. 원래 중지된 worker는
+켜지지 않습니다. 서비스 복귀에 실패하면 백업 완료 여부·경로와 수동 시작 명령을 출력하고
+비제로 종료합니다. pipx/venv에서는 server·worker를 먼저 종료해야 합니다. PostgreSQL DB는
+이 명령이 백업하지 않으므로 운영자가 DB와 data directory를 같은 시점으로 보관해야 합니다.
+Caddy의 외부 CA와 같이 data directory 밖의 파일은 별도로 보관합니다.
+
+아래는 외부 설정·CA까지 포함한 파일 복사 예입니다.
 
 ```bash
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -637,7 +654,8 @@ sudo sha256sum "$BACKUP/dtxwiki.sqlite"
 
 Context 게시 시 `<data_dir>/repositories/<workspace UUID>.git`에 snapshot을 함께 기록합니다.
 Git 실행 파일은 필요 없으며 Python 의존성 pygit2/libgit2를 사용합니다. 저장소를 DB와
-따로 이동·삭제하지 마세요. 이 전환의 첫 단계에서는 기존 DB 본문과 block_map도 유지합니다.
+따로 이동·삭제하지 마세요. 현재 승인본과 작성 중 본문은 DB에 유지하고, 과거 게시본은 Git에서
+읽습니다. `repositories/` 유실은 과거 본문의 유실이므로 DB만으로 복구할 수 없습니다.
 
 자동 백업의 manifest schema 3은 DB·Library·Git을 함께 검증하고 복원합니다. 구 schema
 1·2 백업도 지원하며, 구 DB 전체 복원 시 새 Git 저장소를 함께 정리합니다. secrets-only
@@ -648,8 +666,9 @@ dtxwiki context storage verify
 dtxwiki info --json
 ```
 
-첫 명령은 모든 DB snapshot OID·페이지 경로·원문 bytes·크기와 게시 head를 읽기만 하여
-대조합니다. 실패하면 원본 백업을 보존하고 원인을 해결한 뒤 재시도하세요. worker는 저장소가
+첫 명령은 모든 DB snapshot OID·페이지 경로·크기와 게시 head를 읽기만 하여 대조합니다.
+DB 본문이 있으면 원문 bytes도 비교하고, 과거 본문은 `content_hash`와 commit의 버전 UUID를
+확인합니다. 실패하면 원본 백업을 보존하고 원인을 해결한 뒤 재시도하세요. worker는 저장소가
 있는 workspace를 하루 한 번 점검해 DB 게시 포인터에 head를 맞추고 pack을 생성합니다.
 pack은 원문·OID를 바꾸지 않습니다. 같은 Context 게시는 transaction 종료까지 직렬화되며,
 SQLite에서는 다른 Context의 게시도 같은 DB writer를 기다립니다.
@@ -834,7 +853,7 @@ sudo dtxwiki update --index-url https://pypi.internal/simple   # 사설 wheel in
 > 출력된 `dtxwiki rollback --to-backup <dir>` 로 되돌리거나, 마이그레이션을 수동으로 고친 뒤
 > `sudo systemctl start dtxwiki dtxwiki-worker` 로 재가동한다.
 >
-> systemd tier 에서 `sudo dtxwiki update`/`rollback` 은 `/etc/dtxwiki/dtxwiki.env` 를 자동으로
+> systemd tier 에서 `sudo dtxwiki update`/`backup`/`rollback` 은 `/etc/dtxwiki/dtxwiki.env` 를 자동으로
 > 읽어 실제 prod DB·데이터 경로를 사용한다(다른 위치면 `--env-file <path>`).
 
 **롤백** — 직전 백업으로 코드와 DB 를 *함께* 강등한다(구버전 코드 먼저 재설치 → DB 복원 순서라
@@ -846,9 +865,15 @@ sudo dtxwiki rollback --list              # 백업 목록(버전·시각·revisi
 sudo dtxwiki rollback --to-backup /var/lib/dtxwiki/backups/<id>
 ```
 
+과거 본문을 DB에서 제거한 뒤의 공식 되돌리기는 코드·DB·Library·Git을 함께 복원하는 이
+백업 복원입니다. 실행 전에 백업 전체 경로·생성 시각·현재 버전에서 복구 버전으로의 변경과
+**백업 이후 작성 내용이 사라진다**는 안내를 표시합니다. `--dry-run`도 같은 내용을 표시하고,
+`--yes`는 질문만 생략합니다. Alembic downgrade는 개발·migration 검증용이며 운영 복원
+절차로 사용하지 않습니다.
+
 > 자동 롤백은 index에 **구버전 wheel이 남아 있어야** 합니다. 사설 index는 과거 wheel을
 > 반드시 보존하세요. 백업은 `{DATA_DIR}/backups/<version>-<UTC>/`에 manifest와 함께 쌓이며
-> `DTXWIKI_UPDATE_KEEP_BACKUPS`(기본 5) 개수만 유지된다.
+> 자동 업데이트는 `DTXWIKI_UPDATE_KEEP_BACKUPS`(기본 5) 개수만 유지합니다.
 
 ### Docker 업데이트 (데이터 보존)
 

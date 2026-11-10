@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, replace
 from uuid import UUID
 
@@ -34,6 +35,7 @@ from backend.policy.rbac import (
 )
 from backend.policy.trust_boundaries import actor_with_target_workspace_scope
 from backend.services.context_links import PageLocatorNotFound
+from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.index_refs import IndexRefInputError
 from backend.services.mcp_read_projection import (
     capture_served_reads,
@@ -41,6 +43,8 @@ from backend.services.mcp_read_projection import (
 )
 from backend.services.page_service import PageService
 from backend.services.read_errors import ReadServiceError
+
+logger = logging.getLogger(__name__)
 
 TOOL_HANDLERS = {
     "list_my_workspaces": read_tools.list_my_workspaces,
@@ -178,7 +182,15 @@ def dispatch(
             )
         except ValueError:
             return MCPErrorResponse(envelope=error_envelope(actor, "validation_failed"))
-        response = handler(normalized_payload, ctx)
+        try:
+            response = handler(normalized_payload, ctx)
+        except ContextStorageServiceError as exc:
+            logger.exception("Context storage failed during MCP tool %s", tool_name)
+            # The runner still adds conversation/trace metadata to this failed
+            # result; partially read bodies must not become a served read.
+            return MCPErrorResponse(
+                envelope=error_envelope(scoped_actor, exc.error_code)
+            )
     # An internal attribute deliberately bypasses the wire schema. The runner
     # passes it separately to trace persistence; model_dump never includes it.
     object.__setattr__(

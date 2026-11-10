@@ -1,6 +1,6 @@
 """SQL publication bridge; callers hold the existing publication transaction."""
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.context_versions.application import ContextVersionWriter
@@ -100,12 +100,106 @@ def prepare_publication(
 def align_publication(
     session: Session, page: ContextPage, commit_oid: str | None, writer=None
 ) -> None:
+    """Move the derived head and keep only the live snapshot's SQL body.
+
+    Publication, replay, history repair and approval undo share this operation.
+    The caller retains the publication transaction until commit or rollback.
+    """
+    writer = resolve_writer(session, writer)
+    if commit_oid is None and page.current_published_version_id is not None:
+        raise ContextStorageServiceError("context_snapshot_invalid")
     try:
-        resolve_writer(session, writer).align_head(
-            page.workspace_id, page.id, commit_oid
-        )
+        if commit_oid is not None:
+            _align_database_bodies(session, page, commit_oid, writer.reader)
+        writer.align_head(page.workspace_id, page.id, commit_oid)
     except ContextVersionStorageError as exc:
         raise ContextStorageServiceError(exc.code) from exc
+
+
+def _align_database_bodies(session, page, commit_oid, reader) -> None:
+    from backend.context_versions.codecs import codec_for
+
+    current = session.scalar(
+        select_in_workspace(
+            ContextPageVersion,
+            workspace_id=page.workspace_id,
+            conditions=(
+                ContextPageVersion.page_id == page.id,
+                ContextPageVersion.commit_oid == commit_oid,
+                ContextPageVersion.version_status == "published_snapshot",
+            ),
+        )
+    )
+    if current is None:
+        raise ContextStorageServiceError("context_snapshot_invalid")
+    preserved = []
+    data = reader.read(
+        workspace_id=page.workspace_id,
+        page_id=page.id,
+        commit_oid=commit_oid,
+        descriptor=descriptor_for(current),
+    )
+    if len(data) != current.content_byte_size or (
+        current._body_md is not None and data != current._body_md.encode("utf-8")
+    ):
+        raise ContextStorageServiceError("context_snapshot_invalid")
+    if current._body_md is None:
+        preserved.append((current, current.last_saved_at))
+        current.body_md = codec_for(descriptor_for(current)).decode(data)
+    keep_maps = (
+        session.scalar(
+            select_projection_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                columns=(ContextPageVersion.id,),
+                predicates=(
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.graph_status == "branched",
+                    ContextPageVersion.reconcile_manifest.is_not(None),
+                ),
+            ).limit(1)
+        )
+        is not None
+    )
+    historical = session.scalars(
+        select_in_workspace(
+            ContextPageVersion,
+            workspace_id=page.workspace_id,
+            conditions=(
+                ContextPageVersion.page_id == page.id,
+                ContextPageVersion.version_status == "superseded_snapshot",
+                or_(
+                    ContextPageVersion.body_md.is_not(None),
+                    ContextPageVersion.block_map.is_not(None),
+                ),
+            ),
+        )
+    )
+    for version in historical:
+        stored = version._body_md
+        if stored is None and (keep_maps or version.block_map is None):
+            continue
+        if stored is not None:
+            if version.commit_oid is None:
+                raise ContextStorageServiceError("context_snapshot_invalid")
+            data = reader.read(
+                workspace_id=page.workspace_id,
+                page_id=page.id,
+                commit_oid=version.commit_oid,
+                descriptor=descriptor_for(version),
+            )
+            if data != stored.encode("utf-8") or len(data) != version.content_byte_size:
+                raise ContextStorageServiceError("context_snapshot_invalid")
+        preserved.append((version, version.last_saved_at))
+        version.body_md = None
+        if not keep_maps:
+            version.block_map = None
+    if preserved:
+        session.flush()
+        # onupdate timestamps describe author saves, not storage maintenance.
+        for version, last_saved_at in preserved:
+            version.last_saved_at = last_saved_at
+        session.flush()
 
 
 def verify_context_storage(session: Session, store) -> dict[str, int]:
@@ -132,20 +226,35 @@ def _verify_workspace(session: Session, store, workspace_id) -> int:
         }
         if snapshot != (version.commit_oid is not None):
             raise ContextStorageServiceError("context_snapshot_invalid")
+        if (version._body_md is None) != (
+            version.version_status == "superseded_snapshot"
+        ):
+            raise ContextStorageServiceError("context_snapshot_invalid")
         if not snapshot:
             continue
         try:
-            data = store.read(
+            data = store.verify_snapshot(
                 workspace_id=workspace_id,
                 page_id=version.page_id,
+                version_id=version.id,
                 commit_oid=version.commit_oid,
                 descriptor=descriptor_for(version),
             )
         except ContextVersionStorageError as exc:
             raise ContextStorageServiceError(exc.code) from exc
-        if len(data) != version.content_byte_size or data != version.body_md.encode(
-            "utf-8"
-        ):
+        if len(data) != version.content_byte_size:
+            raise ContextStorageServiceError("context_snapshot_invalid")
+        if version._body_md is not None:
+            valid = data == version._body_md.encode("utf-8")
+        else:
+            from backend.context_versions.codecs import codec_for
+            from backend.utils.content_hash import content_hash
+
+            valid = (
+                content_hash(codec_for(descriptor_for(version)).decode(data))
+                == version.content_hash
+            )
+        if not valid:
             raise ContextStorageServiceError("context_snapshot_invalid")
         checked += 1
     heads = {}
@@ -154,7 +263,12 @@ def _verify_workspace(session: Session, store, workspace_id) -> int:
     ):
         if page.current_published_version_id is not None:
             version = by_id.get(page.current_published_version_id)
-            if version is None or version.page_id != page.id or not version.commit_oid:
+            if (
+                version is None
+                or version.page_id != page.id
+                or version.version_status != "published_snapshot"
+                or not version.commit_oid
+            ):
                 raise ContextStorageServiceError("context_snapshot_invalid")
             heads[page.id] = version.commit_oid
     try:

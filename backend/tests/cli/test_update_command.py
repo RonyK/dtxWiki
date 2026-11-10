@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 import typer
@@ -110,15 +111,41 @@ def test_update_abort_maps_to_exit_2(monkeypatch):
     assert result.exit_code == 2
 
 
-def test_rollback_abort_maps_to_exit_2(monkeypatch):
+def test_rollback_abort_maps_to_exit_2(monkeypatch, tmp_path):
     monkeypatch.setattr(cmd, "_load_prod_env", lambda method, env_file: None)
-
-    def boom(*a, **k):
-        raise typer.Abort()
-
-    monkeypatch.setattr(cmd.update_service, "run_rollback", boom)
+    monkeypatch.setattr(
+        cmd,
+        "invocation_settings",
+        lambda: Settings(
+            app_version="0.2.3",
+            app_env="development",
+            database_url=f"sqlite:///{tmp_path / 'db.sqlite'}",
+        ),
+    )
+    monkeypatch.setattr(
+        cmd.install_method,
+        "detect_install_method",
+        lambda **kwargs: InstallMethod(
+            "venv", None, None, ("python", "-m", "pip"), None, ()
+        ),
+    )
+    backup = tmp_path / "checkpoint"
+    monkeypatch.setattr(
+        cmd.backup_service, "list_backups", lambda *a: [SimpleNamespace(path=backup)]
+    )
+    monkeypatch.setattr(
+        cmd.backup_service,
+        "read_manifest",
+        lambda *a: {"dtxwiki_version": "0.2.2", "created_utc": "2026-11-10T04:00:00Z"},
+    )
+    monkeypatch.setattr(cmd.backup_service, "verify_backup_integrity", lambda *a: None)
     result = runner.invoke(app, ["rollback", "--method", "venv"])
     assert result.exit_code == 2
+    assert f"backup:  {backup.resolve()}" in result.output
+    assert "created: 2026-11-10T04:00:00Z" in result.output
+    assert "version: 0.2.3 -> 0.2.2" in result.output
+    assert "Everything written after this backup will be lost." in result.output
+    assert "Continue?" in result.output
 
 
 def test_load_prod_env_systemd_sources_file(monkeypatch, tmp_path):

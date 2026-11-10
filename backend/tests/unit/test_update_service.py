@@ -5,11 +5,14 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+from typer.testing import CliRunner
 
 from backend.app.runtime_resources import RuntimeResources, acquire_paths
 from backend.app.settings import Settings
+from backend.cli.main import app
 from backend.services import backup_service
 from backend.services import update_service as us
 from backend.services.ops.maintenance_handoff import verify_finalizer_handoff
@@ -72,6 +75,81 @@ def test_run_update_venv_happy(monkeypatch):
     assert result.to_version == "0.2.0"
     assert any("install" in argv for argv in calls)  # pip install ran
     assert any("--finalize-bootstrap" in argv for argv in calls)  # migrations ran
+
+
+def test_manual_backup_cli_reads_env_file_and_restores_only_paused_services(
+    monkeypatch, tmp_path
+):
+    """The real command reads --env-file first and cleans up on every outcome."""
+    _patch_common(monkeypatch)
+    database = tmp_path / "db.sqlite"
+    database.touch()  # No DB work: the existing checkpoint writer is mocked.
+    env_file = tmp_path / "dtxwiki.env"
+    env_file.write_text(
+        f"DTXWIKI_DATABASE_URL=sqlite:///{database}\nDTXWIKI_DATA_DIR={tmp_path}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(us.db_lock, "probe_sqlite_writable", lambda url: None)
+    complete = tmp_path / "backups" / "complete"
+    paused_cycle = [("stop", ("dtxwiki",), True), ("start", ("dtxwiki",), True)]
+    services = []
+    checkpoints = []
+    faults = {"restart": True, "checkpoint": None}
+
+    def systemctl(action, units, **kwargs):
+        if action == "is-active":
+            return subprocess.CompletedProcess(
+                [], 0 if units == ("dtxwiki",) else 3, "", ""
+            )
+        services.append((action, tuple(units), _lock_is_free(tmp_path)))
+        if action == "start" and faults["restart"]:
+            raise subprocess.CalledProcessError(1, ["systemctl", action])
+
+    def checkpoint(settings, **kwargs):
+        assert not _lock_is_free(tmp_path)
+        checkpoints.append((settings.database_url, kwargs))
+        if faults["checkpoint"] is not None:
+            raise faults["checkpoint"]
+        return complete
+
+    def invoke():
+        services.clear()
+        checkpoints.clear()
+        # The CLI sources the env file into os.environ; keep that per call.
+        with patch.dict(os.environ):
+            os.environ.pop("DTXWIKI_DATABASE_URL", None)
+            os.environ.pop("DTXWIKI_DATA_DIR", None)
+            return CliRunner().invoke(
+                app, ["backup", "--method", "systemd", "--env-file", str(env_file)]
+            )
+
+    monkeypatch.setattr(us.svc, "run_systemctl", systemctl)
+    monkeypatch.setattr(us.backup_service, "create_backup", checkpoint)
+
+    result = invoke()
+    assert result.exit_code == 3, result.output
+    assert services == paused_cycle
+    assert len(checkpoints) == 1
+    assert checkpoints[0][0] == f"sqlite:///{database}"
+    assert checkpoints[0][1]["alembic_revision"] == "rev1"
+    assert f"backup: complete — {complete}" in result.output
+    assert "  sudo systemctl start dtxwiki\n" in result.output
+
+    faults.update(restart=False, checkpoint=OSError("disk full"))
+    result = invoke()
+    assert result.exit_code == 2, result.output
+    assert services == paused_cycle and len(checkpoints) == 1
+    assert "backup: failed (no completed checkpoint)" in result.output
+    assert "disk full" in result.output
+
+    held = us.runtime_lock.acquire_shared(tmp_path)
+    try:
+        result = invoke()
+    finally:
+        held.release()
+    assert result.exit_code == 2, result.output
+    assert services == paused_cycle and checkpoints == []
+    assert "backup: failed (no completed checkpoint)" in result.output
 
 
 def test_update_refuses_db_activity_from_another_data_root(monkeypatch, tmp_path):
@@ -296,6 +374,10 @@ def test_run_rollback_reinstalls_old_then_restores(monkeypatch, tmp_path):
     assert any(
         f"restored DB + secrets from {backup_dir.name}" in line for line in lines
     )
+    assert f"  backup:  {backup_dir.resolve()}" in lines
+    assert any(line.startswith("  created: ") for line in lines)
+    assert "  version: 0.2.0 -> 0.1.0" in lines
+    assert "Everything written after this backup will be lost." in lines
 
 
 def test_run_rollback_no_backup_is_exit2(tmp_path):
@@ -315,14 +397,19 @@ def test_run_rollback_no_backup_is_exit2(tmp_path):
 
 def test_run_rollback_dry_run_executes_nothing(monkeypatch, tmp_path):
     settings, base = _rollback_settings(tmp_path)
-    backup_service.create_backup(settings, version="0.1.0", data_dir=base)
+    backup_dir = backup_service.create_backup(settings, version="0.1.0", data_dir=base)
     calls = []
+    lines = []
     monkeypatch.setattr(us, "_run_argv", lambda argv, echo, **_kw: calls.append(argv))
     result = us.run_rollback(
-        settings, method="venv", dry_run=True, data_dir=base, echo=lambda *a: None
+        settings, method="venv", dry_run=True, data_dir=base, echo=lines.append
     )
     assert result.ok
     assert calls == []
+    assert f"  backup:  {backup_dir.resolve()}" in lines
+    assert any(line.startswith("  created: ") for line in lines)
+    assert "  version: 0.2.0 -> 0.1.0" in lines
+    assert "Everything written after this backup will be lost." in lines
 
 
 # --- hardening regressions (#30/#32/#36/#42/#38) -------------------------

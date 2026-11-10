@@ -16,6 +16,21 @@
   status message shrinks to its icon first, then Request review moves into the
   overflow. Focus mode is not offered on these screens.
 
+### Context version storage
+
+- Read past published Context bodies from workspace Git repositories while
+  keeping the current approved body and work in progress in the database.
+  Verify exact Git bytes before removing the previous head's database copy;
+  approval undo restores the selected head's body to the database.
+- Remove historical database bodies in a verified migration. Preserve maps
+  needed by existing reconciliation branches. Back up DB, Library and Git
+  together: losing `repositories/` loses the historical bodies.
+- Add `dtxwiki backup` to create the existing verified SQLite checkpoint without
+  upgrading. Pause only running managed services and restore those services
+  after releasing the runtime lock, including on backup failure.
+- Show the backup path, creation time, version change and loss of writes since
+  the checkpoint before rollback, including `--dry-run` and `--yes`.
+
 ### Release maintenance
 
 - Read the release version from `pyproject.toml` and synchronize package

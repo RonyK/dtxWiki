@@ -298,7 +298,8 @@ def test_stale_read_warning_is_bounded_scoped_and_clears_after_reread(
     assert "changed by" in warning["message"]
     assert "(human)" in warning["message"]
     assert f"conversation {changed_in_chat_id}" in warning["message"]
-    assert "omitted" in warning["message"]
+    assert "changed block IDs: none" in warning["message"]
+    assert "omitted" not in warning["message"]
     assert len(warning["message"]) < 2_000
     assert wrong_owner_pages == []
     assert wrong_workspace_pages == []

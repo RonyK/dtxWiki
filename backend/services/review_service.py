@@ -3185,6 +3185,24 @@ class ReviewService:
             )
             is not None
         ]
+        published_id = page.current_published_version_id
+        if "current_published_version_id" in columns:
+            published = next(
+                (version for version in live if version.id == published_id), None
+            )
+            if published_id is not None and (
+                published is None
+                or published.page_id != page.id
+                or not published.commit_oid
+            ):
+                raise ContextStorageServiceError("context_snapshot_invalid")
+            # Restore SQL FULL before rebuilding projections of the live head.
+            align_publication(
+                session,
+                page,
+                published.commit_oid if published is not None else None,
+                self.context_version_writer,
+            )
         for version in live or [None]:
             sync_page_projections(
                 session,
@@ -3202,22 +3220,6 @@ class ReviewService:
         )
         if "current_published_version_id" not in columns:
             return
-        published_id = page.current_published_version_id
-        published = next(
-            (version for version in live if version.id == published_id), None
-        )
-        if published_id is not None and (
-            published is None
-            or published.page_id != page.id
-            or not published.commit_oid
-        ):
-            raise ContextStorageServiceError("context_snapshot_invalid")
-        align_publication(
-            session,
-            page,
-            published.commit_oid if published is not None else None,
-            self.context_version_writer,
-        )
         # The timeline names what is published from now on, so reads "as of"
         # a later instant resolve to the restored version (or to nothing).
         revert = ChangeSet(
@@ -4547,45 +4549,39 @@ class ReviewService:
                 and candidate_version.page_id == candidate_page.id
             ):
                 from backend.services.context_reconciliation import (
-                    load_reconciliation_snapshot,
-                    reconciliation_branch_is_available,
+                    available_reconciliation_snapshot,
                 )
 
-                if reconciliation_branch_is_available(candidate_version):
-                    try:
-                        snapshot = load_reconciliation_snapshot(
-                            session,
-                            page=candidate_page,
-                            branch_id=candidate_version.id,
-                            actor_kind=actor.actor_kind if actor else None,
-                            actor_id=actor.actor_id if actor else None,
-                        )
-                    except ReadServiceError:
-                        pass
-                    else:
-                        reconciliation_available = True
-                        reconciliation_page_id = candidate_page.id
-                        reconciliation_version_id = candidate_version.id
-                        reconciliation_base_version_no = snapshot.base.version_no
-                        reconciliation_head_advance_count = snapshot.head_advance_count
-                        reconciliation_conflict_count = len(snapshot.conflict_ids)
-                        reconciliation_branch_actor_kind = snapshot.branch.actor_type
-                        reconciliation_branch_actor_display_name = (
-                            snapshot.branch.actor_display_name
-                        )
-                        if (
-                            change_set is not None
-                            and change_set.origin_chat_session_id is not None
-                        ):
-                            chat = session.scalar(
-                                select(McpChatSession).where(
-                                    McpChatSession.workspace_id == review.workspace_id,
-                                    McpChatSession.id
-                                    == change_set.origin_chat_session_id,
-                                )
+                snapshot = available_reconciliation_snapshot(
+                    session,
+                    page=candidate_page,
+                    version=candidate_version,
+                    actor_kind=actor.actor_kind if actor else None,
+                    actor_id=actor.actor_id if actor else None,
+                )
+                if snapshot is not None:
+                    reconciliation_available = True
+                    reconciliation_page_id = candidate_page.id
+                    reconciliation_version_id = candidate_version.id
+                    reconciliation_base_version_no = snapshot.base.version_no
+                    reconciliation_head_advance_count = snapshot.head_advance_count
+                    reconciliation_conflict_count = len(snapshot.conflict_ids)
+                    reconciliation_branch_actor_kind = snapshot.branch.actor_type
+                    reconciliation_branch_actor_display_name = (
+                        snapshot.branch.actor_display_name
+                    )
+                    if (
+                        change_set is not None
+                        and change_set.origin_chat_session_id is not None
+                    ):
+                        chat = session.scalar(
+                            select(McpChatSession).where(
+                                McpChatSession.workspace_id == review.workspace_id,
+                                McpChatSession.id == change_set.origin_chat_session_id,
                             )
-                            if chat is not None:
-                                reconciliation_chat_session_id = chat.id
+                        )
+                        if chat is not None:
+                            reconciliation_chat_session_id = chat.id
         return ReviewItemDetail(
             id=review.id,
             workspace_id=review.workspace_id,
