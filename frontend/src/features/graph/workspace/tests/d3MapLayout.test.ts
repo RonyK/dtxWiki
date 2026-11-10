@@ -79,5 +79,22 @@ describe("Map D3 consumer failure boundary", () => {
     expect(ticks()).toEqual([160]);
     expect(separated).toHaveBeenCalledExactlyOnceWith(spread);
     expect(onError).not.toHaveBeenCalled();
+
+    // Far-apart saved pins clamp the native Fit to .001. The clearance
+    // slack must not turn that supported zoom into an invalid .00097 basis.
+    mock.driver.update.mockClear();
+    const farPins = Float32Array.from([0, 0, .1, 0, 1_000_000, 0]);
+    const farSeparated = Float32Array.from([0, 0, 500_000, 0, 1_000_000, 0]);
+    const published = vi.fn(), calibratedBasis = vi.fn();
+    createWorkspaceD3Layout({ ...input, positions: farPins, pins: [0, 2],
+      viewport: { width: 390, height: 844 } },
+    { onPositions: published, onState, onError, onUnitBasis: calibratedBasis });
+    mock.options!.onIndexedTick!(farPins, keys);
+    expect(ticks()).toEqual([160]);
+    mock.options!.onIndexedTick!(farSeparated, keys);
+    expect(calibratedBasis).toHaveBeenCalledOnce();
+    expect(calibratedBasis.mock.calls[0][0].referenceZoom).toBe(.001);
+    expect(published).toHaveBeenCalledExactlyOnceWith(farSeparated);
+    expect(onError).not.toHaveBeenCalled();
   });
 });

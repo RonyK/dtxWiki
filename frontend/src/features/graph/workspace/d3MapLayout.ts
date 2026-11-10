@@ -115,7 +115,7 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
           if (coolingRemains || calibrationPasses <= MAX_CONTACT_PASSES && hasBodyOverlap(ordered, fit)) {
             calibrationPasses++;
             basis = buildWorkspaceD3UnitBasis({ ...input, positions: ordered, viewport: basis.referenceViewport,
-              referenceZoom: Math.min(basis.referenceZoom, fit) * FIT_CLEARANCE_SLACK,
+              referenceZoom: Math.max(.001, Math.min(basis.referenceZoom, fit) * FIT_CLEARANCE_SLACK),
               calibrationPasses });
             currentScene = scene();
             layout.update(currentScene, undefined, { settle: true, settleAtCurrentAlpha: true,
