@@ -363,6 +363,14 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
         assert released[historical_id]["block_map"] == block_map
         assert released[other_history_id]["body_md"] is None
         assert released[other_history_id]["block_map"] is None
+        with engine.connect() as connection:
+            # JSON null also decodes to Python None; require an actual SQL
+            # NULL so raw-column predicates observe the released map.
+            assert connection.scalar(
+                sa.select(table.c.block_map.is_(None)).where(
+                    table.c.id == key(other_history_id)
+                )
+            )
         for item in (
             current_id,
             other_id,

@@ -87,7 +87,9 @@ def prepare_publication(
             block_map, _ = heal_block_map(
                 version.body_md, None, identity_seed=str(version.id)
             )
-            version.block_map = block_map
+            # Keep preparation free of SQL writes: an autoflush here would
+            # advance last_saved_at before publication preserves it. Alignment
+            # restores the archived map into SQL with its timestamp intact.
         return writer.prepare_snapshot(
             workspace_id=page.workspace_id,
             page_id=page.id,

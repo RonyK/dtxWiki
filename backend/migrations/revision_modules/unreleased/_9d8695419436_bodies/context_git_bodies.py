@@ -259,7 +259,9 @@ def release_historical_bodies(connection: Connection, root: Path) -> None:
         # the only exact identity copy, regardless of current branch activity.
         changes = {"body_md": None}
         if archived_map is not None:
-            changes["block_map"] = None
+            # Reflected JSON does not preserve none_as_null=True from the
+            # runtime model; bind an explicit SQL NULL rather than JSON null.
+            changes["block_map"] = sa.null()
         connection.execute(
             versions.update().where(versions.c.id == row["id"]).values(**changes)
         )

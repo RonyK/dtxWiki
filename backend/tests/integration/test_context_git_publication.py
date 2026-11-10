@@ -246,9 +246,17 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(
         old_body, current_body = old.body_md, current.body_md
         old_map = deepcopy(old.block_map)
         original_saved_at = old.last_saved_at
+        # A legacy draft has no persisted map. Preparing its snapshot must not
+        # turn administrative identity backfill into an author save.
+        current.block_map = None
+        current.last_saved_at = datetime(2026, 11, 9, tzinfo=UTC)
+        session.flush()
+        current_saved_at = current.last_saved_at
         approved = _approve(session, workspace_id, draft.review_item_id)
         store = session.info["context_snapshot_store"]
         current_oid = current.commit_oid
+        assert current.last_saved_at == current_saved_at
+        assert current._block_map is not None
         assert old._body_md is None and old._block_map is None
         assert old.block_map == old_map and old._block_map is None
         assert old.body_md == old_body and old._body_md is None
@@ -278,6 +286,7 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(
         assert old._block_map == old_map
         assert old.last_saved_at == original_saved_at
         assert current._body_md == current_body and current.commit_oid is None
+        assert current.last_saved_at == current_saved_at
         assert store.list_heads(workspace_id)[page_id] == old.commit_oid
 
     # Budget exception: extend the existing DB traversal through the public
@@ -343,6 +352,7 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(
         _approve(session, workspace_id, draft.review_item_id)
         assert old._body_md is None and current.commit_oid == current_oid
         assert current._body_md == current_body
+        assert current.last_saved_at == current_saved_at
         verify_context_storage(session, store)
         # A readable Git copy must not hide an absent current DB FULL copy
         # from operator verification, even though ordinary reads can recover it.
