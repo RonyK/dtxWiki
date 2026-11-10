@@ -76,7 +76,7 @@ class PluginCommandGroup(TyperGroup):
         # Click has parsed the root options and supplies the exact remaining
         # command arguments here. Do not scan argv: option values may happen
         # to be named 'update' or '--env-file'.
-        if args and args[0] in {"update", "rollback"}:
+        if args and args[0] in {"update", "backup", "rollback"}:
             from backend.cli.commands import update
 
             command = super().get_command(ctx, args[0])

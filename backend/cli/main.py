@@ -511,6 +511,7 @@ app.add_typer(input_commands.inputs_app, name="inputs")
 app.add_typer(prod_commands.setup_app, name="setup")
 app.add_typer(prod_commands.config_app, name="config")
 app.command("update")(update_commands.update_command)
+app.command("backup")(update_commands.backup_command)
 app.command("rollback")(update_commands.rollback_command)
 app.command("eval")(eval_commands.eval_command)
 

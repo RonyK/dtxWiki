@@ -512,19 +512,23 @@ def stale_pages_for_conversation(
         ):
             continue
         try:
-            changed_ids = sorted(
-                str(changed_id)[:_STALE_CONVERSATION_BLOCK_ID_MAX_CHARS]
-                for changed_id in changed_ids_between_maps(
-                    block_map_for_version(
-                        read_version.block_map,
-                        read_version.body_md,
-                    ),
-                    block_map_for_version(
-                        head_version.block_map,
-                        head_version.body_md,
-                    ),
-                    base_body_md=read_version.body_md,
-                    candidate_body_md=head_version.body_md,
+            changed_ids = (
+                []
+                if read_version.block_map is None
+                else sorted(
+                    str(changed_id)[:_STALE_CONVERSATION_BLOCK_ID_MAX_CHARS]
+                    for changed_id in changed_ids_between_maps(
+                        block_map_for_version(
+                            read_version.block_map,
+                            read_version.body_md,
+                        ),
+                        block_map_for_version(
+                            head_version.block_map,
+                            head_version.body_md,
+                        ),
+                        base_body_md=read_version.body_md,
+                        candidate_body_md=head_version.body_md,
+                    )
                 )
             )
         except (KeyError, TypeError, ValueError):

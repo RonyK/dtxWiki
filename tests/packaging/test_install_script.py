@@ -369,8 +369,8 @@ DB_COMMANDS = (
 )
 # They write /etc, drive systemctl, or never open the database.
 ROOT_COMMANDS = (
-    "setup", "config", "keygen", "update", "rollback", "mcp", "db", "embedding",
-    "rerank",
+    "setup", "config", "keygen", "update", "backup", "rollback", "mcp", "db",
+    "embedding", "rerank",
 )
 
 

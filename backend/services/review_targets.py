@@ -8,6 +8,7 @@ from the ordinary reader's current head.
 from __future__ import annotations
 
 import json
+import logging
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -32,6 +33,7 @@ from backend.services.actor_visible_read import (
     library_item_visible,
 )
 from backend.services.context_lifecycle import is_publishable_draft
+from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.workspace_urls import (
     agent_page_url,
     library_artifact_url,
@@ -39,6 +41,8 @@ from backend.services.workspace_urls import (
 )
 from backend.utils.page_frontmatter import parse_page_frontmatter
 from backend.utils.uuid import parse_uuid_or_none
+
+logger = logging.getLogger(__name__)
 
 
 def operation_version_id(operation: ChangeOperation, kind: str) -> UUID | None:
@@ -335,10 +339,23 @@ def _context_target(
         # Same lexical body extraction and input ceiling as PageService.diff_versions.
         from backend.services.page_service import PAGE_DIFF_MAX_INPUT_CHARS
 
-        old_body = (
-            "" if baseline is None else parse_page_frontmatter(baseline.body_md).body
-        )
-        new_body = parse_page_frontmatter(version.body_md).body
+        try:
+            old_body = (
+                ""
+                if baseline is None
+                else parse_page_frontmatter(baseline.body_md).body
+            )
+            new_body = parse_page_frontmatter(version.body_md).body
+        except ContextStorageServiceError as exc:
+            # Review rows carry no body, so this is only an availability check.
+            # An unreadable snapshot marks the comparison unavailable.
+            logger.exception(
+                "Context storage failed during review comparison check: %s",
+                exc.error_code,
+            )
+            content.can_diff = False
+            content.unavailable_reason = "baseline_unavailable"
+            return document, content
         if len(old_body) + len(new_body) > PAGE_DIFF_MAX_INPUT_CHARS:
             content.can_diff = False
             content.unavailable_reason = "diff_too_large"

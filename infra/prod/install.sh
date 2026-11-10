@@ -316,7 +316,7 @@ echo "==> [4/5] PATH wrappers (so 'sudo dtxwiki ...' Day-2 commands work)"
 # Load the production env for every Day-2 command. Commands that open the
 # database or write the data directory then drop to the service account, so
 # SQLite files and their WAL sidecars keep the ownership the backend and worker
-# need. setup/config/keygen/update/rollback stay root: they write /etc or drive
+# need. setup/config/keygen/update/backup/rollback stay root: they write /etc or drive
 # systemctl.
 rm -f /usr/local/bin/dtxwiki /usr/local/bin/dtxwiki-worker
 install -o root -g root -m 0755 /dev/stdin /usr/local/bin/dtxwiki <<'EOF'

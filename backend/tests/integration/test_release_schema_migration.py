@@ -27,8 +27,13 @@ from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.ops.alembic_migration_graph import schema_release_head
 from backend.services.workspace_purge import purge_workspace_data
 from backend.services.workspace_write import WorkspaceWriteService
+from backend.tests.utils.context_git import (
+    configure_test_context_storage,
+    seed_published_snapshot,
+)
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 from backend.tests.utils.migration_paths import configure_test_repositories
+from backend.utils.content_hash import content_hash
 
 INITIAL_REVISION = "bd62193d5cf6"
 CORE_REVISION = "efcbcf724889"
@@ -782,6 +787,9 @@ def test_page_link_syntax_downgrade_preserves_wikilink_projection(
         sqlite_templates, tmp_path, "page-link-syntax-downgrade.db"
     )
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    configure_test_context_storage(
+        session_factory, config.attributes["context_repositories_root"]
+    )
     try:
         with session_factory.begin() as session:
             workspace = seed_default_workspace(session)
@@ -810,7 +818,7 @@ def test_page_link_syntax_downgrade_preserves_wikilink_projection(
                 page_id=source.id,
                 version_no=1,
                 body_md="# Source",
-                content_hash="source-v1",
+                content_hash=content_hash("# Source"),
                 actor_type="human",
                 version_status="published_snapshot",
                 created_by_actor_kind="human",
@@ -821,7 +829,7 @@ def test_page_link_syntax_downgrade_preserves_wikilink_projection(
                 page_id=target.id,
                 version_no=1,
                 body_md="# Target",
-                content_hash="target-v1",
+                content_hash=content_hash("# Target"),
                 actor_type="human",
                 version_status="published_snapshot",
                 created_by_actor_kind="human",
@@ -833,6 +841,8 @@ def test_page_link_syntax_downgrade_preserves_wikilink_projection(
             source.current_published_version_id = source_version.id
             target.current_version_id = target_version.id
             target.current_published_version_id = target_version.id
+            seed_published_snapshot(session, source_version)
+            seed_published_snapshot(session, target_version)
             wikilink_created_at = datetime(2026, 9, 20, 1, tzinfo=UTC)
             context_url_created_at = datetime(2026, 9, 20, 2, tzinfo=UTC)
             session.add_all(

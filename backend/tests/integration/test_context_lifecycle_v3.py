@@ -25,6 +25,7 @@ from backend.services.context_write_service import ContextWriteService
 from backend.services.domain_read import DomainReadService
 from backend.services.read_errors import StaleBaseVersionError, StaleContextDraftError
 from backend.services.review_service import ReviewService
+from backend.tests.utils.context_git import seed_published_snapshot
 from backend.tests.utils.prepared_body import prepare_context_body
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
@@ -148,6 +149,10 @@ def test_direct_publication_supersedes_v1_and_normalizes_all_published_rows(
             version_status="published_snapshot",
         )
         rogue_id = rogue.id
+        seed_published_snapshot(session, rogue, parents=(current.commit_oid,))
+        session.info["context_version_writer"].align_head(
+            page.workspace_id, page.id, current.commit_oid
+        )
 
     v3 = page_service.write_page(
         workspace_slug="default",

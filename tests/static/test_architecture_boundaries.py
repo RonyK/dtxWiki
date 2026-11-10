@@ -157,19 +157,20 @@ ADAPTER_PACKAGE_PATHS = (
 )
 MEDIA_PACKAGE_LAYERS = {
     "backend/media": frozenset({"domain", "ports", "application", "adapters"}),
-    "backend/library_media": frozenset(
-        {"domain", "ports", "application", "adapters"}
-    ),
-    "backend/context_media": frozenset(
-        {"domain", "ports", "application", "adapters"}
-    ),
+    "backend/library_media": frozenset({"domain", "ports", "application", "adapters"}),
+    "backend/context_media": frozenset({"domain", "ports", "application", "adapters"}),
 }
 REQUIRED_MEDIA_INNER_LAYERS = ("domain", "ports", "application")
 MEDIA_COMPOSITION_ROOT = "backend/app/container.py"
 CONTEXT_COMPOSITION_ROOT = "backend/app/context_version_storage.py"
-CONTEXT_FROZEN_GIT_HELPER = (
-    "backend/migrations/revision_modules/v0_2/"
-    "_74e5d4f912a6_context_git/context_content_to_git.py"
+CONTEXT_NATIVE_GIT_IMPORTERS = frozenset(
+    {
+        "backend/migrations/env.py",
+        "backend/migrations/revision_modules/v0_2/"
+        "_74e5d4f912a6_context_git/context_content_to_git.py",
+        "backend/migrations/revision_modules/unreleased/"
+        "_9d8695419436_bodies/context_git_bodies.py",
+    }
 )
 
 
@@ -224,8 +225,7 @@ def imports_from(path: Path, *, root: Path = ROOT) -> set[str]:
                 isinstance(target, ast.Name) and target.id == "__import__"
             )
             is_import_module = (
-                isinstance(target, ast.Name)
-                and target.id in import_module_functions
+                isinstance(target, ast.Name) and target.id in import_module_functions
             ) or (
                 isinstance(target, ast.Attribute)
                 and target.attr == "import_module"
@@ -234,9 +234,17 @@ def imports_from(path: Path, *, root: Path = ROOT) -> set[str]:
             )
             if not (is_builtin_import or is_import_module):
                 continue
-            name_argument = node.args[0] if node.args else next(
-                (keyword.value for keyword in node.keywords if keyword.arg == "name"),
-                None,
+            name_argument = (
+                node.args[0]
+                if node.args
+                else next(
+                    (
+                        keyword.value
+                        for keyword in node.keywords
+                        if keyword.arg == "name"
+                    ),
+                    None,
+                )
             )
             if not (
                 isinstance(name_argument, ast.Constant)
@@ -245,13 +253,17 @@ def imports_from(path: Path, *, root: Path = ROOT) -> set[str]:
                 continue
             imported_name = name_argument.value
             if is_import_module and imported_name.startswith("."):
-                package_argument = node.args[1] if len(node.args) > 1 else next(
-                    (
-                        keyword.value
-                        for keyword in node.keywords
-                        if keyword.arg == "package"
-                    ),
-                    None,
+                package_argument = (
+                    node.args[1]
+                    if len(node.args) > 1
+                    else next(
+                        (
+                            keyword.value
+                            for keyword in node.keywords
+                            if keyword.arg == "package"
+                        ),
+                        None,
+                    )
                 )
                 if not (
                     isinstance(package_argument, ast.Constant)
@@ -279,8 +291,7 @@ def shortest_matching_imports(imports: set[str], prefix: str) -> set[str]:
         imported
         for imported in matches
         if not any(
-            imported != other and imported.startswith(f"{other}.")
-            for other in matches
+            imported != other and imported.startswith(f"{other}.") for other in matches
         )
     }
 
@@ -291,8 +302,7 @@ def most_specific_matching_imports(imports: set[str], prefix: str) -> set[str]:
         imported
         for imported in matches
         if not any(
-            imported != other and other.startswith(f"{imported}.")
-            for other in matches
+            imported != other and other.startswith(f"{imported}.") for other in matches
         )
     }
 
@@ -321,7 +331,7 @@ def concrete_adapter_violations(*, root: Path = ROOT) -> list[str]:
         if relative.startswith("backend/tests/"):
             continue
         imported_modules = imports_from(source_file, root=root)
-        if relative != CONTEXT_FROZEN_GIT_HELPER and not relative.startswith(
+        if relative not in CONTEXT_NATIVE_GIT_IMPORTERS and not relative.startswith(
             "backend/context_versions/adapters/"
         ):
             for imported in shortest_matching_imports(imported_modules, "pygit2"):
@@ -379,9 +389,7 @@ def media_package_shape_violations(*, root: Path = ROOT) -> list[str]:
     return sorted(violations)
 
 
-def existing_media_package_completeness_violations(
-    *, root: Path = ROOT
-) -> list[str]:
+def existing_media_package_completeness_violations(*, root: Path = ROOT) -> list[str]:
     """Activate G1b completeness per package once that I2/I4/I5 package exists."""
 
     violations: list[str] = []
@@ -523,8 +531,7 @@ def write_fixture(root: Path, relative: str, source: str) -> None:
         ),
         (
             "backend/media/application/install.py",
-            "import importlib\n"
-            "importlib.import_module('backend.repositories.media')\n",
+            "import importlib\nimportlib.import_module('backend.repositories.media')\n",
             "backend/media/application/install.py imports backend.repositories.media",
         ),
         (

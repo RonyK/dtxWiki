@@ -16,7 +16,8 @@ from sqlalchemy import (
     Uuid,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, object_session, relationship, synonym
+from sqlalchemy.orm.exc import DetachedInstanceError
 from sqlalchemy.sql.elements import conv
 
 from backend.models.base import (
@@ -205,6 +206,10 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
             f"version_status IN ({_sql_in(CONTEXT_PAGE_VERSION_STATUSES)})",
             name="context_page_version_status_check",
         ),
+        CheckConstraint(
+            "body_md IS NOT NULL OR commit_oid IS NOT NULL",
+            name="context_page_version_body_stored_check",
+        ),
         Index("idx_cpv_page_created", "page_id", "created_at"),
         Index("idx_cpv_parent", "parent_version_id"),
         Index(
@@ -268,7 +273,7 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         Uuid(as_uuid=True),
     )
     version_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    body_md: Mapped[str] = mapped_column(Text, nullable=False)
+    _body_md: Mapped[str | None] = mapped_column("body_md", Text, nullable=True)
     commit_oid: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_format: Mapped[str] = mapped_column(
         Text, nullable=False, default="markdown", server_default="markdown"
@@ -341,6 +346,59 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     page: Mapped[ContextPage] = relationship(
         back_populates="versions",
         foreign_keys=[page_id],
+    )
+
+    def _read_body_md(self) -> str:
+        """Read the version's content without materializing history in SQL."""
+        from backend.context_versions.codecs import codec_for
+        from backend.context_versions.domain import (
+            ContentDescriptor,
+            ContextVersionStorageError,
+        )
+        from backend.services.context_version_storage import ContextStorageServiceError
+
+        try:
+            stored = self._body_md
+        except DetachedInstanceError as exc:
+            raise ContextStorageServiceError("context_repository_unavailable") from exc
+        if stored is not None:
+            return stored
+        session = object_session(self)
+        reader = (
+            session.info.get("context_snapshot_store") if session is not None else None
+        )
+        if reader is None:
+            raise ContextStorageServiceError("context_repository_unavailable")
+        if self.commit_oid is None:
+            raise ContextStorageServiceError("context_snapshot_invalid")
+        descriptor = ContentDescriptor(
+            self.content_format, self.format_version, self.media_type, self.encoding
+        )
+        key = (self.commit_oid, descriptor, self.content_byte_size)
+        cached = self.__dict__.get("_git_body_md")
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        try:
+            data = reader.read(
+                workspace_id=self.workspace_id,
+                page_id=self.page_id,
+                commit_oid=self.commit_oid,
+                descriptor=descriptor,
+            )
+            if len(data) != self.content_byte_size:
+                raise ContextVersionStorageError("context_snapshot_invalid")
+            body = codec_for(descriptor).decode(data)
+        except ContextVersionStorageError as exc:
+            raise ContextStorageServiceError(exc.code) from exc
+        self.__dict__["_git_body_md"] = (key, body)
+        return body
+
+    def _write_body_md(self, value: str | None) -> None:
+        self.__dict__.pop("_git_body_md", None)
+        self._body_md = value
+
+    body_md: Mapped[str] = synonym(
+        "_body_md", descriptor=property(_read_body_md, _write_body_md)
     )
 
     @property

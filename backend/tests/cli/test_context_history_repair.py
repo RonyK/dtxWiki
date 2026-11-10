@@ -100,6 +100,11 @@ def test_context_history_repair_apply_uses_canonical_lineage(tmp_path: Path):
     assert page_state == (head_id, head_id, None)
     assert versions[head_id] == ("published_snapshot", "linear")
     assert versions[rogue_id] == ("superseded_snapshot", "linear")
+    with session_factory() as session:
+        assert session.get(ContextPageVersion, head_id)._body_md is not None
+        historical = session.get(ContextPageVersion, rogue_id)
+        assert historical._body_md is None
+        assert historical.block_map is None
 
 
 def test_context_history_repair_apply_is_idempotent(tmp_path: Path):

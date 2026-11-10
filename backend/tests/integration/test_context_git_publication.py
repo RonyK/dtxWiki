@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pygit2
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
@@ -21,8 +22,19 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.repositories.context_page_repo import get_page_by_id_for_update
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.context_lifecycle import apply_context_publication
-from backend.services.context_version_storage import ContextStorageServiceError
+from backend.services.context_version_storage import (
+    ContextStorageServiceError,
+    align_publication,
+    verify_context_storage,
+)
 from backend.services.db_write_intent import acquire_write_intent
+from backend.services.review_service import ReviewService
+from backend.tests.integration.test_context_review_publish import (
+    ACTOR_UUID,
+    _approve,
+    _detail,
+    _published_page_with_draft,
+)
 from backend.utils.content_hash import content_hash
 
 
@@ -162,7 +174,8 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
             second = session.get(ContextPageVersion, second_id)
             assert first.version_status == "superseded_snapshot"
             assert first.body_md == original_body
-            assert first.block_map == [{"id": "preserved-first-map"}]
+            assert first._body_md is None
+            assert first.block_map is None
             assert second.version_status == "published_snapshot"
             assert second.body_md == second_body
             assert second.content_byte_size == len(second_body.encode("utf-8"))
@@ -214,3 +227,127 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
     finally:
         release.set()
         engine.dispose()
+
+
+def test_git_bodies_follow_publication_undo_and_storage_failure(session_factory):
+    """One DB traversal covers the shared read/head rule and its rollback."""
+    with session_factory.begin() as session:
+        workspace, published, draft = _published_page_with_draft(session, "Git bodies")
+        workspace_id, page_id = workspace.id, published.page_id
+        old_id, current_id = published.draft_version_id, draft.draft_version_id
+        old = session.get(ContextPageVersion, old_id)
+        current = session.get(ContextPageVersion, current_id)
+        old_body, current_body = old.body_md, current.body_md
+        original_saved_at = old.last_saved_at
+        approved = _approve(session, workspace_id, draft.review_item_id)
+        store = session.info["context_snapshot_store"]
+        current_oid = current.commit_oid
+        assert old._body_md is None and old.block_map is None
+        assert old.body_md == old_body and old._body_md is None
+        assert old.last_saved_at == original_saved_at
+        # The synonym preserves raw SQL expressions and never materializes a
+        # historical read back into the database.
+        assert (
+            session.scalar(
+                select(ContextPageVersion.body_md).where(
+                    ContextPageVersion.id == old_id
+                )
+            )
+            is None
+        )
+        ReviewService().undo_decision(
+            session,
+            workspace_id,
+            draft.review_item_id,
+            approved.undo.decision_id,
+            actor_kind="human",
+            actor_id=str(ACTOR_UUID),
+            actor_user_id=ACTOR_UUID,
+            actor_role="owner",
+            actor_provenance="browser_session",
+        )
+        assert old._body_md == old_body
+        assert old.last_saved_at == original_saved_at
+        assert current._body_md == current_body and current.commit_oid is None
+        assert store.list_heads(workspace_id)[page_id] == old.commit_oid
+        _approve(session, workspace_id, draft.review_item_id)
+        assert old._body_md is None and current.commit_oid == current_oid
+        assert current._body_md == current_body
+        verify_context_storage(session, store)
+        # A readable Git copy must not hide an absent current DB FULL copy
+        # from operator verification, even though ordinary reads can recover it.
+        current.body_md = None
+        with pytest.raises(ContextStorageServiceError):
+            verify_context_storage(session, store)
+        current.body_md = current_body
+        page = session.get(ContextPage, page_id)
+        page.current_published_version_id = old_id
+        store.set_head(workspace_id, page_id, old.commit_oid)
+        with pytest.raises(ContextStorageServiceError):
+            verify_context_storage(session, store)
+        page.current_published_version_id = current_id
+        store.set_head(workspace_id, page_id, current_oid)
+        with pytest.raises(ContextStorageServiceError):
+            align_publication(session, page, None)
+        assert store.list_heads(workspace_id)[page_id] == current_oid
+
+    with session_factory() as session:
+        historical = session.get(ContextPageVersion, old_id)
+        session.expire(historical, ["_body_md"])
+        session.expunge(historical)
+        with pytest.raises(ContextStorageServiceError) as detached:
+            _ = historical.body_md
+        assert detached.value.error_code == "context_repository_unavailable"
+
+    # A new publication may not destroy the DB's last exact copy if its
+    # supposedly immutable Git snapshot differs. All SQL changes roll back.
+    with pytest.raises(
+        ContextStorageServiceError, match="storage operation"
+    ) as failure:
+        with session_factory.begin() as session:
+            page = get_page_by_id_for_update(session, page_id)
+            current = session.get(ContextPageVersion, current_id)
+            current.body_md += "\nUnexpected mutation"
+            candidate = ContextPageVersion(
+                workspace_id=workspace_id,
+                page_id=page_id,
+                version_no=3,
+                parent_version_id=current_id,
+                body_md="# Next\n",
+                content_hash=content_hash("# Next\n"),
+                actor_type="human",
+                created_by_actor_kind="human",
+                created_by_actor_id=str(ACTOR_UUID),
+                version_status="draft",
+            )
+            session.add(candidate)
+            session.flush()
+            page.current_version_id = page.latest_draft_version_id = candidate.id
+            apply_context_publication(
+                session,
+                page=page,
+                version=candidate,
+                require_latest_draft=True,
+            )
+    assert failure.value.error_code == "context_snapshot_invalid"
+    with session_factory() as session:
+        assert session.get(ContextPageVersion, current_id)._body_md == current_body
+        assert store.list_heads(workspace_id)[page_id] == current_oid
+
+    repository = store.repository_path(workspace_id)
+    unavailable = repository.with_suffix(".offline")
+    repository.rename(unavailable)
+    try:
+        with session_factory() as session:
+            assert session.get(ContextPageVersion, current_id).body_md == current_body
+            with pytest.raises(ContextStorageServiceError) as failure:
+                _ = session.get(ContextPageVersion, old_id).body_md
+            assert failure.value.error_code == "context_snapshot_invalid"
+            # Review rows carry no body: the unreadable comparison base only
+            # marks the diff unavailable and the read still succeeds.
+            detail = _detail(session, workspace_id, draft.review_item_id)
+            content = detail.evidence.operations[0].content
+            assert content.can_diff is False
+            assert content.unavailable_reason == "baseline_unavailable"
+    finally:
+        unavailable.rename(repository)

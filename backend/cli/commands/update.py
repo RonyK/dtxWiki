@@ -263,6 +263,34 @@ def update_command(
     raise typer.Exit(result.exit_code)
 
 
+def backup_command(
+    method: str = typer.Option(
+        "auto",
+        "--method",
+        help="auto|pipx|venv|systemd|docker|npm.",
+        callback=_validate_method,
+    ),
+    env_file: str | None = typer.Option(
+        None,
+        "--env-file",
+        help="Production environment file (systemd default applies).",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the backup plan; change nothing."
+    ),
+) -> None:
+    """Back up SQLite, Library, Git and secrets; briefly pause running services."""
+    _load_prod_env(method, env_file)
+    result = update_service.run_backup(
+        invocation_settings(),
+        method=method,
+        env_file=env_file,
+        dry_run=dry_run,
+        echo=typer.echo,
+    )
+    raise typer.Exit(result.exit_code)
+
+
 def rollback_command(
     to_backup: str | None = typer.Option(
         None, "--to-backup", help="Backup dir or manifest.json (default: latest)."

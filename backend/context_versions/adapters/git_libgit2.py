@@ -32,6 +32,7 @@ from backend.context_versions.domain import (
 # Library-wide options are configured at import, never toggled by requests.
 pygit2.settings.enable_fsync_gitdir(True)
 pygit2.settings.enable_strict_hash_verification(True)
+pygit2.settings.owner_validation = False
 
 _HEAD_PREFIX = "refs/heads/context/"
 _HEX = re.compile(r"[0-9a-f]+\Z")
@@ -164,11 +165,49 @@ class GitSnapshotStore:
         commit_oid: str,
         descriptor: ContentDescriptor,
     ) -> bytes:
+        return self._read_snapshot(
+            workspace_id=workspace_id,
+            page_id=page_id,
+            commit_oid=commit_oid,
+            descriptor=descriptor,
+        )
+
+    def verify_snapshot(
+        self,
+        *,
+        workspace_id: UUID,
+        page_id: UUID,
+        version_id: UUID,
+        commit_oid: str,
+        descriptor: ContentDescriptor,
+    ) -> bytes:
+        """Operator verification includes the DB version's commit identity."""
+        return self._read_snapshot(
+            workspace_id=workspace_id,
+            page_id=page_id,
+            commit_oid=commit_oid,
+            descriptor=descriptor,
+            version_id=version_id,
+        )
+
+    def _read_snapshot(
+        self,
+        *,
+        workspace_id: UUID,
+        page_id: UUID,
+        commit_oid: str,
+        descriptor: ContentDescriptor,
+        version_id: UUID | None = None,
+    ) -> bytes:
         codec = codec_for(descriptor)
         with self._repository(workspace_id) as repository:
-            blob = _page_blob(
-                repository, _commit(repository, commit_oid), page_id, codec.filename
-            )
+            commit = _commit(repository, commit_oid)
+            if (
+                version_id is not None
+                and commit.message != f"Context snapshot {UUID(str(version_id))}\n"
+            ):
+                raise ContextVersionStorageError("context_snapshot_invalid")
+            blob = _page_blob(repository, commit, page_id, codec.filename)
             data = blob.data
             codec.decode(data)
             return data

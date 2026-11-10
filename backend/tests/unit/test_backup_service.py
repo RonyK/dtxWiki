@@ -71,6 +71,7 @@ def _add_library_blob(db: Path, library_root: Path, content: bytes) -> tuple[Pat
 def _add_context_snapshot(db: Path, root: Path, content: bytes):
     from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
     from backend.context_versions.domain import ContentPayload
+    from backend.utils.content_hash import content_hash
 
     workspace_id, page_id, version_id = uuid4(), uuid4(), uuid4()
     store = GitSnapshotStore(root)
@@ -92,6 +93,7 @@ def _add_context_snapshot(db: Path, root: Path, content: bytes):
             "CREATE TABLE context_page_version (id TEXT, workspace_id TEXT, "
             "page_id TEXT, commit_oid TEXT, content_format TEXT, format_version INT, "
             "media_type TEXT, encoding TEXT, content_byte_size INT, body_md TEXT, "
+            "content_hash TEXT NOT NULL, "
             "version_status TEXT NOT NULL DEFAULT 'published_snapshot')"
         )
         connection.execute(
@@ -101,8 +103,8 @@ def _add_context_snapshot(db: Path, root: Path, content: bytes):
         connection.execute(
             "INSERT INTO context_page_version "
             "(id, workspace_id, page_id, commit_oid, content_format, format_version, "
-            "media_type, encoding, content_byte_size, body_md) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "media_type, encoding, content_byte_size, body_md, content_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 version_id.hex,
                 workspace_id.hex,
@@ -114,6 +116,7 @@ def _add_context_snapshot(db: Path, root: Path, content: bytes):
                 "utf-8",
                 len(content),
                 content.decode(),
+                content_hash(content.decode()),
             ),
         )
     return store, workspace_id, page_id, oid
@@ -537,6 +540,7 @@ def test_include_files_restored(tmp_path):
 def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path):
     from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
     from backend.context_versions.domain import ContentDescriptor, ContentPayload
+    from backend.utils.content_hash import content_hash
 
     base = tmp_path / "data"
     base.mkdir()
@@ -550,9 +554,48 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
     staging.parent.mkdir(parents=True)
     staging.write_bytes(b"ephemeral")
     settings = _settings_for(db, jwt, library_root=library_root)
-    git, workspace_id, page_id, oid = _add_context_snapshot(
-        db, base / "repositories", b"# Exact\r\ncontent  \r\n"
+    historical_body = b"# Exact\r\ncontent  \r\n"
+    git, workspace_id, page_id, historical_oid = _add_context_snapshot(
+        db, base / "repositories", historical_body
     )
+    current_id = uuid4()
+    current_body = b"# Current\r\ncontent  \r\n"
+    oid = git.commit(
+        workspace_id=workspace_id,
+        page_id=page_id,
+        version_id=current_id,
+        created_at=datetime(2026, 11, 10, tzinfo=UTC),
+        payload=ContentPayload(current_body),
+        parents=[historical_oid],
+    )
+    git.set_head(workspace_id, page_id, oid)
+    with sqlite3.connect(db) as connection:
+        historical_id = connection.execute(
+            "SELECT id FROM context_page_version"
+        ).fetchone()[0]
+        connection.execute(
+            "UPDATE context_page_version "
+            "SET version_status='superseded_snapshot', body_md=NULL"
+        )
+        connection.execute(
+            "INSERT INTO context_page_version "
+            "(id, workspace_id, page_id, commit_oid, content_format, format_version, "
+            "media_type, encoding, content_byte_size, body_md, content_hash) "
+            "VALUES (?, ?, ?, ?, 'markdown', 1, 'text/markdown', 'utf-8', ?, ?, ?)",
+            (
+                current_id.hex,
+                workspace_id.hex,
+                page_id.hex,
+                oid,
+                len(current_body),
+                current_body.decode(),
+                content_hash(current_body.decode()),
+            ),
+        )
+        connection.execute(
+            "UPDATE context_page SET current_published_version_id=?",
+            (current_id.hex,),
+        )
     # SQL can roll back after Git creates objects and before any ref is set.
     # That workspace's empty refs directory still belongs to the checkpoint.
     orphan_workspace_id, orphan_page_id = uuid4(), uuid4()
@@ -577,13 +620,43 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
     # A post-Git snapshot with a lost mapping is corruption, not an empty
     # repository checkpoint. Refuse it before producing a full backup.
     with sqlite3.connect(db) as connection:
-        connection.execute("UPDATE context_page_version SET commit_oid=NULL")
+        connection.execute(
+            "UPDATE context_page_version SET commit_oid=NULL WHERE id=?",
+            (current_id.hex,),
+        )
     with pytest.raises(
         backup_service.BackupIntegrityError, match="state or published pointer"
     ):
         backup_service.create_backup(settings, data_dir=base)
     with sqlite3.connect(db) as connection:
-        connection.execute("UPDATE context_page_version SET commit_oid=?", (oid,))
+        connection.execute(
+            "UPDATE context_page_version SET commit_oid=? WHERE id=?",
+            (oid, current_id.hex),
+        )
+
+    # With no SQL body to compare, a historical mapping still binds the
+    # normalized hash and the commit's version UUID to that exact row.
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE context_page_version SET content_hash=? WHERE id=?",
+            ("0" * 64, historical_id),
+        )
+    with pytest.raises(backup_service.BackupIntegrityError, match="hash differs"):
+        backup_service.create_backup(settings, data_dir=base)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE context_page_version SET content_hash=?, commit_oid=? WHERE id=?",
+            (content_hash(historical_body.decode()), oid, historical_id),
+        )
+    with pytest.raises(
+        backup_service.BackupIntegrityError, match="reference validation failed"
+    ):
+        backup_service.create_backup(settings, data_dir=base)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE context_page_version SET commit_oid=? WHERE id=?",
+            (historical_oid, historical_id),
+        )
 
     first = backup_service.create_backup(settings, data_dir=base)
     second = backup_service.create_backup(settings, data_dir=base)
@@ -637,8 +710,19 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
             commit_oid=oid,
             descriptor=ContentDescriptor(),
         )
-        == b"# Exact\r\ncontent  \r\n"
+        == current_body
     )
+    assert git.read(
+        workspace_id=workspace_id,
+        page_id=page_id,
+        commit_oid=historical_oid,
+        descriptor=ContentDescriptor(),
+    ) == historical_body
+    with sqlite3.connect(db) as connection:
+        assert connection.execute(
+            "SELECT body_md, content_hash FROM context_page_version WHERE id=?",
+            (historical_id,),
+        ).fetchone() == (None, content_hash(historical_body.decode()))
     assert git.list_heads(orphan_workspace_id) == {}
     assert git.read(
         workspace_id=orphan_workspace_id,
@@ -660,6 +744,10 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
     git.set_head(workspace_id, page_id, None)
     with sqlite3.connect(db) as connection:
         connection.execute("UPDATE context_page SET current_published_version_id=NULL")
+        connection.execute(
+            "UPDATE context_page_version SET body_md=? WHERE id=?",
+            (historical_body.decode(), historical_id),
+        )
         connection.execute(
             "UPDATE context_page_version SET version_status='draft', "
             "commit_oid=NULL, content_byte_size=NULL"

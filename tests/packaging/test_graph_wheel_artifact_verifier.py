@@ -33,6 +33,7 @@ _write_wheel = _backend._write_wheel
 def _stage(tmp_path, name="stage"):
     # Extend the backend fixture locally: no cross-PR fixture rewrites.
     stage = _backend._stage(tmp_path, name)
+    _promote_unreleased(stage)
     assets = stage / "backend/static/assets"
     (assets / "index-abc123.js").write_text(
         'export const openMap=()=>import("./cosmosAdapter-abc123.js");\n',
@@ -48,6 +49,39 @@ def _stage(tmp_path, name="stage"):
         "self.onmessage = () => {};\n", encoding="utf-8"
     )
     return stage
+
+
+def _promote_unreleased(stage):
+    """Assign candidate revisions to this fixture's release group in staging.
+
+    Product development keeps revisions/helpers in unreleased. These cases
+    qualify a simulated release, so move only those pending sources and fix
+    their imports without editing any already-frozen release file or digest.
+    """
+    migrations = stage / "backend/migrations"
+    promoted = []
+    for tree in ("versions", "revision_modules"):
+        pending = migrations / tree / "unreleased"
+        if not pending.exists():
+            continue
+        released = migrations / tree / "v0_2"
+        released.mkdir(parents=True, exist_ok=True)
+        for source in sorted(pending.iterdir()):
+            if source.name in {"__init__.py", "__pycache__"}:
+                continue
+            target = released / source.name
+            assert not target.exists(), target
+            shutil.move(source, target)
+            promoted.extend(target.rglob("*.py") if target.is_dir() else (target,))
+        shutil.rmtree(pending)
+    for path in promoted:
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "backend.migrations.revision_modules.unreleased.",
+                "backend.migrations.revision_modules.v0_2.",
+            ),
+            encoding="utf-8",
+        )
 
 
 def _write_sdist(target, stage):
@@ -240,7 +274,12 @@ def _release_schema_stage(tmp_path, artifact_kind="wheel", version="0.2.1"):
         REPO_ROOT / "backend/migrations/release_manifest.json",
         migrations / "release_manifest.json",
     )
-    shutil.copytree(REPO_ROOT / "backend/migrations/versions", migrations / "versions")
+    shutil.copytree(
+        REPO_ROOT / "backend/migrations/versions",
+        migrations / "versions",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    _promote_unreleased(stage)
     _retain_historical_schema_boundaries(stage)
     _write_release_metadata(stage, artifact_kind, version)
     suffix = "-py3-none-any.whl" if artifact_kind == "wheel" else ".tar.gz"

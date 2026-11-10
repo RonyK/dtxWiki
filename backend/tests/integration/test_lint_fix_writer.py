@@ -19,6 +19,7 @@ from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.services.context_link_targets import markdown_link_targets
 from backend.services.context_links import editor_link_actor
+from backend.services.document_references import document_references_hash
 from backend.services.index_refs import format_index_ref
 from backend.services.lint import LintRegistry
 from backend.services.lint_fix_writer import LintFixWriter
@@ -74,27 +75,42 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             workspace = session.get(Workspace, workspace_id)
             workspace.lint_policy = {"link_fix_mode": "suggest"}
             workspace.auto_fix_enabled = False
-        page = page_service.write_page(
-            workspace_slug="default",
-            slug="lint-source",
-            title="Lint Source",
-            body_md=(
-                "# Lint Source\n\n[Target](/context/lint-target.md)\n \n"
-                + draft_links
-                + f"[Missing](/p/{workspace_id}/{missing_id})\n"
-                + "\nEvidence line  \ncontinues here.\n"
-                + suffix
-            ),
-            actor_kind="human",
-            actor_id="author",
-            actor_provenance="browser_session",
-            base_version_id=base.version_id if base else None,
-            base_content_hash=base.content_hash if base else None,
+        body_md = (
+            "# Lint Source\n\n[Target](/context/lint-target.md)\n \n"
+            + draft_links
+            + f"[Missing](/p/{workspace_id}/{missing_id})\n"
+            + "\nEvidence line  \ncontinues here.\n"
+            + suffix
         )
+        if base is None:
+            page = page_service.write_page(
+                workspace_slug="default",
+                slug="lint-source",
+                title="Lint Source",
+                body_md=body_md,
+                actor_kind="human",
+                actor_id="author",
+                actor_provenance="browser_session",
+                as_draft=True,
+            )
+        else:
+            page = page_service.autosave_page(
+                page_id=base.id,
+                workspace_id=workspace_id,
+                title="Lint Source",
+                body_md=body_md,
+                actor_kind="human",
+                actor_id="author",
+                actor_provenance="browser_session",
+                base_version_id=base.version_id,
+                base_content_hash=base.content_hash,
+                idempotency_key=f"lint-legacy-source:{base.version_id}",
+            )
         with page_service.session_factory.begin() as session:
-            # Seed the existing historical-byte fixture directly. Authored
-            # saves now normalize exact refs even in suggest mode, while this
-            # lifecycle must exercise a pre-normalization published snapshot.
+            # Seed legacy bytes before publication: changing a published body
+            # would correctly fail the exact-Git check when lint replaces it.
+            # Authored saves normalize exact refs even in suggest mode, while
+            # this lifecycle exercises a pre-normalization snapshot.
             stored_page = session.get(ContextPage, page.id)
             stored = session.get(ContextPageVersion, page.version_id)
             stored.body_md = stored.body_md.replace(
@@ -106,10 +122,23 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             page = page.model_copy(update={
                 "body_md": stored.body_md, "content_hash": stored.content_hash,
             })
+            references_hash = document_references_hash(session, stored)
+        published = page_service.publish_draft(
+            page_id=page.id,
+            version_id=page.version_id,
+            reason="publish legacy lint fixture",
+            publish_despite_findings=False,
+            actor_kind="human",
+            actor_id="author",
+            actor_provenance="browser_session",
+            expected_content_hash=page.content_hash,
+            expected_references_hash=references_hash,
+        )
+        with page_service.session_factory.begin() as session:
             workspace = session.get(Workspace, workspace_id)
             workspace.lint_policy = {"link_fix_mode": "auto"}
             workspace.auto_fix_enabled = True
-        return page
+        return published.page
 
     source = legacy_source()
     with page_service.session_factory.begin() as session:

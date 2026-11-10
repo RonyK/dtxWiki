@@ -37,6 +37,7 @@ from backend.scripts.seed_dev import (
     DEFAULT_AGENT_PAGE_SLUG,
     seed_default_workspace,
 )
+from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.page_service import PageService
 from backend.tests.utils.context_git import configure_test_context_storage
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
@@ -657,10 +658,15 @@ def test_page_service_populates_design_context_version_fields(tmp_path):
             .where(ContextPageVersion.page_id == page.id)
             .order_by(ContextPageVersion.version_no)
         ).all()
+        assert [version.body_md for version in versions] == ["# One", "# Two"]
+        assert [version._body_md for version in versions] == [None, "# Two"]
 
     assert page.current_published_version_id == updated.version_id
     assert [version.version_no for version in versions] == [1, 2]
-    assert [version.body_md for version in versions] == ["# One", "# Two"]
+    with pytest.raises(ContextStorageServiceError) as detached:
+        _ = versions[0].body_md
+    assert detached.value.error_code == "context_repository_unavailable"
+    assert versions[1].body_md == "# Two"
     assert [version.version_status for version in versions] == [
         "superseded_snapshot",
         "published_snapshot",

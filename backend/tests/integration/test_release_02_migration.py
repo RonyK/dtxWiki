@@ -48,11 +48,13 @@ from backend.services.ops.input_maintenance import audit_inputs
 from backend.services.page_service import PageService
 from backend.tests.integration.test_release_schema_migration import (
     _assert_each_table_rebuilt_at_most_once,
+    _batch_rebuild_counts,
     _captured_statements,
     _config,
     _schema_snapshot,
 )
 from backend.tests.utils.migration_paths import configure_test_repositories
+from backend.utils.content_hash import content_hash
 
 # Published 0.1.4. The 0.2.1 package used a development-only parent instead.
 PARENT = "eb86fdacb1bb"
@@ -545,7 +547,7 @@ def _seed_release_data(engine, workspace_id, existing_id, now):
             workspace_id=workspace_id,
             page_id=data["source"],
             body_md="# Source\n\n[[release-target]]",
-            content_hash="original-source",
+            content_hash=content_hash("# Source\n\n[[release-target]]"),
             actor_type="human",
             version_status="published_snapshot",
             created_by_actor_kind="human",
@@ -706,14 +708,9 @@ def _assert_release_upgrade(engine, data, now, *, first):
         )
         assert legacy["target_page_id"] == data["target"]
         versions = _table(connection, "context_page_version")
-        assert (
-            connection.scalar(
-                sa.select(versions.c.content_hash).where(
-                    versions.c.id == data["version"]
-                )
-            )
-            == "original-source"
-        )
+        assert connection.scalar(
+            sa.select(versions.c.content_hash).where(versions.c.id == data["version"])
+        ) == content_hash("# Source\n\n[[release-target]]")
         recipients = _table(connection, "workspace_inbox_recipient")
         recipient = (
             connection.execute(
@@ -1016,7 +1013,11 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
             for statement in stamp_writes[1:]
         )
         assert current_alembic_head() in stamp_writes[-1]
-        assert not any("_alembic_tmp_" in statement for statement in statements)
+        # The frozen baseline avoids historical rebuilds. The appended Git
+        # body revision must rebuild only this table to make body_md nullable.
+        assert _batch_rebuild_counts(statements) == (
+            {"context_page_version": 1} if dialect == "sqlite" else {}
+        )
         initialized_schema = _schema_snapshot(engine)
         command.downgrade(config, "efcbcf724889")
         with engine.begin() as connection:
@@ -1073,7 +1074,7 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
                 workspace_id=workspace,
                 page_id=source,
                 body_md="# Older content\n\n[[older-target]]",
-                content_hash="retained-older-content",
+                content_hash=content_hash("# Older content\n\n[[older-target]]"),
                 actor_type="human",
                 version_status="published_snapshot",
                 created_by_actor_kind="human",
