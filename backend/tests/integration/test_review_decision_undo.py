@@ -1,7 +1,7 @@
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from backend.models.audit import AuditEvent
 from backend.models.base import utc_now
@@ -12,6 +12,7 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.schemas.context_write import ReviewDecisionRequest, UpdateDraftRequest
 from backend.schemas.mcp.read_tools import WhatChangedEntryModel
 from backend.schemas.tree import TreeNodeUpdate
+from backend.services.context_version_storage import verify_context_storage
 from backend.services.context_write_service import ContextWriteService
 from backend.services.read_errors import (
     ReadNotFoundError,
@@ -87,11 +88,21 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
     with session_factory.begin() as session:
         workspace, published, draft = _published_page_with_draft(session, "Undo A")
         page_id = published.page_id
+        store = session.info["context_snapshot_store"]
+        published_oid = session.get(
+            ContextPageVersion, published.draft_version_id
+        ).commit_oid
         # The published content was flagged stale; publishing the draft clears
         # the flag, and undoing the publication must bring it back.
         stale = _stale_finding(session, workspace.id, page_id)
         before = _states(session, page_id)
         decided = _approve(session, workspace.id, draft.review_item_id)
+        assert _decision_audit(session, draft.review_item_id).payload["effect"][
+            "format"
+        ] == 2
+        candidate = session.get(ContextPageVersion, draft.draft_version_id)
+        approved_oid = candidate.commit_oid
+        assert approved_oid is not None
         assert decided.undo is not None and decided.undo.available
         assert _states(session, page_id)[0] == draft.draft_version_id
         assert stale.status == "fixed"
@@ -117,6 +128,9 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         assert session.get(ContextPage, page_id).stale_candidate is True
         assert restored.status == "pending" and restored.undo is None
         assert [d.decision_type for d in restored.decisions][:2] == ["undo", "approve"]
+        assert candidate.commit_oid is None and candidate.content_byte_size is None
+        assert store.list_heads(workspace.id)[page_id] == published_oid
+        verify_context_storage(session, store)
         page = session.get(ContextPage, page_id)
         assert resolve_version_as_of(session, page, utc_now()).id == (
             published.draft_version_id
@@ -129,6 +143,9 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
 
         # Approving the same draft again publishes it again, for as-of reads too.
         _approve(session, workspace.id, draft.review_item_id)
+        assert candidate.commit_oid == approved_oid
+        assert store.list_heads(workspace.id)[page_id] == approved_oid
+        verify_context_storage(session, store)
         assert (
             resolve_version_as_of(session, page, utc_now()).id
             == draft.draft_version_id
@@ -156,7 +173,28 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
             f"# First\n\nSee @cite{{/p/{workspace.id}/{page_id}}}.",
         )
         first_before = _states(session, first.page_id)
-        approved = _approve(session, workspace.id, first.review_item_id)
+
+        def record_legacy_effect(_mapper, _connection, audit):
+            effect = (audit.payload or {}).get("effect")
+            if audit.action == "review.decision" and effect:
+                effect["format"] = 1
+                for fields in effect["rows"].get("context_page_version", {}).values():
+                    fields.pop("commit_oid", None)
+                    fields.pop("content_byte_size", None)
+
+        # Older stored decisions lack Git fields even after migration has
+        # assigned their published versions an OID. Build that fixture at
+        # insertion time; existing audit rows remain append-only.
+        event.listen(AuditEvent, "before_insert", record_legacy_effect)
+        try:
+            approved = _approve(session, workspace.id, first.review_item_id)
+        finally:
+            event.remove(AuditEvent, "before_insert", record_legacy_effect)
+        assert "commit_oid" not in _decision_audit(
+            session, first.review_item_id
+        ).payload["effect"]["rows"]["context_page_version"][str(first.draft_version_id)]
+        first_version = session.get(ContextPageVersion, first.draft_version_id)
+        first_oid = first_version.commit_oid
         assert (
             session.scalar(
                 select(EdgeProjection.id).where(
@@ -175,6 +213,10 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
             )
         )
         assert _states(session, first.page_id) == first_before
+        assert first_version.commit_oid is None
+        assert first_version.content_byte_size is None
+        assert first.page_id not in store.list_heads(workspace.id)
+        verify_context_storage(session, store)
         first_page = session.get(ContextPage, first.page_id)
         assert resolve_version_as_of(session, first_page, utc_now()) is None
         entries, has_more = what_changed(
@@ -202,6 +244,9 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         ) == ([], False)
         # Publishing it again is a fresh entry into the published set.
         _approve(session, workspace.id, first.review_item_id)
+        assert first_version.commit_oid == first_oid
+        assert store.list_heads(workspace.id)[first.page_id] == first_oid
+        verify_context_storage(session, store)
         entries, _ = what_changed(
             session, workspace.id, since=since, actor=_actor(workspace.id, "editor"),
         )

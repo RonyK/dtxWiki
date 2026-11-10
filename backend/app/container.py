@@ -1066,6 +1066,7 @@ class ServiceRegistry:
 
         return LintService(
             job_queue=self.job_queue,
+            context_version_writer=self.context_version_writer,
             lint_registry=self.lint_registry,
             context_media_repository_factory=self.context_media_repository_factory,
             self_origins=configured_self_origins(self.settings),

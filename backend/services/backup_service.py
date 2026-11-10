@@ -638,15 +638,7 @@ def _copy_repository_checkpoint(root: Path, backup_dir: Path) -> tuple[list, dic
     if _path_exists(root):
         _require_directory(root, label="Git repositories root")
         excluded = {".locks"}
-        for child in root.iterdir():
-            if child.name == ".locks":
-                continue
-            try:
-                if child.suffix != ".git":
-                    raise ValueError("not a bare repository")
-                UUID(child.stem)
-            except ValueError as exc:
-                raise BackupIntegrityError("unexpected Git repository entry") from exc
+        _repository_workspace_ids(root, exclude_locks=True)
         entries = _copy_tree_snapshot(
             root,
             target,
@@ -661,6 +653,24 @@ def _copy_repository_checkpoint(root: Path, backup_dir: Path) -> tuple[list, dic
     metadata = {"included": True, "tree_prefix": REPOSITORY_CHECKPOINT_PREFIX}
     metadata.update(_tree_summary(_repository_relative_entries(entries)))
     return entries, metadata
+
+
+def _repository_workspace_ids(root: Path, *, exclude_locks: bool = False) -> set[UUID]:
+    """Validate the bare-store namespace shared by capture and copied checks."""
+    _require_directory(root, label="Git repositories root")
+    workspaces = set()
+    for child in root.iterdir():
+        if exclude_locks and child.name == ".locks":
+            continue
+        try:
+            workspace_id = UUID(child.stem)
+            if child.name != f"{workspace_id}.git":
+                raise ValueError("not a canonical bare repository path")
+        except ValueError as exc:
+            raise BackupIntegrityError("unexpected Git repository entry") from exc
+        _require_directory(child, label="Git repository")
+        workspaces.add(workspace_id)
+    return workspaces
 
 
 def _is_git_temporary_directory(relative: PurePosixPath) -> bool:
@@ -719,6 +729,17 @@ def _verify_repository_database_references(database: Path, root: Path | None) ->
     )
     connection.row_factory = sqlite3.Row
     try:
+        actual_heads = {}
+        if root is not None:
+            from backend.app.context_version_storage import build_context_storage
+
+            store, _ = build_context_storage(root)
+            # Even a rolled-back migration can leave valid Git data beside an
+            # old DB schema. Check its structure before optional DB mappings.
+            actual_heads = {
+                workspace_id: store.list_heads(workspace_id)
+                for workspace_id in _repository_workspace_ids(root)
+            }
         columns = {
             row[1]
             for row in connection.execute("PRAGMA table_info(context_page_version)")
@@ -747,16 +768,14 @@ def _verify_repository_database_references(database: Path, root: Path | None) ->
             "format_version, media_type, encoding, content_byte_size, body_md "
             "FROM context_page_version WHERE commit_oid IS NOT NULL"
         ).fetchall()
-        if not rows:
-            return
         if root is None:
+            if not rows:
+                return
             raise BackupIntegrityError(
                 "database references Git but checkpoint omits repositories"
             )
-        from backend.app.context_version_storage import build_context_storage
         from backend.context_versions.domain import ContentDescriptor
 
-        store, _ = build_context_storage(root)
         commits = {}
         workspaces = set()
         for row in rows:
@@ -780,7 +799,9 @@ def _verify_repository_database_references(database: Path, root: Path | None) ->
                 raise BackupIntegrityError("Git snapshot bytes differ from database")
             commits[(workspace_id, page_id, UUID(row["id"]))] = row["commit_oid"]
             workspaces.add(workspace_id)
-        expected = {workspace_id: {} for workspace_id in workspaces}
+        expected = {
+            workspace_id: {} for workspace_id in workspaces | actual_heads.keys()
+        }
         for page in connection.execute(
             "SELECT id, workspace_id, current_published_version_id FROM context_page"
         ):
@@ -795,7 +816,7 @@ def _verify_repository_database_references(database: Path, root: Path | None) ->
                 raise BackupIntegrityError("published snapshot lacks Git checkpoint")
             expected.setdefault(workspace_id, {})[page_id] = oid
         for workspace_id, heads in expected.items():
-            if store.list_heads(workspace_id) != heads:
+            if actual_heads.get(workspace_id, {}) != heads:
                 raise BackupIntegrityError(
                     "Git heads differ from database publication pointers"
                 )
@@ -1024,14 +1045,20 @@ def _copy_tree_snapshot(
         raise FileExistsError(f"snapshot target already exists: {target}")
     target.mkdir(parents=True)
     _chmod_700(target)
-    walked = _walk_regular_files(
-        source,
-        exclude_top_level=exclude_top_level or set(),
-        exclude_directory=exclude_directory,
-    )
     entries: list[dict] = []
     total_bytes = 0
     try:
+        directories: list[str] = []
+        walked = _walk_regular_files(
+            source,
+            exclude_top_level=exclude_top_level or set(),
+            exclude_directory=exclude_directory,
+            directories=directories,
+        )
+        for relative in directories:
+            target.joinpath(*PurePosixPath(relative).parts).mkdir(
+                parents=True, exist_ok=True
+            )
         for source_path, relative, source_stat in walked:
             destination = target.joinpath(*PurePosixPath(relative).parts)
             sha256, byte_size = _copy_regular_file(
@@ -1058,7 +1085,9 @@ def _walk_regular_files(
     *,
     exclude_top_level: set[str] | None = None,
     exclude_directory: Callable[[PurePosixPath], bool] | None = None,
+    directories: list[str] | None = None,
 ) -> list[tuple[Path, str, os.stat_result]]:
+    """Validate the tree and optionally collect its included directory names."""
     _require_directory(root, label="checkpoint tree")
     excluded = exclude_top_level or set()
     stack: list[tuple[Path, PurePosixPath | None]] = [(root, None)]
@@ -1094,6 +1123,8 @@ def _walk_regular_files(
                     continue
                 if exclude_directory is not None and exclude_directory(relative):
                     continue
+                if directories is not None:
+                    directories.append(relative_text)
                 stack.append((child_path, relative))
             elif stat.S_ISREG(child_stat.st_mode):
                 if child_stat.st_size > MAX_CHECKPOINT_FILE_BYTES:

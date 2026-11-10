@@ -34,7 +34,7 @@ def _workspace_id(client: TestClient) -> str:
     ]
 
 
-def test_context_api_creates_updates_and_publishes_draft(page_service):
+def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypatch):
     # P9.1: the old `/{workspace_id}/context-pages*` route family (title-
     # upsert `ContextWriteService.write_draft`/`update_draft`/`publish_draft`)
     # is deleted entirely -- REST callers now use the single canonical
@@ -88,6 +88,11 @@ def test_context_api_creates_updates_and_publishes_draft(page_service):
     assert stale.status_code == 409
     assert stale.json()["error_code"] == "stale_base_version"
 
+    # App assembly already bound its writer. Transport services must retain
+    # that explicit dependency even without the legacy session.info bridge.
+    monkeypatch.delitem(
+        page_service.session_factory.kw["info"], "context_version_writer"
+    )
     published = client.post(
         f"{pages_url}/{draft['id']}/versions/{updated_id}/publish",
         json={

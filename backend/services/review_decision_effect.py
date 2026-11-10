@@ -36,7 +36,9 @@ from backend.repositories.workspace_scoped import (
     select_in_workspace,
 )
 
-EFFECT_FORMAT = 1
+# Git snapshot fields require the current model. Older binaries must refuse
+# these effects after a schema downgrade rather than access unknown columns.
+EFFECT_FORMAT = 2
 
 # model -> (table, guarded columns, advisory columns)
 _TRACKED: dict[type, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
@@ -61,7 +63,7 @@ _TRACKED: dict[type, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     ),
     ContextPageVersion: (
         "context_page_version",
-        ("version_status", "graph_status"),
+        ("version_status", "graph_status", "commit_oid", "content_byte_size"),
         (),
     ),
     ReviewItem: ("review_item", ("status", "claimed_by", "claimed_at"), ()),
@@ -339,6 +341,13 @@ def restore_effect(
                     continue
                 setattr(obj, column, _decode(column, before))
                 restored.setdefault(table, set()).add(column)
+            if isinstance(obj, ContextPageVersion) and obj.version_status not in {
+                "published_snapshot", "superseded_snapshot"
+            }:
+                # Older decision effects did not record these fields. A
+                # restored working version never retains a snapshot mapping.
+                obj.commit_oid = None
+                obj.content_byte_size = None
         session.flush()
     # Maintenance the publication queued for the decided page answers a
     # publication that no longer stands.

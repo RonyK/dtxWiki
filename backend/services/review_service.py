@@ -3145,6 +3145,10 @@ class ReviewService:
         from backend.services.change_propagation import (
             process_page_publish_maintenance,
         )
+        from backend.services.context_version_storage import (
+            ContextStorageServiceError,
+            align_publication,
+        )
         from backend.services.page_service import sync_page_projections
         from backend.services.tree_service import ensure_primary_tree_placement
 
@@ -3198,9 +3202,24 @@ class ReviewService:
         )
         if "current_published_version_id" not in columns:
             return
+        published_id = page.current_published_version_id
+        published = next(
+            (version for version in live if version.id == published_id), None
+        )
+        if published_id is not None and (
+            published is None
+            or published.page_id != page.id
+            or not published.commit_oid
+        ):
+            raise ContextStorageServiceError("context_snapshot_invalid")
+        align_publication(
+            session,
+            page,
+            published.commit_oid if published is not None else None,
+            self.context_version_writer,
+        )
         # The timeline names what is published from now on, so reads "as of"
         # a later instant resolve to the restored version (or to nothing).
-        published_id = page.current_published_version_id
         revert = ChangeSet(
             workspace_id=page.workspace_id,
             reason="review decision undone",
@@ -3260,7 +3279,7 @@ class ReviewService:
 
         payload = ReviewService._decision_audit_payload(session, review, decision)
         effect = (payload or {}).get("effect")
-        if isinstance(effect, dict) and effect.get("format") == EFFECT_FORMAT:
+        if isinstance(effect, dict) and effect.get("format") in {1, EFFECT_FORMAT}:
             return effect
         return None
 

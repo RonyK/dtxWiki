@@ -675,7 +675,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
     from backend.context_versions.domain import ContentPayload
 
-    git = GitSnapshotStore(tmp_path / "repositories")
+    git = factory.kw["info"]["context_snapshot_store"]
     git.commit(
         workspace_id=personal_id,
         page_id=uuid4(),
@@ -724,9 +724,28 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         raise OSError("temporary store outage")
 
     monkeypatch.setattr(store, "purge_workspace", fail_purge)
-    assert service.purge_due(blob_store_provider=provider, now=deadline) == 0
+    # The worker must use this factory's store, even when the process default
+    # contains a different repository with the same workspace UUID.
+    shadow_data = tmp_path / "worker-global-data"
+    shadow_git = GitSnapshotStore(shadow_data / "repositories")
+    shadow_git.commit(
+        workspace_id=personal_id,
+        page_id=uuid4(),
+        version_id=uuid4(),
+        created_at=utc_now(),
+        payload=ContentPayload(b"unrelated process-default Context history"),
+        parents=[],
+    )
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(shadow_data))
+    monkeypatch.setattr(
+        "backend.services.user_deletion_service.utc_now", lambda: deadline
+    )
+    from backend.worker.entry import _sweep_user_deletions
+
+    _sweep_user_deletions(app.state.container.db, provider)
     # Library failure must not prevent the independent Git cleanup.
     assert not git.exists(personal_id)
+    assert shadow_git.exists(personal_id)
     with factory() as session:
         assert session.get(User, target.user_id) is not None
         assert session.get(Workspace, personal_id) is None

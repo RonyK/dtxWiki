@@ -42,6 +42,12 @@ def test_container_memoizes_service_registry():
     container = assemble(_settings())
 
     assert container.get_services() is container.get_services()
+    registry = container.get_services()
+    writer = registry.context_version_writer
+    assert container.get_page_service().context_version_writer is writer
+    assert registry.context_write.context_version_writer is writer
+    assert registry.review.context_version_writer is writer
+    assert registry.lint.context_version_writer is writer
 
 
 def test_container_stamps_settings_on_injected_service_registry():
@@ -89,6 +95,20 @@ def test_tool_call_context_binds_workspace_sessions():
     assert calls == [workspace_id]
     assert control.session_factory is provider.control_session_factory()
     assert calls == [workspace_id]
+
+    from backend.mcp.context_tools import _context_edit_page_service
+
+    registry = ServiceRegistry()
+    bound = ToolCallContext(
+        actor=object(),
+        db=provider,
+        page_service=object(),
+        workspace_id=workspace_id,
+        services=registry,
+    )
+    service = _context_edit_page_service(bound)
+    assert service.session_factory is provider.session_factory
+    assert service.context_version_writer is registry.context_version_writer
 
 
 def test_database_provider_requires_settings_or_factory():

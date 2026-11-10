@@ -62,6 +62,7 @@ def get_page_service_from_app(request: Request) -> PageService:
                 services = container.get_services()
                 state.page_service = PageService(
                     session_factory,
+                    context_version_writer=services.context_version_writer,
                     job_queue=services.job_queue,
                     body_preparer=services.body_preparer,
                     lint_registry=services.lint_registry,

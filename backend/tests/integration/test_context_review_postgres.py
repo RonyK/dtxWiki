@@ -26,6 +26,7 @@ from backend.services.read_errors import (
     ReviewDecisionIdConflictError,
 )
 from backend.services.review_service import ReviewService
+from backend.tests.utils.context_git import configure_test_context_storage
 from backend.tests.utils.postgres import (
     create_isolated_postgres_metadata,
     drop_reflected_postgres_metadata,
@@ -69,6 +70,7 @@ def test_postgres_reviewed_replacement_serializes_before_review_approval(
     engine = create_engine(database_url)
     create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    configure_test_context_storage(session_factory)
     browser_at_review_lookup = threading.Event()
     release_browser = threading.Event()
     browser_result = []
@@ -211,6 +213,7 @@ def test_postgres_approval_queued_behind_a_cascading_rejection_refuses(monkeypat
     engine = create_engine(database_url)
     create_isolated_postgres_metadata(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    configure_test_context_storage(session_factory)
     rejection_holds_page = threading.Event()
     release_rejection = threading.Event()
     errors: dict[str, list[BaseException]] = {"reject": [], "approve": []}
@@ -350,6 +353,7 @@ def test_postgres_ghost_close_and_decision_share_page_then_review_lock_order():
         class_=TrackingSession,
         expire_on_commit=False,
     )
+    configure_test_context_storage(session_factory)
     decision_results = []
     close_results = []
     thread_errors: list[BaseException] = []
@@ -503,6 +507,7 @@ def test_postgres_decision_receipt_serializes_retry_and_cross_review_collision(
     engine = create_engine(_postgres_url())
     create_isolated_postgres_metadata(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    configure_test_context_storage(factory)
     service = ReviewService()
     start = threading.Barrier(2)
     before_insert = threading.Barrier(2)

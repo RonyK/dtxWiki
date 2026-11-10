@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass
 from sqlalchemy import select
 
 from backend.app.bootstrap import ensure_app_version_synced
+from backend.app.container import assemble
 from backend.app.db import make_session_factory_from_settings
 from backend.app.settings import Settings
 from backend.models.api_token import ApiToken
@@ -152,7 +153,9 @@ def seed_remote_mcp_smoke(
         workspace_id = ws_a.id
         foreign_workspace_id = ws_b.id
 
-    page_service = PageService(session_factory)
+    page_service = assemble(
+        settings, session_factory=session_factory
+    ).get_page_service()
     page = _upsert_page(
         page_service=page_service,
         workspace_slug=workspace_a,

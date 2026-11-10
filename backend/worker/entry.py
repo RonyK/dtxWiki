@@ -644,14 +644,19 @@ def _sweep_user_deletions(
     from backend.app.context_version_storage import build_context_storage
     from backend.services.workspace_content_storage import WorkspaceContentStorage
 
-    content_storage = WorkspaceContentStorage(
-        blob_store_provider=blob_store_provider,
-        repository_purger=build_context_storage()[0],
-    )
     try:
+        session_factory = database_provider.control_session_factory()
+        session_info = getattr(session_factory, "kw", {}).get("info") or {}
+        repository_purger = session_info.get("context_snapshot_store")
+        if repository_purger is None:
+            repository_purger = build_context_storage()[0]
+        content_storage = WorkspaceContentStorage(
+            blob_store_provider=blob_store_provider,
+            repository_purger=repository_purger,
+        )
         UserDeletionService(
             workspace_content_storage=content_storage,
-            session_factory=database_provider.control_session_factory(),
+            session_factory=session_factory,
         ).purge_due(blob_store_provider=blob_store_provider)
     except Exception:
         logger.exception("user deletion sweep failed")

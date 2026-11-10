@@ -133,6 +133,7 @@ def submit_feedback(payload: dict, ctx: ToolCallContext) -> SubmitFeedbackToolOu
 def _context_edit_page_service(ctx: ToolCallContext) -> PageService:
     return PageService(
         ctx.session_factory,
+        context_version_writer=ctx.services.context_version_writer,
         actor_context=ctx.actor,
         job_queue=ctx.services.job_queue,
         body_preparer=ctx.services.body_preparer,
