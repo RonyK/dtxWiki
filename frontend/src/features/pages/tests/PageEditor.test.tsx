@@ -163,7 +163,7 @@ function PublishedContextDestination() {
 }
 
 async function openContextExplorer(): Promise<HTMLElement> {
-  const toggle = screen.getByRole("button", { name: "Open Context explorer" });
+  const toggle = await screen.findByRole("button", { name: "Open Context explorer" });
   expect(toggle).toHaveAttribute("aria-expanded", "false");
 
   const drawerId = toggle.getAttribute("aria-controls");
@@ -5442,8 +5442,12 @@ describe("PageEditor", () => {
     await renderMobileEditor();
 
     expect(screen.queryByLabelText("Tags")).not.toBeInTheDocument();
-    const propertiesButton = screen.getByRole("button", { name: "Page properties" });
-    await typist().click(propertiesButton);
+    const moreButton = screen.getByRole("button", { name: "More page actions" });
+    const openProperties = async () => {
+      await typist().click(moreButton);
+      await typist().click(screen.getByRole("button", { name: "Page properties" }));
+    };
+    await openProperties();
     const properties = await screen.findByRole("region", { name: "Page properties" });
     const mobileTags = within(properties).getByLabelText("Tags");
     expect(mobileTags).toHaveAttribute("id", "editor-tags");
@@ -5451,8 +5455,8 @@ describe("PageEditor", () => {
     expect(within(properties).getByText("Mobile")).toBeInTheDocument();
     await typist().click(within(properties).getByRole("button", { name: "Close properties" }));
     expect(screen.queryByRole("region", { name: "Page properties" })).not.toBeInTheDocument();
-    expect(propertiesButton).toHaveFocus();
-    await typist().click(propertiesButton);
+    expect(moreButton).toHaveFocus();
+    await openProperties();
     expect(within(await screen.findByRole("region", { name: "Page properties" })).getByText("Mobile"))
       .toBeInTheDocument();
     await typist().click(screen.getByRole("button", { name: "Close properties" }));
@@ -5461,27 +5465,143 @@ describe("PageEditor", () => {
   it("opens the Context explorer as a modal drawer at 390px and closes it on Escape", async () => {
     await renderMobileEditor();
 
-    const railToggle = screen.getByRole("button", {
-      name: "Open Context explorer",
-    });
-    expect(railToggle).toHaveAttribute("aria-expanded", "false");
+    const moreButton = screen.getByRole("button", { name: "More page actions" });
     const closedRail = document.querySelector("#page-editor-context-rail");
     expect(closedRail).toHaveAttribute("data-mobile-open", "false");
     expect(closedRail).toHaveAttribute("aria-hidden", "true");
     expect(closedRail).toHaveAttribute("inert");
-    await typist().click(railToggle);
-    expect(railToggle).toHaveAttribute("aria-expanded", "true");
-    const drawer = screen.getByRole("dialog", { name: "Context drawer" });
+    await typist().click(moreButton);
+    await typist().click(screen.getByRole("button", { name: "Explorer" }));
+    const drawer = await screen.findByRole("dialog", { name: "Context drawer" });
     expect(drawer).toHaveAttribute("data-mobile-open", "true");
     expect(drawer).toHaveAttribute("aria-modal", "true");
     await waitFor(() => expect(drawer.contains(document.activeElement)).toBe(true));
     expect(document.querySelector(".workspace-mobile-drawer-scrim"))
       .toHaveAccessibleName("Close Context explorer");
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
-    await waitFor(() => expect(railToggle).toHaveFocus());
-    expect(railToggle).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(moreButton).toHaveFocus());
     expect(closedRail).toHaveAttribute("aria-hidden", "true");
     expect(closedRail).toHaveAttribute("inert");
+  });
+
+  it("keeps one top row on phones and tablets and leaves the mouse desktop alone", async () => {
+    let coarsePointer = false;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      addEventListener: vi.fn(),
+      matches: query === "(pointer: coarse)" && coarsePointer,
+      removeEventListener: vi.fn(),
+    }));
+    const resizeTo = (width: number) => {
+      vi.stubGlobal("innerWidth", width);
+      fireEvent(window, new Event("resize"));
+    };
+    const barLabels = () => Array.from(
+      document.querySelectorAll<HTMLElement>(".editor-compact-bar button"),
+    ).map((button) => button.getAttribute("aria-label") ?? button.textContent?.trim());
+
+    await renderMobileEditor();
+
+    expect(document.body).toHaveAttribute("data-compact-editor", "true");
+    expect(barLabels()).toEqual([
+      "More page actions", "Source", "Reading", "Publish", "Request review", "Close editor",
+    ]);
+    expect(document.querySelector(".editor-compact-bar-lead")?.nextElementSibling)
+      .toHaveClass("sync-pill");
+    expect(document.querySelector(".editor-grid")?.nextElementSibling)
+      .toHaveClass("editor-action-bar-shell");
+    expect(screen.queryByRole("button", { name: /focus mode/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "o", ctrlKey: true, shiftKey: true });
+    expect(document.body).not.toHaveAttribute("data-focus-mode");
+
+    const moreButton = screen.getByRole("button", { name: "More page actions" });
+    await typist().click(moreButton);
+    const sheet = document.querySelector(".editor-overflow-panel") as HTMLElement;
+    expect(sheet).toHaveAttribute("data-presentation", "sheet");
+    expect(within(sheet).getByRole("button", { name: "Save draft" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Explorer" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    await waitFor(() => expect(moreButton).toHaveFocus());
+
+    resizeTo(820);
+    expect(barLabels()).toEqual([
+      "Open Context explorer", "More page actions", "Source", "Reading", "Split",
+      "Publish", "Request review", "Close editor",
+    ]);
+    await typist().click(screen.getByRole("button", { name: "More page actions" }));
+    const menu = document.querySelector(".editor-overflow-panel") as HTMLElement;
+    expect(menu).toHaveAttribute("data-presentation", "menu");
+    expect(within(menu).queryByRole("button", { name: "Explorer" })).not.toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".editor-overflow-panel")).toBeNull());
+
+    // A touch tablet above 1024px is compact and fits the title in the row;
+    // the same width with a mouse keeps the desktop editor.
+    coarsePointer = true;
+    resizeTo(1180);
+    expect(document.querySelector(".editor-panel"))
+      .toHaveAttribute("data-title-placement", "bar");
+    coarsePointer = false;
+    resizeTo(1180);
+    expect(document.body).not.toHaveAttribute("data-compact-editor");
+    expect(document.querySelector(".editor-compact-bar")).toBeNull();
+    expect(document.querySelector(".editor-header")).toBeInTheDocument();
+    expect(document.querySelector(".editor-command-bar .editor-action-bar-shell")).toBeInTheDocument();
+  });
+
+  it("keeps the focused title input through every viewport change", async () => {
+    vi.stubGlobal("innerWidth", 820);
+    vi.stubGlobal("innerHeight", 700);
+    await renderEditorOnHello();
+    const resizeTo = (width: number, height: number) => {
+      vi.stubGlobal("innerWidth", width);
+      vi.stubGlobal("innerHeight", height);
+      fireEvent(window, new Event("resize"));
+    };
+    const panel = document.querySelector(".editor-panel");
+    const title = screen.getByTestId("page-title-editor");
+    title.focus();
+    expect(panel).not.toHaveAttribute("data-title-placement");
+
+    // Own row -> top row -> own row -> desktop -> top row.
+    for (const [width, height, placement] of [
+      [820, 400, "bar"],
+      [820, 700, null],
+      [1280, 700, null],
+      [1000, 700, "bar"],
+    ] as const) {
+      resizeTo(width, height);
+      expect(panel?.getAttribute("data-title-placement") ?? null).toBe(placement);
+      expect(screen.getByTestId("page-title-editor")).toBe(title);
+      expect(title).toHaveFocus();
+    }
+  });
+
+  it("returns focus to the overflow button from whatever a row opens", async () => {
+    await renderMobileEditor();
+    const moreButton = screen.getByRole("button", { name: "More page actions" });
+    const choose = async (name: RegExp) => {
+      await typist().click(moreButton);
+      await typist().click(
+        within(document.querySelector(".editor-overflow-panel") as HTMLElement)
+          .getByRole("button", { name }),
+      );
+    };
+
+    // A popover never takes focus, so the button must hold it for Escape to reach it.
+    await choose(/^References/);
+    expect(document.querySelector(".editor-references-popover")).toBeInTheDocument();
+    expect(moreButton).toHaveFocus();
+    fireEvent.keyDown(moreButton, { key: "Escape" });
+    expect(document.querySelector(".editor-references-popover")).toBeNull();
+    expect(moreButton).toHaveFocus();
+
+    // A dialog takes focus and must hand it back when it closes.
+    await choose(/^Keyboard shortcuts$/);
+    const dialog = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    await waitFor(() => expect(moreButton).toHaveFocus());
   });
 
   it("moves between the Source and Reading tabs with the keyboard at 390px", async () => {
@@ -8196,6 +8316,13 @@ function pagePropertiesToggle() {
 // made right after the click races that position. Waiting for the region here
 // (and with findByRole where a test clicks the toggle itself) removes the race.
 async function openPageProperties() {
+  const overflow = screen.queryByRole("button", { name: "More page actions" });
+  if (overflow) {
+    await typist().click(overflow);
+    await typist().click(screen.getByRole("button", { name: "Page properties" }));
+    await screen.findByRole("region", { name: "Page properties" });
+    return;
+  }
   const toggle = pagePropertiesToggle();
   if (toggle.getAttribute("aria-expanded") === "true") {
     return;

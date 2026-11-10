@@ -98,6 +98,11 @@
     }
   },
   "editor": {
+    "overflow": {
+      "label": "페이지 작업",
+      "open": "페이지 작업 더 보기",
+      "close": "페이지 작업 닫기"
+    },
     "publicationActions": "초안 및 게시 작업",
     "saveDraft": "초안 저장",
     "requestReview": "검토 요청",

@@ -1,6 +1,6 @@
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { AlertCircle, BookOpen, Check, ChevronRight, CornerDownRight, Folder, Link2, Plus, Quote, Search, Trash2, X } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, type RefObject, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { searchWorkspace, type RankedSearchResult, type SearchScope } from "../../shared/api/operations";
 import { previewLinkTargets } from "../../shared/api/linkTargets";
@@ -13,6 +13,18 @@ import { kindLabel, referenceKey } from "./documentReferences";
 
 export type UnresolvedCitation = { href: string; start: number; end: number };
 
+export function referencesNeedAttention(
+  references: ReferenceView[],
+  unresolved: UnresolvedCitation[],
+  checkingLocators: ReadonlySet<string> | undefined,
+  retryable: boolean,
+) {
+  const checking = (href: string) => Boolean(checkingLocators?.has(href));
+  return retryable
+    || unresolved.some((item) => !checking(item.href))
+    || references.some((item) => item.state === "unavailable" && !item.occurrences?.some((occurrence) => occurrence.href && checking(occurrence.href)));
+}
+
 /**
  * The editor's references live behind one header button. The list floats over
  * the editor instead of taking height from it; nothing about the editing
@@ -20,7 +32,7 @@ export type UnresolvedCitation = { href: string; start: number; end: number };
  */
 export function ReferencesControl({
   references, unresolved, checkingLocators, open, onOpenChange, disabled,
-  onAdd, onInsert, onRemove, onConvertLink, onLocate, onRetry, onReconcile, retryDisabled,
+  onAdd, onInsert, onRemove, onConvertLink, onLocate, onRetry, onReconcile, retryDisabled, anchorRef,
 }: {
   references: ReferenceView[];
   unresolved: UnresolvedCitation[];
@@ -36,6 +48,8 @@ export function ReferencesControl({
   onRetry?: () => void;
   onReconcile?: () => void;
   retryDisabled?: boolean;
+  /** Replaces the built-in trigger: the popover opens from this element instead. */
+  anchorRef?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation("pages");
   const popoverId = useId();
@@ -45,25 +59,25 @@ export function ReferencesControl({
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const checking = (href: string) => Boolean(checkingLocators?.has(href));
   const pendingUnresolved = unresolved.filter((item) => !checking(item.href));
-  const unavailable = references.filter((item) => item.state === "unavailable" && !item.occurrences?.some((occurrence) => occurrence.href && checking(occurrence.href)));
   const citedPlaces = references.reduce((sum, item) => sum + item.inline_count, 0);
   const uncited = references.filter((item) => item.inline_count === 0).length;
-  const attention = Boolean(onRetry) || pendingUnresolved.length > 0 || unavailable.length > 0;
+  const attention = referencesNeedAttention(references, unresolved, checkingLocators, Boolean(onRetry));
+  const anchor = useCallback(() => anchorRef?.current ?? triggerRef.current, [anchorRef]);
 
   useEffect(() => {
     if (!open) return undefined;
     function onPointerDown(event: PointerEvent) {
       const target = event.target;
-      if (!(target instanceof Node) || popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      if (!(target instanceof Node) || popoverRef.current?.contains(target) || anchor()?.contains(target)) return;
       onOpenChange(false);
     }
     function onKeyDown(event: globalThis.KeyboardEvent) {
       const target = event.target;
       if (event.key !== "Escape" || !(target instanceof Node)) return;
-      if (!popoverRef.current?.contains(target) && !triggerRef.current?.contains(target)) return;
+      if (!popoverRef.current?.contains(target) && !anchor()?.contains(target)) return;
       event.preventDefault();
       onOpenChange(false);
-      triggerRef.current?.focus();
+      anchor()?.focus();
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown, true);
@@ -71,10 +85,10 @@ export function ReferencesControl({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [open, onOpenChange]);
+  }, [anchor, open, onOpenChange]);
 
   useLayoutEffect(() => {
-    const reference = triggerRef.current;
+    const reference = anchor();
     const floating = popoverRef.current;
     if (!open || !reference || !floating) { setPosition(null); return undefined; }
     let disposed = false;
@@ -88,7 +102,7 @@ export function ReferencesControl({
     const cleanup = autoUpdate(reference, floating, update);
     update();
     return () => { disposed = true; cleanup(); };
-  }, [open]);
+  }, [anchor, open]);
 
   const title = (reference: ReferenceView) => reference.state === "unavailable"
     ? t(reference.occurrences?.some((item) => item.href && checking(item.href)) ? "checkingReference.label" : "references.unavailable")
@@ -97,7 +111,7 @@ export function ReferencesControl({
 
   return (
     <>
-      <button
+      {anchorRef ? null : <button
         aria-controls={open ? popoverId : undefined}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -112,7 +126,7 @@ export function ReferencesControl({
         <BookOpen aria-hidden="true" size={16} />
         <span className="editor-references-trigger-label">{t("references.title")}</span>
         <span aria-hidden="true" className="editor-references-count">{references.length}</span>
-      </button>
+      </button>}
       {open ? (
         <section
           aria-labelledby={titleId}
@@ -130,7 +144,7 @@ export function ReferencesControl({
               {uncited ? <span className="is-warning">{t("references.summaryUncited", { count: uncited })}</span> : null}
               {pendingUnresolved.length ? <span className="is-warning">{t("references.summaryUnresolved", { count: pendingUnresolved.length })}</span> : null}
             </p>
-            <button aria-label={t("references.close")} className="icon-button" onClick={() => { onOpenChange(false); triggerRef.current?.focus(); }} type="button">
+            <button aria-label={t("references.close")} className="icon-button" onClick={() => { onOpenChange(false); anchor()?.focus(); }} type="button">
               <X aria-hidden="true" size={16} />
             </button>
           </header>

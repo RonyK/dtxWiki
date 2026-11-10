@@ -1,0 +1,436 @@
+/* The phone and tablet Context editor. PageEditor decides when it applies
+   (isCompactEditorViewport) and marks the page, so the rule lives in one place
+   and these styles carry no viewport condition of their own except for what
+   extra width adds. */
+
+body[data-compact-editor="true"] .topbar,
+body[data-compact-editor="true"] .sidebar {
+  display: none !important;
+}
+
+/* Sized from visualViewport so the same mechanism keeps the toolbar above the
+   on-screen keyboard on iOS and Android. */
+.page-workspace[data-compact-editor="true"] {
+  position: fixed;
+  top: var(--editor-visual-top, 0px);
+  left: 0;
+  z-index: 1;
+  width: 100%;
+  height: var(--editor-visual-height, 100dvh);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  background: var(--surface);
+}
+
+.page-workspace[data-compact-editor="true"] > .editor-panel {
+  position: relative;
+  grid-row: 1;
+  grid-column: 1;
+  padding: 0;
+  /* auto, not hidden: banners plus the body floor can exceed a short screen,
+     and the editor must stay reachable. */
+  overflow: auto;
+}
+
+.page-workspace[data-compact-editor="true"] .editor-header {
+  padding: 8px 14px;
+}
+
+.editor-compact-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 52px;
+  padding: 0 6px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* The automatic margin, rather than a spacer element, saves a gap: a 360px
+   Korean phone fits the whole row with one pixel to spare. */
+.editor-compact-bar-lead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: inherit;
+  margin-inline-end: auto;
+}
+
+.editor-compact-bar .icon-button {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.editor-compact-bar .editor-mode-tabs {
+  flex: 0 0 auto;
+  order: 0;
+  width: auto;
+  margin: 0;
+  padding: 2px;
+}
+
+.editor-compact-bar .editor-mode-tabs.editor-mode-tabs button {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 38px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+
+.editor-compact-bar .editor-publication-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: inherit;
+}
+
+.editor-compact-bar .editor-publication-actions .icon-button {
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+.editor-compact-bar[data-review="menu"] [data-publication-action="review"] {
+  display: none;
+}
+
+.editor-compact-bar .sync-pill {
+  flex: 0 0 auto;
+  gap: 4px;
+  inline-size: auto;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.editor-compact-bar .sync-pill-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The retry control is only an icon when space is tight; the hit area reaches
+   into the row height and the gaps without taking width from its neighbours. */
+.editor-compact-bar .sync-pill-action::after {
+  position: absolute;
+  inset: -14px -5px;
+  content: "";
+}
+
+.editor-compact-bar .sync-pill-error {
+  color: #b91c1c;
+}
+
+.editor-compact-bar[data-message="icon"] .sync-pill-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The title keeps one parent at every size, so resizing or rotating never
+   remounts a focused input. The empty slot reserves its place in the row. */
+.editor-compact-bar-title-slot {
+  flex: 1 1 0;
+  min-width: 240px;
+}
+
+@media (max-height: 480px) {
+  .editor-compact-bar-title-slot {
+    min-width: 200px;
+  }
+}
+
+.editor-panel[data-title-placement="bar"] .editor-title-row {
+  position: absolute;
+  top: 4px;
+  left: var(--editor-title-slot-left, 0);
+  width: var(--editor-title-slot-width, 0);
+  border-bottom: 0;
+}
+
+@media (min-width: 721px) {
+  .editor-compact-bar {
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  .editor-compact-bar .editor-mode-tabs.editor-mode-tabs button {
+    padding: 0 8px;
+  }
+
+  .editor-compact-bar .editor-publication-actions .icon-button {
+    padding-inline: 12px;
+  }
+}
+
+.page-workspace[data-compact-editor="true"] .editor-page-header {
+  flex: 0 0 auto;
+  gap: 0;
+  margin: 0;
+  padding: 0 14px;
+  background: var(--surface);
+}
+
+.page-workspace[data-compact-editor="true"] .editor-title-row {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.page-workspace[data-compact-editor="true"] .editor-title-input {
+  flex: 1 1 0;
+  min-inline-size: 0;
+  padding: 10px 0;
+  font-size: 18px;
+  line-height: 24px;
+}
+
+/* One line until tapped; a title sharing the top row always stays on one. */
+.page-workspace[data-compact-editor="true"] .editor-title-input:not(:focus),
+.editor-panel[data-title-placement="bar"] .editor-title-input {
+  height: 44px !important;
+  overflow: hidden !important;
+  white-space: nowrap;
+}
+
+/* While typing in the body the title row gives its height back. */
+.page-workspace[data-keyboard-open="true"] .editor-panel:not([data-title-placement="bar"]) .editor-page-header:not(:focus-within) {
+  display: none;
+}
+
+/* Holds only the hidden file input and the references popover here. */
+.page-workspace[data-compact-editor="true"] .editor-command-bar {
+  display: contents;
+}
+
+.page-workspace[data-compact-editor="true"] .editor-grid {
+  flex: 1 1 auto;
+  min-height: 80px;
+}
+
+.page-workspace[data-compact-editor="true"] .source-pane {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.page-workspace[data-compact-editor="true"] .editor-action-bar-shell {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 3px 8px max(3px, env(safe-area-inset-bottom));
+}
+
+.page-workspace[data-keyboard-open="true"] .editor-action-bar-shell {
+  padding-bottom: 3px;
+}
+
+.page-workspace[data-compact-editor="true"] .editor-action-bar {
+  width: 100%;
+  border: 0;
+  justify-content: space-between;
+  padding: 0;
+}
+
+.page-workspace[data-compact-editor="true"] .editor-action-more-menu {
+  top: auto;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  max-height: calc(var(--editor-visual-height, 100dvh) - 72px);
+  overflow-y: auto;
+}
+
+@media (min-width: 721px) {
+  .page-workspace[data-compact-editor="true"] .editor-action-bar-shell {
+    display: flex;
+    justify-content: center;
+  }
+
+  .page-workspace[data-compact-editor="true"] .editor-action-bar {
+    width: auto;
+    justify-content: center;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 859px) {
+  .page-workspace[data-compact-editor="true"] [data-command-id="attach"] .editor-command-label {
+    display: none;
+  }
+}
+
+/* The explorer is a drawer here at every width, including the landscape
+   tablets that otherwise get the pinned desktop rail. */
+.page-workspace[data-compact-editor="true"] .workspace-left-panel {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 70;
+  width: min(360px, 86vw);
+  max-width: 86vw;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  transform: translateX(-100%);
+  transition: transform 180ms ease;
+}
+
+.page-workspace[data-compact-editor="true"] .workspace-left-panel[data-mobile-open="true"] {
+  box-shadow: var(--shadow-2);
+  transform: translateX(0);
+}
+
+.page-workspace[data-compact-editor="true"] .workspace-left-panel .tree-rail {
+  height: 100%;
+  max-height: none;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.page-workspace[data-compact-editor="true"] .workspace-mobile-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: block;
+  border: 0;
+  background: rgb(15 23 42 / 35%);
+}
+
+.editor-overflow-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  border: 0;
+  background: rgb(15 23 42 / 35%);
+}
+
+.editor-overflow-scrim[data-presentation="menu"] {
+  background: transparent;
+}
+
+/* Absolute inside the visualViewport-sized page, so it never opens behind the
+   keyboard. */
+.page-workspace[data-compact-editor="true"] .editor-overflow-panel {
+  position: absolute;
+  z-index: 81;
+  gap: 0;
+  border: 0;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  overflow: auto;
+  transform: none;
+  transition: none;
+}
+
+.page-workspace[data-compact-editor="true"] .editor-overflow-panel[data-presentation="sheet"] {
+  inset: auto 0 0;
+  max-height: 85%;
+  border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  padding: 10px 8px max(12px, env(safe-area-inset-bottom));
+}
+
+.page-workspace[data-compact-editor="true"] .editor-overflow-panel[data-presentation="menu"] {
+  top: 54px;
+  right: auto;
+  bottom: auto;
+  width: 320px;
+  max-width: calc(100% - 20px);
+  max-height: calc(100% - 66px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.editor-overflow-header {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 10px 10px;
+  justify-items: start;
+}
+
+.editor-overflow-title {
+  color: var(--ink);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.editor-overflow-header .meta-line {
+  margin: 0;
+  font-size: 12px;
+}
+
+.editor-overflow-header .sync-pill {
+  flex: 0 0 auto;
+  inline-size: auto;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.editor-overflow-group + .editor-overflow-group {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+
+.editor-overflow-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0 10px;
+  font-size: 15px;
+  list-style: none;
+  text-align: left;
+}
+
+.editor-overflow-row:hover:not(:disabled) {
+  background: var(--surface-subtle);
+}
+
+.editor-overflow-row:disabled {
+  color: var(--ink-muted);
+  cursor: not-allowed;
+}
+
+.editor-overflow-row svg {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+}
+
+.editor-overflow-row-badge {
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.editor-overflow-row[data-attention] .editor-overflow-row-badge {
+  color: var(--agent-text);
+  font-weight: 700;
+}
+
+.editor-overflow-panel .editor-share-control > .publish-control {
+  position: static;
+  width: auto;
+  border: 0;
+  box-shadow: none;
+  padding: 4px 10px 8px;
+}

@@ -467,19 +467,20 @@ test("preserves a five-image batch through retry, publication, revocation, and r
         "data-viewport",
         "mobile",
       );
-      // Matches editor.openExplorer, the key PageEditor actually renders. The
-      // former "Open Context navigation" wording came from editor.rail.open-
-      // Context, an orphaned key with no consumer (now removed), so this
-      // assertion could never have matched the real button.
-      const drawerToggle = page.getByRole("button", {
-        name: "Open Context explorer",
+      // On phones the explorer opens from the overflow in the top row.
+      const moreActions = page.getByRole("button", {
+        name: "More page actions",
       });
       const drawer = page.locator("#page-editor-context-rail");
-      await expect(drawerToggle).toBeVisible();
+      await expect(moreActions).toBeVisible();
       await expect(drawer).toHaveAttribute("data-mobile-open", "false");
       await expect(drawer).toHaveAttribute("aria-hidden", "true");
       await expect(drawer).toHaveAttribute("inert", "");
-      await drawerToggle.click();
+      await moreActions.click();
+      await page
+        .locator(".editor-overflow-panel")
+        .getByRole("button", { name: "Explorer", exact: true })
+        .click();
       await expect(drawer).toHaveAttribute("data-mobile-open", "true");
       await expect(drawer).toHaveAttribute("role", "dialog");
       await expect(drawer).toHaveAttribute("aria-modal", "true");
@@ -493,7 +494,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       await expect(drawer).toHaveAttribute("data-mobile-open", "false");
       await expect(drawer).toHaveAttribute("aria-hidden", "true");
       await expect(drawer).toHaveAttribute("inert", "");
-      await expect(drawerToggle).toBeFocused();
+      await expect(moreActions).toBeFocused();
       await expect
         .poll(() =>
           drawer.evaluate((element) => element.getBoundingClientRect().right),
@@ -515,10 +516,10 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       });
       expect(editorViewport.top).toBeLessThan(editorViewport.viewportHeight);
       expect(editorViewport.height).toBeGreaterThanOrEqual(
-        editorViewport.viewportHeight * 0.5 - 0.5,
+        editorViewport.viewportHeight * 0.7,
       );
       expect(editorViewport.visibleHeight).toBeGreaterThanOrEqual(
-        editorViewport.viewportHeight * 0.5 - 0.5,
+        editorViewport.viewportHeight * 0.7,
       );
       await expectDocumentContainment(page);
       const mobileToolbar = page.getByRole("toolbar", {
@@ -531,7 +532,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       await expect(mobileToolbar).toBeInViewport();
       await expect(mobileAttach).toBeVisible();
       await expect(mobileAttach).toBeInViewport();
-      const mobileChromeGeometry = await page.locator(".editor-command-bar").evaluate((bar) => {
+      const mobileChromeGeometry = await page.locator(".editor-panel").evaluate((bar) => {
         const sample = (element: Element | null) => {
           if (!(element instanceof HTMLElement)) return null;
           const rect = element.getBoundingClientRect();
@@ -553,18 +554,17 @@ test("preserves a five-image batch through retry, publication, revocation, and r
           actionBar: sample(bar.querySelector(".editor-action-bar")),
           actionBarShell: sample(bar.querySelector(".editor-action-bar-shell")),
           attach: sample(bar.querySelector('[data-command-id="attach"]')),
-          commandBar: sample(bar),
           modeTabs: sample(bar.querySelector(".editor-mode-tabs")),
         };
       });
       expect(mobileChromeGeometry.actionBar).not.toBeNull();
-      expect(mobileChromeGeometry.commandBar).not.toBeNull();
-      if (mobileChromeGeometry.actionBar && mobileChromeGeometry.commandBar) {
-        expect(mobileChromeGeometry.actionBar.bottom).toBeLessThanOrEqual(
-          editorViewport.top + 0.5,
+      if (mobileChromeGeometry.actionBar) {
+        // Docked below the body so it sits directly above the keyboard.
+        expect(mobileChromeGeometry.actionBar.top).toBeGreaterThanOrEqual(
+          editorViewport.top + editorViewport.height - 0.5,
         );
-        expect(mobileChromeGeometry.commandBar.bottom).toBeLessThanOrEqual(
-          editorViewport.top + 0.5,
+        expect(mobileChromeGeometry.actionBar.bottom).toBeLessThanOrEqual(
+          editorViewport.viewportHeight + 0.5,
         );
       }
       await testInfo.attach("editor-mobile-geometry", {

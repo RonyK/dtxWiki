@@ -3432,12 +3432,13 @@ button.history-card {
     max-width: 86vw;
     border-right: 1px solid var(--border);
     background: var(--surface);
-    box-shadow: var(--shadow-2);
     transform: translateX(-100%);
     transition: transform 180ms ease;
   }
 
+  /* Closed, the shadow would bleed onto the left edge of the screen. */
   .workspace-left-panel[data-mobile-open="true"] {
+    box-shadow: var(--shadow-2);
     transform: translateX(0);
   }
 

@@ -98,6 +98,11 @@
     }
   },
   "editor": {
+    "overflow": {
+      "label": "Page actions",
+      "open": "More page actions",
+      "close": "Close page actions"
+    },
     "publicationActions": "Draft and publication actions",
     "saveDraft": "Save draft",
     "requestReview": "Request review",
