@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { COSMOS_VERSION, COSMOS_SOURCE_SHA256, sha256 } from "./cosmos-rest-log-patch.mjs";
-import { COSMOS_GPU_SIMULATION_PATCH_HUNKS } from "./cosmos-gpu-simulation-patch.mjs";
+import { COSMOS_VERSION, COSMOS_SOURCE_SHA256, sha256 } from "./cosmos-source.mjs";
 import { COSMOS_COLLISION_RADII_PATCH_HUNKS } from "./cosmos-collision-radii-patch.mjs";
 
 const pinnedPointsComment = "  /**\n   * Sets which points are pinned (fixed) in position.";
@@ -207,23 +206,23 @@ export const COSMOS_POINT_PICKER_PATCH_HUNKS = Object.freeze([
   { id: "picker-fresh-click", before: clickStart,
     after: clickStart.replace("this._shouldSuppressNextClick = !1;", "this._shouldSuppressNextClick = !1;\n      this.graph._dtxPointPress = void 0;")
       .replace("    (o =", "    if (this._dtxDispatchPointClick(e)) return;\n    (o =") },
-  { id: "picker-owned-cleanup", before: "      const simulation = this._gpuSimulation;",
-    after: `      const pointPicker = this.graph._dtxPointPicker;
+  { id: "picker-owned-cleanup", before: "    this._isDestroyed || (this.graph._dtxCollisionRadii = null, this._isDestroyed = !0,",
+    after: `    if (!this._isDestroyed) {
+      const pointPicker = this.graph._dtxPointPicker;
       this.graph._dtxPointPicker = null;
       this.graph._dtxPointPress = void 0;
       try { pointPicker?.destroy(); }
       catch (error) { console.error("Point picker cleanup failed", error); }
-      const simulation = this._gpuSimulation;` },
+    }
+    this._isDestroyed || (this.graph._dtxCollisionRadii = null, this._isDestroyed = !0,` },
 ].map(hunk => Object.freeze(hunk)));
 
 export function patchCosmosPointPicker(source, version) {
   assert.equal(version, COSMOS_VERSION, "Review point picking inputs before upgrading Cosmos");
   let original = source;
-  for (const hunks of [COSMOS_COLLISION_RADII_PATCH_HUNKS, COSMOS_GPU_SIMULATION_PATCH_HUNKS]) {
-    for (const { id, before, after } of [...hunks].reverse()) {
-      assert.equal(original.split(after).length, 2, `Expected exactly one reviewed ${id} seam`);
-      original = original.replace(after, before);
-    }
+  for (const { id, before, after } of [...COSMOS_COLLISION_RADII_PATCH_HUNKS].reverse()) {
+    assert.equal(original.split(after).length, 2, `Expected exactly one reviewed ${id} seam`);
+    original = original.replace(after, before);
   }
   assert.equal(sha256(original), COSMOS_SOURCE_SHA256, "Cosmos source differs from the reviewed package");
   let modified = source;

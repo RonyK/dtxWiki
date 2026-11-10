@@ -17,14 +17,12 @@ import { readGraphTokens } from "../../shared/graphTokens";
 import { WORKSPACE_MAP_DEFAULT_BUDGET, WORKSPACE_MAP_PC_10K_BUDGET, type WorkspaceMapBudget } from "../../shared/workspaceMapBudget";
 import * as nativeTracking from "../gpuTrackedPositions";
 
-const { graph, community, createGraph, createNativeGraph, createRestLogGraph } = vi.hoisted(() => {
+const { graph, community, createGraph, createNativeGraph } = vi.hoisted(() => {
   let positions = new Float32Array();
   const graph = {
     ready: Promise.resolve(),
-    attachGpuSimulation: vi.fn(),
     attachPointPicker: vi.fn(),
     getTrackedPointPositionsFrame: vi.fn(() => null),
-    getGpuSimulationFrame: vi.fn(() => null),
     get isSimulationRunning() { return false; },
     destroy: vi.fn(),
     create: vi.fn(),
@@ -70,7 +68,6 @@ const { graph, community, createGraph, createNativeGraph, createRestLogGraph } =
   return {
     graph, createGraph,
     createNativeGraph: vi.fn(function (container: HTMLDivElement, config: GraphConfig) { return createGraph(container, config); }),
-    createRestLogGraph: vi.fn(function (container: HTMLDivElement, config: GraphConfig) { return createGraph(container, config); }),
     community: {
       cancel: vi.fn(),
       compute: vi.fn<(...args: unknown[]) => Promise<WorkspaceMapCommunityOutcome>>(async () => ({ kind: "cancelled", identityKey: "test" })),
@@ -95,7 +92,7 @@ vi.mock("../forceAtlas2WorkerLayout", () => ({ createWorkspaceForceAtlas2WorkerL
 // admitted PC native branch. Default 2K is tested separately below; a native
 // mock must not pretend that an official CPU Worker calls graph.start().
 function createWorkspaceCosmosAdapter(container: HTMLDivElement, input: WorkspaceMapColumns, options: WorkspaceCosmosOptions) {
-  if (options.physics !== undefined || options.budget !== undefined) {
+  if (options.budget !== undefined) {
     return createProductWorkspaceCosmosAdapter(container, input, options);
   }
   return createProductWorkspaceCosmosAdapter(container, input, { ...options, budget: WORKSPACE_MAP_PC_10K_BUDGET,
@@ -346,7 +343,6 @@ function installedSdkLifecycle() {
   };
 }
 
-vi.mock("../cosmosRestLog", () => ({ RestLogGraph: createRestLogGraph }));
 vi.mock("../cosmosNative", () => ({ NativeGraph: createNativeGraph }));
 vi.mock("../webglSupport", () => ({ detectWorkspaceMapWebGL: () => ({ supported: true }) }));
 vi.mock("../../map/communityJob", async (importOriginal) => ({
@@ -387,12 +383,19 @@ function sizedColumns(nodeCount: number, edgeCount = 2): WorkspaceMapColumns {
   };
 }
 
+function nativeContext(textureLimit = 16_384): WebGL2RenderingContext {
+  return {
+    MAX_TEXTURE_SIZE: 0x0D33,
+    ALIASED_POINT_SIZE_RANGE: 0x846D,
+    getParameter: (parameter: number) => parameter === 0x0D33 ? textureLimit
+      : parameter === 0x846D ? Float32Array.of(1, 1024) : null,
+  } as unknown as WebGL2RenderingContext;
+}
+
 let adapters: WorkspaceCosmosAdapter[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    MAX_TEXTURE_SIZE: 0x0D33, getParameter: () => 16_384,
-  } as unknown as WebGL2RenderingContext);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(nativeContext());
   graph.ready = Promise.resolve();
   graph.render.mockReset();
   graph.create.mockReset();
@@ -446,11 +449,11 @@ afterEach(() => {
 });
 
 async function mount(input = columns(), reducedMotion = true, onSelect = vi.fn(), initialPaused = false,
-  onPin = vi.fn(), budget?: WorkspaceMapBudget, physics?: "force-atlas2" | "rest-log") {
+  onPin = vi.fn(), budget?: WorkspaceMapBudget) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const adapter = createWorkspaceCosmosAdapter(container, input, {
-    budget, physics,
+    budget,
     forcedColors: false,
     reducedMotion,
     initialPaused,
@@ -462,9 +465,7 @@ async function mount(input = columns(), reducedMotion = true, onSelect = vi.fn()
 }
 
 it.each([2048, 4096])("chooses the supported native space before upload at texture limit %i and keeps 2k snapshots canonical", async limit => {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    MAX_TEXTURE_SIZE: 0x0D33, getParameter: () => limit,
-  } as unknown as WebGL2RenderingContext);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(nativeContext(limit));
   const input = sizedColumns(2000);
   const adapter = await mount(input);
   const spaceSize = limit / 2;
@@ -481,7 +482,7 @@ it.each([2048, 4096])("chooses the supported native space before upload at textu
 
 it("keeps low-limit pins, drag callbacks, camera and cross-capability remounts in canonical units", async () => {
   const context = vi.spyOn(HTMLCanvasElement.prototype, "getContext");
-  context.mockReturnValue({ MAX_TEXTURE_SIZE: 0x0D33, getParameter: () => 4096 } as unknown as WebGL2RenderingContext);
+  context.mockReturnValue(nativeContext(4096));
   const input = columns(), onPin = vi.fn();
   const adapter = await mount(input, true, vi.fn(), true, onPin);
   expect(adapter.pin("a", true, { x: 1234, y: 2345 })).toEqual({ x: 1234, y: 2345 });
@@ -504,7 +505,7 @@ it("keeps low-limit pins, drag callbacks, camera and cross-capability remounts i
   expect(graph.setPointPositions).toHaveBeenCalledTimes(uploads);
   expect(adapter.captureCoordinates()!.positions).toEqual(before.positions);
   adapter.destroy();
-  context.mockReturnValue({ MAX_TEXTURE_SIZE: 0x0D33, getParameter: () => 16384 } as unknown as WebGL2RenderingContext);
+  context.mockReturnValue(nativeContext());
   const container = document.createElement("div"); document.body.appendChild(container);
   const restored = createWorkspaceCosmosAdapter(container, input, {
     forcedColors: false, reducedMotion: true, initialPaused: true,
@@ -517,18 +518,6 @@ it("keeps low-limit pins, drag callbacks, camera and cross-capability remounts i
   expect(restored.captureCoordinates()!.collisionBasis).toEqual(before.collisionBasis);
   expect(restored.captureCoordinates()!.forceBasis).toEqual(before.forceBasis);
   expect(graph.setZoomTransformByPointPositions).toHaveBeenLastCalledWith(Float32Array.from([300, 400]), 0, .5, 0, false);
-});
-
-it.each(["force-atlas2", "rest-log"] as const)("rejects unsupported reduced-space %s diagnostics before coordinate upload", async physics => {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    MAX_TEXTURE_SIZE: 0x0D33, getParameter: () => 4096,
-  } as unknown as WebGL2RenderingContext);
-  const container = document.createElement("div"); document.body.appendChild(container);
-  const adapter = createWorkspaceCosmosAdapter(container, columns(), { physics,
-    forcedColors: false, reducedMotion: true, callbacks: { onHover: vi.fn(), onSelect: vi.fn() } });
-  adapters.push(adapter);
-  await expect(adapter.whenSettled()).rejects.toThrow("Explicit physics diagnostics require the canonical GPU space");
-  expect(graph.setPointPositions).not.toHaveBeenCalled();
 });
 
 function freshCollisionBasis(input = columns(), width = 734, height = 608) {
@@ -554,7 +543,6 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
     expect(worker.isRunning()).toBe(true); expect(sdk.running()).toBe(false);
     expect(graph.start).not.toHaveBeenCalled();
     expect(graph.setConfigPartial.mock.calls.every(([config]) => config.enableSimulation !== true)).toBe(true);
-    expect(graph.attachGpuSimulation).toHaveBeenLastCalledWith(null);
     expect(worker.input.sources).toBe(input.edgeSources); expect(worker.input.targets).toBe(input.edgeTargets);
     expect(worker.input.weights).toBe(input.edgeWeights); expect(worker.input.weights[0]).toBe(8);
     expect(worker.input.radii).toEqual(Float32Array.from(units.collisionRadiusModel));
@@ -1001,8 +989,7 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
   });
 
   it("uploads reduced-native-space frames and final drag pins in canonical units", async () => {
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ MAX_TEXTURE_SIZE: 0x0D33,
-      getParameter: () => 4096 } as unknown as WebGL2RenderingContext);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(nativeContext(4096));
     const { adapter, onPin } = await mountCpu(), worker = cpu.instances[0];
     const frame = Float32Array.from([500, 600, 700, 800, 900, 1000]); worker.options.onPositions(frame);
     expect(graph.getPointPositions()).toEqual(Float32Array.from([250, 300, 350, 400, 450, 500]));
@@ -1060,8 +1047,6 @@ describe("explicit PC complete upstream GPU simulation", () => {
   it.each([3, 2_000])("uses native Cosmos without a custom driver for the default %i-node scene", async count => {
     const adapter = await mount(sizedColumns(count), false);
     expect(createNativeGraph).toHaveBeenCalledOnce();
-    expect(createRestLogGraph).not.toHaveBeenCalled();
-    expect(graph.attachGpuSimulation).toHaveBeenLastCalledWith(null);
     expect(adapter.captureCoordinates()!.forceAtlas2Units).toBeUndefined();
     expect(createNativeGraph.mock.calls[0][0].dataset.mapPhysics).toBe("cosmos-native");
     expect(createGraph.mock.calls[0][1].simulationCluster).toBe(0);
@@ -1070,118 +1055,20 @@ describe("explicit PC complete upstream GPU simulation", () => {
   });
 });
 
-describe("explicit 2K ForceAtlas2 diagnostic simulation ownership", () => {
-  async function mountDiagnostic(input = columns()) {
-    return mount(input, false, vi.fn(), false, vi.fn(), undefined, "force-atlas2");
-  }
-  it("attaches the complete driver without exposing native forces as its model", async () => {
-    const adapter = await mountDiagnostic();
-    const simulation = graph.attachGpuSimulation.mock.calls.at(-1)?.[0];
-    expect(simulation).toEqual(expect.objectContaining({ step: expect.any(Function),
-      afterDrag: expect.any(Function), invalidate: expect.any(Function), destroy: expect.any(Function) }));
-    const units = adapter.captureCoordinates()!.forceAtlas2Units!;
-    expect(units.rendererUnitsPerModelUnit).toBe(1);
-    expect(units.pairGapCss).toBe(2);
-    expect(Object.isFrozen(units)).toBe(true);
-    expect(Object.isFrozen(units.collisionRadiusModel)).toBe(true);
-  });
-
-  it("camera/search/selection/pin/reset do not recreate the driver or recalibrate its units", async () => {
-    const input = columns(), adapter = await mountDiagnostic(input);
-    const units = adapter.captureCoordinates()!.forceAtlas2Units;
-    const attachments = graph.attachGpuSimulation.mock.calls.length;
-    adapter.stopLayout(); adapter.fit(); adapter.zoomBy(2); adapter.setSearchMatches(new Set([input.nodeIds[0]]));
-    adapter.select(input.nodeIds[0]); adapter.pin(input.nodeIds[0], true); adapter.reset(); adapter.resize();
-    expect(graph.attachGpuSimulation.mock.calls).toHaveLength(attachments);
-    expect(adapter.captureCoordinates()!.forceAtlas2Units).toBe(units);
-  });
-
-  it("reuses immutable scene units in a same-owner palette remount", async () => {
-    const input = columns(), adapter = await mountDiagnostic(input);
-    const snapshot = adapter.captureCoordinates()!;
+describe("PC native scene admission", () => {
+  it("keeps default native GPU physics at admitted PC sizes above 2K on creation and replacement", async () => {
     const container = document.createElement("div"); document.body.appendChild(container);
-    const restored = createWorkspaceCosmosAdapter(container, input, { physics: "force-atlas2", forcedColors: false, reducedMotion: true,
-      initialCoordinates: snapshot, callbacks: { onHover: vi.fn(), onSelect: vi.fn() } });
-    adapters.push(restored); await restored.whenSettled();
-    expect(restored.captureCoordinates()!.forceAtlas2Units).toBe(snapshot.forceAtlas2Units);
-  });
-
-  it("retires units and attachment when actor identity changes even with the same row count", async () => {
-    const input = columns(), adapter = await mountDiagnostic(input);
-    const units = adapter.captureCoordinates()!.forceAtlas2Units;
-    const attachments = graph.attachGpuSimulation.mock.calls.length;
-    adapter.replaceColumns({ ...input, identity: { ...input.identity, actorId: "next-actor" } });
-    expect(graph.attachGpuSimulation.mock.calls).toHaveLength(attachments + 1);
-    expect(adapter.captureCoordinates()!.forceAtlas2Units).not.toBe(units);
-  });
-
-  it("allows explicit legacy rest-log diagnostics on a 2K scene", async () => {
-    const container = document.createElement("div"); document.body.appendChild(container);
-    const adapter = createWorkspaceCosmosAdapter(container, columns(), { physics: "rest-log", forcedColors: false,
-      reducedMotion: true, callbacks: { onHover: vi.fn(), onSelect: vi.fn() } });
-    adapters.push(adapter); await adapter.whenSettled();
-    expect(createRestLogGraph).toHaveBeenCalledOnce();
-    expect(createNativeGraph).not.toHaveBeenCalled();
-    expect(graph.attachGpuSimulation).toHaveBeenLastCalledWith(null);
-    expect(adapter.captureCoordinates()!.forceAtlas2Units).toBeUndefined();
-  });
-});
-
-describe("explicit ForceAtlas2 admission", () => {
-  function create(input: WorkspaceMapColumns, physics?: "force-atlas2" | "rest-log") {
-    const container = document.createElement("div"); document.body.appendChild(container);
-    const adapter = createWorkspaceCosmosAdapter(container, input, {
-      physics, budget: WORKSPACE_MAP_PC_10K_BUDGET, forcedColors: false, reducedMotion: true,
+    const adapter = createWorkspaceCosmosAdapter(container, sizedColumns(2_001), {
+      budget: WORKSPACE_MAP_PC_10K_BUDGET, forcedColors: false, reducedMotion: true,
       callbacks: { onHover: vi.fn(), onSelect: vi.fn() },
     });
     adapters.push(adapter);
-    return { adapter, container };
-  }
-
-  it("rejects an explicit unsupported 2001-node scene before native creation despite its admitted PC budget", () => {
-    expect(() => create(sizedColumns(2_001), "force-atlas2"))
-      .toThrow("Explicit ForceAtlas2 supports at most 2000 nodes");
-    expect(createGraph).not.toHaveBeenCalled();
-    expect(community.compute).not.toHaveBeenCalled();
-    expect(graph.attachGpuSimulation).not.toHaveBeenCalled();
-  });
-
-  it("accepts the explicit 2000-node boundary with the diagnostic GPU driver", async () => {
-    const { adapter, container } = create(sizedColumns(2_000), "force-atlas2");
-    await adapter.whenSettled();
-    expect(container.dataset.mapPhysics).toBe("force-atlas2-contact");
-    expect(graph.attachGpuSimulation).toHaveBeenLastCalledWith(expect.objectContaining({ step: expect.any(Function) }));
-    expect(adapter.captureCoordinates()!.columns.nodeIds).toHaveLength(2_000);
-  });
-
-  it("keeps default native GPU physics at admitted PC sizes above 2K on creation and replacement", async () => {
-    const { adapter, container } = create(sizedColumns(2_001));
     await adapter.whenSettled();
     expect(container.dataset.mapPhysics).toBe("cosmos-native");
     expect(createNativeGraph).toHaveBeenCalledOnce();
-    expect(createRestLogGraph).not.toHaveBeenCalled();
-    expect(graph.attachGpuSimulation).toHaveBeenLastCalledWith(null);
     adapter.replaceColumns(sizedColumns(2_002));
     expect(container.dataset.mapPhysics).toBe("cosmos-native");
-    expect(graph.attachGpuSimulation).toHaveBeenLastCalledWith(null);
     expect(adapter.captureCoordinates()!.columns.nodeIds).toHaveLength(2_002);
-  });
-
-  it("rejects an unsupported explicit replacement before mutating or retiring the valid scene", async () => {
-    const { adapter, container } = create(sizedColumns(2_000), "force-atlas2");
-    await adapter.whenSettled();
-    adapter.pin("node:0", true);
-    const snapshot = adapter.captureCoordinates()!;
-    vi.clearAllMocks();
-    expect(() => adapter.replaceColumns(sizedColumns(2_001)))
-      .toThrow("Explicit ForceAtlas2 supports at most 2000 nodes");
-    expect(adapter.captureCoordinates()).toEqual(snapshot);
-    expect(container.dataset.mapPhysics).toBe("force-atlas2-contact");
-    for (const mutation of [graph.destroy, graph.attachGpuSimulation, graph.setPointPositions,
-      graph.setLinks, graph.setPinnedPoints, graph.setConfigPartial, graph.setZoomLevel,
-      graph.fitView, graph.pause, graph.start, community.cancel, community.compute]) {
-      expect(mutation).not.toHaveBeenCalled();
-    }
   });
 });
 
@@ -2351,8 +2238,6 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
     const budget = { ...WORKSPACE_MAP_PC_10K_BUDGET };
     const adapter = await mount(input, false, vi.fn(), false, vi.fn(), budget);
     expect(createNativeGraph).toHaveBeenCalledOnce();
-    expect(createRestLogGraph).not.toHaveBeenCalled();
-    expect(graph.attachGpuSimulation).toHaveBeenLastCalledWith(null);
     expect(sdk.running()).toBe(true);
     expect(collisionCommits()).toHaveLength(1);
     expect(graph.setPointCollisionRadii).toHaveBeenLastCalledWith(expect.any(Float32Array));
@@ -2385,9 +2270,7 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
     { width: 1_200, height: 800, glyph: 8.5, zoom: 100, textureLimit: 16_384 },
     { width: 390, height: 800, glyph: 1.5, zoom: .001, textureLimit: 4_096 },
   ])("keeps PC canonical force units independent of glyphs, viewport and saved camera %j", async scenario => {
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-      MAX_TEXTURE_SIZE: 0x0D33, getParameter: () => scenario.textureLimit,
-    } as unknown as WebGL2RenderingContext);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(nativeContext(scenario.textureLimit));
     const input = sizedColumns(10_000, 30_895);
     input.nodeSizes.fill(scenario.glyph);
     const container = document.createElement("div"), canvas = document.createElement("canvas");
@@ -3370,13 +3253,9 @@ describe("Cosmos Map interaction contracts", () => {
       expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
     });
 
-    it.each([
-      { count: 2_000, physics: undefined },
-      { count: 3, physics: "force-atlas2" as const },
-      { count: 2_001, physics: "rest-log" as const },
-    ])("retains the legacy alpha floor for $count-node native/diagnostic physics $physics", async ({ count, physics }) => {
+    it("retains the legacy alpha floor for a 2K native scene admitted with the PC budget", async () => {
       const sdk = installedSdkLifecycle();
-      await mount(sizedColumns(count), false, vi.fn(), false, vi.fn(), WORKSPACE_MAP_PC_10K_BUDGET, physics);
+      await mount(sizedColumns(2_000), false, vi.fn(), false, vi.fn(), WORKSPACE_MAP_PC_10K_BUDGET);
       const config = createGraph.mock.calls[0][1];
       graph.stop(); graph.start.mockClear();
       config.onSimulationTick?.(.019);

@@ -3,13 +3,11 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { COSMOS_COLLISION_RADII_PATCH_HUNKS, patchCosmosCollisionRadii } from "./cosmos-collision-radii-patch.mjs";
-import { patchCosmosGpuSimulation } from "./cosmos-gpu-simulation-patch.mjs";
-import { COSMOS_VERSION } from "./cosmos-rest-log-patch.mjs";
+import { COSMOS_VERSION } from "./cosmos-source.mjs";
 
 const require = createRequire(import.meta.url);
 const original = await readFile(require.resolve("@cosmos.gl/graph"), "utf8");
-const hostSource = patchCosmosGpuSimulation(original, COSMOS_VERSION);
-const modified = patchCosmosCollisionRadii(hostSource, COSMOS_VERSION);
+const modified = patchCosmosCollisionRadii(original, COSMOS_VERSION);
 const apiHunk = COSMOS_COLLISION_RADII_PATCH_HUNKS.find(hunk => hunk.id === "collision-radii-api");
 const methods = apiHunk.after.slice(0, -apiHunk.before.length);
 const Host = new Function(`return class Host { ${methods} }`)();
@@ -20,11 +18,11 @@ test("all glyph collision changes reverse exactly and preserve original force sh
     assert.equal(reversed.split(after).length, 2);
     reversed = reversed.replace(after, before);
   }
-  assert.equal(reversed, hostSource);
+  assert.equal(reversed, original);
   assert.ok(modified.includes("pointPosition.r = clamp(pointPosition.r, 0.0, spaceSize);"));
   assert.throws(() => patchCosmosCollisionRadii(modified, COSMOS_VERSION));
-  assert.throws(() => patchCosmosCollisionRadii(`${hostSource}\n`, COSMOS_VERSION));
-  assert.throws(() => patchCosmosCollisionRadii(hostSource, "next"));
+  assert.throws(() => patchCosmosCollisionRadii(`${original}\n`, COSMOS_VERSION));
+  assert.throws(() => patchCosmosCollisionRadii(original, "next"));
 });
 
 function host() {

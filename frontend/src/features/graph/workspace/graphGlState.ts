@@ -5,8 +5,8 @@ interface TextureUnitState {
 }
 
 /**
- * Synchronous binding guard for the FA2 numerical core and its GPU position
- * copy. Restoring the actual GL state keeps an enclosing luma state cache
+ * Synchronous binding guard for graph GPU helpers. Restoring the actual GL
+ * state keeps an enclosing luma state cache
  * truthful; this does not access or invalidate private luma/Cosmos state.
  *
  * Scope is deliberately bounded: program, VAO, framebuffers/read buffer,
@@ -21,11 +21,11 @@ interface TextureUnitState {
  * cannot make an already-started asynchronous GL action safe after an await.
  * No coordinates, texture contents, or framebuffer pixels are read back here.
  */
-export function withWorkspaceForceAtlas2GlState<T>(
+export function withGraphGlState<T>(
   gl: WebGL2RenderingContext,
   action: () => T,
 ): T {
-  if (gl.isContextLost()) throw new Error("ForceAtlas2 GL state guard requires a live context");
+  if (gl.isContextLost()) throw new Error("Graph GL state guard requires a live context");
   const program = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
   const vertexArray = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null;
   const drawFramebuffer = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
@@ -65,7 +65,7 @@ export function withWorkspaceForceAtlas2GlState<T>(
     const result = action();
     if (result !== null && (typeof result === "object" || typeof result === "function")
       && typeof (result as { then?: unknown }).then === "function") {
-      throw new Error("ForceAtlas2 GL state guard action must be synchronous, not a thenable");
+      throw new Error("Graph GL state guard action must be synchronous, not a thenable");
     }
     return result;
   } finally {

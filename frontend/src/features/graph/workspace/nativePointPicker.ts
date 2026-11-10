@@ -1,5 +1,5 @@
 import type { CosmosPointPickFrame, CosmosPointPicker, CosmosPointPickResult } from "./cosmosPointPickingTypes";
-import { withWorkspaceForceAtlas2GlState } from "./forceAtlas2GlState";
+import { withGraphGlState } from "./graphGlState";
 import { createWorkspaceGpuReadback, type WorkspaceGpuReadback } from "./gpuReadback";
 
 /** CSS pixels from a point's centre that still target it: the accessible hover and click target of the native map. */
@@ -80,7 +80,7 @@ void main() { picked = candidate; }
 
 /** Additional state changed by the depth query, beyond the shared bounded guard. */
 function withPickingState<T>(gl: WebGL2RenderingContext, action: () => T): T {
-  return withWorkspaceForceAtlas2GlState(gl, () => {
+  return withGraphGlState(gl, () => {
     const func = gl.getParameter(gl.DEPTH_FUNC) as number;
     const mask = gl.getParameter(gl.DEPTH_WRITEMASK) as boolean;
     const range = Array.from(gl.getParameter(gl.DEPTH_RANGE) as Float32Array);

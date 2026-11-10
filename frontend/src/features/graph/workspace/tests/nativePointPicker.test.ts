@@ -6,7 +6,7 @@ import {
 
 // These tests exercise ownership/readback/lifecycle, not GPU shader semantics.
 // The real native WebGL overlap fixture covers actual nearest-center rasterization.
-vi.mock("../forceAtlas2GlState", () => ({ withWorkspaceForceAtlas2GlState: (_gl: unknown, action: () => unknown) => action() }));
+vi.mock("../graphGlState", () => ({ withGraphGlState: (_gl: unknown, action: () => unknown) => action() }));
 
 /**
  * A restore hands the same context object back, but only objects made since then are valid, and extension state is reset

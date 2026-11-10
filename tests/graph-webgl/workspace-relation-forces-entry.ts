@@ -1,5 +1,4 @@
 import { NativeGraph as Graph } from "../../frontend/src/features/graph/workspace/cosmosNative";
-import { runRestLogLawProbe } from "./rest-log-law";
 
 import { workspaceMapCommunityIdentityKey } from "../../frontend/src/features/graph/map/communityJob";
 import type { WorkspaceMapCommunityRequest, WorkspaceMapCommunityResponse } from "../../frontend/src/features/graph/map/communityWorker";
@@ -104,7 +103,6 @@ declare global {
       error?: string;
       manual(ticks: number[]): Promise<ForceEvidence>;
       collisionOnly(): Promise<CollisionEvidence>;
-      relationLaw(): ReturnType<typeof runRestLogLawProbe>;
       destroy(): void;
     };
   }
@@ -265,8 +263,7 @@ const baselineBasis = buildWorkspaceRelationCollisionBasis(baselineBuffers.posit
 if (!baselineBasis) throw new Error("The fixed native fixture viewport has no valid baseline units");
 const adapter = createWorkspaceCosmosAdapter(stage, columns, {
   // The explicit desktop budget owns the complete upstream GPU pipeline;
-  // the default 2K budget uses the official CPU Worker. The separate
-  // relationLaw probe explicitly owns the historical rest-log diagnostic.
+  // the default 2K budget uses the official CPU Worker.
   budget: WORKSPACE_MAP_PC_10K_BUDGET,
   initialPaused: true, forcedColors: false, reducedMotion: false,
   initialCoordinates: session === "matched" ? { columns, budget: WORKSPACE_MAP_PC_10K_BUDGET, positions: fixturePositions.slice(),
@@ -401,11 +398,6 @@ window.__workspaceRelationForces = {
     samples.push(await isolatedCollisionCase("overlap", [1000.5, 1000.5, 1002.5, 1000.5]));
     return { scope: "Two-point collision-only actual SDK one-step self-centroid regression; not product profile or live2K acceptance",
       pointSizes: [3, 3], samples };
-  },
-  async relationLaw() {
-    if (this.status !== "ready") throw new Error("The native fixture is not ready");
-    this.destroy();
-    return runRestLogLawProbe();
   },
   destroy() {
     adapter.destroy(); window.Worker = NativeWorker;

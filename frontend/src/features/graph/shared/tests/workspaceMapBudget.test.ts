@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { detectWorkspaceMapWebGL } from "../../workspace/webglSupport";
 
 import {
   assertWorkspaceMapWithinBudget, classifyWorkspaceMapDevice, isWorkspaceMapWithinBudget,
@@ -6,11 +8,14 @@ import {
   workspaceMapBudget, type WorkspaceMapDeviceSignals,
 } from "../workspaceMapBudget";
 
+vi.mock("../../workspace/webglSupport", () => ({ detectWorkspaceMapWebGL: vi.fn() }));
+
 const pc: WorkspaceMapDeviceSignals = {
   userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", platform: "Win32",
-  maxTouchPoints: 0, finePointer: true, hover: true,
+  maxTouchPoints: 0, finePointer: true, hover: true, floatBlend: true,
 };
 
+beforeEach(() => vi.mocked(detectWorkspaceMapWebGL).mockReset().mockReturnValue({ supported: true, floatBlend: true }));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Workspace Map device budget", () => {
@@ -28,6 +33,7 @@ describe("Workspace Map device budget", () => {
     [{ userAgent: "" }, "unknown"],
     [{ finePointer: false }, "unknown"],
     [{ hover: false }, "unknown"],
+    [{ floatBlend: false }, "unknown"],
     [{ maxTouchPoints: Number.NaN }, "unknown"],
     [{ maxTouchPoints: -1 }, "unknown"],
     [{ maxTouchPoints: 0.5 }, "unknown"],
@@ -116,15 +122,29 @@ describe("Workspace Map device budget", () => {
     expect(isWorkspaceMapWithinBudget({ nodeCount: 0, edgeCount: 0 }, { documents: 0, relations: 1 })).toBe(false);
   });
 
-  it("reads desktop signals once without reading window dimensions", () => {
+  it("reads desktop signals and float blending without reading window dimensions", () => {
     vi.stubGlobal("navigator", { ...pc, userAgentData: { mobile: false } });
     const queries: string[] = [];
     vi.stubGlobal("window", {
       get innerWidth(): never { throw new Error("viewport must not classify device"); },
       matchMedia(query: string) { queries.push(query); return { matches: true }; },
     });
-    expect(readWorkspaceMapDeviceProfile()).toBe("desktop");
-    expect(queries).toEqual(["(pointer: fine)", "(hover: hover)"]);
+    const probe = vi.mocked(detectWorkspaceMapWebGL);
+    for (const support of [
+      { supported: true, floatBlend: true },
+      { supported: true, floatBlend: false },
+      { supported: false, reason: "webgl2" },
+      { supported: false, reason: "float-render-target" },
+    ] as const) {
+      probe.mockClear().mockReturnValue(support);
+      queries.length = 0;
+      const profile = readWorkspaceMapDeviceProfile();
+      expect(profile).toBe(support.supported && support.floatBlend ? "desktop" : "unknown");
+      expect(workspaceMapBudget(profile, "10k")).toEqual(profile === "desktop"
+        ? WORKSPACE_MAP_PC_10K_BUDGET : WORKSPACE_MAP_DEFAULT_BUDGET);
+      expect(probe).toHaveBeenCalledOnce();
+      expect(queries).toEqual(["(pointer: fine)", "(hover: hover)"]);
+    }
   });
 
   it("falls back to unknown for inaccessible browser hints", () => {

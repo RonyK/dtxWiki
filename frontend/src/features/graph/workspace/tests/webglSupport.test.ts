@@ -12,12 +12,17 @@ describe("Workspace Map WebGL fallback probe", () => {
     expect(detectWorkspaceMapWebGL()).toEqual({ supported: false, reason: "webgl2" });
   });
 
-  it("requires float render targets and releases the probe context", () => {
+  it.each([
+    [false, false, { supported: false, reason: "float-render-target" }],
+    [true, false, { supported: true, floatBlend: false }],
+    [true, true, { supported: true, floatBlend: true }],
+  ])("reports float targets %s and blending %s separately and releases the context", (floatTargets, floatBlend, expected) => {
     const loseContext = vi.fn();
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
-      getExtension: (name: string) => name === "WEBGL_lose_context" ? { loseContext } : null,
+      getExtension: (name: string) => name === "WEBGL_lose_context" ? { loseContext }
+        : name === "EXT_color_buffer_float" && floatTargets || name === "EXT_float_blend" && floatBlend ? {} : null,
     })) as unknown as typeof originalGetContext;
-    expect(detectWorkspaceMapWebGL()).toEqual({ supported: false, reason: "float-render-target" });
+    expect(detectWorkspaceMapWebGL()).toEqual(expected);
     expect(loseContext).toHaveBeenCalledOnce();
   });
 });

@@ -4,7 +4,7 @@
   "license": "AGPL-3.0-only OR Elastic-2.0",
   "type": "module",
   "scripts": {
-    "generate:cosmos": "node ../scripts/generate-cosmos-rest-log.mjs",
+    "generate:cosmos": "node ../scripts/generate-cosmos-native.mjs",
     "postinstall": "npm run generate:cosmos",
     "predev": "npm run generate:cosmos",
     "pretest": "npm run generate:cosmos",

@@ -1,7 +1,7 @@
 import { NativeGraph } from "../../frontend/src/features/graph/workspace/cosmosNative";
 import { createWorkspaceNativePointPicker } from "../../frontend/src/features/graph/workspace/nativePointPicker";
 import type { CosmosPointPickFrame, CosmosPointPicker } from "../../frontend/src/features/graph/workspace/cosmosPointPickingTypes";
-import { withWorkspaceForceAtlas2GlState } from "../../frontend/src/features/graph/workspace/forceAtlas2GlState";
+import { withGraphGlState } from "../../frontend/src/features/graph/workspace/graphGlState";
 
 const container = document.querySelector<HTMLDivElement>("#graph")!;
 const params = new URLSearchParams(location.search);
@@ -107,7 +107,7 @@ function armReleaseMotion() {
     const frame = capturedFrame();
     const writes = [{ index: contextIndex, position: [2053, 2048] as [number, number] },
       { index: libraryIndex, position: [2048, 2048] as [number, number] }];
-    withWorkspaceForceAtlas2GlState(frame.gl, () => {
+    withGraphGlState(frame.gl, () => {
       frame.gl.activeTexture(frame.gl.TEXTURE0);
       frame.gl.bindTexture(frame.gl.TEXTURE_2D, frame.positionTexture);
       for (const { index, position } of writes) frame.gl.texSubImage2D(frame.gl.TEXTURE_2D, 0,

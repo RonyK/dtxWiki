@@ -1,5 +1,4 @@
 import { NativeGraph, type GraphConfig } from "./cosmosNative";
-import { RestLogGraph } from "./cosmosRestLog";
 
 import {
   createWorkspaceMapCommunityJob,
@@ -22,9 +21,8 @@ import { buildWorkspaceRelationCollisionBasis, buildWorkspaceRelationForceConfig
 import { detectWorkspaceMapWebGL } from "./webglSupport";
 import { createInitialWorkspaceCamera, type InitialWorkspaceCamera } from "./initialCamera";
 import { workspaceInitialCameraPolicy } from "./initialCameraPolicy";
-import { createWorkspaceForceAtlas2Binding } from "./forceAtlas2Binding";
 import { createWorkspaceNativeCoordinateSpace, WORKSPACE_MAP_CANONICAL_SPACE_SIZE } from "./nativeCoordinateSpace";
-import { buildWorkspaceForceAtlas2Units, isReusableWorkspaceForceAtlas2Units, isReusableWorkspaceForceAtlas2ContactUnits, workspaceRendererToModelPositions, type WorkspaceForceAtlas2Units } from "./forceAtlas2Units";
+import { buildWorkspaceForceAtlas2Units, isReusableWorkspaceForceAtlas2Units, isReusableWorkspaceForceAtlas2ContactUnits, type WorkspaceForceAtlas2Units } from "./forceAtlas2Units";
 import { createWorkspaceForceAtlas2WorkerLayout, type WorkspaceForceAtlas2WorkerLayout } from "./forceAtlas2WorkerLayout";
 import { isWorkspaceForceAtlas2Progress, type WorkspaceForceAtlas2Progress } from "./forceAtlas2Phases";
 import { placeWorkspaceMapLabels } from "./labelPlacement";
@@ -51,8 +49,6 @@ export type WorkspaceCosmosCallbacks = {
 };
 
 export type WorkspaceCosmosOptions = {
-  /** Default 2K uses the official FA2 Worker; explicit PC expansion retains native GPU physics. */
-  physics?: "force-atlas2" | "rest-log";
   /** The caller's admitted device/scale budget, fixed for this renderer. */
   budget?: WorkspaceMapBudget;
   hoverChip?: HTMLDivElement | null;
@@ -173,12 +169,6 @@ function restoredCoordinates(
   return snapshot.positions.slice();
 }
 
-function assertExplicitForceAtlas2Supported(nodeCount: number, physics: WorkspaceCosmosOptions["physics"]) {
-  if (physics === "force-atlas2" && nodeCount > WORKSPACE_MAP_DEFAULT_BUDGET.documents) {
-    throw new Error(`Explicit ForceAtlas2 supports at most ${WORKSPACE_MAP_DEFAULT_BUDGET.documents} nodes.`);
-  }
-}
-
 /**
  * Cosmos is imported only with this Map-only module. The caller should first
  * run detectWorkspaceMapWebGL from the tiny support module, then import here.
@@ -190,7 +180,6 @@ export function createWorkspaceCosmosAdapter(
 ): WorkspaceCosmosAdapter {
   const budget = { ...(options.budget ?? WORKSPACE_MAP_DEFAULT_BUDGET) };
   assertWorkspaceMapWithinBudget({ nodeCount: initialColumns.nodeIds.length, edgeCount: initialColumns.edgeIds.length }, budget);
-  assertExplicitForceAtlas2Supported(initialColumns.nodeIds.length, options.physics);
   const support = detectWorkspaceMapWebGL();
   if (!support.supported) throw new WorkspaceMapWebGLError(support.reason);
   const mode = options.forcedColors ? "forced"
@@ -227,7 +216,7 @@ export function createWorkspaceCosmosAdapter(
   let calibrationViewport: { width: number; height: number } | null = null;
   let preservesSessionCoordinates = initialCoordinates !== null;
   const restoredUnits = options.initialCoordinates?.forceAtlas2Units;
-  let forceAtlas2Units: WorkspaceForceAtlas2Units | null = (options.physics === "force-atlas2" || usesCpuLayout()) && initialCoordinates
+  let forceAtlas2Units: WorkspaceForceAtlas2Units | null = usesCpuLayout() && initialCoordinates
     && isReusableWorkspaceForceAtlas2Units(restoredUnits, columns.nodeIds.length)
     ? restoredUnits : null;
   let cpuProgress = usesCpuLayout() && initialCoordinates && forceAtlas2Units
@@ -245,6 +234,7 @@ export function createWorkspaceCosmosAdapter(
   let edgeById = new Map(columns.edgeIds.map((id, index) => [id, index]));
   let destroyed = false;
   let ready = false;
+  let nativeContext: WebGL2RenderingContext | null = null;
   let contextLost = false;
   let simulationFailed = false;
   let reducedMotion = options.reducedMotion;
@@ -385,8 +375,7 @@ export function createWorkspaceCosmosAdapter(
     // A settled PC map has no running forces to adopt a released body. Wake
     // that real edit once; pin restoration, no-op echoes and live alpha stay
     // untouched. The normal permission gate still owns pause/motion/lifecycle.
-    if (released && options.physics === undefined
-      && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents
+    if (released && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents
       && !graph.isSimulationRunning) reheatRelationPhysics(.15);
   }
 
@@ -407,7 +396,7 @@ export function createWorkspaceCosmosAdapter(
         width, height);
     }
     if (!collisionBasis) return false;
-    if ((usesForceAtlas2() || usesCpuLayout()) && !forceAtlas2Units) {
+    if (usesCpuLayout() && !forceAtlas2Units) {
       // Native draw/pick/selection use the same point-size shader. Resolve its
       // diameter at canonical Fit, not the user's camera or DPR backing size.
       const initial = buildWorkspaceForceAtlas2Units({ positions: collisionSeed,
@@ -422,12 +411,9 @@ export function createWorkspaceCosmosAdapter(
     // Only the first commit owns forces. A worker seed can replace provisional
     // fallback collision clearance, never gravity/charge/spring/rest distance.
     const nativeCollision = nativeSpace.toNativeCollisionBasis(collisionBasis);
-    const defaultNativeLargeScene = !options.physics && !usesCpuLayout()
+    const defaultNativeLargeScene = !usesCpuLayout()
       && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents;
     if (defaultNativeLargeScene) {
-      if (!("setPointCollisionRadii" in graph) || typeof graph.setPointCollisionRadii !== "function") {
-        throw new Error("Native per-point collision input is unavailable");
-      }
       const radii = buildWorkspaceNativeCollisionRadii(buffers.pointSizes, buffers.pointShapes, collisionBasis, maxPointDiameterCss());
       graph.setPointCollisionRadii(Float32Array.from(radii, radius => radius * nativeSpace.scale));
     }
@@ -443,8 +429,7 @@ export function createWorkspaceCosmosAdapter(
     return true;
   }
 
-  const Graph = options.physics === "rest-log" ? RestLogGraph : NativeGraph;
-  const graph = new Graph(container, {
+  const graph = new NativeGraph(container, {
     backgroundColor: tokens.surface,
     spaceSize: WORKSPACE_MAP_CANONICAL_SPACE_SIZE,
     randomSeed: initialColumns.identity.workspaceId,
@@ -495,8 +480,7 @@ export function createWorkspaceCosmosAdapter(
       initialCamera?.tick(alpha);
       // Expanded default-native PC maps retain upstream natural cooling.
       // Explicit Resume and moved drag/pin gestures still wake their forces.
-      if (alpha < 0.02 && (options.physics !== undefined
-        || columns.nodeIds.length <= WORKSPACE_MAP_DEFAULT_BUDGET.documents)) reheatRelationPhysics(0.04);
+      if (alpha < 0.02 && columns.nodeIds.length <= WORKSPACE_MAP_DEFAULT_BUDGET.documents) reheatRelationPhysics(0.04);
     },
     onDragStart(event) {
       draggedPoint = nativeHoveredIndex !== null && columns.nodeKeys[nativeHoveredIndex] && !destroyed && !contextLost
@@ -781,16 +765,9 @@ export function createWorkspaceCosmosAdapter(
     return frameNativePoint(frame, [(minX + maxX) / 2, (minY + maxY) / 2], nativeZoom, 0, simulate);
   }
 
-  function usesForceAtlas2() {
-    // The custom complete-model port remains an explicit, unaccepted numerical
-    // diagnostic. Default 2K uses the official CPU Worker, while explicitly
-    // expanded PC maps retain the upstream native GPU force pipeline.
-    return options.physics === "force-atlas2" && columns.nodeIds.length > 0
-      && columns.nodeIds.length <= WORKSPACE_MAP_DEFAULT_BUDGET.documents;
-  }
-
   function usesCpuLayout() {
-    return options.physics === undefined && budget.documents <= WORKSPACE_MAP_DEFAULT_BUDGET.documents
+    // Default 2K uses the official CPU Worker; admitted PC maps use native GPU physics.
+    return budget.documents <= WORKSPACE_MAP_DEFAULT_BUDGET.documents
       && columns.nodeIds.length > 0 && columns.nodeIds.length <= WORKSPACE_MAP_DEFAULT_BUDGET.documents;
   }
 
@@ -942,14 +919,7 @@ export function createWorkspaceCosmosAdapter(
 
   function attachRelationSimulation() {
     retireCpuLayout();
-    graph.attachGpuSimulation(usesForceAtlas2() ? createWorkspaceForceAtlas2Binding(() => {
-      if (!forceAtlas2Units) throw new Error("Workspace FA2 scene units are not initialized");
-      return { positions: workspaceRendererToModelPositions(forceAtlas2Units, buffers.positions),
-        radii: Float32Array.from(forceAtlas2Units.collisionRadiusModel), origin: forceAtlas2Units.origin,
-        sources: columns.edgeSources, targets: columns.edgeTargets, weights: columns.edgeWeights };
-    }, failRelationSimulation) : null);
-    container.dataset.mapPhysics = usesForceAtlas2() ? "force-atlas2-contact"
-      : options.physics === "rest-log" ? "rest-log" : usesCpuLayout() ? "force-atlas2-worker" : "cosmos-native";
+    container.dataset.mapPhysics = usesCpuLayout() ? "force-atlas2-worker" : "cosmos-native";
     if (usesCpuLayout()) {
       cpuLayoutTicks = 0;
       container.dataset.mapLayoutRunning = "false";
@@ -1226,7 +1196,7 @@ export function createWorkspaceCosmosAdapter(
   function maxPointDiameterCss(): number {
     const ratio = window.devicePixelRatio || 2;
     if (pointSpriteLimit?.ratio === ratio) return pointSpriteLimit.diameter;
-    const gl = graph.getGpuSimulationFrame()?.gl;
+    const gl = nativeContext;
     const range = gl?.getParameter(gl.ALIASED_POINT_SIZE_RANGE) as Float32Array | undefined;
     if (!range) return Infinity;
     pointSpriteLimit = { ratio, diameter: range[1] / ratio };
@@ -1291,7 +1261,7 @@ export function createWorkspaceCosmosAdapter(
     trackedVelocity = new Map();
     detachNativePointPicker();
     trackedPositions?.destroy(); trackedPositions = null;
-    if ("setPointCollisionRadii" in graph && typeof graph.setPointCollisionRadii === "function") graph.setPointCollisionRadii(null);
+    graph.setPointCollisionRadii(null);
     writePositions(next.positions);
     graph.setPointColors(next.pointColors);
     graph.setPointShapes(next.pointShapes);
@@ -1306,17 +1276,14 @@ export function createWorkspaceCosmosAdapter(
     graph.setLinkColors(next.linkColors);
     graph.setLinkStyles(next.linkStyles);
     graph.render(undefined, 0);
-    if (!options.physics && !usesCpuLayout() && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents
-      && "attachPointPicker" in graph && typeof graph.attachPointPicker === "function") {
+    if (!usesCpuLayout() && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents) {
       graph.attachPointPicker(createWorkspaceNativePointPicker(next.drawPointSizes, next.pointShapes, failRelationSimulation));
       nativePointPickerAttached = true;
     }
     // Titles track their GPU rows in every GPU-laid-out scene, whatever its
     // size: at most 42 rows are read, and never synchronously. CPU rows are
-    // already in JS. A graph without the frame seam (the legacy rest-log
-    // diagnostic) places titles from uploaded rows only.
-    if (!usesCpuLayout() && "getTrackedPointPositionsFrame" in graph
-      && typeof graph.getTrackedPointPositionsFrame === "function") {
+    // already in JS.
+    if (!usesCpuLayout()) {
       const getFrame = graph.getTrackedPointPositionsFrame.bind(graph);
       const owner = workspaceMapCommunityIdentityKey(columns);
       trackedPositions = createWorkspaceTrackedPositions({
@@ -1340,7 +1307,7 @@ export function createWorkspaceCosmosAdapter(
 
   function detachNativePointPicker() {
     nativePointPickerAttached = false;
-    if ("attachPointPicker" in graph && typeof graph.attachPointPicker === "function") graph.attachPointPicker(null);
+    graph.attachPointPicker(null);
   }
 
   function resetLabelCandidates() {
@@ -1968,6 +1935,7 @@ export function createWorkspaceCosmosAdapter(
     event.preventDefault();
     if (destroyed) return;
     contextLost = true;
+    nativeContext = null;
     clearHover();
     detachNativePointPicker();
     trackedPositions?.destroy(); trackedPositions = null;
@@ -1992,11 +1960,9 @@ export function createWorkspaceCosmosAdapter(
     const canvas = container.querySelector<HTMLCanvasElement>("canvas");
     const gl = canvas?.getContext("webgl2");
     if (!gl) throw new WorkspaceMapWebGLError("webgl2");
+    nativeContext = gl;
     nativeSpace = createWorkspaceNativeCoordinateSpace(gl.getParameter(gl.MAX_TEXTURE_SIZE) as number);
     if (nativeSpace.scale !== 1) {
-      // Diagnostic log/FA2 models have their own non-scale-covariant units.
-      // Never silently change them while adapting the default native engine.
-      if (options.physics) throw new Error("Explicit physics diagnostics require the canonical GPU space");
       // Keep ready=false while the SDK updates its scale/Zoom callbacks.
       graph.setConfigPartial({ spaceSize: nativeSpace.spaceSize });
     }
@@ -2195,7 +2161,6 @@ export function createWorkspaceCosmosAdapter(
     replaceColumns(nextColumns) {
       if (destroyed) return;
       assertWorkspaceMapWithinBudget({ nodeCount: nextColumns.nodeIds.length, edgeCount: nextColumns.edgeIds.length }, budget);
-      assertExplicitForceAtlas2Supported(nextColumns.nodeIds.length, options.physics);
       initialCamera?.cancel();
       const sameIdentity = sameGraphVisibleIdentity(columns.identity, nextColumns.identity);
       const next = buildCosmosSceneBuffers(nextColumns, tokens, budget, { forcedColors: options.forcedColors });
