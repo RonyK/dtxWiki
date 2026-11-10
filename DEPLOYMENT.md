@@ -793,7 +793,7 @@ readiness를 수행하며, 실패 시 자동 rollback하지 않고 복구 명령
 ```bash
 # systemd + private wheel index
 sudo dtxwiki update --check               # 새 버전 유무만 (가능하면 exit 10)
-sudo dtxwiki update --version 0.2.3       # 특정 버전 핀
+sudo dtxwiki update --version 0.2.4       # 특정 버전 핀
 sudo dtxwiki update --index-url https://pypi.internal/simple   # 사설 wheel index
 ```
 
@@ -1274,6 +1274,7 @@ endpoint를 사용한다.
 0.1.2부터 DB migration은 **릴리스 그룹**, **revision ID**, **변경 내용 이름**을 구분해
 관리합니다. 당시 ID·파일 배치 정리는 schema·데이터 작업을 바꾸지 않았습니다.
 새 설치와 기존 배포본 업그레이드는 v0.2.3 head `00ba02774c4a`에 도달합니다.
+v0.2.4는 같은 schema head를 사용하며, v0.2.3에서 추가 migration은 없습니다.
 v0.2.1·v0.2.2의 head `5b7e5c149279` 뒤에 단일 릴리스 migration
 `00ba02774c4a`가 연결되어 workspace Labs 정책 컬럼과 보관된 Inbox 목록의 부분
 인덱스를 추가합니다. 이미 배포된 `5b7e5c149279`와 그 이전 구현은 유지합니다.
@@ -1289,7 +1290,7 @@ v0.1.2부터의 배포본은 중간 버전을 따로 설치하지 않고 현재 
 | v0.1.3 | `19db79d3e622` | 정식 0.1.4 → v0.2 경로 적용 |
 | v0.1.4 | `eb86fdacb1bb` | 남은 v0.2 변경과 v0.2.3 후속 migration 적용, 0.1.4 로그인·계정 보존 데이터 유지 |
 | v0.2.1·v0.2.2 | `5b7e5c149279` | v0.2.3의 Labs 정책·Inbox 인덱스 migration 적용 |
-| v0.2.3 | `00ba02774c4a` | 이미 최신 schema이면 migration 생략 |
+| v0.2.3·v0.2.4 | `00ba02774c4a` | 이미 최신 schema이면 migration 생략 |
 
 ```text
 기존 배포본: efcbcf724889 (0.1.2) → 19db79d3e622 (0.1.3)

@@ -263,7 +263,7 @@ for (const { name, group } of [
   const checkbox = page.getByRole('checkbox', { name });
   await checkbox.check();
   const card = page.locator('.policy-card').filter({ has: checkbox });
-  const save = card.getByRole('button', { name: /^(Save changes|변경사항 저장)$/ });
+  const save = card.getByRole('button', { name: /^(Save|저장)$/ });
   const saved = page.waitForResponse(response =>
     new URL(response.url()).pathname === `${workspacePath}/settings/policies/batch`
     && response.request().method() === 'PATCH'

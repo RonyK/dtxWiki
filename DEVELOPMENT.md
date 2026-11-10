@@ -721,7 +721,7 @@ sha256sum "$WHEEL" infra/prod/install.sh
 `verify_wheel_artifact.py` 는 릴리스 워크플로가 태그 시점에 돌리는 것과 같은 검사입니다 —
 SPA 번들과 그 index HTML이 참조하는 asset, alembic.ini, 배포된 migration·직접 초기화·
 helper의 고정 해시를 확인합니다. 추출본 안에서 Alembic graph를 실제로 걸어
-0.2.3 schema head `00ba02774c4a`와 release manifest를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
+0.2.3·0.2.4 schema head `00ba02774c4a`와 release manifest를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
 넘기면 사용법 오류(exit 2)입니다. 이미 만든 `dist/` 에 이전 빌드가 있으면(`make build-wheel` 은 그것을
 `dist/prev/` 로 옮깁니다) 검사 대상이 모호해지므로 위처럼 `rm -rf dist` 로 시작하세요.
 
@@ -781,6 +781,7 @@ Workspace의 Labs 정책 컬럼과 Archived Inbox 조회용 partial index를 추
 DB가 이미 `5b7e5c149279`이면 0.2.1 migration을 다시 실행하지 않고 이 단일 후속
 migration만 적용합니다. 배포된 0.2.2 경계와 그 이전 고정 파일은 바꾸지 않습니다.
 0.2.2는 DB 변경이 없어 0.2.1의 schema 경계를 사용합니다.
+0.2.4도 DB 변경이 없어 0.2.3의 schema 경계 `00ba02774c4a`를 사용합니다.
 최종 schema와 ID를 유지하므로 개발 DB가 이미 `00ba02774c4a`이면 그대로 인식합니다.
 제거된 `fec23ff328e6`은 `RETIRED_REVISION_IDS`에 등록하여 거부하며, 해당 DB는
 원래 checkout으로 `00ba02774c4a`에 도달하고 백업·검증한 뒤 전환합니다.

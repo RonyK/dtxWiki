@@ -2,7 +2,7 @@
 
 **Give your AI the knowledge you've already built.**
 
-[Website](https://www.dtxwiki.com/) · [Documentation](https://docs.dtxwiki.com/) · [PyPI](https://pypi.org/project/dtxwiki/) · [한국어](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/README.ko.md)
+[Website](https://www.dtxwiki.com/) · [Documentation](https://docs.dtxwiki.com/) · [PyPI](https://pypi.org/project/dtxwiki/) · [한국어](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/README.ko.md)
 
 dtxWiki connects your notes, source materials, and decisions in a knowledge base
 that you and your AI tools can use together. Keep your reasoning and references
@@ -60,12 +60,12 @@ write, organize, and search without an AI account or API key.
 
 ## Get started
 
-This guide is for **dtxWiki 0.2.3 (Beta)**. Start on your own computer, then follow
+This guide is for **dtxWiki 0.2.4 (Beta)**. Start on your own computer, then follow
 [Access from other devices](#server-access) and
 [Run in the background](#4-run-in-the-background) to share it with others.
 To register Claude Code or Codex CLI, follow
 [Connect MCP clients](#mcp-clients).
-For an existing installation, read [Upgrading to 0.2.3](#upgrading) before
+For an existing installation, read [Upgrading to 0.2.4](#upgrading) before
 starting the new server.
 
 ### 1. Install and start the web server
@@ -82,7 +82,7 @@ Linux or macOS (`python3` must be Python 3.12 or newer):
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install "dtxwiki==0.2.3"
+python -m pip install "dtxwiki==0.2.4"
 dtxwiki
 ```
 
@@ -91,7 +91,7 @@ Windows PowerShell (with Python 3.12 installed):
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install "dtxwiki==0.2.3"
+python -m pip install "dtxwiki==0.2.4"
 dtxwiki
 ```
 
@@ -106,14 +106,14 @@ or [uv](https://docs.astral.sh/uv/getting-started/installation/).
 The npm package launches the matching Python release through one of these tools.
 
 ```bash
-npx @dtxsuite/dtxwiki@0.2.3
+npx @dtxsuite/dtxwiki@0.2.4
 ```
 
 With npm, replace `dtxwiki` in foreground CLI commands below with
-`npx @dtxsuite/dtxwiki@0.2.3`. For a global installation, use
-`npm install --global @dtxsuite/dtxwiki@0.2.3`, then run `dtxwiki`.
+`npx @dtxsuite/dtxwiki@0.2.4`. For a global installation, use
+`npm install --global @dtxsuite/dtxwiki@0.2.4`, then run `dtxwiki`.
 The manual background examples use a direct Python installation, such as the
-pip environment above. See the [npm guide](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/npm/dtxwiki/README.md)
+pip environment above. See the [npm guide](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/npm/dtxwiki/README.md)
 for launcher details.
 
 The browser opens **[http://127.0.0.1:21080/](http://127.0.0.1:21080/)**.
@@ -132,7 +132,7 @@ Node.js 22.18 or newer with npm, and GNU Make. Clone the release, install its
 dependencies, and build the web UI:
 
 ```bash
-git clone --branch v0.2.3 https://github.com/dtxSuite/dtxWiki.git
+git clone --branch v0.2.4 https://github.com/dtxSuite/dtxWiki.git
 cd dtxWiki
 uv sync --locked --extra dev --python 3.12
 npm ci
@@ -141,7 +141,7 @@ source .venv/bin/activate
 dtxwiki
 ```
 
-For development servers and contributing, see [DEVELOPMENT.md](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/DEVELOPMENT.md).
+For development servers and contributing, see [DEVELOPMENT.md](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/DEVELOPMENT.md).
 
 </details>
 
@@ -218,20 +218,20 @@ server-admin permission does not automatically share workspace content.
 #### An HTTPS server for shared use
 
 Use an Ubuntu 22.04+ server with `sudo`, point your domain's DNS to it, and
-allow incoming **TCP 80 and 443**. On the server, download the 0.2.3 installer
+allow incoming **TCP 80 and 443**. On the server, download the 0.2.4 installer
 and its release wheel, then replace the domain and administrator email:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL https://raw.githubusercontent.com/dtxSuite/dtxWiki/v0.2.3/infra/prod/install.sh -o install-dtxwiki.sh
-curl -fL https://github.com/dtxSuite/dtxWiki/releases/download/v0.2.3/dtxwiki-0.2.3-py3-none-any.whl -o /tmp/dtxwiki-0.2.3-py3-none-any.whl
-chmod 0644 /tmp/dtxwiki-0.2.3-py3-none-any.whl
+curl -fL https://raw.githubusercontent.com/dtxSuite/dtxWiki/v0.2.4/infra/prod/install.sh -o install-dtxwiki.sh
+curl -fL https://github.com/dtxSuite/dtxWiki/releases/download/v0.2.4/dtxwiki-0.2.4-py3-none-any.whl -o /tmp/dtxwiki-0.2.4-py3-none-any.whl
+chmod 0644 /tmp/dtxwiki-0.2.4-py3-none-any.whl
 sudo bash install-dtxwiki.sh \
   --domain wiki.example.com \
   --email admin@example.com \
   --tls acme \
-  --wheel /tmp/dtxwiki-0.2.3-py3-none-any.whl
+  --wheel /tmp/dtxwiki-0.2.4-py3-none-any.whl
 ```
 
 The installer prepares Python, HTTPS, an administrator account, and services
@@ -317,7 +317,7 @@ sudo systemctl start dtxwiki dtxwiki-worker
 
 ### 5. Connect MCP clients
 
-[한국어: 같은 MCP 연결 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/README.ko.md#mcp-clients)
+[한국어: 같은 MCP 연결 안내](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/README.ko.md#mcp-clients)
 
 Keep dtxWiki running and install Claude Code or Codex CLI on the client computer.
 The examples below connect to its Streamable HTTP endpoint using an access key
@@ -426,7 +426,7 @@ account role. Context changes are prepared as drafts for review.
 
 You can change an existing key's allowed workspaces in **Settings > MCP access**
 without registering the client again. For the permission rules, see
-[MCP workspace access in the deployment guide (Korean)](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/DEPLOYMENT.md#mcp-workspace-access).
+[MCP workspace access in the deployment guide (Korean)](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/DEPLOYMENT.md#mcp-workspace-access).
 Other clients and OAuth compatibility are covered in
 [Connect an AI app](https://docs.dtxwiki.com/docs/0.2/integrations/mcp-connections/).
 
@@ -451,7 +451,7 @@ sign-up off by default and needs a configured session secret.
 
 | Symptom | Check |
 | --- | --- |
-| `dtxwiki` command not found | For pip, activate the virtual environment from step 1. For npm, use `npx @dtxsuite/dtxwiki@0.2.3`. |
+| `dtxwiki` command not found | For pip, activate the virtual environment from step 1. For npm, use `npx @dtxsuite/dtxwiki@0.2.4`. |
 | Local access works, another device cannot connect | Bind with `--host 0.0.0.0`; check TCP 21080, router forwarding, and WSL/VM forwarding. |
 | Host validation rejects an IP or domain | Set `DTXWIKI_PUBLIC_BASE_URL` to the browser-visible base URL and add other IPs/names to `DTXWIKI_ALLOWED_HOSTS`. Do not use `/mcp` or `0.0.0.0` as the base URL. Restart after changing environment variables. |
 | `admin grant` cannot find the account | Use the same OS user and data directory as the server, and make sure the account already exists. |
@@ -465,23 +465,28 @@ sign-up off by default and needs a configured session secret.
 <a id="upgrade-021"></a>
 <a id="upgrade-022"></a>
 <a id="upgrade-023"></a>
+<a id="upgrade-024"></a>
 
-## Upgrading to 0.2.3
+## Upgrading to 0.2.4
+
+Version 0.2.4 keeps the 0.2.3 database schema (`00ba02774c4a`); upgrading from
+0.2.3 requires no additional migration. Older supported versions follow the
+existing upgrade path below.
 
 For systemd or Docker installations, follow the
 [maintenance guide](https://docs.dtxwiki.com/docs/0.2/administration/backup-upgrades/)
 for the deployment-specific update steps. For local installations, read the
-[release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/CHANGELOG.md), stop
+[release notes](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/CHANGELOG.md), stop
 the server and every separately managed worker, then back up the database,
 files, and configuration.
 
-Install 0.2.3 using your existing installation method without starting the new
+Install 0.2.4 using your existing installation method without starting the new
 server. For pip, activate the existing virtual
-environment and run `python -m pip install --upgrade "dtxwiki==0.2.3"`.
-For npm, follow the [npm update instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/npm/dtxwiki/README.md#updating).
+environment and run `python -m pip install --upgrade "dtxwiki==0.2.4"`.
+For npm, follow the [npm update instructions](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/npm/dtxwiki/README.md#updating).
 
 For an existing uv installation, use
-`uv tool install --force "dtxwiki==0.2.3"`. dtxWiki requires Python 3.12 or newer;
+`uv tool install --force "dtxwiki==0.2.4"`. dtxWiki requires Python 3.12 or newer;
 this command does not pin the interpreter. If you need a specific interpreter,
 add `--python <version-or-path>` with a supported version. Preserve your existing
 package index and authentication settings.
@@ -539,10 +544,10 @@ See the [full documentation](https://docs.dtxwiki.com/) for more workflows.
 Share a use case, suggest an improvement, or report a problem on
 [GitHub](https://github.com/dtxSuite/dtxWiki/issues).
 For code and documentation contributions, see the
-[contribution guide](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/CONTRIBUTING.md).
+[contribution guide](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/CONTRIBUTING.md).
 
 ## License
 
 dtxWiki is available under your choice of **AGPL-3.0-only OR Elastic-2.0**.
-See [LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.2.3/LICENSE) for the terms,
+See [LICENSE](https://github.com/dtxSuite/dtxWiki/blob/v0.2.4/LICENSE) for the terms,
 third-party notices, and commercial licensing options.
