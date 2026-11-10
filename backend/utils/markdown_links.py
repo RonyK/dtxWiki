@@ -11,6 +11,7 @@ from copy import copy, deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 from heapq import merge
+from types import MethodType
 
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import isMdAsciiPunct, isPunctChar, isWhiteSpace
@@ -1250,6 +1251,11 @@ def _wikilink_boundary_parser() -> MarkdownIt:
     # Never mutate the canonical shared parser: explicit authored-link parsing
     # and media analysis retain their existing profile and relationship policy.
     parser = copy(_MARKDOWN_LINK_PARSER)
+    # A restored spy can leave parse bound on the source instance. Shallow
+    # copying that method must not bypass this profile's private inline rules.
+    parse = parser.parse
+    if isinstance(parse, MethodType) and parse.__self__ is _MARKDOWN_LINK_PARSER:
+        parser.parse = MethodType(parse.__func__, parser)
     parser.inline = _ReaderBoundaryInlineParser(_MARKDOWN_LINK_PARSER.inline)
     parser.inline.ruler.at("text", _reader_boundary_text)
     return parser

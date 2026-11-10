@@ -13,6 +13,7 @@ from backend.context_media.domain.rendered_markdown import (
 from backend.utils.markdown_links import (
     _decoded_reader_url_spans,
     _raw_reader_url_spans,
+    _wikilink_boundary_parser,
     rendered_markdown_links,
     rendered_wikilinks,
 )
@@ -591,6 +592,23 @@ def test_reader_private_profile_does_not_mutate_shared_parser_under_concurrent_r
 
     assert tuple(RENDERED_MARKDOWN.inline.ruler.getRules("")) == original_rules
     assert canonical_shape() == original_shape
+
+
+def test_reader_private_profile_keeps_unicode_rules_after_parser_spy_is_restored(
+    monkeypatch,
+):
+    # Undo restores an instance-bound method; the private parser may first be
+    # created afterward when another xdist worker order reaches this input.
+    # Preserve whether parse was originally inherited or assigned on the instance.
+    monkeypatch.setitem(vars(RENDERED_MARKDOWN), "parse", RENDERED_MARKDOWN.parse)
+    with monkeypatch.context() as patch:
+        patch.setattr(RENDERED_MARKDOWN, "parse", lambda *_args, **_kwargs: [])
+    _wikilink_boundary_parser.cache_clear()
+    try:
+        body = "- ==_x_\ufeff[[Design]]=="
+        assert [link.target for link in rendered_wikilinks(body)] == ["Design"]
+    finally:
+        _wikilink_boundary_parser.cache_clear()
 
 
 def test_highlight_visibility_keeps_exact_decoded_wikilink_source_spans():
