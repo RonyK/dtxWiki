@@ -5,6 +5,7 @@ import type { GraphNode, GraphQueryPayload } from "../../frontend/src/shared/api
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { backendBaseUrl, currentWorkspace, login, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
+import { admittedNodes, expectCurrentContainment, listedEdgeCount, listedNodeIds, sceneRelations } from "./workspace_graph_scene";
 
 const GRAPH_2K_OWNER_EMAIL = "e2e-graph-2k-owner@example.com";
 const DOCUMENT_COUNT = 2_000;
@@ -58,18 +59,18 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       rendered_clusters: 0,
       rendered_relations: COMBINED_RELATION_COUNT,
     });
-    expect(combined.nodes).toHaveLength(DOCUMENT_COUNT);
-    expect(combined.edges).toHaveLength(COMBINED_RELATION_COUNT);
-    expectCurrentFolderTopology(combined);
+    expect(admittedNodes(combined)).toHaveLength(DOCUMENT_COUNT);
+    expect(sceneRelations(combined)).toHaveLength(COMBINED_RELATION_COUNT);
+    expectCurrentContainment(combined);
     expect(combined.edges.some((edge) => edge.relation_kind === "wikilink")).toBe(true);
     expect(combined.edges.some((edge) => edge.relation_kind.startsWith("citation_"))).toBe(true);
-    expect(combined.edges.every((edge) => ["wikilink", "citation_page", "citation_source"]
+    expect(combined.edges.every((edge) => ["wikilink", "citation_page", "citation_source", "tree"]
       .includes(edge.relation_kind))).toBe(true);
-    expect(new Set(combined.edges.flatMap((edge) => [edge.source, edge.target])).size)
-      .toBe(COMBINED_CONNECTED_DOCUMENT_COUNT);
+    const combinedConnected = new Set(sceneRelations(combined).flatMap((edge) => [edge.source, edge.target]));
+    expect(combinedConnected.size).toBe(COMBINED_CONNECTED_DOCUMENT_COUNT);
     await expect(page.getByLabel("Lens", { exact: true })).toHaveValue("combined");
     await expect(page.getByTestId("workspace-graph-node-list"))
-      .toHaveAttribute("data-total-count", String(COMBINED_CONNECTED_DOCUMENT_COUNT));
+      .toHaveAttribute("data-total-count", String(listedNodeIds(combined, combinedConnected).size));
     await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
       .toHaveAttribute("title", "72 unlinked documents hidden from this map.");
     await expect(page.getByTestId("graph-canvas"))
@@ -99,16 +100,19 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       rendered_clusters: 0,
       rendered_relations: LINK_RELATION_COUNT,
     });
-    expect(scene.nodes).toHaveLength(DOCUMENT_COUNT);
-    expect(scene.edges).toHaveLength(LINK_RELATION_COUNT);
-    expectCurrentFolderTopology(scene);
+    expect(admittedNodes(scene)).toHaveLength(DOCUMENT_COUNT);
+    expect(sceneRelations(scene)).toHaveLength(LINK_RELATION_COUNT);
+    expectCurrentContainment(scene);
+    const linksConnected = new Set(sceneRelations(scene).flatMap((edge) => [edge.source, edge.target]));
+    const allListed = listedNodeIds(scene, new Set(admittedNodes(scene).map((node) => node.id)));
 
     const nodeList = page.getByTestId("workspace-graph-node-list");
     const edgeList = page.getByTestId("workspace-graph-edge-list");
     // The real corpus includes 252 unlinked documents. Keep the API's complete
     // 2K proof above, while the first viewport prioritizes its 1,748 connected
     // documents. The display toggle reveals the same authoritative 2K scene.
-    await expect(nodeList).toHaveAttribute("data-total-count", "1748");
+    expect(linksConnected.size).toBe(1748);
+    await expect(nodeList).toHaveAttribute("data-total-count", String(listedNodeIds(scene, linksConnected).size));
     await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
       .toHaveAttribute("title", "252 unlinked documents hidden from this map.");
     const initialCanvas = page.getByTestId("graph-canvas");
@@ -116,8 +120,8 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
     await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible({ timeout: 60_000 });
     await capture(page, testInfo, "real-api-2k-connected-first-viewport.png");
     await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
-    await expect(nodeList).toHaveAttribute("data-total-count", String(DOCUMENT_COUNT));
-    await expect(edgeList).toHaveAttribute("data-total-count", String(LINK_RELATION_COUNT));
+    await expect(nodeList).toHaveAttribute("data-total-count", String(allListed.size));
+    await expect(edgeList).toHaveAttribute("data-total-count", String(listedEdgeCount(scene, allListed)));
     await expectBoundedRows(nodeList, edgeList);
 
     const canvas = page.getByTestId("graph-canvas");
@@ -222,7 +226,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       expect(overview.ok()).toBe(true);
       expect(overview.request().postDataJSON().lens).toBe("combined");
       const scene = (await overview.json()).data as WorkspaceGraphScene;
-      expectCurrentFolderTopology(scene);
+      expectCurrentContainment(scene);
       const workspaceId = new URL(overview.url()).pathname
         .match(/\/workspaces\/([^/]+)\/graph\/overview\/query$/)?.[1];
       if (!workspaceId) throw new Error("Overview response did not use the real workspace-scoped route");
@@ -231,21 +235,21 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       expect(scene.representation).toBe("exact");
       expect(scene.completeness).toBe("complete");
       expect(scene.truncated).toBe(false);
-      const connectedIds = new Set(scene.edges.flatMap((edge) => [edge.source, edge.target]));
+      const connectedIds = new Set(sceneRelations(scene).flatMap((edge) => [edge.source, edge.target]));
       expect(connectedIds.size).toBe(COMBINED_CONNECTED_DOCUMENT_COUNT);
       const contextDocument = scene.nodes.find((node) => node.grain === "document"
         && node.entity_kind === "context" && connectedIds.has(node.id));
       if (!contextDocument || contextDocument.grain !== "document") throw new Error("No real linked Context document in 2K fixture");
 
-      // Exercise optional metadata without replacing document geometry in both languages,
-      // then preserve the original EN reader/history/keyboard journey below.
-      const folderLanguage = viewport.width === 390 ? "ko" : "en";
-      if (folderLanguage === "ko") {
+      // Exercise map continuity in the viewport's language, then preserve the
+      // original EN reader/history/keyboard journey below.
+      const mapLanguage = viewport.width === 390 ? "ko" : "en";
+      if (mapLanguage === "ko") {
         await page.getByRole("button", { name: "Switch language to 한국어" }).click();
         await expect(page.locator("html")).toHaveAttribute("lang", "ko");
       }
-      await expectRealFolderContext(page, scene, contextDocument.primary_folder_id, testInfo, folderLanguage);
-      if (folderLanguage === "ko") {
+      await expectRealMapContinuity(page, scene, testInfo, mapLanguage);
+      if (mapLanguage === "ko") {
         await page.getByRole("button", { name: /English.*언어 변경/ }).click();
         await expect(page.locator("html")).toHaveAttribute("lang", "en");
       }
@@ -320,7 +324,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       // Citations connect 180 documents that are unlinked in Links alone.
       // The first test retains the separate Links count of 1,748.
       await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", String(COMBINED_CONNECTED_DOCUMENT_COUNT));
+        .toHaveAttribute("data-total-count", String(listedNodeIds(scene, connectedIds).size));
       await expect(page.getByRole("searchbox", { name: "Find in visible map" })).toHaveValue("");
       const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
       expect(horizontalOverflow).toBe(false);
@@ -354,7 +358,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
     const scene = (await overview.json()).data as WorkspaceGraphScene;
     expect(scene.counts.candidate_documents).toBe(DOCUMENT_COUNT);
     expect(scene.counts.candidate_relations).toBe(COMBINED_RELATION_COUNT);
-    const linked = new Set(scene.edges.flatMap((edge) => [edge.source, edge.target]));
+    const linked = new Set(sceneRelations(scene).flatMap((edge) => [edge.source, edge.target]));
     const document = scene.nodes.find((node) => node.grain === "document"
       && node.entity_kind === "context" && linked.has(node.id));
     if (!document || document.grain !== "document") throw new Error("No real linked Context document in 2K fixture");
@@ -385,30 +389,28 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
 const SCENE_NAVIGATION_LABELS = {
   en: {
     listMode: "List", listSearch: "Find in the graph list", incoming: "Incoming", outgoing: "Outgoing",
-    membership: "Membership", documentSearch: "Find in the selected document's relationships",
+    membership: "Contains", documentSearch: "Find in the selected node's relationships",
     empty: "Select a node or relationship to inspect it.",
   },
   ko: {
     listMode: "목록", listSearch: "그래프 목록에서 찾기", incoming: "들어오는 관계", outgoing: "나가는 관계",
-    membership: "소속", documentSearch: "선택한 문서의 관계에서 찾기",
+    membership: "포함", documentSearch: "선택한 노드의 관계에서 찾기",
     empty: "확인할 노드 또는 관계를 선택하세요.",
   },
 } as const;
 
-const FOLDER_MAP_LABELS = {
+const MAP_LABELS = {
   en: {
-    view: "View",
-    context: "Folder context", openCanvas: "Open canvas fullscreen", canvas: "Knowledge Map canvas",
-    closeCanvas: "Close canvas", closeDetails: "Close folder details", export: "Export visible map",
+    openCanvas: "Open canvas fullscreen", canvas: "Knowledge Map canvas",
+    closeCanvas: "Close canvas", export: "Export filtered graph",
     fit: "Fit graph", pause: "Pause layout", resume: "Resume layout", clear: "Clear selection",
-    search: "Find in visible map", details: "Folder members and relationships",
+    search: "Find in visible map",
   },
   ko: {
-    view: "보기",
-    context: "폴더 보조 정보", openCanvas: "캔버스 전체 화면으로 열기", canvas: "지식 지도 캔버스",
-    closeCanvas: "캔버스 닫기", closeDetails: "폴더 상세 닫기", export: "표시된 지도 내보내기",
+    openCanvas: "캔버스 전체 화면으로 열기", canvas: "지식 지도 캔버스",
+    closeCanvas: "캔버스 닫기", export: "필터링된 그래프 내보내기",
     fit: "그래프 맞춤", pause: "레이아웃 일시 중지", resume: "레이아웃 다시 시작", clear: "선택 해제",
-    search: "표시된 지도에서 찾기", details: "폴더 소속과 관계",
+    search: "표시된 지도에서 찾기",
   },
 } as const;
 
@@ -632,7 +634,7 @@ async function prepareNativeCrossFolderCorridor(
 }
 
 async function prepareNativeDocumentDrag(
-  page: Page, canvas: Locator, scene: WorkspaceGraphScene, dragDelta: { x: number; y: number },
+  page: Page, canvas: Locator, scene: WorkspaceGraphScene, dragStep: { x: number; y: number },
   testInfo: TestInfo, suffix: string,
 ) {
   const nodes = new Map(scene.nodes.map((node) => [node.id, node]));
@@ -640,15 +642,17 @@ async function prepareNativeDocumentDrag(
     const title = nodes.get(id)?.label ?? "";
     return Math.min(144, (title.length <= 24 ? title.length : 25) * 7 + 4);
   };
-  const isDragCandidate = (point: MapPoint, readback: MapReadback) => {
+  const isDragCandidate = (point: MapPoint, readback: MapReadback, dragDelta: { x: number; y: number }) => {
     const node = nodes.get(point.id);
     if (node?.grain !== "document" || node.entity_kind !== "context") return false;
     const width = ordinaryLabelWidth(point.id);
-    // Retain the complete ordinary-label and gesture margins. A hover title
-    // alone is clamped and must never be used as inferred GPU coordinates.
-    if (point.x <= 30 || point.y <= 30
-      || point.x >= readback.width - (width + 8 + dragDelta.x + 5)
-      || point.y >= readback.height - (18 + dragDelta.y + 5)) return false;
+    // Retain the complete ordinary-label and gesture margins at both ends of
+    // the drag. A hover title alone is clamped and must never be used as
+    // inferred GPU coordinates.
+    const left = Math.min(point.x, point.x + dragDelta.x), right = Math.max(point.x, point.x + dragDelta.x);
+    const top = Math.min(point.y, point.y + dragDelta.y), bottom = Math.max(point.y, point.y + dragDelta.y);
+    if (left <= 30 || top <= 30 || right >= readback.width - (width + 8 + 5)
+      || bottom >= readback.height - (18 + 5)) return false;
     const labelX = point.x + 8 + dragDelta.x;
     const labelY = point.y - 9 + dragDelta.y;
     return !readback.labels.some((other) => other.id !== point.id
@@ -660,74 +664,89 @@ async function prepareNativeDocumentDrag(
   // from the canvas element itself, whichever scope (page or dialog) found it.
   const hoverChip = canvas.locator("xpath=..").locator(".graph-hover-chip");
   let before = await settleMapReadback(page, canvas);
-  let expectedId: string | null = null;
+  let zoomAnchor: MapPoint | undefined;
   const preparation: { camera: MapReadback["camera"]; expectedId: string | null;
-    point: MapPoint | null; nativeHoverIds: string[] }[] = [];
+    point: MapPoint | null; dragDelta?: { x: number; y: number }; nativeHoverIds: string[];
+    destinationHoverIds?: string[] }[] = [];
+  // Points scale with zoom, so a crowded map stays crowded at every zoom, and
+  // native picking reports any point within a few pixels of the pointer. Look
+  // for an empty drop target from each labeled source: longest drag first,
+  // away from the map centre first, six per source and 40 per camera.
+  const dragDeltas = (point: MapPoint, readback: MapReadback) => {
+    const outX = point.x < readback.width / 2 ? -1 : 1, outY = point.y < readback.height / 2 ? -1 : 1;
+    return [7, 4, 2, 1].flatMap((scale) =>
+      [[outX, outY], [outX, 0], [0, outY], [outX, -outY], [-outX, outY], [-outX, 0], [0, -outY], [-outX, -outY]]
+        .map(([x, y]) => ({ x: x * dragStep.x * scale, y: y * dragStep.y * scale })))
+      .filter((dragDelta) => isDragCandidate(point, readback, dragDelta))
+      .slice(0, 6);
+  };
   for (let attempt = 0; attempt <= 6; attempt += 1) {
-    const point: MapPoint | undefined = expectedId === null ? before.labels.find((candidate) => isDragCandidate(candidate, before))
-      : before.labels.find((candidate) => candidate.id === expectedId && isDragCandidate(candidate, before));
-    if (point && before.labels.length >= 3) {
-      expectedId ??= point.id;
+    const candidates = before.labels.length < 3 ? [] : before.labels
+      .flatMap((point) => dragDeltas(point, before).map((dragDelta) => ({ point, dragDelta })))
+      .slice(0, 40);
+    if (!candidates.length) preparation.push({ camera: before.camera, expectedId: null, point: null, nativeHoverIds: [] });
+    zoomAnchor = candidates.find((candidate) => candidate.point.id === zoomAnchor?.id)?.point ?? candidates[0]?.point;
+    for (const { point, dragDelta } of candidates) {
+      // The expected source is fixed here, before any mouse down.
+      const expectedId = point.id;
       const bounds = await canvas.locator("canvas").boundingBox();
       if (!bounds) throw new Error("No native drag bounds");
-      await page.mouse.move(bounds.x + point.x, bounds.y + point.y);
+      // Floating controls cover parts of the canvas. An empty hover there only
+      // means the pointer left the canvas, so both ends must hit the canvas.
+      const hoveredIds = async (x: number, y: number) => {
+        const onCanvas = await canvas.locator("canvas").evaluate((element, target) =>
+          document.elementFromPoint(target.x, target.y) === element, { x: bounds.x + x, y: bounds.y + y });
+        if (!onCanvas) return null;
+        await page.mouse.move(bounds.x + x, bounds.y + y);
+        await page.waitForTimeout(300);
+        return hoverChip.evaluateAll((chips) => chips
+          .filter((chip) => getComputedStyle(chip).display !== "none")
+          .flatMap((chip) => (chip as HTMLElement).dataset.hoverNodeId ?? []));
+      };
+      // Labels show only some points, so free label space does not prove an
+      // empty drop. Native picking must find no other point under the drop
+      // target; otherwise the click after the drag selects the point on top.
+      const destinationHoverIds = await hoveredIds(point.x + dragDelta.x, point.y + dragDelta.y);
+      if (!destinationHoverIds?.every((id) => id === expectedId)) {
+        preparation.push({ camera: before.camera, expectedId, point, dragDelta, nativeHoverIds: [],
+          destinationHoverIds: destinationHoverIds ?? ["off-canvas"] });
+        continue;
+      }
       // Native GPU picking must publish this ORIGINAL intended source as the
       // hover chip before any mouse down can create a pin.
-      await page.waitForTimeout(300);
-      const nativeHoverIds = await hoverChip.evaluateAll((chips) => chips
-        .filter((chip) => getComputedStyle(chip).display !== "none")
-        .flatMap((chip) => (chip as HTMLElement).dataset.hoverNodeId ?? []));
-      preparation.push({ camera: before.camera, expectedId, point, nativeHoverIds });
+      const nativeHoverIds = await hoveredIds(point.x, point.y) ?? [];
+      preparation.push({ camera: before.camera, expectedId, point, dragDelta, nativeHoverIds, destinationHoverIds });
       if (nativeHoverIds.includes(expectedId)) {
         await expect(hoverChip).toHaveAttribute("data-hover-node-id", expectedId);
         await expect(hoverChip).toBeVisible();
         await attachJson(testInfo, `real-api-2k-native-drag-preparation-${suffix}.json`, {
-          entrypoint: "real camera zoom, fresh ordinary GPU label, expected-source native hover BEFORE mouse down",
+          entrypoint: "real camera zoom, fresh ordinary GPU label, empty native drop target and expected-source native hover BEFORE mouse down",
           expectedId, preparation, before,
         });
-        return { dragPoint: point, dragBounds: bounds, beforeDrag: before };
+        return { dragPoint: point, dragDelta, dragBounds: bounds, beforeDrag: before };
       }
-    } else preparation.push({ camera: before.camera, expectedId, point: point ?? null, nativeHoverIds: [] });
+    }
     if (attempt === 6) break;
     // A wrong native hover is only a setup observation, never a wrong drag
     // followed by accepting whichever source happened to become pinned.
-    before = await zoomMapForObservation(page, canvas, "in", point);
+    before = await zoomMapForObservation(page, canvas, "in", zoomAnchor);
   }
-  await attachJson(testInfo, `real-api-2k-native-drag-preparation-failed-${suffix}.json`, { expectedId, preparation, before });
-  throw new Error(`No isolated expected Context GPU hover before native drag after bounded zoom: ${expectedId ?? "none"}`);
+  await attachJson(testInfo, `real-api-2k-native-drag-preparation-failed-${suffix}.json`, { preparation, before });
+  throw new Error("No isolated Context GPU hover with an empty drop target before native drag after bounded zoom");
 }
 
-async function expectRealFolderContext(
-  page: Page, scene: WorkspaceGraphScene, preferredFolderId: string | null,
-  testInfo: TestInfo, language: keyof typeof FOLDER_MAP_LABELS,
+async function expectRealMapContinuity(
+  page: Page, scene: WorkspaceGraphScene, testInfo: TestInfo, language: keyof typeof MAP_LABELS,
 ) {
-  const labels = FOLDER_MAP_LABELS[language];
+  const labels = MAP_LABELS[language];
   const workspaceId = new URL(page.url()).pathname.match(/^\/workspaces\/([^/]+)\/graph$/)?.[1];
-  if (!workspaceId) throw new Error("Folder context requires the canonical Workspace Map route");
+  if (!workspaceId) throw new Error("Map continuity requires the canonical Workspace Map route");
   const mobile = page.viewportSize()!.width === 390;
   const suffix = `${language}-${page.viewportSize()!.width}`;
-  const topology = scene.folder_topology;
-  if (!topology) throw new Error("Real folder context requires current visible topology");
-  const connected = new Set(scene.edges.flatMap((edge) => [edge.source, edge.target]));
-  const memberships = topology.memberships.filter((row) => connected.has(row.node_id));
-  const folders = new Map(topology.folders.map((folder) => [folder.id, folder]));
+  const relations = sceneRelations(scene);
+  const connected = new Set(relations.flatMap((edge) => [edge.source, edge.target]));
+  const listed = listedNodeIds(scene, connected);
   const nodes = new Map(scene.nodes.map((node) => [node.id, node]));
-  const visibleFolders = new Set<string>();
-  for (const membership of memberships) {
-    let id = membership.folder_id;
-    while (id !== null && !visibleFolders.has(id)) {
-      visibleFolders.add(id);
-      const folder = folders.get(id);
-      if (!folder) throw new Error("Visible primary ancestor is absent");
-      id = folder.parent_folder_id;
-    }
-  }
-  const folderId = preferredFolderId ?? memberships.find((row) => row.folder_id !== null)?.folder_id;
-  if (!folderId || !visibleFolders.has(folderId)) throw new Error("No visible primary folder");
-  const folder = folders.get(folderId)!;
-  const memberIds = memberships.filter((row) => row.folder_id === folderId).map((row) => row.node_id).sort();
-  expect(memberIds.length).toBeGreaterThan(0);
-  expect(memberIds.length).toBeLessThanOrEqual(2_000);
   const originalTheme = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
   // This shipped DOM ID also permits read-only value checks while the mobile
   // input is in the inert underlay. Fill actions occur only before/after dialog.
@@ -747,32 +766,12 @@ async function expectRealFolderContext(
     const scope = mobile ? page.getByRole("dialog", { name: labels.canvas, exact: true }) : page;
     const canvas = scope.getByTestId("graph-canvas");
     const native = canvas.locator("canvas");
-    const toggle = scope.locator("button.workspace-graph-folder-toggle");
-    const clickFolderToggle = async () => {
-      if (!mobile) {
-        const view = page.locator(".workspace-graph-view-options");
-        if (await view.getAttribute("open") === null) await view.locator("summary").click();
-      }
-      await expect(toggle).toHaveAccessibleName(labels.context);
-      await toggle.click();
-      // Leave the View disclosure before navigating the sidebar beneath it.
-      // Exercise its shipped Escape/focus behavior rather than force-clicking
-      // a folder index that the still-open popup legitimately overlays.
-      if (!mobile) {
-        await toggle.press("Escape");
-        await expect(page.locator(".workspace-graph-view-options")).not.toHaveAttribute("open", "");
-        await expect(page.locator(".workspace-graph-view-options > summary")).toBeFocused();
-      }
-    };
     await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
     await expect(native).toHaveCount(1);
     await expect(native).toBeVisible();
     await expect(canvas).toHaveAttribute("data-map-node-count", String(connected.size));
-    await expect(canvas).toHaveAttribute("data-map-edge-count", String(scene.edges.length));
+    await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations.length));
     await expect(canvas).toHaveAttribute("data-map-community-count", /^[1-9]\d*$/);
-    await expect(canvas.locator("[data-workspace-map-folder-islands]")).toHaveCount(0);
-    await expect(canvas).not.toHaveAttribute("data-map-folder-count");
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
     if (mobile) {
       const bounds = await canvas.boundingBox();
       expect(bounds).not.toBeNull();
@@ -792,23 +791,20 @@ async function expectRealFolderContext(
       expect(await nativeIdentity.evaluate((element) => element.isConnected)).toBe(true);
       expect(await native.evaluate((element, original) => element === original, nativeIdentity)).toBe(true);
       await expect(canvas).toHaveAttribute("data-map-node-count", String(connected.size));
-      await expect(canvas).toHaveAttribute("data-map-edge-count", String(scene.edges.length));
+      await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations.length));
       await expect(native).toHaveCount(1);
-      await expect(canvas.locator("[data-workspace-map-folder-islands]")).toHaveCount(0);
-      await expect(canvas).not.toHaveAttribute("data-map-folder-count");
       await expect(scope.getByRole("button", { name: labels.resume, exact: true })).toBeEnabled();
     };
     const exportBaselines = new Map<string, unknown>();
     const assertExport = async (phase: string) => {
-      // Native columns retain the whole connected scene, while the shipped
+      // Native columns retain the whole listed scene, while the shipped
       // list/export contains the current Find-in-map subset. Derive its
-      // canonical IDs independently from the actor-visible wire response;
-      // Folder context must not alter either representation.
+      // canonical IDs independently from the actor-visible wire response.
       const query = (await search.inputValue()).trim().toLocaleLowerCase();
-      const expectedNodes = scene.nodes.filter((node) => connected.has(node.id)
+      const expectedNodes = scene.nodes.filter((node) => listed.has(node.id)
         && (!query || [node.label,
-          node.grain === "document" ? node.primary_folder_label : null,
-          node.grain === "document" ? node.entity_kind : "cluster"]
+          node.grain === "document" ? node.primary_folder_label : node.grain === "folder" ? node.path : null,
+          node.grain === "document" ? node.entity_kind : node.grain]
           .filter(Boolean).join(" ").toLocaleLowerCase().includes(query)));
       const expectedIds = new Set(expectedNodes.map((node) => node.id));
       const expectedEdges = scene.edges.filter((edge) => expectedIds.has(edge.source) && expectedIds.has(edge.target));
@@ -824,14 +820,19 @@ async function expectRealFolderContext(
         graph_revision: string; nodes: { id: string; entityKind: string; grain: string }[];
         edges: { id: string; source: string; target: string }[];
       };
-      await attachJson(testInfo, `real-api-2k-folder-context-export-${phase}-${suffix}.json`, payload);
+      await attachJson(testInfo, `real-api-2k-map-export-${phase}-${suffix}.json`, payload);
       expect(payload.graph_revision).toBe(scene.graph_revision);
       expect(payload.nodes.map((node) => node.id).sort()).toEqual([...expectedIds].sort());
       expect(payload.edges.map((edge) => edge.id).sort()).toEqual(expectedEdges.map((edge) => edge.id).sort());
       const sourceProof: { id: string; entityId: string; entityKind: string; path: string }[] = [];
       for (const node of payload.nodes) {
         const original = nodes.get(node.id);
-        if (!original || original.grain !== "document") throw new Error("Export invented a non-document source");
+        if (original?.grain === "folder") {
+          // A folder is an ordinary node; it has no document page to resolve.
+          if (node.grain !== "folder" || node.entityKind !== "folder") throw new Error("Export changed a folder's kind");
+          continue;
+        }
+        if (!original || original.grain !== "document") throw new Error("Export invented a node the API did not send");
         if (node.grain !== "document"
           || node.entityKind !== (original.entity_kind === "context" ? "context_page" : "library_item")) {
           throw new Error("Export changed the original source kind");
@@ -854,7 +855,7 @@ async function expectRealFolderContext(
       }
       if (exportBaselines.has(query)) expect(payload).toEqual(exportBaselines.get(query));
       else exportBaselines.set(query, payload);
-      await attachJson(testInfo, `real-api-2k-folder-context-export-sources-${phase}-${suffix}.json`, {
+      await attachJson(testInfo, `real-api-2k-map-export-sources-${phase}-${suffix}.json`, {
         search: query, sourceProof, expectedEdgeIds: [...originalEdges.keys()].sort(),
         scope: "Export IDs resolve to original actor-visible API sources; paths are wire provenance, not added export fields",
       });
@@ -865,26 +866,16 @@ async function expectRealFolderContext(
       await expectNativeCrossFolderCorridor(page, canvas, scene, testInfo, `default-${suffix}`, initialCorridorEdgeId);
     }
     const initial = await waitStableMapReadback(page, canvas);
-    await assertExport("baseline-off");
-    await clickFolderToggle();
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await assertExport("baseline");
     await assertNativeIdentity();
     expectSameMapGeometry(initial, await settleMapReadback(page, canvas));
-    if (!mobile) await expectNativeCrossFolderCorridor(page, canvas, scene, testInfo, `context-on-${suffix}`, initialCorridorEdgeId);
-    await assertExport("on");
-    await capture(canvas, testInfo, `real-api-2k-folder-context-default-${suffix}.png`);
-    await clickFolderToggle();
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await assertNativeIdentity();
-    expectSameMapGeometry(initial, await settleMapReadback(page, canvas));
-    await assertExport("off");
+    await capture(canvas, testInfo, `real-api-2k-map-default-${suffix}.png`);
 
     // A native drag establishes a NONEMPTY original-source pin. An empty
     // persisted pin list cannot demonstrate pin continuity.
     if (!mobile) await search.fill("note");
-    const dragDelta = { x: 18, y: 12 };
-    const { dragPoint, dragBounds, beforeDrag } = await prepareNativeDocumentDrag(
-      page, canvas, scene, dragDelta, testInfo, suffix,
+    const { dragPoint, dragDelta, dragBounds, beforeDrag } = await prepareNativeDocumentDrag(
+      page, canvas, scene, { x: 18, y: 12 }, testInfo, suffix,
     );
     await page.mouse.down();
     await page.mouse.move(dragBounds.x + dragPoint.x + dragDelta.x,
@@ -912,7 +903,7 @@ async function expectRealFolderContext(
     const baselineState = await readStoredMapState(page, scene.graph_revision);
     expect(baselineState.pinnedIds).toContain(dragPoint.id);
     expect(baselineState.selectedId).toBe(dragPoint.id);
-    await assertExport("baseline-off-selected-pinned");
+    await assertExport("baseline-selected-pinned");
     const assertContinuity = async (phase: string) => {
       await assertNativeIdentity();
       await expect(search).toHaveValue("note");
@@ -920,100 +911,18 @@ async function expectRealFolderContext(
       const after = await settleMapReadback(page, canvas);
       expectSameMapGeometry(baseline, after);
       expect(overviewRequests).toBe(0);
-      await attachJson(testInfo, `real-api-2k-folder-context-continuity-${phase}-${suffix}.json`, {
-        entrypoint: "real Pause layout, native document drag/pin/click, visible search and Folder context UI",
+      await attachJson(testInfo, `real-api-2k-map-continuity-${phase}-${suffix}.json`, {
+        entrypoint: "real Pause layout, native document drag/pin/click and visible search",
         scope: "same native canvas and every observed GPU-backed document label; not all2K coordinate readback",
         before: baseline, after, state: baselineState, search: "note", overviewRequests,
       });
     };
-    await clickFolderToggle();
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
-    await assertContinuity("on-selected-pinned");
-    await assertExport("on-selected-pinned");
-    const index = scope.locator(".workspace-graph-folder-index");
-    await index.locator("summary").click();
-    expect((await index.locator("[data-map-folder-id]").evaluateAll((rows) =>
-      rows.map((row) => row.getAttribute("data-map-folder-id")))).sort()).toEqual([...visibleFolders].sort());
-    const folderButton = index.locator(`[data-map-folder-id="${folderId}"]`);
-    await folderButton.focus();
-    await page.keyboard.press("Enter");
-    await expect(folderButton).toHaveAttribute("aria-pressed", "true");
-    const details = scope.getByRole("region", { name: labels.details, exact: true });
-    await expect(details).toHaveAttribute("data-map-folder-details", folderId);
-    await expect(details.getByRole("heading", { name: folder.label, exact: true })).toBeVisible();
-    expect((await details.locator("[data-map-folder-member]").evaluateAll((rows) =>
-      rows.map((row) => row.getAttribute("data-map-folder-member")))).sort()).toEqual(memberIds);
-    await assertContinuity("folder-details");
-    await capture(details, testInfo, `real-api-2k-folder-context-details-${suffix}.png`);
-    if (folder.parent_folder_id) {
-      const parent = folders.get(folder.parent_folder_id)!;
-      const parentLabel = language === "ko" ? `부모 폴더: ${parent.label}` : `Parent folder: ${parent.label}`;
-      await details.getByRole("button", { name: parentLabel, exact: true }).focus();
-      await page.keyboard.press("Enter");
-      await expect(details).toHaveAttribute("data-map-folder-details", parent.id);
-      await expect(details.getByRole("heading", { name: parent.label, exact: true })).toBeFocused();
-      await page.keyboard.press("Tab");
-      await expect(details.getByRole("button", { name: labels.closeDetails, exact: true })).toBeFocused();
-      await assertContinuity("parent-navigation");
-      const child = details.locator(".workspace-map-folder-children")
-        .getByRole("button", { name: folder.label, exact: true });
-      await child.focus();
-      await page.keyboard.press("Enter");
-      await expect(details).toHaveAttribute("data-map-folder-details", folder.id);
-      await expect(details.getByRole("heading", { name: folder.label, exact: true })).toBeFocused();
-      await page.keyboard.press("Tab");
-      await expect(details.getByRole("button", { name: labels.closeDetails, exact: true })).toBeFocused();
-      await assertContinuity("child-navigation");
-    }
-    const related = details.locator(".workspace-map-folder-bundles button").first();
-    if (await related.count()) {
-      const label = await related.innerText();
-      await related.focus();
-      await page.keyboard.press("Enter");
-      await expect(details.getByRole("heading", { name: label, exact: true })).toBeFocused();
-      await page.keyboard.press("Tab");
-      await expect(details.getByRole("button", { name: labels.closeDetails, exact: true })).toBeFocused();
-      await assertContinuity("related-folder-navigation");
-      // Return through the shipped index, without changing document selection.
-      await folderButton.focus();
-      await page.keyboard.press("Enter");
-      await expect(details).toHaveAttribute("data-map-folder-details", folderId);
-      await assertContinuity("folder-index-return");
-    }
-    await details.getByRole("button", { name: labels.closeDetails, exact: true }).click();
-    await expect(scope.locator("[data-map-folder-details]")).toHaveCount(0);
-    await assertContinuity("close-details");
-    await clickFolderToggle();
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await expect(scope.locator(".workspace-graph-folder-index")).toHaveCount(0);
-    await assertContinuity("off-selected-pinned");
-    await assertExport("off-selected-pinned");
-    await clickFolderToggle();
-    await index.locator("summary").click();
-    await folderButton.focus();
-    await page.keyboard.press("Enter");
-    const sourceId = memberIds.find((id) => nodes.get(id)?.grain === "document");
-    if (!sourceId) throw new Error("No real document member source");
-    const source = nodes.get(sourceId)!;
-    if (source.grain !== "document") throw new Error("Member is not an original source");
-    const member = details.locator(`[data-map-folder-member="${sourceId}"]`);
-    await expect(member.getByRole("link")).toHaveAttribute("href", source.path);
-    await member.getByRole("button").click();
-    await expect(scope.locator("[data-map-folder-details]")).toHaveCount(0);
-    await expect.poll(async () => (await readStoredMapState(page, scene.graph_revision)).selectedId).toBe(sourceId);
-    expect((await readStoredMapState(page, scene.graph_revision)).pinnedIds).toContain(dragPoint.id);
-    await assertNativeIdentity();
-    await attachJson(testInfo, `real-api-2k-folder-context-member-source-${suffix}.json`, {
-      folderId, directMemberIds: memberIds, originalSourceNodeId: sourceId, originalSourcePath: source.path,
-      state: await readStoredMapState(page, scene.graph_revision), overviewRequests,
-    });
-    await capture(canvas, testInfo, `real-api-2k-folder-context-source-selected-${suffix}.png`);
+    await assertContinuity("selected-pinned");
+    await capture(canvas, testInfo, `real-api-2k-map-selected-pinned-${suffix}.png`);
     await scope.getByRole("button", { name: labels.clear, exact: true }).click();
     if (mobile) {
       await scope.getByRole("button", { name: labels.closeCanvas, exact: true }).click();
       await search.fill("");
-      await page.locator(".workspace-graph-view-options > summary").click();
-      await page.getByRole("button", { name: labels.context, exact: true }).click();
     } else {
       await search.fill("");
       // Real CSS/system-media remounts must preserve original source IDs and
@@ -1035,7 +944,7 @@ async function expectRealFolderContext(
         await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
         await expect(native).toHaveCount(1);
         await expect(canvas).toHaveAttribute("data-map-node-count", String(connected.size));
-        await expect(canvas).toHaveAttribute("data-map-edge-count", String(scene.edges.length));
+        await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations.length));
         await expect(canvas).toHaveAttribute("data-map-community-count", /^[1-9]\d*$/);
         await expect(scope.getByRole("button", { name: labels.resume, exact: true })).toBeEnabled();
         const paused = await waitStableMapReadback(page, canvas);
@@ -1051,17 +960,16 @@ async function expectRealFolderContext(
         expect(beforeFitState).toEqual(beforeThemeState);
         expect(beforeFitState.pinnedIds).toContain(dragPoint.id);
         await assertExport(`theme-${phase}`);
-        await capture(canvas, testInfo, `real-api-2k-folder-context-theme-${phase}-${suffix}.png`);
-        await attachJson(testInfo, `real-api-2k-folder-context-theme-${phase}-${suffix}.json`, {
+        await capture(canvas, testInfo, `real-api-2k-map-theme-${phase}-${suffix}.png`);
+        await attachJson(testInfo, `real-api-2k-map-theme-${phase}-${suffix}.json`, {
           entrypoint: "html[data-theme]/forced-color media emulation, not user settings control",
           theme, forced, beforeTheme, pausedBefore: paused, pausedAfter: await readMapReadback(canvas),
           stateBefore: beforeThemeState, stateAfter: beforeFitState, overviewRequests,
         });
-        // A member action intentionally centers its original document. Preserve
-        // and prove that camera through remount first, then use shipped Fit to
-        // establish an overview with observable cross-folder endpoints. This
-        // explicit navigation may change camera/screen coordinates, not pins,
-        // selection, source counts, pause, search or data requests.
+        // Preserve and prove the camera through remount first, then use shipped
+        // Fit to establish an overview with observable cross-folder endpoints.
+        // This explicit navigation may change camera/screen coordinates, not
+        // pins, selection, source counts, pause, search or data requests.
         await scope.getByRole("button", { name: labels.fit, exact: true }).click();
         const fitted = await waitStableMapReadback(page, canvas);
         const fittedState = await readStoredMapState(page, scene.graph_revision);
@@ -1073,20 +981,19 @@ async function expectRealFolderContext(
         await expect(search).toHaveValue("");
         await expect(scope.getByRole("button", { name: labels.resume, exact: true })).toBeEnabled();
         expect(overviewRequests).toBe(0);
-        await attachJson(testInfo, `real-api-2k-folder-context-theme-fit-${phase}-${suffix}.json`, {
+        await attachJson(testInfo, `real-api-2k-map-theme-fit-${phase}-${suffix}.json`, {
           entrypoint: "real Fit graph after theme camera/pin/pause continuity was verified",
           scope: "intentional overview navigation; camera and screen coordinates may change, original saved pins may not",
           theme, forced, before: paused, after: fitted, stateBefore: beforeFitState,
           stateAfter: fittedState, search: "", overviewRequests,
         });
-        const themeCorridorEdgeId = await prepareNativeCrossFolderCorridor(page, canvas, scene, testInfo, `${phase}-context-on-${suffix}`);
-        await expectNativeCrossFolderCorridor(page, canvas, scene, testInfo, `${phase}-context-on-${suffix}`, themeCorridorEdgeId);
+        const themeCorridorEdgeId = await prepareNativeCrossFolderCorridor(page, canvas, scene, testInfo, `${phase}-${suffix}`);
+        await expectNativeCrossFolderCorridor(page, canvas, scene, testInfo, `${phase}-${suffix}`, themeCorridorEdgeId);
       }
-      await clickFolderToggle();
     }
-    expect(overviewRequests, "Folder context, inspection, drag/pin, display and export must not re-query data").toBe(0);
+    expect(overviewRequests, "Inspection, drag/pin, display and export must not re-query data").toBe(0);
     await expect(page.getByTestId("workspace-graph-node-list"))
-      .toHaveAttribute("data-total-count", String(connected.size));
+      .toHaveAttribute("data-total-count", String(listed.size));
     await nativeIdentity.dispose();
   } finally {
     page.off("request", recordRequest);
@@ -1181,103 +1088,6 @@ async function expectNativeCrossFolderCorridor(
   await identity.dispose();
 }
 
-function expectCurrentFolderTopology(scene: WorkspaceGraphScene) {
-  const topology = scene.folder_topology;
-  if (!topology) throw new Error("Real overview did not return current folder inputs");
-  // Check every wire row, but record only one Playwright assertion. A plain
-  // expect per row creates tens of thousands of traced steps whose parent-step
-  // lookup scans the growing step history, blocking the runner rather than
-  // measuring the production API or renderer.
-  const failures: string[] = [];
-  const check = (condition: boolean, message: string) => {
-    if (!condition) failures.push(message);
-  };
-  check(topology.schema_version === "workspace-graph-folders.v1", "folder schema version");
-  const folders = new Map(topology.folders.map((folder) => [folder.id, folder]));
-  check(folders.size === topology.folders.length, "folder IDs must be unique");
-  const membershipKeys = new Set<string>();
-  const membersByNode = new Map<string, number>();
-  const membersByFolder = new Map<string, number>();
-  const membershipKey = (nodeId: string, folderId: string | null, kind: string) =>
-    JSON.stringify([nodeId, folderId, kind]);
-  for (const row of topology.memberships) {
-    const key = membershipKey(row.node_id, row.folder_id, row.entity_kind);
-    check(Number.isSafeInteger(row.member_count) && row.member_count > 0,
-      `membership ${key}: positive safe member count`);
-    check(!membershipKeys.has(key), `membership ${key}: unique node/folder/kind`);
-    membershipKeys.add(key);
-    membersByNode.set(row.node_id, (membersByNode.get(row.node_id) ?? 0) + row.member_count);
-    if (row.folder_id !== null) {
-      check(folders.has(row.folder_id), `membership ${key}: folder must exist`);
-      membersByFolder.set(row.folder_id,
-        (membersByFolder.get(row.folder_id) ?? 0) + row.member_count);
-    }
-  }
-  for (const node of scene.nodes) {
-    check(membersByNode.get(node.id) === (node.grain === "document" ? 1 : node.member_count),
-      `node ${node.id}: membership total must equal represented members`);
-    if (node.grain === "document") {
-      check(membershipKeys.has(membershipKey(node.id, node.primary_folder_id, node.entity_kind)),
-        `node ${node.id}: current primary folder and entity kind`);
-    }
-  }
-  const closure = new Set<string>();
-  for (const id of membersByFolder.keys()) {
-    const branch = new Set<string>();
-    let current: string | null = id;
-    while (current !== null && !closure.has(current)) {
-      if (branch.has(current)) {
-        check(false, `folder ${id}: ancestor cycle at ${current}`);
-        break;
-      }
-      branch.add(current);
-      const folder = folders.get(current);
-      if (!folder) {
-        check(false, `folder ${id}: ancestor ${current} must be in the visible response`);
-        break;
-      }
-      current = folder.parent_folder_id;
-    }
-    for (const folderId of branch) closure.add(folderId);
-  }
-  check(closure.size === folders.size && [...folders.keys()].every((id) => closure.has(id)),
-    "visible folders must equal the primary-membership ancestor closure");
-  for (const folder of folders.values()) {
-    check(folder.direct_member_count === (membersByFolder.get(folder.id) ?? 0),
-      `folder ${folder.id}: exact direct member count`);
-  }
-  const edges = new Map(scene.edges.map((edge) => [edge.id, edge]));
-  const counts = new Map<string, number>();
-  const weights = new Map<string, number>();
-  for (const row of topology.edge_slices) {
-    const edge = edges.get(row.edge_id);
-    check(Number.isSafeInteger(row.relation_count) && row.relation_count > 0,
-      `slice ${row.edge_id}: positive safe relation count`);
-    check(Number.isSafeInteger(row.occurrence_weight) && row.occurrence_weight > 0,
-      `slice ${row.edge_id}: positive safe occurrence weight`);
-    if (!edge) {
-      check(false, `slice ${row.edge_id}: authored relationship must exist`);
-      continue;
-    }
-    check(membershipKeys.has(membershipKey(edge.source, row.source_folder_id, row.source_entity_kind)),
-      `slice ${row.edge_id}: correlated source folder and entity kind`);
-    check(membershipKeys.has(membershipKey(edge.target, row.target_folder_id, row.target_entity_kind)),
-      `slice ${row.edge_id}: correlated target folder and entity kind`);
-    counts.set(edge.id, (counts.get(edge.id) ?? 0) + row.relation_count);
-    weights.set(edge.id, (weights.get(edge.id) ?? 0) + row.occurrence_weight);
-  }
-  for (const edge of scene.edges) {
-    check(counts.get(edge.id) === edge.relation_count,
-      `edge ${edge.id}: exact summed relation count`);
-    check(weights.get(edge.id) === edge.occurrence_weight,
-      `edge ${edge.id}: exact summed occurrence weight`);
-    check(Number.isSafeInteger(edge.occurrence_weight) && edge.occurrence_weight! > 0,
-      `edge ${edge.id}: positive safe occurrence weight`);
-  }
-  expect(failures, "Every real overview folder topology row must satisfy the wire invariants")
-    .toEqual([]);
-}
-
 async function expectLocalSceneNavigation(
   page: Page,
   panel: Locator,
@@ -1305,11 +1115,11 @@ async function expectLocalSceneNavigation(
     await expect.poll(() => details.evaluate((element) => element.scrollTop)).toBe(0);
     const heading = await details.locator("h5.graph-details-title").boundingBox();
     const box = await details.boundingBox();
-    const actions = await details.locator(".graph-details-footer").boundingBox();
+    const actions = await details.locator(".graph-detail-actions").boundingBox();
     expect(heading).not.toBeNull();
     expect(box).not.toBeNull();
     expect(actions).not.toBeNull();
-    // The full title follows the compact header; primary actions stay in the sticky footer.
+    // The full title follows the compact header; the action row follows the fields.
     expect(actions!.y).toBeGreaterThanOrEqual(box!.y);
     expect(actions!.y + actions!.height).toBeLessThanOrEqual(box!.y + box!.height);
     expect(heading!.y).toBeGreaterThanOrEqual(box!.y);
@@ -1322,7 +1132,7 @@ async function expectLocalSceneNavigation(
       const panel = element.getBoundingClientRect();
       const reader = element.closest(".graph-view")!.getBoundingClientRect();
       return Array.from(element.querySelectorAll<HTMLElement>(
-        ".graph-details-close,.graph-details-sheet-toggle,.graph-details-footer > a,.graph-details-context-actions > button,.graph-details-more > summary",
+        ".graph-details-close,.graph-details-sheet-toggle,.graph-detail-actions > a,.graph-detail-actions > button",
       )).filter((control) => control.getClientRects().length > 0).map((control) => {
         const bounds = control.getBoundingClientRect();
         const points = [[bounds.left + 4, bounds.top + 4], [bounds.right - 4, bounds.top + 4],

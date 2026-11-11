@@ -4,6 +4,7 @@ import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspac
 import { currentWorkspace, login, enableKnowledgeMapLab } from "./auth";
 import { expectNativeCounts, installNativeDrawMeter } from "./workspace_graph_native_draw";
 import { createOverviewResponseReader } from "./workspace_graph_response_reader";
+import { admittedNodes, expectCurrentContainment, nativeDrawCounts, sceneRelations } from "./workspace_graph_scene";
 
 const DOCUMENTS = 12_000;
 const PC_BUDGET = { documents: 10_000, relations: 100_000 };
@@ -23,25 +24,27 @@ function overview(page: Page, workspaceId: string, clusterId?: string) {
 function assertScene(scene: WorkspaceGraphScene) {
   expect(scene.counts.candidate_documents).toBe(DOCUMENTS);
   expect(scene.representation).toBe("aggregated");
-  expect(scene.nodes.length).toBeGreaterThan(2_000);
-  expect(scene.nodes.length).toBeLessThanOrEqual(PC_BUDGET.documents);
-  expect(scene.edges.length).toBeLessThanOrEqual(PC_BUDGET.relations);
+  expect(admittedNodes(scene).length).toBeGreaterThan(2_000);
+  expect(admittedNodes(scene).length).toBeLessThanOrEqual(PC_BUDGET.documents);
+  expect(sceneRelations(scene).length).toBeLessThanOrEqual(PC_BUDGET.relations);
   expect(new Set(scene.nodes.map(node => node.id)).size).toBe(scene.nodes.length);
   expect(new Set(scene.edges.map(edge => edge.id)).size).toBe(scene.edges.length);
   const ids = new Set(scene.nodes.map(node => node.id));
   expect(scene.edges.every(edge => ids.has(edge.source) && ids.has(edge.target))).toBe(true);
-  expect(scene.nodes.reduce((count, node) => count + (node.grain === "document" ? 1 : node.member_count), 0))
+  expect(admittedNodes(scene).reduce((count, node) => count + (node.grain === "cluster" ? node.member_count : 1), 0))
     .toBe(DOCUMENTS);
+  expectCurrentContainment(scene);
 }
 
 async function assertRendered(page: Page, scene: WorkspaceGraphScene) {
-  const links = scene.edges.filter(edge => edge.source !== edge.target).length;
+  const links = sceneRelations(scene).filter(edge => edge.source !== edge.target).length;
   await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible();
-  await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-node-count", String(scene.nodes.length));
+  await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-node-count", String(admittedNodes(scene).length));
   await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-edge-count", String(links));
   await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", String(scene.nodes.length));
   await expect(page.getByTestId("workspace-graph-edge-list")).toHaveAttribute("data-total-count", String(scene.edges.length));
-  await expectNativeCounts(page, scene.nodes.length, links);
+  const drawn = nativeDrawCounts(scene);
+  await expectNativeCounts(page, drawn.points, drawn.links);
 }
 
 test.describe("PC10K real-API aggregated GPU integration", () => {
@@ -67,9 +70,9 @@ test.describe("PC10K real-API aggregated GPU integration", () => {
         && response.request().method() === "POST");
       await page.goto("/graph");
       const initial = await reader.read(await initialRead);
-      expect(initial.nodes.length).toBeLessThanOrEqual(2_000);
+      expect(admittedNodes(initial).length).toBeLessThanOrEqual(2_000);
       await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible();
-      const view = page.locator("details.workspace-graph-view-options");
+      const view = page.locator("details.graph-view-options");
       await view.locator("summary").click();
       const responsePromise = overview(page, workspace.id);
       await page.getByRole("combobox", { name: "Map node limit", exact: true }).selectOption("10k");

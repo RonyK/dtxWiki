@@ -15,6 +15,14 @@ from backend.tests.utils.workspace_graph_corpora import build_knowledge_40, corp
 pytestmark = pytest.mark.integration
 
 
+def _containment(scene):
+    return {
+        (edge.source, edge.target, edge.relation_count, edge.primary)
+        for edge in scene.edges
+        if edge.relation_kind == "tree"
+    }
+
+
 def test_details_are_admitted_after_grouping_filtering_expansion_and_focus(
     session_factory,
     monkeypatch,
@@ -54,9 +62,10 @@ def test_details_are_admitted_after_grouping_filtering_expansion_and_focus(
     real_path = graph._CapturedPlacement.path.fget
 
     def attach(session, workspace_id, documents):
-        real_attach(session, workspace_id, documents)
+        tree = real_attach(session, workspace_id, documents)
         captured.clear()
         captured.update(documents)
+        return tree
 
     def detail(document, *scene):
         detailed.append(document.key)
@@ -114,7 +123,11 @@ def test_details_are_admitted_after_grouping_filtering_expansion_and_focus(
                     if node.grain == "document"
                 )
         assert (
-            sum(1 if n.grain == "document" else n.member_count for n in payload.nodes)
+            sum(
+                1 if n.grain == "document" else n.member_count
+                for n in payload.nodes
+                if n.grain != "folder"
+            )
             == payload.counts.candidate_documents
         )
         return payload, set(captured) - expected
@@ -202,7 +215,7 @@ def test_clustered_metadata_and_beyond_cap_placement_still_invalidate_revision(
     changed = query()
     assert changed.graph_revision != placed.graph_revision
     assert changed.counts == placed.counts == base.counts
-    assert changed.folder_topology == placed.folder_topology == base.folder_topology
+    assert _containment(changed) == _containment(placed) != _containment(base)
     assert changed.facet_counts == placed.facet_counts == base.facet_counts
     with session_factory.begin() as session:
         page = session.get(ContextPage, target)
@@ -215,5 +228,5 @@ def test_clustered_metadata_and_beyond_cap_placement_still_invalidate_revision(
     moved = query()
     assert moved.graph_revision != titled.graph_revision
     assert moved.counts == titled.counts
-    assert moved.folder_topology != titled.folder_topology
+    assert _containment(moved) != _containment(titled)
     assert detailed == []

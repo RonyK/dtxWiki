@@ -312,7 +312,9 @@ def test_map_api_search_respects_visible_titles_and_primary_paths_not_navigation
         response = client.post(route, json={"search": search})
         assert response.status_code == 200, response.text
         scene = response.json()["data"]
-        assert {node["entity_id"] for node in scene["nodes"]} == expected, search
+        assert {
+            node["entity_id"] for node in scene["nodes"] if node["grain"] == "document"
+        } == expected, search
         assert scene["counts"]["candidate_documents"] == len(expected)
         assert sum(facet["count"] for facet in scene["facet_counts"]["folders"]) == len(
             expected
@@ -338,9 +340,9 @@ def test_map_api_applies_its_unplaced_facet_without_422(page_service, mode):
     )
     assert response.status_code == 200, response.text
     scene = response.json()["data"]
-    assert {node["entity_id"] for node in scene["nodes"]} == (
-        {folder_page} if mode == "exclude" else unplaced
-    )
+    assert {
+        node["entity_id"] for node in scene["nodes"] if node["grain"] == "document"
+    } == ({folder_page} if mode == "exclude" else unplaced)
     assert {
         facet["value"]: facet["count"] for facet in scene["facet_counts"]["folders"]
     } == {
@@ -364,9 +366,11 @@ def test_map_api_accepts_mixed_uuid_and_unplaced_and_rejects_invalid_sentinels(
             route, json={"folders": {mode: [str(fixture["ancestor"]), "unplaced"]}}
         )
         assert response.status_code == 200, response.text
-        assert {node["entity_id"] for node in response.json()["data"]["nodes"]} == {
-            str(page_id) for page_id in fixture["pages"].values()
-        }
+        assert {
+            node["entity_id"]
+            for node in response.json()["data"]["nodes"]
+            if node["grain"] == "document"
+        } == {str(page_id) for page_id in fixture["pages"].values()}
     for folders in (
         {"include": ["UNPLACED"]},
         {"include": ["unplaced "]},

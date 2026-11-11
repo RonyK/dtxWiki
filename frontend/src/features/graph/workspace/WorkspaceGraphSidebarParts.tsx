@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import type { WorkspaceGraphEdge, WorkspaceGraphNode } from "../../../shared/api/workspaceGraph";
 import { localEdgeVisualKind } from "../local/edgeKinds";
-import { GraphNodeCue, type GraphEdgeCueKind } from "../shared/GraphCues";
+import { GraphEdgeCue, GraphNodeCue, type GraphEdgeCueKind } from "../shared/GraphCues";
 import type { GraphNodeVisualKind } from "../shared/graphTokens";
 import {
   RELATION_FLOW_PAGE,
@@ -24,14 +24,14 @@ import { RelationFlow } from "../shared/relationList/RelationFlow";
 import type { RelationListEdgeView, RelationListNodeView, RelationListStroke } from "../shared/relationList/types";
 import type { WorkspaceGraphNodeRelations } from "../workspaceGraphModel";
 import type { WorkspaceGraphDocumentNavigation } from "./WorkspaceGraphNodeActions";
-import { workspaceGraphEnumLabel } from "./workspaceGraphLabels";
+import { formatCount, workspaceGraphEnumLabel, workspaceGraphNodeKind, workspaceGraphNodeLocation } from "./workspaceGraphLabels";
 
 /** Same shape and colour as the map point and the legend cue. */
-export type WorkspaceGraphNodeCueKind = "context" | "library" | "agent" | "cluster";
+export type WorkspaceGraphNodeCueKind = "context" | "library" | "agent" | "cluster" | "folder";
 
-/** A Map cluster is a grouping, drawn like a folder: the grey ring. */
+/** Same visuals as the shared registry: a cluster is the numbered grey disc, a folder the grey ring. */
 export const WORKSPACE_GRAPH_CUE_VISUAL = {
-  context: "context", library: "library", agent: "agent", cluster: "folder",
+  context: "context", library: "library", agent: "agent", cluster: "cluster", folder: "folder",
 } as const satisfies Record<WorkspaceGraphNodeCueKind, GraphNodeVisualKind>;
 
 /**
@@ -44,7 +44,7 @@ export function workspaceRelationCue(kind: string): WorkspaceRelationCue {
 }
 
 export function workspaceGraphNodeCueKind(node: WorkspaceGraphNode): WorkspaceGraphNodeCueKind {
-  return node.grain === "cluster" ? "cluster" : node.entity_kind;
+  return node.grain === "document" ? node.entity_kind : node.grain;
 }
 
 /** Results and the selected node's relations grow by these shared page sizes. */
@@ -60,14 +60,14 @@ export function WorkspaceGraphNodeCue({ className = "workspace-graph-node-cue is
   return <GraphNodeCue className={size === "legend" ? undefined : className} kind={WORKSPACE_GRAPH_CUE_VISUAL[kind]} />;
 }
 
-/** Short chip text; the full kind name stays in the tooltip and accessible name. */
+/** Short chip text from the shared chip registry; the full kind name stays in the tooltip. */
 function workspaceGraphNodeChipLabel(node: WorkspaceGraphNode, t: TFunction<"graph">): string {
-  const value = node.grain === "cluster" ? node.cluster_kind : node.entity_kind;
-  return t(`workspaceGraph.chips.${value}`, { defaultValue: workspaceGraphEnumLabel(value, t) });
+  const value = workspaceGraphNodeKind(node);
+  return t(`graph.listChips.node.${value}`, { defaultValue: workspaceGraphEnumLabel(value, t) });
 }
 
 function workspaceGraphRelationChipLabel(kind: string, t: TFunction<"graph">): string {
-  return t(`workspaceGraph.chips.${kind}`, { defaultValue: workspaceGraphEnumLabel(kind, t) });
+  return t(`graph.listChips.edge.${kind}`, { defaultValue: workspaceGraphEnumLabel(kind, t) });
 }
 
 /** Every name a relation kind is shown with, for the kind-name search. */
@@ -75,8 +75,14 @@ export function workspaceGraphRelationNames(kind: string, t: TFunction<"graph">)
   return `${workspaceGraphEnumLabel(kind, t)} ${workspaceGraphRelationChipLabel(kind, t)}`;
 }
 
+/** Every name a node kind is shown with: the chip and the legend's full name. */
+export function workspaceGraphNodeKindNames(node: WorkspaceGraphNode, t: TFunction<"graph">): string {
+  return `${workspaceGraphNodeChipLabel(node, t)} ${workspaceGraphEnumLabel(workspaceGraphNodeKind(node), t)}`;
+}
+
+/** Line names come from the legend, as in the Context graph. */
 function strokeLabel(t: TFunction<"graph">) {
-  return (stroke: RelationListStroke) => t(`relationList.lines.${stroke}`);
+  return (stroke: RelationListStroke) => t(`graph.legend.edge.${stroke}`);
 }
 
 function workspaceNodeView(node: WorkspaceGraphNode, t: TFunction<"graph">): RelationListNodeView {
@@ -85,14 +91,14 @@ function workspaceNodeView(node: WorkspaceGraphNode, t: TFunction<"graph">): Rel
     chip: {
       cue: <WorkspaceGraphNodeCue kind={kind} />,
       label: workspaceGraphNodeChipLabel(node, t),
-      title: workspaceGraphEnumLabel(node.grain === "cluster" ? node.cluster_kind : node.entity_kind, t),
+      title: workspaceGraphEnumLabel(workspaceGraphNodeKind(node), t),
       tone: kind,
     },
     cue: <WorkspaceGraphNodeCue kind={kind} />,
     href: node.grain === "document" ? node.path : null,
     id: node.id,
     label: node.label,
-    meta: node.grain === "document" ? node.primary_folder_label : null,
+    meta: workspaceGraphNodeLocation(node),
   };
 }
 
@@ -167,19 +173,27 @@ export function WorkspaceGraphNodeSummary({ nodes }: { nodes: readonly Workspace
       const kind = workspaceGraphNodeCueKind(node);
       counts.set(kind, (counts.get(kind) ?? 0) + 1);
     }
-    return (["context", "library", "agent", "cluster"] as const).filter((kind) => counts.has(kind)).map((kind) => ({
-      count: counts.get(kind)!, cue: <WorkspaceGraphNodeCue kind={kind} />, key: kind, label: t(`workspaceGraph.chips.${kind}`),
+    return (["context", "library", "agent", "cluster", "folder"] as const).filter((kind) => counts.has(kind)).map((kind) => ({
+      count: counts.get(kind)!, cue: <WorkspaceGraphNodeCue kind={kind} />, key: kind, label: t(`graph.listChips.node.${kind}`),
     }));
   }, [nodes, t]);
   return <RelationListSummary items={items} />;
 }
 
-/** One entry per map line style: the map draws every citation kind with the same dashed stroke. */
+/**
+ * One chip per map line style, as the Context graph's relation chips: line,
+ * legend name, count. The map draws every citation kind with the same dashed stroke.
+ */
 export function WorkspaceGraphLineSummary({ edges }: { edges: readonly WorkspaceGraphEdge[] }) {
   const { t } = useTranslation("graph");
   const items = useMemo(() => relationListStrokeSummary(edges,
     (edge) => workspaceRelationCue(edge.relation_kind), STROKE_ORDER, strokeLabel(t)), [edges, t]);
-  return <RelationListSummary items={items} />;
+  return <span className="graph-local-relation-chips">{items.map((item) => (
+    <span className={`graph-local-relation-chip graph-local-relation-chip-${item.key}`} key={item.key}>
+      <GraphEdgeCue className="graph-local-relation-line" kind={item.key as RelationListStroke} width={18} />
+      {item.label}<span className="graph-local-relation-count">{formatCount(item.count)}</span>
+    </span>
+  ))}</span>;
 }
 
 export function WorkspaceGraphRelationMiniMap({ edge, nodesById }: {
@@ -197,10 +211,11 @@ export function WorkspaceGraphRelationMiniMap({ edge, nodesById }: {
 /**
  * The selected node's relations at the bottom of Details: incoming relations
  * flow down a rail into this node, outgoing relations leave it below. The
- * search box filters both directions by the other end's name or folder and
- * by the relation kind.
+ * search box filters both directions by the other end's name, location and
+ * kind and by the relation kind, as in the Context graph.
  */
-export function WorkspaceGraphRelationFlow({ labels, node, nodesById, onBlur, onFocus, onNavigate, onSelect, relations }: {
+export function WorkspaceGraphRelationFlow({ active = true, labels, node, nodesById, onBlur, onFocus, onNavigate, onSelect, relations }: {
+  active?: boolean;
   labels: ReadonlyMap<string, string>;
   node: WorkspaceGraphNode;
   nodesById: ReadonlyMap<string, WorkspaceGraphNode>;
@@ -211,7 +226,6 @@ export function WorkspaceGraphRelationFlow({ labels, node, nodesById, onBlur, on
   relations: WorkspaceGraphNodeRelations;
 }) {
   const { t } = useTranslation("graph");
-  const self = node.grain === "cluster" ? "Cluster" : "Document";
   const nodeView = useCallback((id: string) => {
     const item = nodesById.get(id);
     return item ? workspaceNodeView(item, t) : undefined;
@@ -221,31 +235,37 @@ export function WorkspaceGraphRelationFlow({ labels, node, nodesById, onBlur, on
     const other = nodesById.get(otherId);
     return [
       other?.label,
-      other?.grain === "document" ? other.primary_folder_label : null,
+      other ? workspaceGraphNodeLocation(other) : null,
+      other ? workspaceGraphNodeKindNames(other, t) : null,
       workspaceGraphRelationNames(edge.relation_kind, t),
     ].filter(Boolean).join(" ");
   }, [nodesById, t]);
   const flowRelations = useMemo(() => ({ ...relations, undirected: [] }), [relations]);
   return <RelationFlow
+    active={active}
     edgeView={edgeView}
+    navigation="roving"
     node={workspaceNodeView(node, t)}
+    nodeChips
     nodeTone={workspaceGraphNodeCueKind(node)}
     nodeView={nodeView}
     onNavigate={onNavigate as (event: ReactMouseEvent<HTMLAnchorElement>) => void}
     onRowBlur={(edgeId) => onBlur(edgeId)}
     onRowFocus={(edgeId) => onFocus(edgeId)}
     onSelect={(otherId) => onSelect(otherId)}
+    openLinkTabIndex={-1}
     page={RELATION_FLOW_PAGE}
     relations={flowRelations}
     searchText={searchText}
     strokeLabel={strokeLabel(t)}
     texts={{
-      empty: t("workspaceGraph.relations.none"),
-      incomingNote: t(`workspaceGraph.relations.incomingNote${self}`),
-      outgoingNote: t(`workspaceGraph.relations.outgoingNote${self}`),
-      searchLabel: t(`workspaceGraph.relations.search${self}`),
-      self: t(`workspaceGraph.relations.self${self}`),
-      title: t("workspaceGraph.relations.title"),
+      empty: t("graph.relations.none"),
+      incomingNote: t("graph.relations.incomingNote"),
+      outgoingNote: t("graph.relations.outgoingNote"),
+      searchLabel: t("graph.relations.search"),
+      self: t("graph.relations.self"),
+      title: t("graph.relations.title"),
+      undirectedNote: t("graph.relations.undirectedNote"),
     }}
   />;
 }
@@ -258,10 +278,8 @@ export function WorkspaceGraphRelationEnds({ edge, nodesById, onNavigate }: {
 }) {
   const { t } = useTranslation("graph");
   const visual = workspaceRelationCue(edge.relation_kind);
-  const roles = visual === "citation" ? "Citation" : visual === "link" ? "Link" : "";
-  const role = (end: "source" | "target") => t(`workspaceGraph.details.${end}Role${roles}`, {
-    defaultValue: t(`workspaceGraph.details.${end}`),
-  });
+  const roles = visual === "citation" ? "Citation" : visual === "link" ? "Link" : visual === "membership" ? "Membership" : "";
+  const role = (end: "source" | "target") => t(roles ? `graph.roles.${end}${roles}` : `graph.roles.${end}`);
   return <RelationEnds
     edge={workspaceEdgeView(edge, new Map(), t)}
     nodeView={(id) => {

@@ -13,6 +13,8 @@ describe("bounded Workspace Map label placement", () => {
       label(), label({ priority: "explicit" }), label({ priority: "active" }),
     ], viewport);
     expect(result[2]).toEqual({ x: 108, y: 91, visible: true, reason: "placed" });
+    // A wide glyph (a cluster's count disc) pushes its title clear of the disc, never over it.
+    expect(placeWorkspaceMapLabels([label({ clearance: 24 })], viewport)[0]).toMatchObject({ x: 124, visible: true });
     expect(result[1].visible).toBe(true);
     expect(result[0]).toMatchObject({ visible: false, reason: "collision" });
     expect(result[1].y + 36 + 5 <= result[2].y || result[2].y + 36 + 5 <= result[1].y

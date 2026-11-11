@@ -1,14 +1,12 @@
-"""Real authored heads and authorized primary placements feed folder layout."""
+"""Real authored heads and authorized TreeRail placements feed containment."""
 
 from __future__ import annotations
 
-from collections import Counter
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
 
-import backend.services.workspace_graph_service as graph
 from backend.models.context import ContextCitation, ContextPageVersion, PageLink
 from backend.models.tree import WorkspaceTreeNode
 from backend.schemas.workspace_graph import WorkspaceGraphOverviewRequest
@@ -16,6 +14,8 @@ from backend.services.workspace_graph_service import WorkspaceGraphService
 from backend.tests.utils.workspace_graph_corpora import (
     WorkspaceGraphCorpusBuilder,
     corpus_actor,
+    relation_edges,
+    represented_nodes,
 )
 from backend.tests.utils.workspace_graph_fixture_identity import fixture_time
 
@@ -169,93 +169,101 @@ def _query(session, corpus, **kwargs):
     )
 
 
-def _membership_counts(scene):
-    return Counter(
-        {
-            (row.node_id, row.folder_id, row.entity_kind): row.member_count
-            for row in scene.folder_topology.memberships
-        }
-    )
+def _folder_ids(scene):
+    return {node.folder_id for node in scene.nodes if node.grain == "folder"}
 
 
-def test_exact_topology_has_primary_nested_closure_unplaced_and_no_secondary_island(
+def _containment(scene):
+    return {
+        (edge.source, edge.target, edge.primary)
+        for edge in scene.edges
+        if edge.relation_kind == "tree"
+    }
+
+
+def _doc(fixture, name):
+    return f"document:context:{fixture['pages'][name]}"
+
+
+def _folder(fixture, name):
+    return f"folder:{fixture['folders'][name]}"
+
+
+def test_exact_containment_follows_every_visible_placement_and_allows_cycles(
     session_factory,
 ):
     with session_factory.begin() as session:
         corpus, fixture = _build(session, "folder-topology-exact")
         scene = _query(session, corpus)
-    topology = scene.folder_topology
     folders = fixture["folders"]
     assert scene.representation == "exact"
     assert scene.counts.candidate_documents == 5
     assert scene.counts.candidate_relations == 4
-    assert topology.schema_version == "workspace-graph-folders.v1"
-    assert {
-        (row.id, row.parent_folder_id, row.direct_member_count)
-        for row in topology.folders
-    } == {
-        (folders["Parent"], None, 0),
-        (folders["Child"], folders["Parent"], 1),
-        (folders["Other"], None, 1),
-        (folders["Library parent"], None, 0),
-        (folders["Library child"], folders["Library parent"], 1),
+    assert scene.counts.rendered_relations == len(relation_edges(scene)) == 4
+    # Folders hidden, empty or holding only invisible items never become nodes.
+    assert _folder_ids(scene) == {
+        folders[name]
+        for name in [
+            "Parent",
+            "Child",
+            "Other",
+            "Secondary only",
+            "Library parent",
+            "Library child",
+        ]
     }
-    assert _membership_counts(scene) == Counter(
-        {
-            (
-                f"document:context:{fixture['pages'][name]}",
-                folders[folder] if folder is not None else None,
-                "context",
-            ): 1
-            for name, folder in [
-                ("Alpha", "Child"),
-                ("Beta", "Other"),
-                ("Unplaced", None),
-                ("Hidden ancestor child", None),
-            ]
-        }
-        | {
-            (
-                f"document:library:{fixture['library']}",
-                folders["Library child"],
-                "library",
-            ): 1
-        }
-    )
+    assert _containment(scene) == {
+        (_folder(fixture, "Parent"), _folder(fixture, "Child"), True),
+        (_folder(fixture, "Child"), _doc(fixture, "Alpha"), True),
+        (_folder(fixture, "Secondary only"), _doc(fixture, "Alpha"), False),
+        (_folder(fixture, "Other"), _doc(fixture, "Beta"), True),
+        (_folder(fixture, "Library parent"), _folder(fixture, "Library child"), True),
+        (
+            _folder(fixture, "Library child"),
+            f"document:library:{fixture['library']}",
+            True,
+        ),
+    }
     alpha = next(
-        node for node in scene.nodes if node.entity_id == fixture["pages"]["Alpha"]
+        node
+        for node in represented_nodes(scene)
+        if node.entity_id == fixture["pages"]["Alpha"]
     )
     assert [row.tree_node_id for row in alpha.also_appears_in] == [
         fixture["secondary_id"]
     ]
-    assert folders["Secondary only"] not in {row.id for row in topology.folders}
-    assert {edge.relation_count for edge in scene.edges} == {1}
-    assert sorted(edge.occurrence_weight for edge in scene.edges) == [1, 2, 3, 7]
-    assert sorted(row.occurrence_weight for row in topology.edge_slices) == [1, 2, 3, 7]
+    assert {edge.relation_count for edge in relation_edges(scene)} == {1}
+    assert sorted(edge.occurrence_weight for edge in relation_edges(scene)) == [
+        1,
+        2,
+        3,
+        7,
+    ]
     assert not any(
         key in scene.model_dump_json()
         for key in ['"x":', '"y":', '"community":', '"coordinates":']
     )
-    assert {node.parent_document_id for node in scene.nodes} == {None}
 
-    # TreeRail: a page placed under Beta's page is contained by Beta itself,
-    # while Beta's folder stays the folder container of both.
+    # TreeRail: a page placed under Beta's page is contained by Beta itself.
     unplaced = fixture["pages"]["Unplaced"]
     with session_factory.begin() as session:
-        beta_placement = session.scalar(
-            select(WorkspaceTreeNode.id).where(
-                WorkspaceTreeNode.workspace_id == corpus.workspace_id,
-                WorkspaceTreeNode.target_id == fixture["pages"]["Beta"],
-                WorkspaceTreeNode.primary_placement.is_(True),
+        primary = {
+            node.target_id: node
+            for node in session.scalars(
+                select(WorkspaceTreeNode).where(
+                    WorkspaceTreeNode.workspace_id == corpus.workspace_id,
+                    WorkspaceTreeNode.primary_placement.is_(True),
+                    WorkspaceTreeNode.target_id.is_not(None),
+                )
             )
-        )
+        }
         session.add(
             WorkspaceTreeNode(
                 id=uuid4(),
                 workspace_id=corpus.workspace_id,
                 section="context",
                 node_kind="page_ref",
-                parent_id=beta_placement,
+                parent_id=primary[fixture["pages"]["Beta"]].id,
                 sort_key="000099",
                 title="Unplaced",
                 slug="unplaced",
@@ -269,82 +277,63 @@ def test_exact_topology_has_primary_nested_closure_unplaced_and_no_secondary_isl
         )
         session.flush()
         nested = _query(session, corpus)
-    parents = {node.entity_id: node.parent_document_id for node in nested.nodes}
-    assert parents[unplaced] == f"document:context:{fixture['pages']['Beta']}"
-    assert parents[fixture["pages"]["Beta"]] is None
-    assert (
-        _membership_counts(nested)[
-            (f"document:context:{unplaced}", folders["Other"], "context")
-        ]
-        == 1
-    )
+        assert (_doc(fixture, "Beta"), _doc(fixture, "Unplaced"), True) in (
+            _containment(nested)
+        )
+
+        # A secondary placement can close a document cycle: folder -> Alpha
+        # (secondary) -> Beta (primary) -> Alpha (primary). Both directions are
+        # drawn and the scene is still served.
+        primary[fixture["pages"]["Beta"]].parent_id = fixture["secondary_id"]
+        primary[fixture["pages"]["Alpha"]].parent_id = primary[
+            fixture["pages"]["Beta"]
+        ].id
+        session.flush()
+        cycle = _query(session, corpus)
+    assert {
+        (_doc(fixture, "Beta"), _doc(fixture, "Alpha"), True),
+        (_doc(fixture, "Alpha"), _doc(fixture, "Beta"), True),
+        (_folder(fixture, "Secondary only"), _doc(fixture, "Alpha"), False),
+    } <= _containment(cycle)
 
 
-def test_one_mixed_aggregate_retains_correlated_folder_kind_self_edge_slices(
+def test_one_mixed_aggregate_hangs_from_every_member_placement(
     session_factory,
 ):
     with session_factory.begin() as session:
         corpus, fixture = _build(session, "folder-topology-mixed-aggregate")
         scene = _query(session, corpus, budget={"documents": 1, "relations": 6})
-    assert len(scene.nodes) == 1
-    cluster = scene.nodes[0]
+    assert len(represented_nodes(scene)) == 1
+    cluster = represented_nodes(scene)[0]
     assert cluster.grain == "cluster"
     assert cluster.member_count == 5
-    assert all(edge.source == edge.target == cluster.id for edge in scene.edges)
-    assert _membership_counts(scene) == Counter(
-        {
-            (cluster.id, fixture["folders"]["Child"], "context"): 1,
-            (cluster.id, fixture["folders"]["Other"], "context"): 1,
-            (cluster.id, None, "context"): 2,
-            (cluster.id, fixture["folders"]["Library child"], "library"): 1,
-        }
+    assert all(
+        edge.source == edge.target == cluster.id for edge in relation_edges(scene)
     )
-    edges = {edge.relation_kind: edge for edge in scene.edges}
+    # Every member placement hangs the cluster from its folder; the cluster is
+    # laid out from one of the folders holding a primary placement.
+    into_cluster = {
+        edge.source: edge
+        for edge in scene.edges
+        if edge.relation_kind == "tree" and edge.target == cluster.id
+    }
+    assert set(into_cluster) == {
+        _folder(fixture, name)
+        for name in ["Child", "Secondary only", "Other", "Library child"]
+    }
+    assert [edge.source for edge in into_cluster.values() if edge.primary] == [
+        min(_folder(fixture, name) for name in ["Child", "Other", "Library child"])
+    ]
+    edges = {edge.relation_kind: edge for edge in relation_edges(scene)}
     assert edges["wikilink"].relation_count == 3
     assert edges["wikilink"].occurrence_weight == 12
     assert edges["citation_source"].relation_count == 1
     assert edges["citation_source"].occurrence_weight == 1
-    parts = {
-        (
-            row.edge_id,
-            row.source_folder_id,
-            row.source_entity_kind,
-            row.target_folder_id,
-            row.target_entity_kind,
-            row.relation_count,
-            row.occurrence_weight,
-        )
-        for row in scene.folder_topology.edge_slices
-    }
-    assert parts == {
-        (
-            edges["wikilink"].id,
-            fixture["folders"][source],
-            "context",
-            fixture["folders"][target] if target else None,
-            "context",
-            1,
-            weight,
-        )
-        for source, target, weight in [
-            ("Child", "Other", 7),
-            ("Other", "Child", 2),
-            ("Child", None, 3),
-        ]
-    } | {
-        (
-            edges["citation_source"].id,
-            fixture["folders"]["Child"],
-            "context",
-            fixture["folders"]["Library child"],
-            "library",
-            1,
-            1,
-        )
-    }
 
 
-def test_topology_is_after_filters_not_self_excluding_folder_facets(session_factory):
+def test_containment_is_after_filters_not_self_excluding_folder_facets(
+    session_factory,
+):
     with session_factory.begin() as session:
         corpus, fixture = _build(session, "folder-topology-filtered")
         scene = _query(session, corpus, search="Alpha")
@@ -354,35 +343,34 @@ def test_topology_is_after_filters_not_self_excluding_folder_facets(session_fact
     assert (
         scene.counts.candidate_documents == folder_scene.counts.candidate_documents == 1
     )
-    expected = {fixture["folders"]["Parent"], fixture["folders"]["Child"]}
-    assert {row.id for row in scene.folder_topology.folders} == expected
-    assert {row.id for row in folder_scene.folder_topology.folders} == expected
+    expected = {
+        fixture["folders"][name] for name in ["Parent", "Child", "Secondary only"]
+    }
+    assert _folder_ids(scene) == _folder_ids(folder_scene) == expected
     assert str(fixture["folders"]["Other"]) in {
         row.value for row in folder_scene.facet_counts.folders
     }
-    assert scene.folder_topology.edge_slices == []
-    assert folder_scene.folder_topology.edge_slices == []
+    assert relation_edges(scene) == relation_edges(folder_scene) == []
 
 
-def test_kind_floor_omission_retains_only_slices_for_retained_real_edges(
+def test_kind_floor_omission_keeps_containment_outside_the_relation_cap(
     session_factory,
 ):
     with session_factory.begin() as session:
-        corpus, _fixture = _build(session, "folder-topology-kind-floor")
+        corpus, fixture = _build(session, "folder-topology-kind-floor")
         scene = _query(session, corpus, budget={"documents": 1, "relations": 1})
     assert scene.counts.candidate_documents == 5
     assert scene.counts.candidate_relations == 4
-    assert len(scene.edges) == 1
-    assert {row.edge_id for row in scene.folder_topology.edge_slices} == {
-        scene.edges[0].id
+    assert len(relation_edges(scene)) == scene.counts.rendered_relations == 1
+    cluster = represented_nodes(scene)[0]
+    assert {
+        edge.source
+        for edge in scene.edges
+        if edge.relation_kind == "tree" and edge.target == cluster.id
+    } == {
+        _folder(fixture, name)
+        for name in ["Child", "Secondary only", "Other", "Library child"]
     }
-    assert sum(row.relation_count for row in scene.folder_topology.edge_slices) == (
-        scene.edges[0].relation_count
-    )
-    assert sum(row.occurrence_weight for row in scene.folder_topology.edge_slices) == (
-        scene.edges[0].occurrence_weight
-    )
-    assert sum(row.member_count for row in scene.folder_topology.memberships) == 5
 
 
 @pytest.mark.parametrize("aggregated", [False, True])
@@ -450,7 +438,9 @@ def test_visible_occurrence_and_folder_parent_changes_invalidate_revision(
         changed_weight = _query(session, corpus)
         assert changed_weight.graph_revision != before.graph_revision
         assert changed_weight.generated_at == before.generated_at
-        assert sorted(edge.occurrence_weight for edge in changed_weight.edges) == [
+        assert sorted(
+            edge.occurrence_weight for edge in relation_edges(changed_weight)
+        ) == [
             1,
             2,
             3,
@@ -462,16 +452,19 @@ def test_visible_occurrence_and_folder_parent_changes_invalidate_revision(
         session.flush()
         changed_parent = _query(session, corpus)
     assert changed_parent.graph_revision != changed_weight.graph_revision
-    assert {row.id for row in changed_parent.folder_topology.folders} == {
+    assert _folder_ids(changed_parent) == {
         fixture["folders"][name]
-        for name in ["Other", "Child", "Library parent", "Library child"]
+        for name in [
+            "Other",
+            "Child",
+            "Secondary only",
+            "Library parent",
+            "Library child",
+        ]
     }
-    child = next(
-        row
-        for row in changed_parent.folder_topology.folders
-        if row.id == fixture["folders"]["Child"]
+    assert (_folder(fixture, "Other"), _folder(fixture, "Child"), True) in (
+        _containment(changed_parent)
     )
-    assert child.parent_folder_id == fixture["folders"]["Other"]
 
 
 def test_distinct_authored_link_syntax_weights_sum_without_duplicate_relation(
@@ -511,28 +504,12 @@ def test_distinct_authored_link_syntax_weights_sum_without_duplicate_relation(
         session.flush()
         scene = _query(session, corpus)
     assert scene.counts.candidate_relations == 4
-    assert sorted(edge.occurrence_weight for edge in scene.edges) == [2, 2, 3, 12]
-    assert sorted(
-        row.occurrence_weight for row in scene.folder_topology.edge_slices
-    ) == [2, 2, 3, 12]
-
-
-def test_row_budget_disables_whole_optional_topology_without_clipping_scene(
-    session_factory, monkeypatch
-):
-    with session_factory.begin() as session:
-        corpus, _fixture = _build(session, "folder-topology-row-budget")
-        before = _query(session, corpus)
-        monkeypatch.setattr(graph, "WORKSPACE_GRAPH_FOLDER_TOPOLOGY_ROW_LIMIT", 4)
-        capped = _query(session, corpus)
-    assert capped.folder_topology is None
-    assert capped.warnings == ["folder_topology_row_budget_exceeded"]
-    assert capped.nodes == before.nodes
-    assert capped.edges == before.edges
-    assert capped.counts == before.counts
-    assert capped.graph_revision == before.graph_revision
-    assert capped.completeness == before.completeness == "complete"
-    assert not capped.truncated
+    assert sorted(edge.occurrence_weight for edge in relation_edges(scene)) == [
+        2,
+        2,
+        3,
+        12,
+    ]
 
 
 def test_citation_occurrence_revision_ignores_stale_heads_and_restricted_targets(
@@ -615,35 +592,3 @@ def test_citation_occurrence_revision_ignores_stale_heads_and_restricted_targets
     # Exactly two accepted authored rows must produce weight two, with no
     # join multiplication and no deduplication of distinct occurrences.
     assert citation_edge.occurrence_weight == accepted_row_count == 2
-    assert (
-        next(
-            part
-            for part in after.folder_topology.edge_slices
-            if part.edge_id == citation_edge.id
-        ).occurrence_weight
-        == 2
-    )
-
-
-@pytest.mark.parametrize("cap", [9, 12, 14])
-def test_row_budget_boundary_counts_membership_and_correlated_slices(
-    session_factory, monkeypatch, cap
-):
-    with session_factory.begin() as session:
-        corpus, _fixture = _build(session, f"folder-topology-row-stages-{cap}")
-        before = _query(session, corpus)
-        assert (
-            len(before.folder_topology.folders)
-            + len(before.folder_topology.memberships)
-            + len(before.folder_topology.edge_slices)
-        ) == 14
-        monkeypatch.setattr(graph, "WORKSPACE_GRAPH_FOLDER_TOPOLOGY_ROW_LIMIT", cap)
-        after = _query(session, corpus)
-    assert after.nodes == before.nodes
-    assert after.edges == before.edges
-    if cap == 14:
-        assert after.folder_topology == before.folder_topology
-        assert after.warnings == []
-    else:
-        assert after.folder_topology is None
-        assert after.warnings == ["folder_topology_row_budget_exceeded"]

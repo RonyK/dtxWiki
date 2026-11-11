@@ -40,10 +40,14 @@ def _query(service, session, corpus, lens):
     )
 
 
+def _authored(payload):
+    return [edge for edge in payload.edges if edge.relation_kind != "tree"]
+
+
 def _relations(payload):
     return {
         (edge.relation_kind, edge.source, edge.target, edge.layer)
-        for edge in payload.edges
+        for edge in _authored(payload)
     }
 
 
@@ -74,7 +78,7 @@ def test_combined_is_the_complete_published_union_and_compare_stays_partial(
         assert _relations(combined) == _relations(compare)
         assert links.counts.candidate_relations == 40
         assert evidence.counts.candidate_relations == 10
-        assert {edge.relation_kind for edge in combined.edges} == {
+        assert {edge.relation_kind for edge in _authored(combined)} == {
             "wikilink",
             "citation_page",
             "citation_source",
@@ -82,7 +86,7 @@ def test_combined_is_the_complete_published_union_and_compare_stays_partial(
         assert all(
             edge.layer
             == ("knowledge" if edge.relation_kind == "wikilink" else "evidence")
-            for edge in combined.edges
+            for edge in _authored(combined)
         )
         for kind, source, target in branches.expected_relation_keys:
             source_kind, source_id = source

@@ -13,7 +13,6 @@ import {
   localNodeSearchText,
   localNodeView,
   localRelationSearchText,
-  localSelfKind,
   localStroke,
   localStrokeLabel,
   type LocalViewContext,
@@ -21,7 +20,7 @@ import {
 
 type Select = (id: string, origin: RovingSelectionOrigin) => void;
 
-/** Under the title: the kind chip and status, then the location. */
+/** Under the title: the kind chip and status, then the location (the folder holding it). */
 export function LocalNodeMeta({ context, node }: { context: LocalViewContext; node: GraphNode }) {
   const { t } = useTranslation("graph");
   const view = localNodeView(node, context);
@@ -31,7 +30,7 @@ export function LocalNodeMeta({ context, node }: { context: LocalViewContext; no
       {view.badge}
       {node.status ? <span className="graph-details-status">{domainLabel("graph", "graphStatus", node.status, t)}</span> : null}
     </span>
-    {node.path ? <span className="graph-details-location" title={node.path}>{node.path}</span> : null}
+    {view.meta ? <span className="graph-details-location" title={view.meta}>{view.meta}</span> : null}
   </div>;
 }
 
@@ -100,7 +99,7 @@ export function LocalSeedPath({ analysis, context, node, onSelect }: {
         const self = id === node.id;
         const content = <>
           {view.cue}<strong>{view.label}</strong>
-          {self ? <span className="relation-list-flow-self">{t(`graph.relations.self.${localSelfKind(node)}`)}</span>
+          {self ? <span className="relation-list-flow-self">{t("graph.relations.self")}</span>
             // The path starts at a seed; every node between it and this one is passed through.
             : index === 0 ? view.badge : <span className="graph-seed-path-via">{t("graph.seedPath.via")}</span>}
         </>;
@@ -149,7 +148,6 @@ export function LocalRelationFlow({ active, analysis, context, node, onBlur, onF
     return item ? localNodeView(item, context) : undefined;
   }, [analysis, context]);
   const edgeView = useCallback((edge: GraphEdge) => localEdgeView(edge, context, labelOf), [context, labelOf]);
-  const self = localSelfKind(node);
   const view = localNodeView(node, context);
   return <RelationFlow
     active={active}
@@ -169,16 +167,15 @@ export function LocalRelationFlow({ active, analysis, context, node, onBlur, onF
     scopeKey={scopeKey}
     searchText={(edge, otherId) => {
       const other = analysis.nodesById.get(otherId);
-      return `${localRelationSearchText(edgeView(edge))} ${other ? localNodeSearchText(other, t) : ""}`;
+      return `${localRelationSearchText(edgeView(edge))} ${other ? localNodeSearchText(other, context) : ""}`;
     }}
     strokeLabel={localStrokeLabel(t)}
     texts={{
       empty: t("graph.relations.none"),
-      incomingNote: t(`graph.relations.incomingNote.${self}`),
-      outgoingNote: t(`graph.relations.outgoingNote.${self}`),
-      searchLabel: t(`graph.relations.search.${self}`),
-      searchPlaceholder: t("graph.list.searchPlaceholder"),
-      self: t(`graph.relations.self.${self}`),
+      incomingNote: t("graph.relations.incomingNote"),
+      outgoingNote: t("graph.relations.outgoingNote"),
+      searchLabel: t("graph.relations.search"),
+      self: t("graph.relations.self"),
       title: t("graph.relations.title"),
       undirectedNote: t("graph.relations.undirectedNote"),
     }}

@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import type { WorkspaceGraphDocumentNode, WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { login, enableKnowledgeMapLab } from "./auth";
+import { admittedNodes, listedNodeIds, sceneRelations } from "./workspace_graph_scene";
 
 const OVERVIEW_PATH = "/graph/overview/query";
 const CONNECTED_DOCUMENTS = 1_928;
@@ -36,9 +37,10 @@ test.describe("real API 2K Knowledge Map reading", () => {
     const scene = (await response.json()).data as WorkspaceGraphScene;
     expect(scene).toMatchObject({ representation: "exact", completeness: "complete", truncated: false,
       counts: { candidate_documents: 2_000, rendered_documents: 2_000, candidate_relations: RELATIONS, rendered_relations: RELATIONS } });
-    expect(scene.nodes).toHaveLength(2_000);
-    expect(scene.edges).toHaveLength(RELATIONS);
-    const connected = new Set(scene.edges.flatMap(edge => [edge.source, edge.target]));
+    // Folders and containment are scene nodes and relations, outside the document and relation budgets.
+    expect(admittedNodes(scene)).toHaveLength(2_000);
+    expect(sceneRelations(scene)).toHaveLength(RELATIONS);
+    const connected = new Set(sceneRelations(scene).flatMap(edge => [edge.source, edge.target]));
     expect(connected.size).toBe(CONNECTED_DOCUMENTS);
     const canvas = page.getByTestId("graph-canvas");
     await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready", { timeout: 60_000 });
@@ -94,7 +96,9 @@ test.describe("real API 2K Knowledge Map reading", () => {
     expect(new Set(selectedCandidates.slice(0, neighbors.length + 1))).toEqual(new Set([document.id, ...neighbors]));
     const paintedNeighbors = selected.candidates.filter(label => neighbors.includes(label.id) && label.painted);
     expect(paintedNeighbors.length, "A selected document must have at least one painted direct-neighbor title").toBeGreaterThan(0);
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", String(CONNECTED_DOCUMENTS));
+    // The list holds the linked documents and the folders that hold them.
+    await expect(page.getByTestId("workspace-graph-node-list"))
+      .toHaveAttribute("data-total-count", String(listedNodeIds(scene, connected).size));
     const selectedState = await readState(page);
     expect(selectedState.pinnedIds).toEqual(initialState.pinnedIds);
     expect(selectedState.pinnedPositions).toEqual(initialState.pinnedPositions);
@@ -171,11 +175,11 @@ test.describe("real API 2K Knowledge Map reading", () => {
       await saveCheckpoint("response", { status: response.status() });
       expect(response.ok()).toBe(true);
       const scene = (await response.json()).data as WorkspaceGraphScene;
-      const connected = new Set(scene.edges.flatMap(edge => [edge.source, edge.target]));
+      const connected = new Set(sceneRelations(scene).flatMap(edge => [edge.source, edge.target]));
       await saveCheckpoint("api", { status: response.status(), nodes: scene.nodes.length,
         edges: scene.edges.length, connected: connected.size });
-      expect(scene.nodes).toHaveLength(2_000);
-      expect(scene.edges).toHaveLength(RELATIONS);
+      expect(admittedNodes(scene)).toHaveLength(2_000);
+      expect(sceneRelations(scene)).toHaveLength(RELATIONS);
       expect(connected.size).toBe(CONNECTED_DOCUMENTS);
       await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready", { timeout: 60_000 });
       await expect(canvas).toHaveAttribute("data-map-physics", "d3-worker");

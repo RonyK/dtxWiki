@@ -13,6 +13,8 @@ from backend.services.workspace_graph_service import WorkspaceGraphService
 from backend.tests.utils.workspace_graph_corpora import (
     build_synthetic_workspace,
     corpus_actor,
+    relation_edges,
+    represented_nodes,
 )
 
 pytestmark = pytest.mark.integration
@@ -71,32 +73,40 @@ def test_combined_2001_keeps_unlinked_exact_and_preserves_focus_and_relation_tot
         )
         assert {key[1] for key in unlinked} <= exact_ids
         assert all(
-            node.grain == "document" or node.member_count > 1 for node in payload.nodes
+            node.grain == "document" or node.member_count > 1
+            for node in represented_nodes(payload)
         )
-        assert len(payload.nodes) <= 2_000
-        assert len(payload.edges) <= 6_000
+        assert len(represented_nodes(payload)) <= 2_000
+        assert len(relation_edges(payload)) <= 6_000
         assert (
             sum(
                 1 if node.grain == "document" else node.member_count
-                for node in payload.nodes
+                for node in represented_nodes(payload)
             )
             == 2_001
         )
         assert (
-            sum(edge.relation_count for edge in payload.edges)
+            sum(edge.relation_count for edge in relation_edges(payload))
             == payload.counts.candidate_relations
         )
         assert payload.algorithm_version == "visible-component-pack.v3"
         if focus is None:
             wire = payload.model_dump_json().encode("utf-8")
-            without_topology = payload.model_dump_json(
-                exclude={"folder_topology"}
-            ).encode("utf-8")
+            without_containment = (
+                payload.model_copy(
+                    update={
+                        "nodes": represented_nodes(payload),
+                        "edges": relation_edges(payload),
+                    }
+                )
+                .model_dump_json()
+                .encode("utf-8")
+            )
             print(
                 f"FR-08 read-only 2001: raw={len(wire)} bytes, "
-                f"without_topology={len(without_topology)}, "
+                f"without_containment={len(without_containment)}, "
                 f"gzip={len(gzip.compress(wire))}, "
-                f"without_topology_gzip={len(gzip.compress(without_topology))}"
+                f"without_containment_gzip={len(gzip.compress(without_containment))}"
             )
         if focus_id is not None:
             assert focus_id in exact_ids

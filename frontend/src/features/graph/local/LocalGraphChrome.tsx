@@ -1,4 +1,4 @@
-import { Activity, History, Info, Network, Ratio, Scan, ZoomIn, ZoomOut } from "lucide-react";
+import { Activity, History, Info, Network, Ratio } from "lucide-react";
 import { useId, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphEdge, GraphHistoryMode, GraphRange, GraphTimelineEvent } from "../../../shared/api/graph";
@@ -90,23 +90,14 @@ export function GraphScopeSelector({ range, historical, busy, onChange }: {
   </div>;
 }
 
-export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled, canvasRatio, heightDisabled, onHeightChange }: {
-  canvasRatio: GraphCanvasRatio; heightDisabled: boolean; onHeightChange: (ratio: GraphCanvasRatio) => void;
-  disabled: boolean;
-  onZoomIn: () => void; onZoomOut: () => void; onFit: () => void;
+/** The Context graph's own canvas control, after the shared ones: the canvas aspect ratio. */
+export function GraphCanvasRatioPicker({ canvasRatio, onHeightChange }: {
+  canvasRatio: GraphCanvasRatio; onHeightChange: (ratio: GraphCanvasRatio) => void;
 }) {
   const { t } = useTranslation("graph");
-  return <div className="graph-camera-controls" role="toolbar" aria-label={t("graph.canvasControls")}>
-    {[["zoomIn", ZoomIn, onZoomIn], ["zoomOut", ZoomOut, onZoomOut], ["fit", Scan, onFit]].map(([key, Icon, onClick]) => {
-      const ButtonIcon = Icon as typeof Scan;
-      return <button className="icon-button" type="button" key={key as string} disabled={disabled}
-        aria-label={t(`graph.${key as string}`)} title={t(`graph.${key as string}`)} onClick={onClick as () => void}>
-        <ButtonIcon size={17} aria-hidden="true" />
-      </button>;
-    })}
-    {!heightDisabled ? <details className="graph-height-picker">
+  return <details className="graph-height-picker">
       <summary title={t("graph.view.canvasHeight")}><Ratio size={16} aria-hidden="true" />
-        {t("graph.view.height")} · {canvasRatio}
+        <span className="graph-height-label">{t("graph.view.height")} · </span>{canvasRatio}
       </summary>
       <div className="graph-height-options" role="group" aria-label={t("graph.view.canvasHeight")}>
         <p>{t("graph.view.canvasAspectRatio")}</p>
@@ -118,8 +109,7 @@ export function GraphCameraControls({ onZoomIn, onZoomOut, onFit, disabled, canv
             picker?.querySelector("summary")?.focus();
           }}>{ratio}</button>)}
       </div>
-    </details> : null}
-  </div>;
+    </details>;
 }
 
 export type LocalTimelineEvent = GraphTimelineEvent & { visible_change: boolean } & import("./timelinePresentation").TimelinePresentation;

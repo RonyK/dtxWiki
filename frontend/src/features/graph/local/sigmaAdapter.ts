@@ -9,7 +9,7 @@ import { colorToArray, floatColor } from "sigma/utils";
 import type { GraphRenderScene, GraphPoint, GraphViewport } from "../shared/rendererTypes";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
 import { GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type GraphNodeShape } from "../shared/graphTokens";
-import { FORCED_OUTLINE_INSETS, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, TRIANGLE_RADIUS_FACTOR, drawShapeRing } from "../shared/nodeShapes";
+import { FORCED_OUTLINE_INSETS, GRAPH_RING_BAND_PX, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, TRIANGLE_RADIUS_FACTOR, drawShapeRing } from "../shared/nodeShapes";
 import { LOCAL_EDGE_PROGRAMS } from "./edgePrograms";
 import { createLocalLayout, type LocalLayout } from "./layout";
 import { createLocateTrace } from "./locateTrace";
@@ -164,9 +164,13 @@ const OutlinedTriangleNodeProgram = createNodeCompoundProgram([
   createTriangleNodeProgram(FORCED_OUTLINE_INSETS.triangle[1]),
 ], (context, data, settings) => settings.defaultDrawNodeLabel(context, data, settings), () => undefined);
 
+// Legend folder ring: a constant pixel band at every size and zoom. node-border
+// feathers each edge over 2 px inside the band; one more pixel keeps a fully
+// opaque core, so the band reads as the Map's 2 px ring.
+const SIGMA_BORDER_FEATHER_PX = 1;
 const FolderNodeProgram = createNodeBorderProgram({
   borders: [
-    { size: { value: 0.24 }, color: { attribute: "color" } },
+    { size: { value: GRAPH_RING_BAND_PX + SIGMA_BORDER_FEATHER_PX, mode: "pixels" }, color: { attribute: "color" } },
     { size: { fill: true }, color: { transparent: true } },
   ],
 });
@@ -192,7 +196,8 @@ const OutlinedCircleNodeProgram = createNodeBorderProgram({
 function nodeProgramType(shape: GraphNodeShape, forcedOutline: boolean): string {
   if (forcedOutline && shape === "circle") return "outlinedCircle";
   if (forcedOutline && shape === "triangle") return "outlinedTriangle";
-  return shape === "ring" ? "folder" : shape;
+  // The Context graph has no aggregates; a count disc would draw as its disc.
+  return shape === "ring" ? "folder" : shape === "countDisc" ? "circle" : shape;
 }
 
 function finitePoint(point: GraphPoint | undefined): point is GraphPoint {
@@ -336,6 +341,7 @@ export function createSigmaGraphAdapter(
       quietBorderColor: quietColor(ink, tokens.surface),
       isSeed: node.isSeed,
       isCurrent: node.isCurrent,
+      isFolder: localNodeVisualKind(node.entityKind, node.family) === "folder",
       // Drawn last, above the dense centre where it is pinned.
       zIndex: node.isCurrent ? 1 : 0,
       label: node.label,
@@ -577,7 +583,9 @@ export function createSigmaGraphAdapter(
       // otherwise have no room left.
       const badgeWidth = badge && room - context.measureText(badge).width - 12 >= 24
         ? context.measureText(badge).width + 12 : 0;
-      context.font = `${current ? 700 : settings.labelWeight} ${fontSize}px ${settings.labelFont}`;
+      // Folder names are semibold, as on the Map.
+      const folder = Boolean((data as { isFolder?: boolean }).isFolder);
+      context.font = `${current ? 700 : folder ? 600 : settings.labelWeight} ${fontSize}px ${settings.labelFont}`;
       context.textAlign = right ? "left" : "right";
       context.textBaseline = "middle";
       const textRoom = room - badgeWidth;

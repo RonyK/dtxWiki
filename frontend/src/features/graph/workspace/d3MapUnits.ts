@@ -55,7 +55,7 @@ export function buildWorkspaceD3UnitBasis(input: {
     calibrationPasses: input.calibrationPasses ?? 0 });
 }
 
-/** Circumscribed ordinary body discs; cosmetic cluster emphasis is excluded. */
+/** Circumscribed body discs, each cluster at its drawn count disc. */
 export function measureWorkspaceD3BodyOverlap(positions: ArrayLike<number>, radiiCss: readonly number[], zoom: number,
   materialPenetrationCss = .5, fixedIndices?: ReadonlySet<number>): { overlappingNodes: number; fraction: number; maximumPenetrationCss: number } {
   if (positions.length !== radiiCss.length * 2 || !Number.isFinite(zoom) || zoom <= 0) {

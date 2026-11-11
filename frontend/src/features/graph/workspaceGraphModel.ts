@@ -1,12 +1,13 @@
-import type {
-  WorkspaceGraphDataFilters,
-  WorkspaceGraphAvailableLens,
-  WorkspaceGraphDocumentKind,
-  WorkspaceGraphEdge,
-  WorkspaceGraphFacetRule,
-  WorkspaceGraphNode,
-  WorkspaceGraphOverviewRequest,
-  WorkspaceGraphScene,
+import {
+  isWorkspaceGraphContainment,
+  type WorkspaceGraphDataFilters,
+  type WorkspaceGraphAvailableLens,
+  type WorkspaceGraphDocumentKind,
+  type WorkspaceGraphEdge,
+  type WorkspaceGraphFacetRule,
+  type WorkspaceGraphNode,
+  type WorkspaceGraphOverviewRequest,
+  type WorkspaceGraphScene,
 } from "../../shared/api/workspaceGraph";
 import type {
   GraphRenderEdge,
@@ -174,7 +175,7 @@ export function workspaceGraphDisplayItems(
   payload: WorkspaceGraphScene,
   display: Pick<WorkspaceGraphDisplaySettings, "show_orphans" | "show_edges">,
 ): WorkspaceGraphDisplayItems {
-  const hiddenOrphans = display.show_orphans ? new Set<string>() : workspaceGraphOrphanIds(payload);
+  const hiddenOrphans = display.show_orphans ? new Set<string>() : workspaceGraphHiddenUnlinkedIds(payload);
   const nodes = payload.nodes.filter((node) => !hiddenOrphans.has(node.id));
   const ids = new Set(nodes.map((node) => node.id));
   const edges = display.show_edges
@@ -187,12 +188,12 @@ export function normalizeWorkspaceGraphSearch(search: string): string {
   return search.trim().toLocaleLowerCase();
 }
 
-/** The one document/cluster match rule: map highlight and sidebar results share it. */
+/** The one node match rule: map highlight and sidebar results share it. */
 export function workspaceGraphNodeMatchesSearch(node: WorkspaceGraphNode, normalizedSearch: string): boolean {
   return !normalizedSearch || [
     node.label,
-    node.grain === "document" ? node.primary_folder_label : null,
-    node.grain === "document" ? node.entity_kind : "cluster",
+    node.grain === "document" ? node.primary_folder_label : node.grain === "folder" ? node.path : null,
+    node.grain === "document" ? node.entity_kind : node.grain,
   ]
     .filter(Boolean)
     .join(" ")
@@ -294,26 +295,57 @@ export function workspaceGraphNodeRelations(
   };
 }
 
+/** A scene's visible edges, skipping dangling and self ends. */
+function visibleSceneEdges(payload: WorkspaceGraphScene): WorkspaceGraphEdge[] {
+  const nodeIds = new Set(payload.nodes.map((node) => node.id));
+  return payload.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+    && edge.source !== edge.target);
+}
+
 /**
- * Only classify unlinked documents when the authoritative scene is complete.
- * A missing edge in a capped/aggregated response is not evidence of an orphan.
- * Counts are actor-visible metrics; incoming-only counts alone are insufficient,
- * so an outgoing scene relation also keeps its document in the map.
+ * Unlinked documents. Only classify them when the authoritative scene is
+ * complete: a missing edge in a capped/aggregated response is not evidence of
+ * an orphan. Counts are actor-visible metrics; incoming-only counts alone are
+ * insufficient, so an outgoing scene relation also keeps its document in the
+ * map. Being placed in a folder does not link a document.
  */
 export function workspaceGraphOrphanIds(payload: WorkspaceGraphScene): Set<string> {
   if (payload.representation !== "exact" || payload.completeness !== "complete" || payload.truncated) {
     return new Set();
   }
-  const nodeIds = new Set(payload.nodes.map((node) => node.id));
-  const connected = new Set<string>();
-  for (const edge of payload.edges) {
-    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target) || edge.source === edge.target) continue;
-    connected.add(edge.source);
-    connected.add(edge.target);
-  }
+  const connected = new Set(visibleSceneEdges(payload).filter((edge) => !isWorkspaceGraphContainment(edge))
+    .flatMap((edge) => [edge.source, edge.target]));
   return new Set(payload.nodes.filter((node) => node.grain === "document"
     && node.reference_count === 0 && node.evidence_count === 0
     && !connected.has(node.id) && payload.focus?.node_id !== node.id).map((node) => node.id));
+}
+
+/**
+ * What hiding the unlinked documents hides: those documents and every folder
+ * whose held nodes are all hidden, since it has nothing left to show.
+ */
+export function workspaceGraphHiddenUnlinkedIds(
+  payload: WorkspaceGraphScene,
+  orphans: ReadonlySet<string> = workspaceGraphOrphanIds(payload),
+): Set<string> {
+  const hidden = new Set(orphans);
+  if (!hidden.size) return hidden;
+  const folders = new Set(payload.nodes.filter((node) => node.grain === "folder").map((node) => node.id));
+  const held = new Map<string, string[]>();
+  for (const edge of visibleSceneEdges(payload)) {
+    if (folders.has(edge.source) && isWorkspaceGraphContainment(edge)) {
+      held.set(edge.source, [...held.get(edge.source) ?? [], edge.target]);
+    }
+  }
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [folder, items] of held) {
+      if (hidden.has(folder) || !items.every((item) => hidden.has(item))) continue;
+      hidden.add(folder);
+      grew = true;
+    }
+  }
+  return hidden;
 }
 
 export function estimateWorkspaceGraphImpact(
@@ -561,9 +593,10 @@ function renderNode(
     is_seed: false,
     entityKind: node.grain === "document"
       ? node.entity_kind === "context" ? "context_page" : node.entity_kind === "agent" ? "agent_page" : "library_item"
-      : "cluster",
-    grain: node.grain === "document" ? "document" : node.cluster_kind,
-    referenceCount: node.grain === "document" ? node.reference_count : node.relation_count,
+      : node.grain,
+    grain: node.grain === "cluster" ? node.cluster_kind : node.grain,
+    referenceCount: node.grain === "document" ? node.reference_count
+      : node.grain === "cluster" ? node.relation_count : undefined,
     metricSized: metricSize !== null,
     nodeWidth: metricSize?.width,
     nodeHeight: metricSize?.height,

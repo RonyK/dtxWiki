@@ -3174,7 +3174,8 @@ describe("Cosmos Map interaction contracts", () => {
     graph.getZoomLevel.mockReturnValue(0.08);
     await mount();
     const config = createGraph.mock.calls[0][1];
-    expect(config).toMatchObject({ linkDefaultWidth: .9, linkVisibilityMinTransparency: .65,
+    // Every line is the legend's one width; no scene-size scale.
+    expect(config).toMatchObject({ linkDefaultWidth: 1.5, linkVisibilityMinTransparency: .65,
       hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6 });
     graph.setConfigPartial.mockClear();
     config.onZoom?.({ transform: { k: 0.02 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);

@@ -1331,7 +1331,6 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
 
           await relatedRow.click();
           await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
-          await graphDetails.locator(".graph-details-more > summary").click();
           await graphDetails.getByRole("button", { name: "Pin", exact: true }).click();
           await graphPanel.locator(".graph-frame-filters > summary").click();
           const statusFilters = graphPanel.getByRole("group", {
@@ -1348,11 +1347,9 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await graphPanel.locator(".graph-frame-filters > summary").click();
           await relatedRow.click();
           await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
-          await graphDetails.locator(".graph-details-more > summary").click();
           await expect(
             graphDetails.getByRole("button", { name: "Unpin", exact: true }),
           ).toBeVisible();
-          await graphDetails.locator(".graph-details-more > summary").click();
 
           const expandedResponsePromise = page.waitForResponse((response) =>
             response.url().endsWith(`/api/v1/workspaces/${workspace.id}/graph/query`)
@@ -1413,7 +1410,6 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await createdRows.first().locator("button[data-local-graph-id]").click();
           await graphPanel.locator(".graph-seed-path .graph-seed-path-relation").filter({ hasText: /^Created$/ }).first().click();
           await expect(graphPanel.locator("h5.graph-details-title")).toHaveText("Created");
-          await graphPanel.locator(".graph-details-more > summary").click();
           await graphPanel.locator(".graph-details").getByRole("button", { name: "Center", exact: true }).click();
           if (graphScreenshotPrefix) {
             await graphPanel.getByTestId("graph-canvas").screenshot({

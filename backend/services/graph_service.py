@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
 from uuid import UUID
 
@@ -65,10 +66,7 @@ from backend.services.graph_rank import (
     pagerank_weight,
     rank_score,
 )
-from backend.services.graph_reference_projection import (
-    document_projection_for_workspace,
-    select_document_edges_in_workspace,
-)
+from backend.services.graph_reference_projection import document_edge_projection
 from backend.services.graph_semantics import EDGE_SEMANTICS
 from backend.services.library_canonical import (
     LEGACY_READY_PROCESSING_STATUSES,
@@ -638,7 +636,7 @@ class GraphService:
         their keyset refill is bounded across both directions. ``scan_capped``
         tells callers when that fallback sample was insufficient.
         """
-        EdgeProjection = document_projection_for_workspace(workspace_id)
+        EdgeProjection = document_projection_for_workspace(workspace_id, actor)
 
         if limit <= 0:
             return VisibleProjectionEdges()
@@ -967,6 +965,7 @@ class GraphService:
             stored = self._stored_relation_counts(
                 session,
                 workspace_id,
+                actor=actor,
                 source_kind=kind,
                 source_ids=missing,
                 edge_kinds=edge_kinds,
@@ -995,6 +994,7 @@ class GraphService:
                         *(
                             self._capped_count(
                                 workspace_id,
+                                actor=actor,
                                 source_kind=kind,
                                 source_id=source_id,
                                 edge_kinds=family_kinds,
@@ -1026,7 +1026,7 @@ class GraphService:
         folder_chunks: int,
     ) -> list[tuple[Any, tuple[str, ...]]]:
         """The grouped denominator statements for this reader, built once."""
-        EdgeProjection = document_projection_for_workspace(workspace_id)
+        EdgeProjection = document_projection_for_workspace(workspace_id, actor)
 
         key = (
             workspace_id,
@@ -1037,11 +1037,11 @@ class GraphService:
         cached = _DENOMINATOR_STATEMENTS.get(key)
         if cached is not None:
             return cached
-        visible_target, visible_child = _denominator_visibility(workspace_id, actor)
         arms = [
             (
                 GraphService._grouped_count(
                     workspace_id,
+                    actor=actor,
                     source_kind=kind,
                     source_ids=bindparam(
                         f"{family}_ids_{index}",
@@ -1049,24 +1049,16 @@ class GraphService:
                         type_=EdgeProjection.source_id.type,
                     ),
                     edge_kinds=edge_kinds,
-                    visible=visible,
                 ),
                 f"{family}_ids_{index}",
             )
-            for family, kind, chunks, edge_kinds, visible in (
-                (
-                    "page",
-                    "context_page",
-                    page_chunks,
-                    _PAGE_DENOMINATOR_KINDS,
-                    visible_child,
-                ),
+            for family, kind, chunks, edge_kinds in (
+                ("page", "context_page", page_chunks, _PAGE_DENOMINATOR_KINDS),
                 (
                     "folder",
                     EntityKind.WORKSPACE_TREE_NODE.value,
                     folder_chunks,
                     ("tree",),
-                    visible_child,
                 ),
             )
             for index in range(chunks)
@@ -1099,17 +1091,28 @@ class GraphService:
     def _grouped_count(
         workspace_id: UUID,
         *,
+        actor: ActorContext | None,
         source_kind: str,
         source_ids: Any,
         edge_kinds: tuple[str, ...],
-        visible: Any,
     ):
         """Visible relations of each source whose stored ones fit the cap.
 
         The inner, index-only count keeps a large source out of the grouped
-        read, where it would cost a visibility check per stored relation.
+        read, where it would cost a visibility check per stored relation. The
+        projection itself is read for these sources only, so its placement
+        checks run on their rows alone. It is built per statement, and the
+        statements are cached in ``_DENOMINATOR_STATEMENTS``.
         """
-        EdgeProjection = document_projection_for_workspace(workspace_id)
+        EdgeProjection = document_edge_projection(
+            workspace_id,
+            _reader_placement_visibility(workspace_id, actor),
+            source_ids,
+            (source_kind,),
+        )
+        _visible_target, visible = _denominator_visibility(
+            workspace_id, actor, EdgeProjection
+        )
 
         stored = aliased(
             EdgeProjection,
@@ -1130,6 +1133,8 @@ class GraphService:
         )
         return select_document_edges_in_workspace(
             workspace_id=workspace_id,
+            actor=actor,
+            projection=EdgeProjection,
             columns=(
                 EdgeProjection.source_kind,
                 EdgeProjection.source_id,
@@ -1170,6 +1175,7 @@ class GraphService:
         session: Session,
         workspace_id: UUID,
         *,
+        actor: ActorContext | None,
         source_kind: str,
         source_ids: list[UUID],
         edge_kinds: tuple[str, ...],
@@ -1178,7 +1184,7 @@ class GraphService:
 
         Only picks the statement that counts a source; never a count itself.
         """
-        EdgeProjection = document_projection_for_workspace(workspace_id)
+        EdgeProjection = document_projection_for_workspace(workspace_id, actor)
 
         counts: dict[UUID, int] = {}
         for offset in range(0, len(source_ids), RANK_DENOMINATOR_BATCH_SIZE):
@@ -1187,6 +1193,7 @@ class GraphService:
                 session.execute(
                     select_document_edges_in_workspace(
                         workspace_id=workspace_id,
+                        actor=actor,
                         columns=(EdgeProjection.source_id, func.count()),
                         predicates=(
                             EdgeProjection.source_kind == source_kind,
@@ -1206,6 +1213,7 @@ class GraphService:
     def _capped_count(
         workspace_id: UUID,
         *,
+        actor: ActorContext | None,
         source_kind: str,
         source_id: UUID,
         edge_kinds: tuple[str, ...],
@@ -1218,7 +1226,7 @@ class GraphService:
         ``summed`` adds the rows' weights (citation instances) instead of
         counting them, over the same capped rows in a fixed order.
         """
-        EdgeProjection = document_projection_for_workspace(workspace_id)
+        EdgeProjection = document_projection_for_workspace(workspace_id, actor)
 
         rows = (
             select(EdgeProjection.weight.label("weight"))
@@ -1520,38 +1528,6 @@ class GraphService:
         overflowing partition keeps, and survives rebuilds that recreate row
         ids.
         """
-        EdgeProjection = document_projection_for_workspace(workspace_id)
-
-        if orientation == "out":
-            anchor_kind, anchor_id = (
-                EdgeProjection.source_kind,
-                EdgeProjection.source_id,
-            )
-            neighbor_kind, neighbor_id = (
-                EdgeProjection.target_kind,
-                EdgeProjection.target_id,
-            )
-        else:
-            anchor_kind, anchor_id = (
-                EdgeProjection.target_kind,
-                EdgeProjection.target_id,
-            )
-            neighbor_kind, neighbor_id = (
-                EdgeProjection.source_kind,
-                EdgeProjection.source_id,
-            )
-        position = (
-            func.row_number()
-            .over(
-                partition_by=(anchor_id, EdgeProjection.edge_kind),
-                order_by=(
-                    EdgeProjection.weight.desc(),
-                    neighbor_kind.asc(),
-                    neighbor_id.asc(),
-                ),
-            )
-            .label("rn")
-        )
         # Built once per reader and shape and reused: the visibility
         # predicate costs more to build than the statement costs to run.
         key = (
@@ -1563,6 +1539,46 @@ class GraphService:
         )
         query = _PARTITION_STATEMENTS.get(key)
         if query is None:
+            EdgeProjection = document_projection_for_workspace(workspace_id, actor)
+            if orientation == "out":
+                # Read the seeds' rows only, so placement checks run on them.
+                # The anchor filter below binds the same ``seed_ids`` value.
+                EdgeProjection = document_edge_projection(
+                    workspace_id,
+                    _reader_placement_visibility(workspace_id, actor),
+                    bindparam(
+                        "seed_ids", expanding=True, type_=EdgeProjection.source_id.type
+                    ),
+                )
+                anchor_kind, anchor_id = (
+                    EdgeProjection.source_kind,
+                    EdgeProjection.source_id,
+                )
+                neighbor_kind, neighbor_id = (
+                    EdgeProjection.target_kind,
+                    EdgeProjection.target_id,
+                )
+            else:
+                anchor_kind, anchor_id = (
+                    EdgeProjection.target_kind,
+                    EdgeProjection.target_id,
+                )
+                neighbor_kind, neighbor_id = (
+                    EdgeProjection.source_kind,
+                    EdgeProjection.source_id,
+                )
+            position = (
+                func.row_number()
+                .over(
+                    partition_by=(anchor_id, EdgeProjection.edge_kind),
+                    order_by=(
+                        EdgeProjection.weight.desc(),
+                        neighbor_kind.asc(),
+                        neighbor_id.asc(),
+                    ),
+                )
+                .label("rn")
+            )
             statement = select(
                 EdgeProjection.source_kind,
                 EdgeProjection.source_id,
@@ -2187,7 +2203,7 @@ def _bounded_context_edge_rows(
     edge_kinds: tuple[str, ...],
     actor: ActorContext | None,
 ) -> list[tuple[UUID, str, UUID, str, float, str]]:
-    EdgeProjection = document_projection_for_workspace(workspace_id)
+    EdgeProjection = document_projection_for_workspace(workspace_id, actor)
     if direction == "out":
         seed_column = EdgeProjection.source_id
         neighbor_kind = EdgeProjection.target_kind
@@ -2281,9 +2297,72 @@ def graph_visibility_signature(actor: ActorContext | None) -> tuple:
     )
 
 
-def _denominator_visibility(workspace_id: UUID, actor: ActorContext | None):
+@dataclass(frozen=True)
+class _ProjectionReader:
+    """Cache key by visibility signature; the actor only builds the predicate."""
+
+    signature: tuple
+    actor: ActorContext | None = field(compare=False, hash=False)
+
+
+def _reader_placement_visibility(workspace_id: UUID, actor: ActorContext | None):
+    """The reader's TreeRail chain rule for a document placement."""
+    return lambda placement_id: _tree_chain_visibility_predicate(
+        placement_id, workspace_id=workspace_id, actor=actor
+    )
+
+
+@lru_cache(maxsize=64)
+def _reader_document_projection(workspace_id, reader, source_ids, source_kinds):
+    return document_edge_projection(
+        workspace_id,
+        _reader_placement_visibility(workspace_id, reader.actor),
+        source_ids,
+        source_kinds,
+    )
+
+
+def document_projection_for_workspace(
+    workspace_id: UUID,
+    actor: ActorContext | None,
+    source_ids=None,
+    source_kinds=None,
+):
+    """The document read model as ``actor``'s TreeRail shows it.
+
+    A document placement's children read as the document's relations only
+    through placements this reader can see. Readers with one visibility
+    signature share one projection object, so statements and predicates
+    cached by that signature stay correlated with it.
+    """
+    return _reader_document_projection(
+        workspace_id,
+        _ProjectionReader(graph_visibility_signature(actor), actor),
+        source_ids,
+        source_kinds,
+    )
+
+
+def select_document_edges_in_workspace(
+    *,
+    workspace_id: UUID,
+    actor: ActorContext | None,
+    columns,
+    predicates=(),
+    projection=None,
+):
+    """Scope a read-only document projection without classifying it as a table."""
+    if projection is None:
+        projection = document_projection_for_workspace(workspace_id, actor)
+    return select(*columns).where(projection.workspace_id == workspace_id, *predicates)
+
+
+def _denominator_visibility(
+    workspace_id: UUID, actor: ActorContext | None, EdgeProjection=None
+):
     """The relation-target and folder-child predicates the counts use."""
-    EdgeProjection = document_projection_for_workspace(workspace_id)
+    if EdgeProjection is None:
+        EdgeProjection = document_projection_for_workspace(workspace_id, actor)
 
     visible_target = graph_neighbor_visibility_predicate(
         EdgeProjection.target_kind,
@@ -2449,7 +2528,7 @@ def graph_neighbor_visibility_predicate(
         predicates.append(
             and_(
                 neighbor_kind == EntityKind.WORKSPACE_TREE_NODE.value,
-                _tree_chain_visibility_predicate(
+                _projection_tree_chain_predicate(
                     neighbor_id, workspace_id=workspace_id, actor=actor
                 ),
             )
@@ -2457,20 +2536,14 @@ def graph_neighbor_visibility_predicate(
     return or_(*predicates)
 
 
-def _tree_chain_visibility_predicate(
+def _projection_tree_chain_predicate(
     neighbor_id,
     *,
     workspace_id: UUID,
     actor: ActorContext | None,
 ):
-    """Correlated, depth-bounded tree closure matching visible_tree_nodes.
-
-    A nested recursive CTE is evaluated for the candidate row, not the whole
-    workspace. All ancestors must be visible and the chain must reach a root
-    within the same 64-hop bound used by the hydrator. This is intentionally
-    in SQL so invisible rows cannot spend a LIMIT applied outside the query.
-    """
-    EdgeProjection = document_projection_for_workspace(workspace_id)
+    """Reuse one reader's chain predicate for a projection endpoint column."""
+    EdgeProjection = document_projection_for_workspace(workspace_id, actor)
 
     endpoint = (
         "source"
@@ -2486,7 +2559,30 @@ def _tree_chain_visibility_predicate(
     )
     if cache_key is not None and cache_key in _TREE_CHAIN_PREDICATES:
         return _TREE_CHAIN_PREDICATES[cache_key]
+    predicate = _tree_chain_visibility_predicate(
+        neighbor_id, workspace_id=workspace_id, actor=actor
+    )
+    if cache_key is not None:
+        if len(_TREE_CHAIN_PREDICATES) >= _DENOMINATOR_STATEMENT_LIMIT:
+            _TREE_CHAIN_PREDICATES.pop(next(iter(_TREE_CHAIN_PREDICATES)), None)
+        _TREE_CHAIN_PREDICATES[cache_key] = predicate
+    return predicate
 
+
+def _tree_chain_visibility_predicate(
+    neighbor_id,
+    *,
+    workspace_id: UUID,
+    actor: ActorContext | None,
+):
+    """Correlated, depth-bounded tree closure matching visible_tree_nodes.
+
+    A nested recursive CTE is evaluated for the candidate row, not the whole
+    workspace. All ancestors must be visible and the chain must reach a root
+    within the same 64-hop bound used by the hydrator. This is intentionally
+    in SQL so invisible rows cannot spend a LIMIT applied outside the query.
+    It reads no projection, so the projection itself can use it.
+    """
     tree_node = aliased(WorkspaceTreeNode)
     tree_parent = aliased(WorkspaceTreeNode)
     chain = (
@@ -2534,7 +2630,7 @@ def _tree_chain_visibility_predicate(
         )
     # Aggregate over the chain once. Separate EXISTS clauses would execute
     # the recursive walk twice for every candidate relation.
-    predicate = (
+    return (
         select(
             and_(
                 func.max(case((chain.c.parent_id.is_(None), 1), else_=0)) == 1,
@@ -2544,8 +2640,3 @@ def _tree_chain_visibility_predicate(
         .select_from(chain)
         .scalar_subquery()
     )
-    if cache_key is not None:
-        if len(_TREE_CHAIN_PREDICATES) >= _DENOMINATOR_STATEMENT_LIMIT:
-            _TREE_CHAIN_PREDICATES.pop(next(iter(_TREE_CHAIN_PREDICATES)), None)
-        _TREE_CHAIN_PREDICATES[cache_key] = predicate
-    return predicate

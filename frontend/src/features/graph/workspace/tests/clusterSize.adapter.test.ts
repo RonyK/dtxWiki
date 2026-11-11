@@ -18,7 +18,7 @@ const { graph, createNativeGraph, cpu } = vi.hoisted(() => {
     destroy: vi.fn(), create: vi.fn(), fitView: vi.fn(), getPointPositions: vi.fn(() => positions.slice()),
     getTrackedPointPositionsMap: vi.fn(() => new Map()), getZoomLevel: vi.fn(() => 2), pause: vi.fn(),
     render: vi.fn(), screenToSpacePosition: vi.fn(() => [2048, 2048]), setClusterPositions: vi.fn(),
-    setConfigPartial: vi.fn(), setLinkColors: vi.fn(), setLinkStyles: vi.fn(), setLinkStrength: vi.fn(),
+    setConfigPartial: vi.fn(), setLinkColors: vi.fn(), setLinkWidths: vi.fn(), setLinkStyles: vi.fn(), setLinkStrength: vi.fn(),
     setLinks: vi.fn(), setPinnedPoints: vi.fn(), setPointClusters: vi.fn(), setPointColors: vi.fn(),
     setPointPositions: vi.fn((next: Float32Array) => { positions = next.slice(); }),
     setPointShapes: vi.fn(), setPointSizes: vi.fn(), setPointCollisionRadii: vi.fn(),
@@ -157,36 +157,46 @@ async function run(input: WorkspaceMapColumns, options: RunOptions) {
 }
 
 /**
- * The same scene with and without the cluster counts: every physics input must match, while the renderer is
- * handed the scene builder's emphasised sizes.
+ * The same scene with and without the cluster counts. Forces never read a
+ * cluster's count disc; only collision does, so a document's every physics
+ * input matches, a cluster's collision follows its drawn disc, and the
+ * renderer is handed the scene builder's drawn sizes.
  */
 async function withAndWithoutCounts(count: number, options: RunOptions) {
   const input = aggregatedColumns(count, true);
   const plain = await run(aggregatedColumns(count, false), options);
-  const emphasised = await run(input, options);
-  expect(emphasised.workerInput).toEqual(plain.workerInput);
-  expect(emphasised.layoutBasis).toEqual(plain.layoutBasis);
-  expect(emphasised.configs).toEqual(plain.configs);
-  expect(emphasised.radiiCalls).toEqual(plain.radiiCalls);
+  const counted = await run(input, options);
+  expect(counted.layoutBasis).toEqual(plain.layoutBasis);
+  expect(counted.configs).toEqual(plain.configs);
   const built = buildCosmosSceneBuffers(input, tokens, options.budget);
-  expect(emphasised.drawn[0]).toBeGreaterThan(built.pointSizes[0]);
-  expect(Array.from(emphasised.drawn)).toEqual(Array.from(built.drawPointSizes));
-  return { plain, emphasised };
+  // "17,499" needs a wider disc than the 18 px base a count-less cluster gets; "2" does not.
+  expect(counted.drawn[0]).toBeGreaterThan(plain.drawn[0]);
+  expect([counted.drawn[2], plain.drawn[2]]).toEqual([18, 18]);
+  expect(Array.from(counted.drawn)).toEqual(Array.from(built.drawPointSizes));
+  return { plain, counted };
 }
 
-describe("Aggregated Map: cluster emphasis is render-only", () => {
-  it("hands the shared D3 Worker the same input with and without cluster counts, and draws the emphasised sizes", async () => {
-    const { plain, emphasised } = await withAndWithoutCounts(2_000, { reducedMotion: false });
-    expect(emphasised.physics).toBe("d3-worker");
-    expect(plain.workerInput).toBeDefined();
+/** Per-row collision radii: equal for documents and small clusters, larger for the wide-count cluster. */
+function expectCollisionFollowsDrawnDisc(counted: ArrayLike<number>, plain: ArrayLike<number>) {
+  expect(counted[0]).toBeGreaterThan(plain[0]);
+  expect(Array.from(counted).slice(2)).toEqual(Array.from(plain).slice(2));
+}
+
+describe("Aggregated Map: a cluster's count disc reaches collision, never forces", () => {
+  it("hands the shared D3 Worker the same relations and document radii, and a counted cluster its disc", async () => {
+    const { plain, counted } = await withAndWithoutCounts(2_000, { reducedMotion: false });
+    expect(counted.physics).toBe("d3-worker");
+    const radii = (run: typeof plain) => (run.workerInput as { nodes: Array<{ radiusPx: number }> }).nodes.map(node => node.radiusPx);
+    expect((counted.workerInput as { edges: unknown }).edges).toEqual((plain.workerInput as { edges: unknown }).edges);
+    expectCollisionFollowsDrawnDisc(radii(counted), radii(plain));
   });
 
-  it("keeps native collision radii and force profile above 2K independent of the clusters, and picks what is drawn", async () => {
-    const { plain, emphasised } = await withAndWithoutCounts(2_001, { budget: WORKSPACE_MAP_PC_10K_BUDGET, reducedMotion: true });
-    expect(emphasised.physics).toBe("cosmos-native");
-    expect(emphasised.lastRadii).toHaveLength(2_001);
-    expect(Array.from(emphasised.lastRadii!)).toEqual(Array.from(plain.lastRadii!));
+  it("keeps the native force profile above 2K, sizes native collision by the drawn disc, and picks what is drawn", async () => {
+    const { plain, counted } = await withAndWithoutCounts(2_001, { budget: WORKSPACE_MAP_PC_10K_BUDGET, reducedMotion: true });
+    expect(counted.physics).toBe("cosmos-native");
+    expect(counted.lastRadii).toHaveLength(2_001);
+    expectCollisionFollowsDrawnDisc(counted.lastRadii!, plain.lastRadii!);
     // The native picker exists above 2K only; it must hit what is drawn, value for value.
-    expect(Array.from(emphasised.pickerSizes!)).toEqual(Array.from(emphasised.drawn));
+    expect(Array.from(counted.pickerSizes!)).toEqual(Array.from(counted.drawn));
   });
 });

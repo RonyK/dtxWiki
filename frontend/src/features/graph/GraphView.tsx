@@ -1,14 +1,20 @@
-import { Clock3, Download, Focus, Layers, List, Maximize2, Minimize2, MoreHorizontal, Network, RefreshCw, RotateCcw, SlidersHorizontal, X } from "lucide-react";
+import { Clock3, Download, Filter, Focus, Layers, List, Maximize2, Minimize2, MoreHorizontal, Network, RefreshCw, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 
 import { MermaidDiagram } from "../pages/MarkdownView";
 import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeKindsFor, localEdgeVisualKind } from "./local/edgeKinds";
 import { decorateStaticDiagramSvg, graphSceneToMermaid, type StaticDiagramVisuals } from "./local/staticDiagram";
-import { GraphCameraControls, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, eventInvolves } from "./local/LocalGraphChrome";
+import { GraphCanvasRatioPicker, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, eventInvolves } from "./local/LocalGraphChrome";
+import { GraphLegendGroups, graphLegendRelationNames } from "./shared/GraphLegend";
+import { GraphCanvasControls } from "./shared/GraphCanvasControls";
+import { GraphViewMenu } from "./shared/GraphViewMenu";
+import { localNodeVisualKind } from "./local/nodeVisual";
+import {
+  GraphDetailActions, GraphDetailCenterButton, GraphDetailOpenLink, GraphDetailOtherGraphLink, GraphDetailPinButton, type GraphPinState,
+} from "./shared/GraphDetailActions";
 import { LocalGraphTimeline, LocalTimelineMark } from "./local/LocalGraphTimeline";
 import { readCanvasRatio, storeCanvasRatio, type GraphCanvasRatio } from "./local/canvasRatio";
 import { timelinePresentation } from "./local/timelinePresentation";
@@ -41,7 +47,6 @@ import type {
   GraphTimelineEvent,
 } from "../../shared/api/graph";
 import { StatusBanner } from "../../shared/components/StatusBanner";
-import { Spinner } from "../../shared/components/Spinner";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
@@ -60,7 +65,7 @@ import {
   type GraphScene,
 } from "./graphModel";
 
-type LocalPinState = "unpinned" | "waiting" | "pinning" | "pinned";
+type LocalPinState = GraphPinState;
 
 type GraphViewProps = {
   active: boolean;
@@ -149,6 +154,7 @@ export function GraphView({
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const [rendererStatus, setRendererStatus] = useState<RendererStatus>("loading");
   const [showLabels, setShowLabels] = useState(true);
+  const [layoutPaused, setLayoutPaused] = useState(false);
   const [staticOpen, setStaticOpen] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [timelinePositions, setTimelinePositions] = useState<Record<string, string | null>>({});
@@ -218,12 +224,22 @@ export function GraphView({
     const primary = payload.query.seeds[0];
     return primary ? payload.nodes.find((node) => node.entity_kind === primary.kind && node.entity_id === primary.id) ?? null : null;
   }, [payload.nodes, payload.query.seeds]);
-  const listContext = useMemo<LocalViewContext>(() => ({
-    currentId: currentNode?.id ?? null,
-    hrefFor: (node) => nodeHref(node, workspaceId ?? null),
-    t,
-    visuals: nodeVisuals,
-  }), [currentNode, nodeVisuals, t, workspaceId]);
+  const listContext = useMemo<LocalViewContext>(() => {
+    // A node's location is the folder holding it in this scene; a document's
+    // stored path is its address, not a place.
+    const holders = new Map<string, string>();
+    for (const edge of sceneAnalysis.edges) {
+      const holder = edge.edge_kind === "tree" ? sceneAnalysis.nodesById.get(edge.source) : undefined;
+      if (holder && !holders.has(edge.target)) holders.set(edge.target, holder.label);
+    }
+    return {
+      currentId: currentNode?.id ?? null,
+      hrefFor: (node) => nodeHref(node, workspaceId ?? null),
+      locationOf: (node) => holders.get(node.id) ?? null,
+      t,
+      visuals: nodeVisuals,
+    };
+  }, [currentNode, nodeVisuals, sceneAnalysis, t, workspaceId]);
   const canvasScene = useMemo<GraphRenderScene>(() => {
     const hoveredIndex = timeline.findIndex((event) => event.id === hoveredEventId);
     const eventIndex = hoveredIndex >= 0 ? hoveredIndex : visibleCursor;
@@ -360,7 +376,7 @@ export function GraphView({
         event.preventDefault(); void document.exitFullscreen(); return;
       }
       const target = event.target instanceof Element ? event.target.closest("details[open]") : null;
-      if (target && target.matches(".graph-type-comparison,.graph-frame-filters,.graph-canvas-more,.graph-height-picker,.graph-details-more,.graph-local-coverage-info")) {
+      if (target && target.matches(".graph-type-comparison,.graph-frame-filters,.graph-view-options,.graph-canvas-more,.graph-height-picker,.graph-local-coverage-info")) {
         target.removeAttribute("open"); target.querySelector("summary")?.focus();
         event.preventDefault(); event.stopPropagation(); return;
       }
@@ -387,7 +403,7 @@ export function GraphView({
     const closeOutside = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
       for (const details of Array.from(graphRegionRef.current?.querySelectorAll<HTMLDetailsElement>(
-        ".graph-type-comparison[open],.graph-frame-filters[open],.graph-canvas-more[open],.graph-height-picker[open],.graph-details-more[open]",
+        ".graph-type-comparison[open],.graph-frame-filters[open],.graph-view-options[open],.graph-canvas-more[open],.graph-height-picker[open]",
       ) ?? [])) if (!details.contains(event.target)) details.open = false;
     };
     document.addEventListener("pointerdown", closeOutside);
@@ -698,6 +714,7 @@ export function GraphView({
   }
 
   function resetView() {
+    setLayoutPaused(false);
     setPinnedPositions({});
     setPinnedIds([]);
     setSelectedId(null);
@@ -851,8 +868,8 @@ export function GraphView({
         aria-label={t("graph.filters.heading", { defaultValue: "Graph filters" })}
         className="graph-filter-bar graph-filter-options graph-frame-filters"
       >
-        <summary title={t("graph.filters.heading")}><SlidersHorizontal size={16} aria-hidden="true" />
-          <span>{t("graph.localToolbar.moreFilters", { defaultValue: "More filters" })}</span>
+        <summary title={t("graph.filters.heading")}><Filter size={15} aria-hidden="true" />
+          <span>{t("graph.filters.refine")}</span>
           {" "}
           <span className="graph-filter-active-count" aria-live="polite">
             {t("graph.filters.activeCount", {
@@ -962,7 +979,10 @@ export function GraphView({
         </div>
         </div>
       </details>
-
+      {!listOpen ? <GraphViewMenu>
+        <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />{t("graph.display.labels")}</label>
+        {historical ? <label><input type="checkbox" checked={showFuture} onChange={(e) => setShowFuture(e.target.checked)} />{t("graph.historyUi.showFuture")}</label> : null}
+      </GraphViewMenu> : null}
         </div>
       <div className={`graph-local-stage ${busyAction ? "is-loading" : ""} ${listOpen ? "is-list-view" : ""}`} data-height-ratio={canvasRatio} aria-busy={!!busyAction} ref={stageRef}>
         {!listOpen ? loadingView : null}
@@ -987,12 +1007,9 @@ export function GraphView({
           <details className="graph-canvas-more"><summary aria-label={t("graph.view.more")} title={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary>
             <div>
               <button className="graph-mobile-fullscreen" type="button" onClick={() => void toggleFullscreen()}><Maximize2 size={16} aria-hidden="true" />{t(fullscreen ? "graph.view.exitFullscreen" : "graph.view.fullscreen")}</button>
-              {/* Camera, labels and future items only change the drawing: List mode leaves them out. */}
-              {!listOpen ? <button type="button" onClick={resetView}><RotateCcw size={16} aria-hidden="true" />{t("graph.resetView")}</button> : null}
-              <button type="button" disabled={payload.capabilities?.export === false} onClick={exportFilteredScene}><Download size={16} aria-hidden="true" />{t("graph.export")}</button>
+              {/* The canvas controls carry Export; List mode hides them, so it stays here. */}
+              {listOpen ? <button type="button" disabled={payload.capabilities?.export === false} onClick={exportFilteredScene}><Download size={16} aria-hidden="true" />{t("graph.export")}</button> : null}
               {!fullscreen ? <button type="button" onClick={() => { setStaticOpen(true); requestAnimationFrame(() => graphRegionRef.current?.querySelector(".graph-static-fallback")?.scrollIntoView({ block: "nearest" })); }}>{t("graph.view.openStatic")}</button> : null}
-              {!listOpen ? <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />{t("graph.localToolbar.labels")}</label> : null}
-              {historical && !listOpen ? <label><input type="checkbox" checked={showFuture} onChange={(e) => setShowFuture(e.target.checked)} />{t("graph.historyUi.showFuture")}</label> : null}
             </div>
           </details>
         </div>
@@ -1003,8 +1020,16 @@ export function GraphView({
             notice={loadingView || coverageView ? <>{loadingView}{coverageView}</> : null} onBlur={clearItemFocus}
             onFocus={setFocusedId} onSelect={selectItem} scopeKey={canvasScopeKey} selectedId={effectiveSelectedId} />
         </div> : null}
-        <GraphCameraControls disabled={rendererStatus !== "ready"} onZoomIn={() => canvasRef.current?.zoomIn()} onZoomOut={() => canvasRef.current?.zoomOut()} onFit={() => canvasRef.current?.fit()}
-          canvasRatio={canvasRatio} heightDisabled={fullscreen} onHeightChange={(ratio) => { setCanvasRatio(ratio); storeCanvasRatio(ratio); }} />
+        {/* The canvas controls act on the drawing: List mode leaves them out. */}
+        {!listOpen ? <GraphCanvasControls className="graph-camera-controls" disabled={rendererStatus !== "ready"}
+          exportEnabled={payload.capabilities?.export !== false}
+          layout={reducedMotion ? "reducedMotion" : layoutPaused ? "paused" : "running"}
+          onExport={exportFilteredScene} onFit={() => canvasRef.current?.fit()} onReset={resetView}
+          onToggleLayout={() => setLayoutPaused((paused) => !paused)}
+          onZoomIn={() => canvasRef.current?.zoomIn()} onZoomOut={() => canvasRef.current?.zoomOut()}>
+          {!fullscreen ? <GraphCanvasRatioPicker canvasRatio={canvasRatio}
+            onHeightChange={(ratio) => { setCanvasRatio(ratio); storeCanvasRatio(ratio); }} /> : null}
+        </GraphCanvasControls> : null}
         {canvasScene.nodes.length ? (
           <GraphCanvas
           ref={canvasRef}
@@ -1021,6 +1046,7 @@ export function GraphView({
           active={active}
           focusedId={effectiveFocusedId}
           forcedColors={forcedColors}
+          layoutPaused={layoutPaused}
           // The adapter owns transient pointer hover. Feeding it back as
           // keyboard focus makes edge hover replace a selected node's star.
           onHover={() => undefined}
@@ -1218,45 +1244,33 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
     if (isActionEdgeVisualKind(kind)) {
       return localEdgeKindsFor(kind).map((actionKind) => graphLabel(t, "graphActionKind", actionKind)).join(" · ");
     }
-    const names = [...new Set(localEdgeKindsFor(kind).map((edgeKind) => graphLabel(t, "graphEdgeKind", edgeKind)))]
-      .filter((name) => name !== t(`graph.legend.edge.${kind}`));
-    return names.join(" · ");
+    return graphLegendRelationNames(localEdgeKindsFor(kind), t(`graph.legend.edge.${kind}`), t);
   };
   return (
     <div className="graph-legend" data-legend-mode={historical ? "history" : "current"}>
-      <h4 className="visually-hidden">{t("graph.legend.heading", { defaultValue: "Legend" })}</h4>
-      <div className="graph-legend-groups">
-        <ul aria-label={t("graph.legend.nodes", { defaultValue: "Node types" })}>
-          <li data-node-visual-kind="seed">
-            <GraphSeedCue color={tokens.node.context} />
-            {t("graph.legend.node.seed")}
-          </li>
-          {LEGEND_NODE_KINDS[historical ? "history" : "current"].map((kind) => (
-            <li data-node-visual-kind={kind} key={kind}>
-              <GraphNodeCue className="graph-local-node-cue" color={tokens.node[GRAPH_NODE_VISUALS[kind].color]}
-                forcedColors={forcedColors} kind={kind} surface={tokens.surface} />
-              {t(`graph.legend.node.${kind}`)}
-            </li>
-          ))}
-        </ul>
-        <ul aria-label={t("graph.legend.edges", { defaultValue: "Relationship line styles" })} className="graph-legend-stack">
-          {LEGEND_EDGE_KINDS[historical ? "history" : "current"].map((kind) => {
-            const names = relationNames(kind);
-            const label = historical && kind === "action" ? "actionOther" : kind;
-            return (
-              <li data-edge-visual-kind={kind} key={kind}>
-                <GraphEdgeCue color={tokens.edge[kind]} kind={kind} />
-                <span>{t(`graph.legend.edge.${label}`)}{names ? <small>{names}</small> : null}</span>
-              </li>
-            );
-          })}
-          {historical ? (
-            <li data-edge-visual-kind="removed">
-              <GraphEdgeCue kind="removed" />
-              <span>{t("graph.legend.edge.removed")}</span>
-            </li>
-          ) : null}
-        </ul>
+      <h4 className="visually-hidden">{t("graph.legend.heading")}</h4>
+      <GraphLegendGroups
+        lines={[
+          ...LEGEND_EDGE_KINDS[historical ? "history" : "current"].map((kind) => ({
+            cue: <GraphEdgeCue color={tokens.edge[kind]} kind={kind} />,
+            key: kind,
+            label: t(`graph.legend.edge.${historical && kind === "action" ? "actionOther" : kind}`),
+            names: relationNames(kind),
+          })),
+          ...historical ? [{ cue: <GraphEdgeCue kind="removed" />, key: "removed", label: t("graph.legend.edge.removed") }] : [],
+        ]}
+        nodes={[
+          { cue: <GraphSeedCue color={tokens.node.context} />, key: "seed", label: t("graph.legend.node.seed") },
+          ...LEGEND_NODE_KINDS[historical ? "history" : "current"].map((kind) => ({
+            cue: <GraphNodeCue className="graph-local-node-cue" color={tokens.node[GRAPH_NODE_VISUALS[kind].color]}
+              forcedColors={forcedColors} kind={kind} surface={tokens.surface} />,
+            key: kind,
+            label: t(`graph.legend.node.${kind}`),
+          })),
+        ]}
+        // Every node here is sized by the relationships it shows, folders too.
+        size={[t("graph.legend.sizeRelations")]}
+      >
         {historical ? (
           <ul aria-label={t("graph.legend.history", { defaultValue: "History marks" })} className="graph-legend-stack">
             <li data-legend-mark="event-target">
@@ -1272,28 +1286,12 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
             ))}
           </ul>
         ) : null}
-      </div>
+      </GraphLegendGroups>
     </div>
   );
 }
 
 
-
-/** The pin toggle. A requested pin that is not fixed yet stays cancellable. */
-function GraphDetailsPinButton({ onToggle, state }: { onToggle: () => void; state: LocalPinState }) {
-  const { t } = useTranslation("graph");
-  const pending = state === "waiting" || state === "pinning";
-  const label = state === "unpinned" ? t("graph.details.pin") : state === "pinned" ? t("graph.details.unpin")
-    : state === "pinning" ? t("graph.details.pinning") : t("graph.details.pinWaiting");
-  const cancel = state === "pinning" ? t("graph.details.pinningCancel") : t("graph.details.pinWaitingCancel");
-  return (
-    <button type="button" className={pending ? "graph-details-pin-pending" : undefined} onClick={onToggle}
-      aria-label={pending ? cancel : undefined}>
-      {label}
-      {state === "pinning" ? <Spinner decorative size={12} /> : null}
-    </button>
-  );
-}
 
 function GraphDetails({
   active,
@@ -1409,6 +1407,14 @@ function GraphDetails({
     busyAction, node, querySeeds, supportsExpand, t, workspaceGraphHref,
   }) : null;
   const clearLabel = t("graph.details.clearSelection", { defaultValue: "Clear selection" });
+  // What a folder holds is counted from its containment lines, as on the Map.
+  const contained = node && localNodeVisualKind(node.entity_kind, node.family) === "folder"
+    ? analysis.edges.filter((item) => item.edge_kind === "tree" && item.source === node.id).length : null;
+  const centerSelection = () => {
+    setSheetExpanded(false);
+    const id = (node ?? edge)!.id;
+    requestAnimationFrame(() => onCenter(id));
+  };
   return (
     <aside className={`graph-details ${sheetExpanded ? "is-sheet-expanded" : ""}`} aria-labelledby="graph-details-heading" ref={detailsRef} tabIndex={-1}>
       <div className="graph-details-title-row">
@@ -1439,33 +1445,22 @@ function GraphDetails({
         {!historyEvents.some((event) => eventInvolves(event, node?.id ?? edge?.id ?? null, historyEdges)) ? <p>{t("graph.historyUi.noItemRecords")}</p> : null}
       </div> : null}
       <dl>
+        {contained !== null ? <GraphDetail label={t("graph.details.containedItems")} value={contained.toLocaleString()} /> : null}
         {node ? <>{node.review_status ? <GraphDetail label={t("graph.details.review")} value={versionOutcome(node, t)} /> : null}{node.actor_label ? <GraphDetail label={t("graph.details.actor", { defaultValue: "Actor" })} value={node.actor_label} /> : null}</> : null}
         {edge ? <><GraphDetail label={t("graph.details.layer", { defaultValue: "Layer" })} value={graphLabel(t, "graphLayer", edge.layer)} /><GraphDetail label={t("graph.details.relationship", { defaultValue: "Relationship" })} value={graphLabel(t, "graphEdgeKind", edge.edge_kind)} />{edge.action_kind ? <GraphDetail label={t("graph.details.action", { defaultValue: "Action" })} value={graphLabel(t, "graphActionKind", edge.action_kind)} /> : null}<GraphDetail label={t("graph.details.direction", { defaultValue: "Direction" })} value={graphLabel(t, "graphDirection", edge.direction)} /><GraphDetail label={t("graph.details.provenance", { defaultValue: "Provenance" })} value={graphLabel(t, "graphProvenance", edge.provenance)} />{edge.aggregate && !coAccess ? <GraphDetail label={t("graph.details.aggregate", { defaultValue: "Aggregate" })} value={String(edge.count ?? edge.weight)} /> : null}</> : null}
         {(node?.occurred_at || edge?.occurred_at) ? <GraphDetail label={t("graph.details.time", { defaultValue: "Time" })} value={formatVersionTimestamp((node?.occurred_at ?? edge?.occurred_at)!, "long")} /> : null}
         {evidence ? <><GraphDetail label={t("graph.details.evidence", { defaultValue: "Evidence" })} value={evidence.label ?? graphLabel(t, "graphEvidenceKind", evidence.kind)} /><GraphDetail label={t("graph.details.evidenceRef", { defaultValue: "Evidence reference" })} value={evidence.available ? evidence.ref ?? evidence.id ?? t("graph.details.available", { defaultValue: "Available" }) : t("graph.details.unavailable", { defaultValue: "Unavailable" })} /></> : null}
       </dl>
       {workspaceId && citationPair ? <CitationEvidenceSection active={citationEvidenceActive} pair={citationPair} revision={citationEvidenceRevision} workspaceId={workspaceId} /> : null}
+      <GraphDetailActions>
+        {href ? <GraphDetailOpenLink href={href} /> : null}
+        <GraphDetailCenterButton onCenter={centerSelection} />
+        {node ? <GraphDetailPinButton onToggle={() => onTogglePin(node)} state={pinState} /> : null}
+        {nodeActions?.href ? <GraphDetailOtherGraphLink href={nodeActions.href} label={t("graph.showInKnowledgeMap")} /> : null}
+        {node && nodeActions ? <GraphSelectedNodeActions actions={nodeActions} node={node} onCollapse={onCollapse} onExpand={onExpand} reasonId={actionReasonId} /> : null}
+      </GraphDetailActions>
       {node ? <LocalRelationFlow active={active} analysis={analysis} context={listContext} key={node.id} node={node}
         onBlur={onBlur} onFocus={onFocus} onSelect={onSelect} scopeKey={`${workspaceId ?? ""}:${node.id}`} /> : null}
-      <div className="graph-details-footer">
-        {href ? <Link className="graph-details-open" to={href}>{t("graph.open")}</Link> : null}
-        {node && nodeActions ? <GraphSelectedNodeActions actions={{ ...nodeActions, href: null }} node={node} onCollapse={onCollapse} onExpand={onExpand} reasonId={actionReasonId} /> : null}
-        <details className="graph-details-more" onToggle={(event) => {
-          if (!event.currentTarget.open) return;
-          const more = event.currentTarget;
-          if (!below) setSheetExpanded(true);
-          requestAnimationFrame(() => fitDetailsMenu(detailsRef.current, more, below));
-        }}><summary aria-label={t("graph.view.more")}><MoreHorizontal size={17} aria-hidden="true" /></summary><div>
-          <button type="button" onClick={(event) => {
-            event.currentTarget.closest("details")?.removeAttribute("open");
-            setSheetExpanded(false);
-            const id = (node ?? edge)!.id;
-            requestAnimationFrame(() => onCenter(id));
-          }}>{t("graph.details.center")}</button>
-          {node ? <GraphDetailsPinButton onToggle={() => onTogglePin(node)} state={pinState} /> : null}
-          {nodeActions?.href ? <Link to={nodeActions.href}>{t("graph.showInKnowledgeMap")}</Link> : null}
-        </div></details>
-      </div>
     </aside>
   );
 }
@@ -1475,26 +1470,6 @@ function GraphDetails({
 function returnToListRow(region: HTMLElement | null, id: string) {
   const rows = region?.querySelectorAll<HTMLElement>(".graph-list-view button[data-local-graph-id]") ?? [];
   Array.from(rows).find((row) => row.dataset.localGraphId === id)?.scrollIntoView?.({ block: "center" });
-}
-
-/** More opens upward from the footer; it stops under the title row so it never covers Clear selection. */
-function fitDetailsMenu(details: HTMLElement | null, more: HTMLDetailsElement, below: boolean) {
-  const title = details?.querySelector<HTMLElement>(".graph-details-title-row");
-  const footer = details?.querySelector<HTMLElement>(".graph-details-footer");
-  const menu = more.querySelector<HTMLElement>(":scope > div");
-  if (!title || !footer || !menu || !more.open) return;
-  menu.style.maxHeight = "";
-  if (!menu.offsetHeight) return;
-  const gap = 6;
-  const overlap = () => title.getBoundingClientRect().bottom + gap - menu.getBoundingClientRect().top;
-  if (below && overlap() > 0) {
-    // The sticky footer holds its place while the page lifts the title clear of the menu.
-    title.style.scrollMarginBottom = `${footer.getBoundingClientRect().bottom - menu.getBoundingClientRect().top + gap}px`;
-    title.scrollIntoView({ block: "nearest" });
-    title.style.scrollMarginBottom = "";
-  }
-  const remaining = overlap();
-  if (remaining > 0) menu.style.maxHeight = `${Math.max(0, menu.offsetHeight - remaining)}px`;
 }
 
 type SelectedNodeActions = {
@@ -1544,20 +1519,17 @@ function GraphSelectedNodeActions({ actions, node, onCollapse, onExpand, reasonI
   reasonId: string;
 }) {
   const { t } = useTranslation("graph");
+  // Expanding is the Context graph's own node action; it follows the shared ones in the row.
   return (
-    <div className="graph-details-context-actions">
-      {actions.href ? <Link to={actions.href}>{t("graph.showInKnowledgeMap")}</Link> : null}
-      <button
-        aria-describedby={actions.reason ? reasonId : undefined}
-        className="graph-list-action-button"
-        disabled={actions.disabled}
-        onClick={() => actions.action === "collapse" ? onCollapse(node) : onExpand(node)}
-        type="button"
-      >
-        <Focus aria-hidden="true" size={15} />
-        {t(`graph.${actions.action}`)}
-      </button>
-    </div>
+    <button
+      aria-describedby={actions.reason ? reasonId : undefined}
+      disabled={actions.disabled}
+      onClick={() => actions.action === "collapse" ? onCollapse(node) : onExpand(node)}
+      type="button"
+    >
+      <Focus aria-hidden="true" size={16} />
+      {t(`graph.${actions.action}`)}
+    </button>
   );
 }
 
@@ -1788,19 +1760,9 @@ function graphLabel(t: TFunction, group: GraphLabelGroup, value: string) {
   return domainLabel("graph", group, value, t);
 }
 
+/** A relation chip names its line as the legend does. */
 function localRelationLabel(t: TFunction, kind: GraphEdgeVisualKind) {
-  const labels: Record<GraphEdgeVisualKind, string> = {
-    link: t("graph.localToolbar.link", { defaultValue: "Links" }),
-    citation: t("graph.localToolbar.citation", { defaultValue: "Citations" }),
-    coAccess: t("graph.localToolbar.coAccess", { defaultValue: "Read together" }),
-    membership: t("graph.localToolbar.membership", { defaultValue: "Membership" }),
-    actionWrite: t("graph.legend.edge.actionWrite"),
-    actionCite: t("graph.legend.edge.actionCite"),
-    actionRead: t("graph.legend.edge.actionRead"),
-    actionReference: t("graph.legend.edge.actionReference"),
-    action: t("graph.localToolbar.action", { defaultValue: "Actions" }),
-  };
-  return labels[kind];
+  return t(`graph.legend.edge.${kind}`);
 }
 
 function graphLabelGroupForFilter(key: keyof GraphFilters): GraphLabelGroup {

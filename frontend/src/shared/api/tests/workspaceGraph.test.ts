@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isWorkspaceGraphResponse, type WorkspaceGraphScene } from "../workspaceGraph";
+import { isWorkspaceGraphResponse } from "../workspaceGraph";
 
 const validResponse = {
   data: {
@@ -34,8 +34,27 @@ const validResponse = {
       reference_count: 0,
       evidence_count: 0,
       also_appears_in: [],
+    }, {
+      grain: "folder",
+      id: "folder:root",
+      folder_id: "00000000-0000-4000-8000-0000000000f1",
+      label: "Root",
+      path: "Root",
     }],
-    edges: [],
+    edges: [{
+      id: "contains:folder:root|context:one",
+      source: "folder:root",
+      target: "context:one",
+      relation_kind: "tree",
+      label: null,
+      layer: "knowledge",
+      direction: "directed",
+      aggregate: false,
+      relation_count: 1,
+      occurrence_weight: 1,
+      cross_folder: false,
+      primary: true,
+    }],
     facet_counts: {
       document_kinds: [],
       relation_kinds: [],
@@ -101,137 +120,19 @@ describe("Workspace Graph response guard", () => {
         also_appears_in: [null],
       }],
     }],
+    ["folder without its folder", {
+      nodes: [validResponse.data.nodes[0], { ...validResponse.data.nodes[1], folder_id: "" }],
+    }],
+    ["nonpositive occurrence weight", { edges: [{ ...validResponse.data.edges[0], occurrence_weight: 0 }] }],
+    ["unsafe occurrence weight", { edges: [{ ...validResponse.data.edges[0], occurrence_weight: 2 ** 53 }] }],
   ])("rejects a malformed payload: %s", (_label, replacement) => {
     expect(isWorkspaceGraphResponse({
       data: { ...validResponse.data, ...replacement },
     })).toBe(false);
   });
-});
-
-function folderResponse(): { data: WorkspaceGraphScene } {
-  const response = structuredClone(validResponse) as { data: WorkspaceGraphScene };
-  const document = response.data.nodes[0];
-  if (document.grain !== "document") throw new Error("Expected fixture document.");
-  document.primary_folder_id = "child";
-  response.data.nodes.push({ grain: "cluster", id: "mixed", label: "Mixed",
-    cluster_kind: "link_cluster", member_count: 2, relation_count: 2 });
-  response.data.edges.push({ id: "loop", source: "mixed", target: "mixed",
-    relation_kind: "wikilink", label: null, layer: "knowledge", direction: "directed",
-    aggregate: true, relation_count: 2, occurrence_weight: 3, cross_folder: true });
-  response.data.counts = { candidate_documents: 3, candidate_relations: 2,
-    rendered_documents: 1, rendered_clusters: 1, rendered_relations: 1 };
-  response.data.folder_topology = {
-    schema_version: "workspace-graph-folders.v1",
-    folders: [
-      { id: "root", label: "Root", parent_folder_id: null, direct_member_count: 1 },
-      { id: "child", label: "Child", parent_folder_id: "root", direct_member_count: 2 },
-    ],
-    memberships: [
-      { node_id: document.id, folder_id: "child", entity_kind: "context", member_count: 1 },
-      { node_id: "mixed", folder_id: "root", entity_kind: "context", member_count: 1 },
-      { node_id: "mixed", folder_id: "child", entity_kind: "library", member_count: 1 },
-    ],
-    edge_slices: [
-      { edge_id: "loop", source_folder_id: "root", source_entity_kind: "context",
-        target_folder_id: "child", target_entity_kind: "library", relation_count: 1,
-        occurrence_weight: 2 },
-      { edge_id: "loop", source_folder_id: "child", source_entity_kind: "library",
-        target_folder_id: "child", target_entity_kind: "library", relation_count: 1,
-        occurrence_weight: 1 },
-    ],
-  };
-  return response;
-}
-
-describe("Workspace Graph visible folder topology guard", () => {
-  it("accepts correlated mixed-cluster loops and visible ancestor rows", () => {
-    expect(isWorkspaceGraphResponse(folderResponse())).toBe(true);
-    const ancestorOnly = folderResponse();
-    const topology = ancestorOnly.data.folder_topology!;
-    topology.folders.unshift({ id: "grandparent", label: "Ancestor", parent_folder_id: null,
-      direct_member_count: 0 });
-    topology.folders[1].parent_folder_id = "grandparent";
-    expect(isWorkspaceGraphResponse(ancestorOnly)).toBe(true);
-  });
-
-  it("keeps absent/null topology and absent/null edge weight legacy-compatible", () => {
-    for (const folder_topology of [undefined, null]) {
-      const response = folderResponse();
-      response.data.folder_topology = folder_topology;
-      for (const occurrence_weight of [undefined, null, 3]) {
-        response.data.edges[0].occurrence_weight = occurrence_weight;
-        expect(isWorkspaceGraphResponse(response)).toBe(true);
-      }
-    }
-  });
-
-  it.each(["😀".repeat(101), `한${"😀".repeat(199)}`])(
-    "accepts server-valid Unicode folder labels by code points, not UTF-16 units",
-    (label) => {
-      const response = folderResponse();
-      response.data.folder_topology!.folders[0].label = label;
-      expect(isWorkspaceGraphResponse(response)).toBe(true);
-    },
-  );
-
-  it("rejects folder labels longer than the server's 200 code-point contract", () => {
-    const response = folderResponse();
-    response.data.folder_topology!.folders[0].label = "😀".repeat(201);
-    expect(isWorkspaceGraphResponse(response)).toBe(false);
-  });
-
-  const invalid: Array<[string, (scene: WorkspaceGraphScene) => void]> = [
-    ["unsupported version", (scene) => Object.assign(scene.folder_topology!, { schema_version: "future" })],
-    ["server-computed coordinates", (scene) => Object.assign(scene.folder_topology!, { positions: [1, 2] })],
-    ["folder coordinate", (scene) => Object.assign(scene.folder_topology!.folders[0], { x: 1 })],
-    ["membership coordinate", (scene) => Object.assign(scene.folder_topology!.memberships[0], { y: 1 })],
-    ["slice community hint", (scene) => Object.assign(scene.folder_topology!.edge_slices[0], { community: 1 })],
-    ["duplicate folder", (scene) => scene.folder_topology!.folders.push(scene.folder_topology!.folders[0])],
-    ["dangling ancestor", (scene) => { scene.folder_topology!.folders[0].parent_folder_id = "hidden"; }],
-    ["ancestry cycle", (scene) => { scene.folder_topology!.folders[0].parent_folder_id = "child"; }],
-    ["empty label", (scene) => { scene.folder_topology!.folders[0].label = ""; }],
-    ["unrelated empty folder", (scene) => scene.folder_topology!.folders.push({ id: "secondary",
-      label: "Secondary", parent_folder_id: null, direct_member_count: 0 })],
-    ["negative folder count", (scene) => { scene.folder_topology!.folders[0].direct_member_count = -1; }],
-    ["fractional member count", (scene) => { scene.folder_topology!.memberships[1].member_count = 0.5; }],
-    ["unsafe member count", (scene) => { scene.folder_topology!.memberships[1].member_count = 2 ** 53; }],
-    ["duplicate membership", (scene) => scene.folder_topology!.memberships.push(scene.folder_topology!.memberships[0])],
-    ["missing membership node", (scene) => { scene.folder_topology!.memberships[0].node_id = "hidden"; }],
-    ["missing primary folder", (scene) => { scene.folder_topology!.memberships[0].folder_id = "hidden"; }],
-    ["non-primary membership", (scene) => { scene.folder_topology!.memberships[0].folder_id = "root"; }],
-    ["wrong document kind", (scene) => { scene.folder_topology!.memberships[0].entity_kind = "library"; }],
-    ["document represents two members", (scene) => { scene.folder_topology!.memberships[0].member_count = 2; }],
-    ["missing node membership", (scene) => { scene.folder_topology!.memberships.shift(); }],
-    ["cluster member total differs", (scene) => {
-      const node = scene.nodes[1];
-      if (node.grain === "cluster") node.member_count = 3;
-    }],
-    ["direct folder count differs", (scene) => { scene.folder_topology!.folders[0].direct_member_count = 2; }],
-    ["duplicate edge slice", (scene) => scene.folder_topology!.edge_slices.push(scene.folder_topology!.edge_slices[0])],
-    ["slice missing edge", (scene) => { scene.folder_topology!.edge_slices[0].edge_id = "missing"; }],
-    ["slice missing endpoint partition", (scene) => { scene.folder_topology!.edge_slices[0].source_entity_kind = "library"; }],
-    ["relation total differs", (scene) => { scene.folder_topology!.edge_slices[0].relation_count = 2; }],
-    ["occurrence total differs", (scene) => { scene.folder_topology!.edge_slices[0].occurrence_weight = 3; }],
-    ["nonpositive occurrence weight", (scene) => { scene.edges[0].occurrence_weight = 0; }],
-    ["unsafe occurrence weight", (scene) => { scene.edges[0].occurrence_weight = 2 ** 53; }],
-    ["topology with legacy missing weight", (scene) => { delete scene.edges[0].occurrence_weight; }],
-    ["topology with legacy null weight", (scene) => { scene.edges[0].occurrence_weight = null; }],
-    ["duplicate node ID", (scene) => scene.nodes.push(scene.nodes[0])],
-    ["duplicate entity key", (scene) => scene.nodes.push({ ...scene.nodes[0], id: "new-row" })],
-    ["duplicate edge ID", (scene) => scene.edges.push(scene.edges[0])],
-    ["dangling edge endpoint", (scene) => { scene.edges[0].target = "hidden"; }],
-    ["row budget exceeded", (scene) => {
-      scene.folder_topology!.folders = Array.from({ length: 200_001 }, () => scene.folder_topology!.folders[0]);
-    }],
-  ];
-  it.each(invalid)("rejects malformed present topology: %s", (_label, mutate) => {
-    const response = folderResponse();
-    mutate(response.data);
-    expect(isWorkspaceGraphResponse(response)).toBe(false);
-  });
 
   it.each([NaN, Infinity, -1, 0.5, 2 ** 53])("rejects unsafe numeric scene counts: %s", (count) => {
-    const response = folderResponse();
+    const response = structuredClone(validResponse);
     response.data.counts.candidate_documents = count;
     expect(isWorkspaceGraphResponse(response)).toBe(false);
   });

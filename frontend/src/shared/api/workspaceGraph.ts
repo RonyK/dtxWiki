@@ -111,8 +111,6 @@ export type WorkspaceGraphDocumentNode = {
   path: string;
   primary_folder_id: string | null;
   primary_folder_label: string;
-  /** Nearest TreeRail ancestor document rendered in this scene, below the primary folder. */
-  parent_document_id?: string | null;
   reference_count: number;
   evidence_count: number;
   also_appears_in: Array<{
@@ -131,9 +129,19 @@ export type WorkspaceGraphClusterNode = {
   relation_count: number;
 };
 
+/** A TreeRail folder. What it holds is its outgoing `tree` relations. */
+export type WorkspaceGraphFolderNode = {
+  grain: "folder";
+  id: string;
+  folder_id: string;
+  label: string;
+  path: string;
+};
+
 export type WorkspaceGraphNode =
   | WorkspaceGraphDocumentNode
-  | WorkspaceGraphClusterNode;
+  | WorkspaceGraphClusterNode
+  | WorkspaceGraphFolderNode;
 
 export type WorkspaceGraphEdge = {
   id: string;
@@ -148,41 +156,32 @@ export type WorkspaceGraphEdge = {
   /** Repeated occurrences are layout weight, not the distinct relation count. */
   occurrence_weight?: number | null;
   cross_folder: boolean;
+  /** On `tree` containment: the target's one placement that starts the layout. */
+  primary?: boolean;
 };
 
-export type WorkspaceGraphFolder = {
-  id: string;
-  label: string;
-  parent_folder_id: string | null;
-  direct_member_count: number;
-};
+/** TreeRail containment. Budgets and the unlinked-document rule do not count it. */
+export const WORKSPACE_GRAPH_CONTAINMENT_KIND = "tree";
 
-export type WorkspaceGraphFolderMembership = {
-  node_id: string;
-  folder_id: string | null;
-  entity_kind: WorkspaceGraphDocumentKind;
-  member_count: number;
-};
+export function isWorkspaceGraphContainment(edge: Pick<WorkspaceGraphEdge, "relation_kind">): boolean {
+  return edge.relation_kind === WORKSPACE_GRAPH_CONTAINMENT_KIND;
+}
 
-export type WorkspaceGraphFolderEdgeSlice = {
-  edge_id: string;
-  source_folder_id: string | null;
-  source_entity_kind: WorkspaceGraphDocumentKind;
-  target_folder_id: string | null;
-  target_entity_kind: WorkspaceGraphDocumentKind;
-  relation_count: number;
-  occurrence_weight: number;
-};
+/** Documents a node stands for: one, a cluster's members, or none for a folder. */
+export function workspaceGraphNodeDocuments(node: WorkspaceGraphNode): number {
+  return node.grain === "document" ? 1 : node.grain === "cluster" ? node.member_count : 0;
+}
 
-/** Only visible primary placements and their visible ancestor closure. */
-export type WorkspaceGraphFolderTopology = {
-  schema_version: "workspace-graph-folders.v1";
-  folders: WorkspaceGraphFolder[];
-  memberships: WorkspaceGraphFolderMembership[];
-  edge_slices: WorkspaceGraphFolderEdgeSlice[];
-};
-
-export const WORKSPACE_GRAPH_FOLDER_TOPOLOGY_ROW_LIMIT = 200_000;
+/** What the 2K/10K budgets count: documents, clusters and relations, never folders or containment. */
+export function workspaceGraphAdmissionCounts(scene: Pick<WorkspaceGraphScene, "nodes" | "edges">): {
+  nodeCount: number;
+  edgeCount: number;
+} {
+  return {
+    nodeCount: scene.nodes.filter((node) => node.grain !== "folder").length,
+    edgeCount: scene.edges.filter((edge) => !isWorkspaceGraphContainment(edge)).length,
+  };
+}
 
 export type WorkspaceGraphFacetOption = {
   value: string;
@@ -238,7 +237,6 @@ export type WorkspaceGraphScene = {
     provenance: boolean;
   };
   focus?: WorkspaceGraphFocus | null;
-  folder_topology?: WorkspaceGraphFolderTopology | null;
 };
 
 export async function queryWorkspaceGraph(
@@ -286,7 +284,6 @@ export function isWorkspaceGraphResponse(value: unknown): value is { data: Works
     ].includes(String(reason)))
     && Array.isArray(scene.nodes)
     && scene.nodes.every(isGraphNode)
-    && hasAcyclicDocumentParents(scene.nodes as WorkspaceGraphNode[])
     && Array.isArray(scene.edges)
     && scene.edges.every(isGraphEdge)
     && isFacetCounts(scene.facet_counts)
@@ -296,12 +293,7 @@ export function isWorkspaceGraphResponse(value: unknown): value is { data: Works
     && Array.isArray(scene.warnings)
     && scene.warnings.every((warning) => typeof warning === "string")
     && isCapabilities(scene.capabilities)
-    && (scene.focus === undefined || scene.focus === null || isFocus(scene.focus))
-    && (scene.folder_topology === undefined || scene.folder_topology === null
-      || isWorkspaceGraphFolderTopology(
-        scene.folder_topology, scene.nodes as WorkspaceGraphNode[],
-        scene.edges as WorkspaceGraphEdge[],
-      ));
+    && (scene.focus === undefined || scene.focus === null || isFocus(scene.focus));
 }
 
 function isExpansionOutcome(value: unknown): value is WorkspaceGraphExpansionOutcome {
@@ -334,20 +326,6 @@ function isGraphCounts(value: unknown): value is WorkspaceGraphCounts {
     ].every((key) => isNonnegativeCount(value[key]));
 }
 
-/** Every parent is another rendered document and no TreeRail chain loops. */
-function hasAcyclicDocumentParents(nodes: WorkspaceGraphNode[]): boolean {
-  const parents = new Map<string, string | null>();
-  for (const node of nodes) if (node.grain === "document") parents.set(node.id, node.parent_document_id ?? null);
-  for (const start of parents.keys()) {
-    const seen = new Set<string>([start]);
-    for (let current = parents.get(start) ?? null; current !== null; current = parents.get(current) ?? null) {
-      if (!parents.has(current) || seen.has(current)) return false;
-      seen.add(current);
-    }
-  }
-  return true;
-}
-
 function isGraphNode(value: unknown): value is WorkspaceGraphNode {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string") {
     return false;
@@ -359,13 +337,15 @@ function isGraphNode(value: unknown): value is WorkspaceGraphNode {
       && isPositiveCount(value.member_count)
       && isNonnegativeCount(value.relation_count);
   }
+  if (value.grain === "folder") {
+    return typeof value.folder_id === "string" && value.folder_id.length > 0
+      && typeof value.path === "string";
+  }
   return value.grain === "document"
     && (value.entity_kind === "context" || value.entity_kind === "library" || value.entity_kind === "agent")
     && typeof value.entity_id === "string"
     && typeof value.path === "string"
     && (value.primary_folder_id === null || typeof value.primary_folder_id === "string")
-    && (value.parent_document_id === undefined || value.parent_document_id === null
-      || typeof value.parent_document_id === "string")
     && typeof value.primary_folder_label === "string"
     && isNonnegativeCount(value.reference_count)
     && isNonnegativeCount(value.evidence_count)
@@ -393,7 +373,8 @@ function isGraphEdge(value: unknown): value is WorkspaceGraphEdge {
     && isPositiveCount(value.relation_count)
     && (value.occurrence_weight === undefined || value.occurrence_weight === null
       || isPositiveCount(value.occurrence_weight))
-    && typeof value.cross_folder === "boolean";
+    && typeof value.cross_folder === "boolean"
+    && (value.primary === undefined || typeof value.primary === "boolean");
 }
 
 function isNonnegativeCount(value: unknown): value is number {
@@ -402,160 +383,6 @@ function isNonnegativeCount(value: unknown): value is number {
 
 function isPositiveCount(value: unknown): value is number {
   return isNonnegativeCount(value) && value > 0;
-}
-
-function isFolderId(value: unknown): value is string | null {
-  return value === null || (typeof value === "string" && value.length > 0);
-}
-
-function isDocumentKind(value: unknown): value is WorkspaceGraphDocumentKind {
-  return value === "context" || value === "library" || value === "agent";
-}
-
-function membershipKey(nodeId: string, folderId: string | null, kind: string): string {
-  return JSON.stringify([nodeId, folderId, kind]);
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(value).every((key) => allowed.includes(key));
-}
-
-/** Validate correlated rows before any renderer can infer folder membership. */
-export function isWorkspaceGraphFolderTopology(
-  value: unknown,
-  nodes: readonly WorkspaceGraphNode[],
-  edges: readonly WorkspaceGraphEdge[],
-): value is WorkspaceGraphFolderTopology {
-  if (!isRecord(value) || value.schema_version !== "workspace-graph-folders.v1"
-    || !hasOnlyKeys(value, ["schema_version", "folders", "memberships", "edge_slices"])
-    || !Array.isArray(value.folders) || !Array.isArray(value.memberships)
-    || !Array.isArray(value.edge_slices)
-    || value.folders.length + value.memberships.length + value.edge_slices.length
-      > WORKSPACE_GRAPH_FOLDER_TOPOLOGY_ROW_LIMIT) return false;
-
-  const folders = new Map<string, WorkspaceGraphFolder>();
-  for (const folder of value.folders) {
-    if (!isRecord(folder) || typeof folder.id !== "string" || !folder.id
-      || !hasOnlyKeys(folder, ["id", "label", "parent_folder_id", "direct_member_count"])
-      || folders.has(folder.id) || typeof folder.label !== "string"
-      || folder.label.length === 0 || Array.from(folder.label).length > 200
-      || !isFolderId(folder.parent_folder_id)
-      || !isNonnegativeCount(folder.direct_member_count)) return false;
-    folders.set(folder.id, folder as WorkspaceGraphFolder);
-  }
-  // A three-state walk is linear even for a deeply nested forest.
-  const visited = new Set<string>();
-  for (const folder of folders.values()) {
-    const path = new Set<string>();
-    let current: string | null = folder.id;
-    while (current !== null && !visited.has(current)) {
-      if (path.has(current)) return false;
-      const ancestor = folders.get(current);
-      if (!ancestor) return false;
-      path.add(current);
-      current = ancestor.parent_folder_id;
-    }
-    for (const id of path) visited.add(id);
-  }
-
-  const nodeById = new Map<string, WorkspaceGraphNode>();
-  const entityKeys = new Set<string>();
-  for (const node of nodes) {
-    if (!isGraphNode(node) || !node.id || nodeById.has(node.id)) return false;
-    if (node.grain === "document") {
-      const key = JSON.stringify([node.entity_kind, node.entity_id]);
-      if (!node.entity_id || entityKeys.has(key)
-        || !isNonnegativeCount(node.reference_count)
-        || !isNonnegativeCount(node.evidence_count)) return false;
-      entityKeys.add(key);
-    } else if (!isPositiveCount(node.member_count)
-      || !isNonnegativeCount(node.relation_count)) return false;
-    nodeById.set(node.id, node);
-  }
-
-  const memberships = new Set<string>();
-  const membersByNode = new Map<string, number>();
-  const rowsByNode = new Map<string, number>();
-  const membersByFolder = new Map<string, number>();
-  for (const row of value.memberships) {
-    if (!isRecord(row) || typeof row.node_id !== "string"
-      || !hasOnlyKeys(row, ["node_id", "folder_id", "entity_kind", "member_count"])
-      || !isFolderId(row.folder_id) || !isDocumentKind(row.entity_kind)
-      || !isPositiveCount(row.member_count)) return false;
-    const node = nodeById.get(row.node_id);
-    if (!node || (row.folder_id !== null && !folders.has(row.folder_id))) return false;
-    const key = membershipKey(row.node_id, row.folder_id, row.entity_kind);
-    if (memberships.has(key)) return false;
-    memberships.add(key);
-    if (node.grain === "document" && (row.entity_kind !== node.entity_kind
-      || row.folder_id !== node.primary_folder_id || row.member_count !== 1)) return false;
-    const count = (membersByNode.get(row.node_id) ?? 0) + row.member_count;
-    if (!isPositiveCount(count)) return false;
-    membersByNode.set(row.node_id, count);
-    rowsByNode.set(row.node_id, (rowsByNode.get(row.node_id) ?? 0) + 1);
-    if (row.folder_id !== null) {
-      const folderCount = (membersByFolder.get(row.folder_id) ?? 0) + row.member_count;
-      if (!isPositiveCount(folderCount)) return false;
-      membersByFolder.set(row.folder_id, folderCount);
-    }
-  }
-  for (const node of nodes) {
-    if (membersByNode.get(node.id) !== (node.grain === "document" ? 1 : node.member_count)
-      || (node.grain === "document" && rowsByNode.get(node.id) !== 1)) return false;
-  }
-  // Empty ancestor rows are allowed; unrelated folders (including secondary
-  // placements) must not become islands simply because a facet names them.
-  const requiredFolders = new Set<string>();
-  for (const id of membersByFolder.keys()) {
-    let current: string | null = id;
-    while (current !== null && !requiredFolders.has(current)) {
-      requiredFolders.add(current);
-      current = folders.get(current)!.parent_folder_id;
-    }
-  }
-  for (const folder of folders.values()) {
-    if (!requiredFolders.has(folder.id)
-      || folder.direct_member_count !== (membersByFolder.get(folder.id) ?? 0)) return false;
-  }
-
-  const edgeById = new Map<string, WorkspaceGraphEdge>();
-  for (const edge of edges) {
-    if (!isGraphEdge(edge) || !edge.id || edgeById.has(edge.id)
-      || !isPositiveCount(edge.relation_count)
-      || edge.occurrence_weight === undefined || edge.occurrence_weight === null
-      || !nodeById.has(edge.source) || !nodeById.has(edge.target)) return false;
-    edgeById.set(edge.id, edge);
-  }
-  const sliceKeys = new Set<string>();
-  const countsByEdge = new Map<string, number>();
-  const weightsByEdge = new Map<string, number>();
-  for (const row of value.edge_slices) {
-    if (!isRecord(row) || typeof row.edge_id !== "string"
-      || !hasOnlyKeys(row, ["edge_id", "source_folder_id", "source_entity_kind",
-        "target_folder_id", "target_entity_kind", "relation_count", "occurrence_weight"])
-      || !isFolderId(row.source_folder_id) || !isFolderId(row.target_folder_id)
-      || !isDocumentKind(row.source_entity_kind) || !isDocumentKind(row.target_entity_kind)
-      || !isPositiveCount(row.relation_count) || !isPositiveCount(row.occurrence_weight)) {
-      return false;
-    }
-    const edge = edgeById.get(row.edge_id);
-    if (!edge
-      || !memberships.has(membershipKey(edge.source, row.source_folder_id, row.source_entity_kind))
-      || !memberships.has(membershipKey(edge.target, row.target_folder_id, row.target_entity_kind))) {
-      return false;
-    }
-    const key = JSON.stringify([row.edge_id, row.source_folder_id, row.source_entity_kind,
-      row.target_folder_id, row.target_entity_kind]);
-    if (sliceKeys.has(key)) return false;
-    sliceKeys.add(key);
-    const count = (countsByEdge.get(row.edge_id) ?? 0) + row.relation_count;
-    const weight = (weightsByEdge.get(row.edge_id) ?? 0) + row.occurrence_weight;
-    if (!isPositiveCount(count) || !isPositiveCount(weight)) return false;
-    countsByEdge.set(row.edge_id, count);
-    weightsByEdge.set(row.edge_id, weight);
-  }
-  return edges.every((edge) => countsByEdge.get(edge.id) === edge.relation_count
-    && weightsByEdge.get(edge.id) === edge.occurrence_weight);
 }
 
 function isFacetCounts(value: unknown): value is WorkspaceGraphScene["facet_counts"] {

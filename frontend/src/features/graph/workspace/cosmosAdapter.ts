@@ -8,16 +8,19 @@ import {
 import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, workspaceMapContainedDocumentCounts,
   type WorkspaceMapColumns } from "../map/sceneColumns";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
-import { readGraphTokens } from "../shared/graphTokens";
-import { GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, outlinePathData, shapeOutline } from "../shared/nodeShapes";
+import { GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, readGraphTokens } from "../shared/graphTokens";
+import { FORCED_OUTLINE_INSETS, GRAPH_RING_BAND_PX, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, outlinePathData, shapeOutline } from "../shared/nodeShapes";
 import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../shared/rendererTypes";
 import { canAnimateWorkspaceRelationLayout } from "../shared/workspaceLayoutPolicy";
 import { assertWorkspaceMapWithinBudget, isWorkspaceMapWithinBudget, WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
 import { sameWorkspaceMapIndexedGeometry } from "../shared/workspaceMapGeometry";
 import {
-  buildCosmosRelationColors, buildCosmosSceneBuffers, buildWorkspacePointImages, incidentStar,
+  buildCosmosRelationColors, buildCosmosSceneBuffers, incidentStar,
   isReadableWorkspaceMapScene, type CosmosSceneBuffers,
 } from "./cosmosScene";
+import {
+  createWorkspaceCountImageCache, createWorkspaceCountMeasure, workspaceAnnulusImage, workspaceClusterCountText,
+} from "./pointImages";
 import { buildWorkspaceRelationCollisionBasis, type WorkspaceRelationCollisionBasis } from "./relationPhysics";
 import { detectWorkspaceMapWebGL } from "./webglSupport";
 import { createInitialWorkspaceCamera, type InitialWorkspaceCamera } from "./initialCamera";
@@ -130,6 +133,8 @@ const LABEL_MOTION_EPSILON_PX = 0.5;
 const LABEL_FADE_MS = 120;
 /** Overview label slots reserved for the TreeRail folders holding the most documents. */
 const MAJOR_FOLDER_LABELS = 8;
+/** Titles and cluster counts share one face. */
+const WORKSPACE_MAP_LABEL_FONT_FAMILY = "system-ui, sans-serif";
 /** A camera gesture without zoom events this long no longer holds titles. */
 const LABEL_GESTURE_LAPSE_MS = 1_000;
 /** GPU rows reach titles a few simulation steps late; titles look this far ahead at most. */
@@ -197,7 +202,14 @@ export function createWorkspaceCosmosAdapter(
   // The explicit renderer budget bounds forces as well as drawing. This is
   // not a target-hardware performance qualification. Folders exert no force.
   const canAnimateLayout = () => canAnimateWorkspaceRelationLayout(admitted().nodeCount, budget);
-  let buffers = buildCosmosSceneBuffers(columns, tokens, budget, { forcedColors: options.forcedColors });
+  // Cluster counts: the reader's locale, measured and drawn in the label face.
+  const countLocale = document.documentElement.lang || undefined;
+  const sceneOptions = {
+    forcedColors: options.forcedColors,
+    countText: (count: number) => workspaceClusterCountText(count, countLocale),
+    measureCount: createWorkspaceCountMeasure(WORKSPACE_MAP_LABEL_FONT_FAMILY),
+  };
+  let buffers = buildCosmosSceneBuffers(columns, tokens, budget, sceneOptions);
   buffers.positions = solver.initialPositions(columns, buffers.positions);
   // Canonical worker/public/snapshot units never depend on GPU capability.
   // Resolve this SDK-only conversion before the first coordinate upload.
@@ -337,10 +349,6 @@ export function createWorkspaceCosmosAdapter(
     return sparseScene ? [40, 350] : readableScene ? [30, 220] : [10, 60];
   }
 
-  function linkWidth(): number {
-    return keepOverviewContext() ? 0.8 : readableScene ? 0.9 : 0.5;
-  }
-
   function linkTransparencyFloor(): number {
     return options.forcedColors ? 1 : sparseScene ? 0.65 : readableScene ? 0.35 : 0.03;
   }
@@ -400,7 +408,7 @@ export function createWorkspaceCosmosAdapter(
     // fallback collision clearance, never gravity/charge/spring/rest distance.
     const nativeCollision = nativeSpace.toNativeCollisionBasis(collisionBasis);
     const radii = solver.collisionRadii(buffers.pointSizes, buffers.pointShapes, collisionBasis,
-      maxPointDiameterCss(), nativeSpace.scale, admitted().nodeCount);
+      maxPointDiameterCss(), nativeSpace.scale, admitted().nodeCount, buffers.collisionPointSizes);
     if (radii) graph.setPointCollisionRadii(radii);
     graph.setConfigPartial(solver.collisionConfig(forceBasisApplied,
       nativeSpace.toNativeCollisionBasis(forceBasis), nativeCollision, nativeSpace.scale, admitted().nodeCount));
@@ -421,11 +429,19 @@ export function createWorkspaceCosmosAdapter(
     enableSimulation: false,
     simulationLinkDistRandomVariationRange: [1, 1],
     simulationCluster: 0,
-    linkDefaultWidth: linkWidth(),
+    // Every link has the legend's one width, at every scene size.
+    linkDefaultWidth: GRAPH_EDGE_WIDTH_PX,
     hoveredLinkWidthIncrease: 0.6,
     focusedLinkWidthIncrease: 0.6,
-    linkDashLength: 7,
-    linkDashGap: 4,
+    // Legend dashes: citation on the dashed style, containment on the dotted one.
+    linkDashLength: GRAPH_EDGE_PATTERN.citation[0],
+    linkDashGap: GRAPH_EDGE_PATTERN.citation[1],
+    linkDottedDashLength: GRAPH_EDGE_PATTERN.membership[0],
+    linkDottedDashGap: GRAPH_EDGE_PATTERN.membership[1],
+    // Legend folder/grouping ring: the native ring shape's band, CSS px.
+    pointRingWidth: GRAPH_RING_BAND_PX,
+    // Cluster counts and the Agent outline are distance-field images.
+    pointImageSdf: true,
     // Native shaders emit straight RGB with faded alpha; source-over blending
     // is required before the premultiplied canvas is composited by the browser.
     linkBlending: true,
@@ -649,8 +665,21 @@ export function createWorkspaceCosmosAdapter(
     updateLabels(undefined, true);
   }
 
-  const pointImages = buildWorkspacePointImages(tokens);
-  if (pointImages) graph.setImageData(pointImages);
+  // Point images are signed distance fields (crisp at any drawn size): the
+  // forced-colours Agent outline, then one image per distinct cluster count.
+  const outlineImage = workspaceAnnulusImage(tokens.surface, FORCED_OUTLINE_INSETS.circle[1], FORCED_OUTLINE_INSETS.circle[0]);
+  const countImage = createWorkspaceCountImageCache(tokens.surface, WORKSPACE_MAP_LABEL_FONT_FAMILY);
+  let uploadedImageKey: string | null = null;
+  function uploadPointImages(next: CosmosSceneBuffers): boolean {
+    if (!outlineImage) return false;
+    const key = next.countImages.map(({ text, diameterCss }) => `${text}\u0000${diameterCss}`).join("\u0001");
+    if (key === uploadedImageKey) return true;
+    const images = [outlineImage, ...next.countImages.map(({ text, diameterCss }) => countImage(text, diameterCss))];
+    if (!images.every((image): image is ImageData => image !== null)) return false;
+    graph.setImageData(images);
+    uploadedImageKey = key;
+    return true;
+  }
 
   function readPositions(): Float32Array {
     return nativeSpace.fromNativePositions(graph.getPointPositions());
@@ -800,7 +829,7 @@ export function createWorkspaceCosmosAdapter(
         height: availableFrame.height - availableFrame.top - availableFrame.bottom,
       } : { width: canvas.clientWidth, height: canvas.clientHeight };
       positionLayout = solver.createPositionLayout({ columns, positions: buffers.positions,
-        diameters: buffers.pointSizes, shapes: buffers.pointShapes,
+        diameters: buffers.collisionPointSizes, shapes: buffers.pointShapes,
         pins: [...pinned], reducedMotion, restoredSolved: positionLayoutReady,
         unitBasis: positionUnitBasis, viewport: layoutViewport,
         maxDiameterCss: maxPointDiameterCss() }, {
@@ -1212,11 +1241,11 @@ export function createWorkspaceCosmosAdapter(
     writePositions(next.positions);
     graph.setPointColors(next.pointColors);
     graph.setPointShapes(next.pointShapes);
-    if (pointImages) {
+    if (uploadPointImages(next)) {
       graph.setPointImageIndices(next.pointImageIndices);
       graph.setPointImageSizes(next.pointImageSizes);
     }
-    // Draw and pick the emphasised sizes; layout and collision keep reading pointSizes.
+    // Draw and pick the drawn sizes; forces read pointSizes, collision collisionPointSizes.
     graph.setPointSizes(next.drawPointSizes);
     graph.setLinks(next.links);
     graph.setLinkStrength(next.linkStrength);
@@ -1261,7 +1290,7 @@ export function createWorkspaceCosmosAdapter(
     const byKey = (left: number, right: number) =>
       columns.nodeKeys[left] < columns.nodeKeys[right] ? -1 : columns.nodeKeys[left] > columns.nodeKeys[right] ? 1 : 0;
     const rows = Array.from({ length: columns.nodeIds.length }, (_, index) => index);
-    // Major folders name the map's regions first: the TreeRail hubs holding
+    // Major folders name the map's regions first: the TreeRail folders holding
     // the most documents, except one that holds every document.
     const contained = workspaceMapContainedDocumentCounts(columns), documents = admitted().nodeCount;
     const folders = rows.filter((index) => columns.nodeKinds[index] === WORKSPACE_MAP_NODE_KIND.folder
@@ -1540,8 +1569,11 @@ export function createWorkspaceCosmosAdapter(
       candidate.height = height > 0 ? height : 18;
       if (width > 0 && height > 0) labelMeasurements.set(label, { text, full, maxWidth, width, height });
     }
-    const placements = placeWorkspaceMapLabels(candidates.map(({ label, screenX, screenY, width, height, wasVisible }) => ({
+    const placements = placeWorkspaceMapLabels(candidates.map(({ label, node, screenX, screenY, width, height, wasVisible }) => ({
       screenX, screenY, width, height, wasVisible,
+      // A cluster's title starts beside its count disc, never over the number.
+      ...columns.nodeKinds[node] === WORKSPACE_MAP_NODE_KIND.cluster
+        ? { clearance: renderedPointDiameter(node) / 2 + 3 } : {},
       priority: label.dataset.labelPriority === "active" ? "active"
         : label.dataset.labelPriority === "explicit" ? "explicit" : "ordinary",
     })), bounds, { freeze: dragGesture
@@ -1668,7 +1700,7 @@ export function createWorkspaceCosmosAdapter(
       Object.assign(label.style, {
         position: "absolute", left: "0", top: "0", display: "none",
         maxWidth: "144px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
-        color: getComputedStyle(container).color || "#e5e7eb", font: "11px system-ui, sans-serif",
+        color: getComputedStyle(container).color || "#e5e7eb", font: `11px ${WORKSPACE_MAP_LABEL_FONT_FAMILY}`,
         lineHeight: "14px", backgroundColor: "transparent", padding: "2px 4px", boxSizing: "border-box",
         // Paint the surface halo before the ink, leaving a 1.5px outline.
         // A system colour keeps forced-colour browsers from remapping it to ink.
@@ -2127,7 +2159,7 @@ export function createWorkspaceCosmosAdapter(
       assertWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(nextColumns), budget);
       initialCamera?.cancel();
       const sameIdentity = sameGraphVisibleIdentity(columns.identity, nextColumns.identity);
-      const next = buildCosmosSceneBuffers(nextColumns, tokens, budget, { forcedColors: options.forcedColors });
+      const next = buildCosmosSceneBuffers(nextColumns, tokens, budget, sceneOptions);
       next.positions = solver.initialPositions(nextColumns, next.positions);
       const sameScope = columns.identity.actorId === nextColumns.identity.actorId
         && columns.identity.workspaceId === nextColumns.identity.workspaceId;
@@ -2195,7 +2227,6 @@ export function createWorkspaceCosmosAdapter(
           enableDrag: true,
           linkBlending: true,
           transitionDuration: 0,
-          linkDefaultWidth: linkWidth(),
           linkVisibilityMinTransparency: linkTransparencyFloor(),
           pointGreyoutColor: keepOverviewContext() ? tokens.node.folder : undefined,
           pointGreyoutOpacity: keepOverviewContext() ? 0.3 : undefined,

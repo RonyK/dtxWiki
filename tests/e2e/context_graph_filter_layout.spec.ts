@@ -87,11 +87,9 @@ for (const viewport of viewports) {
       await sourceRow.click();
       await expect(details.locator("h5.graph-details-title")).toHaveText(`Graph source ${suffix}`);
       await expect(details.getByRole("link", { name: "Open", exact: true })).toBeVisible();
-      await details.locator(".graph-details-more > summary").click();
       await expect(details.getByRole("button", { name: "Center", exact: true })).toBeVisible();
       await details.getByRole("button", { name: "Pin", exact: true }).click();
       await expect(details.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
-      await details.locator(".graph-details-more > summary").click();
       await stage.scrollIntoViewIfNeeded();
       const selectedGeometry = await graph.evaluate((element) => {
         const owner = element.querySelector(".graph-local-stage")!.getBoundingClientRect();
@@ -114,7 +112,7 @@ for (const viewport of viewports) {
       expect(selectedGeometry.painted).toBe(true);
       if (selectedGeometry.stageWidth <= 760) {
         // Details follows the canvas in the page and leaves it uncovered;
-        // the pinned actions stay clear of its title row and close control.
+        // its title row and close control are not covered.
         expect(selectedGeometry.panelTop).toBeGreaterThanOrEqual(selectedGeometry.stageHeight);
         const closeHit = await details.getByRole("button", { name: "Clear selection", exact: true }).evaluate((element) => {
           const bounds = element.getBoundingClientRect();
@@ -132,7 +130,6 @@ for (const viewport of viewports) {
       await expect(details).toBeHidden();
       await expect(graph).toBeFocused();
       await sourceRow.click();
-      await details.locator(".graph-details-more > summary").click();
       await expect(details.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
       await details.getByRole("button", { name: "Clear selection", exact: true }).click();
       await expect(details).toBeHidden();

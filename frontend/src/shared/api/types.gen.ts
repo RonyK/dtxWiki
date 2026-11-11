@@ -12599,8 +12599,6 @@ export interface components {
             id: string;
             /** Label */
             label: string;
-            /** Parent Document Id */
-            parent_document_id?: string | null;
             /** Path */
             path: string;
             /** Primary Folder Id */
@@ -12642,6 +12640,11 @@ export interface components {
             layer: "knowledge" | "evidence" | "structure" | "provenance";
             /** Occurrence Weight */
             occurrence_weight?: number | null;
+            /**
+             * Primary
+             * @default false
+             */
+            primary: boolean;
             /**
              * Relation Count
              * @default 1
@@ -12749,43 +12752,6 @@ export interface components {
              */
             status: "document" | "cluster" | "unavailable";
         };
-        /** WorkspaceGraphFolder */
-        WorkspaceGraphFolder: {
-            /** Direct Member Count */
-            direct_member_count: number;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Label */
-            label: string;
-            /** Parent Folder Id */
-            parent_folder_id?: string | null;
-        };
-        /** WorkspaceGraphFolderEdgeSlice */
-        WorkspaceGraphFolderEdgeSlice: {
-            /** Edge Id */
-            edge_id: string;
-            /** Occurrence Weight */
-            occurrence_weight: number;
-            /** Relation Count */
-            relation_count: number;
-            /**
-             * Source Entity Kind
-             * @enum {string}
-             */
-            source_entity_kind: "context" | "library" | "agent";
-            /** Source Folder Id */
-            source_folder_id?: string | null;
-            /**
-             * Target Entity Kind
-             * @enum {string}
-             */
-            target_entity_kind: "context" | "library" | "agent";
-            /** Target Folder Id */
-            target_folder_id?: string | null;
-        };
         /** WorkspaceGraphFolderFilter */
         WorkspaceGraphFolderFilter: {
             /** Exclude */
@@ -12795,41 +12761,24 @@ export interface components {
             /** Only */
             only?: (string | "unplaced")[];
         };
-        /** WorkspaceGraphFolderMembership */
-        WorkspaceGraphFolderMembership: {
+        /** WorkspaceGraphFolderNode */
+        WorkspaceGraphFolderNode: {
             /**
-             * Entity Kind
+             * Folder Id
+             * Format: uuid
+             */
+            folder_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
-            entity_kind: "context" | "library" | "agent";
-            /** Folder Id */
-            folder_id?: string | null;
-            /** Member Count */
-            member_count: number;
-            /** Node Id */
-            node_id: string;
-        };
-        /**
-         * WorkspaceGraphFolderTopology
-         * @description Lossless, actor-visible folder inputs, never layout coordinates.
-         *
-         *     Membership distributions retain mixed aggregates. Correlated edge slices
-         *     retain their real endpoint folder/kind pair, including aggregate self-edges;
-         *     independent source/target marginals cannot reconstruct that information.
-         */
-        WorkspaceGraphFolderTopology: {
-            /** Edge Slices */
-            edge_slices: components["schemas"]["WorkspaceGraphFolderEdgeSlice"][];
-            /** Folders */
-            folders: components["schemas"]["WorkspaceGraphFolder"][];
-            /** Memberships */
-            memberships: components["schemas"]["WorkspaceGraphFolderMembership"][];
-            /**
-             * Schema Version
-             * @default workspace-graph-folders.v1
-             * @constant
-             */
-            schema_version: "workspace-graph-folders.v1";
+            grain: "folder";
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Path */
+            path: string;
         };
         /**
          * WorkspaceGraphMapCapability
@@ -12945,7 +12894,6 @@ export interface components {
             expansions?: components["schemas"]["WorkspaceGraphExpansionOutcome"][];
             facet_counts: components["schemas"]["WorkspaceGraphFacetCounts"];
             focus?: components["schemas"]["WorkspaceGraphFocus"] | null;
-            folder_topology?: components["schemas"]["WorkspaceGraphFolderTopology"] | null;
             /**
              * Generated At
              * Format: date-time
@@ -12962,7 +12910,7 @@ export interface components {
             /** Metric Basis */
             metric_basis: string;
             /** Nodes */
-            nodes: (components["schemas"]["WorkspaceGraphDocumentNode"] | components["schemas"]["WorkspaceGraphClusterNode"])[];
+            nodes: (components["schemas"]["WorkspaceGraphDocumentNode"] | components["schemas"]["WorkspaceGraphClusterNode"] | components["schemas"]["WorkspaceGraphFolderNode"])[];
             /** Omission Reasons */
             omission_reasons?: ("document_budget" | "relation_budget" | "projection_partial" | "privacy_policy" | "renderer_fallback")[];
             /**

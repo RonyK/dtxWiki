@@ -1,20 +1,17 @@
 """Earlier graph hot paths, and the seeded universes they are compared on.
 
-The reveal search and the folder topology were rewritten to share per-probe and
-per-relation work; their output must not change by a byte. The functions here
-are the earlier algorithms (copies: the production ones have changed) and a
-generator of small universes that exercise them.
+The reveal search was rewritten to share per-probe work; its output must not
+change by a byte. The functions here are the earlier algorithm (copies: the
+production one has changed) and a generator of small universes that exercise it.
 """
 
 from __future__ import annotations
 
 import random
-from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from uuid import UUID
 
 import backend.services.workspace_graph_service as graph
-from backend.schemas.workspace_graph import WorkspaceGraphFolderTopology
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 KINDS = (
@@ -162,87 +159,3 @@ def reference_reveal(
     return sorted(
         best, key=lambda group: graph._group_sort_key(group, documents)
     ), probes
-
-
-def reference_folder_topology(documents, relations, rendered):
-    """``_folder_topology`` with an edge id hashed for every authored relation."""
-
-    def text(value):
-        return "" if value is None else str(value)
-
-    node_of: dict = {}
-    folders: dict = {}
-    direct: Counter = Counter()
-    memberships: Counter = Counter()
-    for group in rendered.groups:
-        for member in group.members:
-            document = documents[member]
-            node_of[member] = graph._group_id(group, documents)
-            memberships[
-                (node_of[member], document.folder_id, document.entity_kind)
-            ] += 1
-            direct[document.folder_id] += 1
-            if document.primary is not None:
-                folders.update({f.id: f for f in document.primary.folder_ancestors})
-    emitted = {edge.id for edge in rendered.edges}
-    slices: defaultdict = defaultdict(lambda: [0, 0])
-    for relation in relations:
-        edge_id = graph._aggregate_edge_id(
-            node_of[relation.source],
-            node_of[relation.target],
-            relation.kind,
-            relation.layer,
-        )
-        if edge_id in emitted:
-            source, target = documents[relation.source], documents[relation.target]
-            counts = slices[
-                (
-                    edge_id,
-                    source.folder_id,
-                    source.entity_kind,
-                    target.folder_id,
-                    target.entity_kind,
-                )
-            ]
-            counts[0] += 1
-            counts[1] += relation.occurrence_weight
-    return WorkspaceGraphFolderTopology.model_validate(
-        {
-            "folders": [
-                {
-                    "id": folder.id,
-                    "label": folder.label[:200],
-                    "parent_folder_id": folder.parent_folder_id,
-                    "direct_member_count": direct[folder.id],
-                }
-                for folder in sorted(folders.values(), key=lambda f: str(f.id))
-            ],
-            "memberships": [
-                {
-                    "node_id": node_id,
-                    "folder_id": folder_id,
-                    "entity_kind": entity_kind,
-                    "member_count": count,
-                }
-                for (node_id, folder_id, entity_kind), count in sorted(
-                    memberships.items(),
-                    key=lambda item: (item[0][0], text(item[0][1]), item[0][2]),
-                )
-            ],
-            "edge_slices": [
-                {
-                    "edge_id": edge_id,
-                    "source_folder_id": source_folder,
-                    "source_entity_kind": source_kind,
-                    "target_folder_id": target_folder,
-                    "target_entity_kind": target_kind,
-                    "relation_count": count,
-                    "occurrence_weight": weight,
-                }
-                for (edge_id, source_folder, source_kind, target_folder, target_kind), (
-                    count,
-                    weight,
-                ) in sorted(slices.items(), key=lambda item: tuple(map(text, item[0])))
-            ],
-        }
-    )

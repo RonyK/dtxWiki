@@ -25,7 +25,10 @@ from backend.schemas.graph import (
 )
 from backend.schemas.tree import TreeFolderCreateRequest
 from backend.services.graph_query_service import GraphQueryService
-from backend.services.indexing.edge_registry import refresh_page_edge_projection
+from backend.services.indexing.edge_registry import (
+    refresh_page_edge_projection,
+    refresh_tree_edge_projection,
+)
 from backend.services.tree_service import TreeService
 from backend.tests.integration.test_library_canonical_read_paths import (
     _seed_canonical_fixture,
@@ -89,6 +92,7 @@ def test_production_shaped_page_shows_links_tree_and_citations(
             actor_id="mixed-scene-test",
         )
         folder_id = folder.id
+        root_id = root.id
 
     seed = _write(
         page_service,
@@ -124,6 +128,7 @@ def test_production_shaped_page_shows_links_tree_and_citations(
             )
         )
         from backend.models.document_reference import ContextCitationPublication
+
         # Production-shaped legacy evidence predates publication manifests.
         marker = session.get(ContextCitationPublication, seed.version_id)
         session.delete(marker)
@@ -154,7 +159,8 @@ def test_production_shaped_page_shows_links_tree_and_citations(
             )
         )
 
-    # A sub-document of the seed hangs from the seed, not from the folder.
+    # A sub-document of the seed hangs from the seed, not from the folder. The
+    # seed's secondary placement at the root is a second, equal containment.
     child = _write(
         page_service,
         slug="mixed-child",
@@ -162,6 +168,25 @@ def test_production_shaped_page_shows_links_tree_and_citations(
         body="# Mixed Child\n\nPart of [[mixed-seed]], and [[mixed-seed]] again.",
         parent_id=seed_placement_id,
     )
+    with session_factory.begin() as session:
+        session.add(
+            WorkspaceTreeNode(
+                id=uuid4(),
+                workspace_id=workspace_id,
+                section="context",
+                node_kind="page_ref",
+                parent_id=root_id,
+                sort_key="mixed-seed-secondary",
+                title="Mixed Seed elsewhere",
+                slug="mixed-seed-secondary",
+                target_kind="context_page",
+                target_id=seed_id,
+                primary_placement=False,
+                visibility_status="visible",
+            )
+        )
+        session.flush()
+        refresh_tree_edge_projection(session, workspace_id)
 
     def query(mode):
         with session_factory() as session:
@@ -184,12 +209,19 @@ def test_production_shaped_page_shows_links_tree_and_citations(
     for mode in ("appearance", "current"):
         scene = query(mode)
         node_by_entity = {node.entity_id: node.id for node in scene.nodes}
-        child_containers = [
-            edge.source
+        containers = {
+            (edge.source, edge.target)
             for edge in scene.edges
-            if edge.edge_kind == "tree" and edge.target == node_by_entity[child.id]
-        ]
-        assert child_containers == [node_by_entity[seed_id]], mode
+            if edge.edge_kind == "tree"
+        }
+        assert {
+            source
+            for source, target in containers
+            if target == node_by_entity[child.id]
+        } == {node_by_entity[seed_id]}, mode
+        assert {
+            source for source, target in containers if target == node_by_entity[seed_id]
+        } == {node_by_entity[folder_id], node_by_entity[root_id]}, mode
         assert seed_placement_id not in node_by_entity, mode
     payload = query("appearance")
 

@@ -8,21 +8,10 @@ import {
 import type { EdgeDisplayData, NodeDisplayData, RenderParams } from "sigma/types";
 import { floatColor } from "sigma/utils";
 
-import { GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, type GraphEdgeVisualKind } from "../shared/graphTokens";
+import { GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, type GraphEdgeVisualKind } from "../shared/graphTokens";
 
-// Local strokes deliberately use CSS-pixel widths. The Workspace Map has a
-// separate renderer and should not inherit these values or this edge buffer.
-export const LOCAL_EDGE_HALF_WIDTH_PX = {
-  link: 0.75,
-  citation: 0.75,
-  coAccess: 0.8,
-  membership: 0.65,
-  actionWrite: 1,
-  actionCite: 0.85,
-  actionRead: 0.55,
-  actionReference: 0.5,
-  action: 0.85,
-} as const satisfies Record<GraphEdgeVisualKind, number>;
+// Every line has the legend's one CSS-pixel width; half of it on each side.
+export const LOCAL_EDGE_HALF_WIDTH_PX = GRAPH_EDGE_WIDTH_PX / 2;
 
 // Sigma sizes an arrowhead from the edge's `size`, which hover and history
 // emphasis change. The head keeps one size; only its line is emphasised.
@@ -64,6 +53,7 @@ const UNIFORMS = [
   "u_halfWidthPx",
   "u_dashOnPx",
   "u_dashOffPx",
+  "u_rampPx",
 ] as const;
 type EdgeUniform = (typeof UNIFORMS)[number];
 
@@ -89,6 +79,7 @@ attribute float a_normalCoef;
 uniform mat3 u_matrix;
 uniform vec2 u_viewportPx;
 uniform float u_halfWidthPx;
+uniform float u_rampPx;
 
 varying vec4 v_color;
 varying float v_alongPx;
@@ -102,8 +93,9 @@ void main(void) {
   vec2 perpendicularPx = edgeLengthPx > 0.0001
     ? vec2(-edgePx.y, edgePx.x) / edgeLengthPx
     : vec2(0.0, 1.0);
+  // The quad also holds half a ramp outside the stroke, as the Map's line does.
   vec2 offsetClip = perpendicularPx * a_normalCoef
-    * u_halfWidthPx * (2.0 / u_viewportPx);
+    * (u_halfWidthPx + 0.5 * u_rampPx) * (2.0 / u_viewportPx);
 
   gl_Position = vec4(mix(startClip, endClip, a_positionCoef) + offsetClip, 0.0, 1.0);
   v_alongPx = a_positionCoef * edgeLengthPx;
@@ -128,6 +120,7 @@ precision mediump float;
 uniform float u_halfWidthPx;
 uniform float u_dashOnPx;
 uniform float u_dashOffPx;
+uniform float u_rampPx;
 
 varying vec4 v_color;
 varying float v_alongPx;
@@ -142,9 +135,9 @@ void main(void) {
   if (u_dashOffPx > 0.0 && mod(v_alongPx, u_dashOnPx + u_dashOffPx) >= u_dashOnPx) {
     discard;
   }
-  // A quarter CSS pixel of feather preserves thin membership strokes at DPR 1.
-  float inner = max(0.0, u_halfWidthPx - 0.25);
-  float alpha = 1.0 - smoothstep(inner, u_halfWidthPx, abs(v_across) * u_halfWidthPx);
+  // The Map line's anti-aliasing: a one-device-pixel ramp centred on the stroke edge.
+  float distancePx = abs(v_across) * (u_halfWidthPx + 0.5 * u_rampPx);
+  float alpha = 1.0 - smoothstep(u_halfWidthPx - 0.5 * u_rampPx, u_halfWidthPx + 0.5 * u_rampPx, distancePx);
   gl_FragColor = vec4(v_color.rgb, v_color.a * alpha);
 #endif
 }
@@ -152,7 +145,7 @@ void main(void) {
 
 function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
   const dash = GRAPH_EDGE_PATTERN[kind];
-  const halfWidthPx = LOCAL_EDGE_HALF_WIDTH_PX[kind];
+  const halfWidthPx = LOCAL_EDGE_HALF_WIDTH_PX;
 
   return class LocalEdgeProgram extends EdgeProgram<EdgeUniform> {
     getDefinition(): ProgramDefinition<EdgeUniform> {
@@ -201,6 +194,8 @@ function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
       gl.uniform1f(uniformLocations.u_halfWidthPx, isPicking
         ? Math.max(halfWidthPx, PICK_HALF_WIDTH_PX)
         : halfWidthPx);
+      // One device pixel in CSS px: the same ramp as the Map's line shader.
+      gl.uniform1f(uniformLocations.u_rampPx, isPicking ? 0 : 1 / Math.max(1, params.pixelRatio));
       // The picking shader removes dash uniforms at compile time.
       if (uniformLocations.u_dashOnPx) {
         gl.uniform1f(uniformLocations.u_dashOnPx, dash?.[0] ?? 0);

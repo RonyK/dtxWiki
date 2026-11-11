@@ -14,7 +14,9 @@
       "knowledge": "Knowledge",
       "evidence": "Evidence",
       "activity": "Activity",
-      "action": "Action"
+      "action": "Action",
+      "structure": "Structure",
+      "provenance": "Provenance"
     },
     "graphDirection": {
       "in": "Inbound",
@@ -96,9 +98,9 @@
       "viewed": "Viewed"
     },
     "graphEntityKind": {
-      "context_page": "Context page",
-      "context_page_version": "Context page version",
-      "library_item": "Library item",
+      "context_page": "Context document",
+      "context_page_version": "Document version",
+      "library_item": "Library material",
       "library_item_version": "Library item version",
       "library_artifact": "Library artifact",
       "mcp_chat_session": "MCP chat session",
@@ -106,14 +108,14 @@
       "ask_turn": "Ask turn",
       "review_item": "Review item",
       "review_decision": "Review decision",
-      "agent_page": "Agent page",
+      "agent_page": "Agent document",
       "actor": "Actor",
       "audit_event": "Audit event",
       "mcp_tool_call": "MCP tool call",
       "change_set": "Change set",
       "change_operation": "Change operation",
       "graph_observation": "Graph observation",
-      "workspace_tree_node": "Workspace tree node",
+      "workspace_tree_node": "Folder",
       "library_sync_run": "Library sync run",
       "mcp_chat_session_group": "MCP chat group",
       "ask_session_group": "Ask session group"
@@ -206,14 +208,7 @@
     "expandCap": "Collapse an expanded page before adding another (maximum 8 seeds).",
     "expandAvailable": "Additional Context pages can be expanded again.",
     "localToolbar": {
-      "relationships": "Relationships",
-      "link": "Links",
-      "citation": "Citations",
-      "coAccess": "Read together",
-      "membership": "Membership",
-      "action": "Actions",
-      "labels": "Labels",
-      "moreFilters": "More filters"
+      "relationships": "Relationships"
     },
     "filters": {
       "heading": "Graph filters",
@@ -230,7 +225,8 @@
       "active": "Active filters",
       "clearAll": "Clear all",
       "remove": "Remove filter: without {{value}}",
-      "without": "Without {{value}}"
+      "without": "Without {{value}}",
+      "refine": "Refine"
     },
     "legend": {
       "heading": "Legend",
@@ -243,27 +239,33 @@
         "library": "Library material",
         "conversation": "Chat or activity record",
         "folder": "Folder",
-        "seed": "This document"
+        "seed": "This document",
+        "cluster": "Aggregate cluster"
       },
       "edge": {
         "link": "Link",
         "citation": "Citation",
         "coAccess": "Often read together",
-        "membership": "Folder membership",
+        "membership": "Contains",
         "action": "Action occurrence",
         "removed": "Removed relationship",
         "actionWrite": "Wrote or edited",
         "actionCite": "Cited",
         "actionRead": "Read",
         "actionReference": "Looked at structure",
-        "actionOther": "Other activity"
+        "actionOther": "Other activity",
+        "other": "Other relationships"
       },
       "edgeNote": {
         "action": "Recorded activity such as creating, editing, reviewing, searching and citing",
         "actionOther": "Review, publish, search and other records"
       },
       "history": "History marks",
-      "eventTarget": "Current event target"
+      "eventTarget": "Current event target",
+      "size": "Node size",
+      "sizeRelations": "Relationships shown",
+      "sizeFolder": "Folders: items inside",
+      "sizeCluster": "Aggregate clusters: number = documents inside"
     },
     "timeline": {
       "heading": "Timeline",
@@ -324,7 +326,8 @@
       "expandSheet": "Expand details",
       "collapseSheet": "Collapse details",
       "records": "Records of this version",
-      "review": "Review"
+      "review": "Review",
+      "containedItems": "Items inside"
     },
     "citationEvidence": {
       "title": "Retained citation evidence",
@@ -379,7 +382,7 @@
         "name": "Current relationships",
         "short": "Current",
         "question": "What is connected now",
-        "description": "Explore current links, citations, read-together signals, and folder membership. There is no time navigation.",
+        "description": "Explore current links, citations, read-together signals, and containment. There is no time navigation.",
         "nodes": "Documents, sources, folders, and connected items",
         "edges": "Currently valid relationships",
         "time": "Time of query",
@@ -479,19 +482,18 @@
       "sessionDetailWithOthers_other": "This document: {{verbs}} · {{count}} other documents"
     },
     "list": {
-      "title": "Graph list",
+      "title": "List",
       "counts": "{{nodes}} · {{edges}}",
       "nodeCount_one": "{{value}} node",
       "nodeCount_other": "{{value}} nodes",
       "relationCount_one": "{{value}} relationship",
       "relationCount_other": "{{value}} relationships",
       "search": "Find in the graph list",
-      "searchPlaceholder": "Name or kind",
       "clearSearch": "Clear list search",
       "status": "“{{query}}” matches {{nodes}} · {{edges}}",
       "noMatch": "Nothing matches “{{query}}”.",
-      "incomingNote": "point to the seed",
-      "outgoingNote": "the seed points to",
+      "incomingNote": "Other nodes → seed",
+      "outgoingNote": "Seed → other nodes",
       "undirectedNote": "connected both ways",
       "groups": {
         "seed": "Seed relationships",
@@ -512,30 +514,10 @@
     "relations": {
       "title": "Relationships",
       "none": "No relationships are shown in this scene.",
-      "search": {
-        "document": "Find in the selected document's relationships",
-        "library": "Find in the selected source's relationships",
-        "folder": "Find in the selected folder's relationships",
-        "other": "Find in the selected item's relationships"
-      },
-      "self": {
-        "document": "Selected document",
-        "library": "Selected source",
-        "folder": "Selected folder",
-        "other": "Selected item"
-      },
-      "incomingNote": {
-        "document": "to the selected document",
-        "library": "to the selected source",
-        "folder": "to the selected folder",
-        "other": "to the selected item"
-      },
-      "outgoingNote": {
-        "document": "from the selected document",
-        "library": "from the selected source",
-        "folder": "from the selected folder",
-        "other": "from the selected item"
-      },
+      "search": "Find in the selected node's relationships",
+      "self": "Selected node",
+      "incomingNote": "Other nodes → selected node",
+      "outgoingNote": "Selected node → other nodes",
       "undirectedNote": "connected both ways"
     },
     "seedPath": {
@@ -553,7 +535,11 @@
         "library": "Library",
         "agent": "Agent",
         "agentVersion": "Agent version",
-        "folder": "Folder"
+        "folder": "Folder",
+        "cluster": "Cluster",
+        "folder_cluster": "Folder",
+        "link_cluster": "Cluster",
+        "other_cluster": "Other"
       },
       "edge": {
         "wikilink": "Link",
@@ -561,7 +547,7 @@
         "citation_source": "Source",
         "citation_agent": "Citation",
         "ask_citation": "Evidence",
-        "tree": "Membership",
+        "tree": "Contains",
         "co_access": "Read together"
       }
     },
@@ -572,8 +558,8 @@
       "targetLink": "Target · linked document",
       "sourceCitation": "Source · citing document",
       "targetCitation": "Target · cited item",
-      "sourceMembership": "Source · folder",
-      "targetMembership": "Target · member"
+      "sourceMembership": "Source · container",
+      "targetMembership": "Target · contained item"
     },
     "viewMode": {
       "group": "View",
@@ -612,6 +598,16 @@
         "changes_requested": "Changes requested",
         "rejected": "Rejected"
       }
+    },
+    "layoutPause": "Pause layout",
+    "layoutResume": "Resume layout",
+    "layoutReducedMotion": "Layout motion is off",
+    "layoutFixed": "Fixed layout for large maps",
+    "exportUnavailable": "Export unavailable",
+    "display": {
+      "menu": "View",
+      "labels": "Show labels",
+      "relationships": "Show relationships"
     }
   },
   "workspaceGraph": {
@@ -669,7 +665,6 @@
       "visibleCoverage": "{{visible}}/{{total}} documents · {{representation}}",
       "clusterCoverage_one": "{{shown}} shown · {{grouped}} in {{clusters}} cluster",
       "clusterCoverage_other": "{{shown}} shown · {{grouped}} in {{clusters}} clusters",
-      "view": "View",
       "mapSize": "Map node limit",
       "mapSize2k": "2,000 nodes",
       "mapSize10k": "10,000 nodes · PC",
@@ -685,8 +680,6 @@
       "focusOverride": "Showing a temporary unfiltered published scene for the selected document. Saved map filters have not changed.",
       "focusUnavailable": "The selected document is not available in this published map. Saved map filters have not changed.",
       "findVisible": "Find in visible map",
-      "findVisiblePlaceholder": "Highlight matches and narrow the list without moving the map",
-      "findVisiblePlaceholderMobile": "Find and highlight in this map",
       "empty": "No visible documents match these filters",
       "emptyBody": "Reset the staged and visible-map filters to return to the published scene.",
       "emptyFolders": "No folders match these filters",
@@ -702,15 +695,12 @@
       "closeCanvas": "Close canvas",
       "closeCanvasLabel": "Close fullscreen canvas",
       "selectionFocus": "A selection is active. Other relationships may appear faded.",
-      "clearSelection": "Clear selection",
-      "clearSelectionAction": "Clear",
       "inspectorAttention": "Selected: {{label}}",
       "noticeMore": "Details",
       "noticeLess": "Less",
       "noticeDismiss": "Dismiss notice"
     },
     "card": {
-      "label": "Selection summary",
       "details": "Details"
     },
     "expandedGroups": {
@@ -745,7 +735,6 @@
       "library": "Library",
       "folder": "Folder",
       "time": "Time",
-      "refine": "Refine",
       "quick": "Quick filters",
       "orphans": "Orphans",
       "highlyReferenced": "Highly referenced",
@@ -767,37 +756,10 @@
       "metricBasis": "Metric basis",
       "revision": "Revision {{revision}} · {{algorithm}}"
     },
-    "legend": {
-      "title": "Legend and metric meaning",
-      "shapes": "Node colors and shapes",
-      "context": "Context document",
-      "library": "Library material",
-      "cluster": "Aggregate cluster · larger means more documents",
-      "lines": "Relationship line styles",
-      "size": "Node size metric",
-      "visibleRelationMetric": "Node size: relationships shown in this map (bounded square-root scale).",
-      "linksMetric": "Node size: Referenced by N visible documents (bounded square-root scale).",
-      "evidenceMetric": "Node size: visible evidence relationship count (bounded square-root scale).",
-      "uniformMetric": "Node size is uniform for this lens; it does not encode importance.",
-      "agent": "Agent document",
-      "link": "Link",
-      "citation": "Citation"
-    },
     "enums": {
-      "context": "Context",
-      "library": "Library",
       "folder_cluster": "Folder cluster",
       "link_cluster": "Link cluster",
       "other_cluster": "Other bounded cluster",
-      "wikilink": "Wiki link",
-      "citation_page": "Page citation",
-      "citation_source": "Source citation",
-      "knowledge": "Knowledge",
-      "evidence": "Evidence",
-      "structure": "Structure",
-      "provenance": "Provenance",
-      "directed": "Directed",
-      "undirected": "Undirected",
       "exact": "Exact",
       "aggregated": "Aggregated",
       "grouped": "Grouped by folder",
@@ -805,9 +767,7 @@
       "capped": "Capped",
       "partial": "Partial",
       "privacy_suppressed": "Privacy suppressed",
-      "unknown": "Other visible relationship",
-      "agent": "Agent",
-      "citation_agent": "Agent citation"
+      "unknown": "Other visible relationship"
     },
     "metrics": {
       "combined": "Visible published links and citation relationships",
@@ -820,11 +780,8 @@
       "unknown": "Server-defined actor-visible metric"
     },
     "list": {
-      "title": "Map items",
-      "virtualKeyboardHint": "{{count}} entries. Use Up/Down, Page Up/Down, Home, or End to move through this list.",
-      "documents": "Documents and clusters",
+      "documents": "Nodes",
       "relationships": "Relationships",
-      "open": "Open",
       "expand": "Expand cluster",
       "expandAction": "Expand",
       "expanding": "Expanding…",
@@ -839,15 +796,13 @@
       "relationCount_one": "{{count}} relationship",
       "relationCount_other": "{{count}} relationships",
       "hint": "Type in “Find in visible map” above the map to list matching documents and relationships here. Open a section to browse without searching, 10 at a time.",
-      "status": "“{{query}}”: {{nodes}} documents or clusters · {{relations}} relationships",
-      "noMatch": "Nothing in the visible map matches “{{query}}”. Hidden documents are not searched; check View › Show unlinked documents or Refine.",
-      "noDocuments": "No matching documents or clusters.",
+      "noDocuments": "No matching nodes.",
       "noRelationships": "No matching relationships.",
       "groups": {
         "both": "Between matches",
         "kind": "Kind name matches",
-        "outgoing": "Matches → other documents",
-        "incoming": "Other documents → matches"
+        "outgoing": "Matches → other nodes",
+        "incoming": "Other nodes → matches"
       },
       "expandCluster": "Expand cluster: {{label}}",
       "clusterMeta": "{{members}} members · {{relations}} relations",
@@ -855,62 +810,21 @@
       "referenceMetricShort_other": "{{count}} references",
       "evidenceMetricShort_one": "{{count}} evidence",
       "evidenceMetricShort_other": "{{count}} evidence",
-      "combinedMetricShort": "{{references}} references · {{evidence}} evidence"
+      "combinedMetricShort": "{{references}} references · {{evidence}} evidence",
+      "noMatchHint": "Hidden documents are not searched; check View › Show unlinked documents or Refine."
     },
     "details": {
-      "title": "Details",
-      "empty": "Select a document, cluster, or relationship.",
-      "kind": "Kind",
       "members": "Members",
       "relations": "Relations",
-      "relationship": "Relationship",
-      "source": "Source",
-      "target": "Target",
-      "layer": "Layer",
-      "direction": "Direction",
       "relationsRepresented": "Relations represented",
       "crossFolder": "Cross-folder",
       "yes": "Yes",
       "no": "No",
-      "primaryFolder": "Primary folder",
       "referencedBy": "Referenced by",
       "referencedByValue": "{{count}} visible documents",
       "evidence": "Evidence",
       "alsoAppears": "Also appears in",
-      "openDocument": "Open document",
-      "centerMap": "Center on map",
-      "centerAction": "Center",
-      "explore": "Explore neighborhood",
-      "exploreAction": "Explore",
-      "sourceRoleLink": "From · links",
-      "sourceRoleCitation": "From · cites",
-      "targetRoleLink": "To · linked",
-      "targetRoleCitation": "To · cited"
-    },
-    "relations": {
-      "title": "Relationships",
-      "none": "No relationships in the visible map.",
-      "searchDocument": "Find in this document's relationships",
-      "searchCluster": "Find in this cluster's relationships",
-      "incomingNoteDocument": "to this document",
-      "incomingNoteCluster": "to this cluster",
-      "outgoingNoteDocument": "from this document",
-      "outgoingNoteCluster": "from this cluster",
-      "selfDocument": "This document",
-      "selfCluster": "This cluster"
-    },
-    "chips": {
-      "context": "Context",
-      "library": "Library",
-      "agent": "Agent",
-      "cluster": "Cluster",
-      "folder_cluster": "Folder",
-      "link_cluster": "Cluster",
-      "other_cluster": "Other",
-      "wikilink": "Link",
-      "citation_page": "Citation",
-      "citation_source": "Source",
-      "ask_citation": "Evidence"
+      "explore": "Explore neighborhood"
     },
     "drawer": {
       "close": "Close Refine data",
@@ -951,48 +865,17 @@
       "to": "To",
       "invalidTime": "The start date must be before the end date.",
       "display": "Display settings · immediate",
-      "showLabels": "Show labels",
       "showLabelsHint": "At overview zoom, readable labels are prioritized. Zoom in or select a node to reveal its full title.",
       "showOrphansHint": "Immediate display setting. Complete scenes hide unlinked documents by default; partial scenes retain documents whose relationships may be omitted.",
-      "showRelationships": "Show relationships",
       "impact": "Impact preview",
       "impactUnknown": "Build the initial scene to preview actor-visible facet impact.",
       "impactValue": "Up to {{count}} visible document candidates based on returned facet counts.",
       "cancel": "Cancel"
     },
     "canvas": {
-      "aria": "Knowledge Map canvas controls",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out",
-      "fit": "Fit graph",
-      "pause": "Pause layout",
-      "resume": "Resume layout",
-      "fixedLayout": "Fixed layout for large maps",
-      "fixedLayoutHint": "Large maps use a stable layout. Zoom in to inspect relationships between dense points; you can still pan and select documents.",
-      "reducedMotionLayout": "Layout motion is off",
-      "reset": "Reset viewport, pins, and selection",
-      "export": "Export visible map",
-      "exportUnavailable": "Export unavailable"
+      "fixedLayoutHint": "Large maps use a stable layout. Zoom in to inspect relationships between dense points; you can still pan and select documents."
     },
     "folders": {
-      "groupByFolder": "Folder context",
-      "primaryOnly": "Optional primary-folder information. Document positions and relationships stay unchanged; secondary placements remain in document details.",
-      "unavailable": "Folder context is unavailable for this response; the map and list remain usable.",
-      "index_one": "Folder index · {{count}} visible folder",
-      "index_other": "Folder index · {{count}} visible folders",
-      "detailsLabel": "Folder members and relationships",
-      "close": "Close folder details",
-      "parent": "Parent folder: {{label}}",
-      "children": "Nested folders",
-      "members_one": "Direct members ({{count}} document)",
-      "members_other": "Direct members ({{count}} documents)",
-      "fragment_one": "Aggregate membership · {{count}} document",
-      "fragment_other": "Aggregate membership · {{count}} documents",
-      "moreMembers_one": "{{count}} more member row is not shown.",
-      "moreMembers_other": "{{count}} more member rows are not shown.",
-      "bundles": "Relationships with other folders",
-      "bundleLimit": "Counts summarize the original visible relationships. Folder context does not hide links or change document positions.",
-      "directions": "Outgoing {{outgoing}} · incoming {{incoming}} · undirected {{undirected}}",
       "unplaced": "No visible placement"
     },
     "expansion": {
@@ -1020,20 +903,12 @@
     "openDocument": "Open document: {{label}}",
     "relationName": "{{source}} to {{target}}, {{kind}}",
     "relationNameUndirected": "{{source}} and {{target}}, {{kind}}",
-    "searchPlaceholder": "Name, folder or kind",
+    "searchPlaceholder": "Name, location or kind",
     "clearSearch": "Clear relationship search",
     "searchStatus": "{{shown}} of {{total}} match",
     "noMatch": "No relationships match “{{query}}”.",
     "incoming": "Incoming",
     "outgoing": "Outgoing",
-    "undirected": "No direction",
-    "lines": {
-      "link": "Links (solid line)",
-      "citation": "Citations and sources (dashed line)",
-      "coAccess": "Read together (dotted line)",
-      "membership": "Folder membership (dashed line)",
-      "action": "Actions (long dashes)",
-      "other": "Other relationships"
-    }
+    "undirected": "No direction"
   }
 }

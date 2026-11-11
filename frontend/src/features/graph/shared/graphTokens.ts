@@ -3,8 +3,8 @@ export type GraphColorMode = "light" | "dark" | "forced";
 export type GraphNodeColorKey = "context" | "library" | "agent" | "conversation" | "folder";
 /** A node's legend identity: colour family plus the shape that says what it is. */
 export type GraphNodeVisualKind =
-  | "context" | "version" | "agent" | "agentVersion" | "library" | "conversation" | "folder";
-export type GraphNodeShape = "circle" | "triangle" | "square" | "diamond" | "ring";
+  | "context" | "version" | "agent" | "agentVersion" | "library" | "conversation" | "folder" | "cluster";
+export type GraphNodeShape = "circle" | "triangle" | "square" | "diamond" | "ring" | "countDisc";
 export type GraphEdgeVisualKind =
   | "link" | "citation" | "coAccess" | "membership"
   | "actionWrite" | "actionCite" | "actionRead" | "actionReference" | "action";
@@ -33,7 +33,8 @@ export const GRAPH_EDGE_ARROW = {
  * The one node vocabulary for both graph views, their legends and lists.
  * Shape = what (circle: edited document, triangle: one point in a document's
  * history, square: unedited source material, diamond: chat/activity record,
- * ring: folder or grouping). Colour = whose. In forced colours an Agent keeps
+ * ring: folder, count disc: an aggregate of documents numbered by how many it
+ * holds). Colour = whose. In forced colours an Agent keeps
  * its shape and gains a thin inner outline, the only cue left there.
  */
 export const GRAPH_NODE_VISUALS = {
@@ -44,6 +45,7 @@ export const GRAPH_NODE_VISUALS = {
   library: { color: "library", shape: "square", forcedOutline: false },
   conversation: { color: "conversation", shape: "diamond", forcedOutline: false },
   folder: { color: "folder", shape: "ring", forcedOutline: false },
+  cluster: { color: "folder", shape: "countDisc", forcedOutline: false },
 } as const satisfies Record<GraphNodeVisualKind, {
   color: GraphNodeColorKey; shape: GraphNodeShape; forcedOutline: boolean;
 }>;
@@ -75,10 +77,8 @@ export const GRAPH_EDGE_PATTERN = {
   action: [10, 3],
 } as const satisfies Record<GraphEdgeVisualKind, readonly number[] | null>;
 
-export const GRAPH_EDGE_WIDTH = {
-  link: 2, citation: 2, coAccess: 2, membership: 1.1,
-  actionWrite: 2, actionCite: 1.7, actionRead: 1.1, actionReference: 1, action: 1.7,
-} as const satisfies Record<GraphEdgeVisualKind, number>;
+/** Every relationship line, in both graphs and their legends, is this wide (CSS px). */
+export const GRAPH_EDGE_WIDTH_PX = 1.5;
 
 /** A relationship that was removed in the replayed history. */
 export const GRAPH_REMOVED_EDGE_COLOR = "#dc2626";

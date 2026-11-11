@@ -206,7 +206,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await (await openList(page)).locator('button[data-local-graph-id="node:seed"]').click();
     const details = graph.locator(".graph-details");
     await expect(details.locator("h5.graph-details-title")).toHaveText("Decision Log");
-    await (await openLocalDetailsMore(details)).getByRole("button", { name: locale === "en" ? "Pin" : "고정", exact: true }).click();
+    await (await localDetailsActions(details)).getByRole("button", { name: locale === "en" ? "Pin" : "고정", exact: true }).click();
     const unpin = details.getByRole("button", { name: locale === "en" ? "Unpin" : "고정 해제", exact: true, includeHidden: true });
     await expect(unpin).toHaveCount(1);
     await showGraph(page);
@@ -228,8 +228,8 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(before);
     await page.keyboard.press("Space");
     await expect(disclosure).toHaveAttribute("open");
-    await graph.locator(".graph-canvas-more > summary").click();
-    const labels = graph.getByRole("checkbox", { name: locale === "en" ? "Labels" : "레이블", exact: true });
+    await graph.locator(".graph-frame-header .graph-view-options > summary").click();
+    const labels = graph.getByRole("checkbox", { name: locale === "en" ? "Show labels" : "레이블 표시", exact: true });
     await labels.uncheck();
     await expect(disclosure).not.toHaveAttribute("open");
     await expect(labels).toBeFocused();
@@ -238,7 +238,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(unpin).toHaveCount(1);
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(before);
     expect(await nativeCanvas!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
-    await graph.locator(".graph-canvas-more > summary").click();
+    await graph.locator(".graph-frame-header .graph-view-options > summary").click();
     await summary.click();
     await page.evaluate(() => window.__localCoverageFixture.replacePayload());
     await expect(disclosure).not.toHaveAttribute("open");
@@ -332,20 +332,21 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
     await expect(graph.getByRole("dialog")).toHaveCount(0);
     await expect(graph.locator("[aria-modal='true'], [inert]")).toHaveCount(0);
-    const actions = details.locator(".graph-details-footer");
+    const actions = details.locator(".graph-detail-actions");
     await expect(actions.getByRole("link", { name: locale === "en" ? "Open" : "열기", exact: true })).toHaveAttribute("href", `/workspaces/${fixtureWorkspaceId}/context/pages/${seedEntityId}`);
     if (viewport.width === 390) {
-      const targets = await actions.locator(":scope > a,:scope > .graph-details-context-actions > button,:scope > .graph-details-more > summary").evaluateAll((elements) => elements.map((element) => {
+      const targets = await actions.locator(":scope > a,:scope > button").evaluateAll((elements) => elements.map((element) => {
         const bounds = element.getBoundingClientRect();
         return { width: bounds.width, height: bounds.height };
       }));
-      expect(targets).toHaveLength(3);
+      // Open, center, pin, the Knowledge Map and expand share one row.
+      expect(targets.length).toBeGreaterThanOrEqual(4);
       for (const bounds of targets) {
         expect(bounds.width).toBeGreaterThanOrEqual(44);
         expect(bounds.height).toBeGreaterThanOrEqual(44);
       }
     }
-    await (await openLocalDetailsMore(details)).getByRole("button", { name: locale === "en" ? "Pin" : "고정", exact: true }).click();
+    await (await localDetailsActions(details)).getByRole("button", { name: locale === "en" ? "Pin" : "고정", exact: true }).click();
     await expect(actions.getByRole("button", { name: locale === "en" ? "Unpin" : "고정 해제", exact: true })).toBeVisible();
     await details.locator("h5.graph-details-title").click();
     await expect(details.locator("h5.graph-details-title")).toHaveText("Decision Log");
@@ -353,7 +354,9 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await evidenceScreenshot(page, testInfo, `local-${locale}-${mode}-${viewport.width}-details-open.png`);
 
     // A normal input on uncovered native canvas clears selection without
-    // touching pins; an input inside the non-modal details does not.
+    // touching pins; an input inside the non-modal details does not. The
+    // action row follows the fields, so bring the canvas back into view first.
+    await graph.locator(".graph-canvas-frame").scrollIntoViewIfNeeded();
     const canvasBounds = await graph.locator(".graph-canvas-frame").boundingBox();
     // Canvas chrome ends at 44px.
     const blank = { x: canvasBounds!.x + 8, y: canvasBounds!.y + 52 };
@@ -414,18 +417,18 @@ test("Local en short-screen details keep actions and full long evidence availabl
   await expect(details.locator("h5.graph-details-title")).toContainText("full title stays available");
   await expectLocalDetailsBounds(graph, "below");
   await expect(details).toContainText("end of evidence");
-  // Below the canvas the page scrolls Details and its actions stay on screen.
-  const footer = details.locator(".graph-details-footer");
-  await expect(footer).toBeInViewport({ ratio: 1 });
+  // Below the canvas the page scrolls Details; its action row follows the fields.
+  const actions = details.locator(".graph-detail-actions");
+  await actions.scrollIntoViewIfNeeded();
+  await expect(actions).toBeInViewport({ ratio: 1 });
   const dimensions = await details.evaluate((element) => ({ client: element.clientHeight, scroll: element.scrollHeight }));
   expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client + 1);
   await details.focus();
   const scrollY = await page.evaluate(() => window.scrollY);
   await page.keyboard.press("End");
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(scrollY);
-  await expect(footer).toBeInViewport({ ratio: 1 });
   // Native key scrolling animates; read the position once it has settled.
-  const { outerScrollY: scrolled } = await settleLocalAsideScroll(footer);
+  const { outerScrollY: scrolled } = await settleLocalAsideScroll(actions);
   await page.evaluate(() => window.__localCoverageFixture.replacePayload());
   expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
   expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
@@ -436,7 +439,7 @@ test("Local en short-screen details keep actions and full long evidence availabl
   const reselection = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
   await page.mouse.click(reselection.x, reselection.y);
   await expect(details).toBeVisible();
-  await (await openLocalDetailsMore(details)).getByRole("button", { name: "Center", exact: true }).click();
+  await (await localDetailsActions(details)).getByRole("button", { name: "Center", exact: true }).click();
   await graph.locator(".graph-local-stage").scrollIntoViewIfNeeded();
   await expect.poll(async () => {
     const point = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
@@ -493,16 +496,16 @@ async function expectLocalDetailsBounds(graph: Locator, mode: "drawer" | "below"
   }
 }
 
-async function expectAllLocalDetailsActions(details: Locator, artifactName?: string) {
-  const geometry = await details.evaluate((element) => {
+const LOCAL_DETAILS_CONTROLS = ".graph-details-close,.graph-details-sheet-toggle,.graph-detail-actions a,.graph-detail-actions button";
+
+async function expectAllLocalDetailsActions(details: Locator, artifactName?: string, controls = LOCAL_DETAILS_CONTROLS) {
+  const geometry = await details.evaluate((element, controls) => {
     const panel = element.getBoundingClientRect();
     const readerWidth = element.closest(".graph-view")!.getBoundingClientRect().width;
     return { panel: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
       viewport: { width: window.innerWidth, height: window.innerHeight },
       minimumTarget: readerWidth <= 760 ? 44 : 36,
-      actions: Array.from(element.querySelectorAll<HTMLElement>(
-        ".graph-details-close,.graph-details-sheet-toggle,.graph-details-footer a,.graph-details-footer button,.graph-details-more > summary",
-      )).filter((action) => action.getClientRects().length > 0
+      actions: Array.from(element.querySelectorAll<HTMLElement>(controls)).filter((action) => action.getClientRects().length > 0
         && (action.matches("summary") || !action.closest("details:not([open])"))).map((action) => {
         const bounds = action.getBoundingClientRect();
         const x1 = bounds.left + 4; const x2 = bounds.right - 4;
@@ -514,7 +517,7 @@ async function expectAllLocalDetailsActions(details: Locator, artifactName?: str
             [bounds.x + bounds.width / 2, bounds.y + bounds.height / 2]]
             .map(([x, y]) => action.contains(document.elementFromPoint(x, y))) };
       }) };
-  });
+  }, controls);
   if (artifactName) {
     // Write before assertions so a clipped target retains exact geometry,
     // including the control the earlier first-action-only oracle missed.
@@ -541,14 +544,11 @@ async function expectAllLocalDetailsActions(details: Locator, artifactName?: str
   return geometry;
 }
 
-async function openLocalDetailsMore(details: Locator) {
-  const menu = details.locator(".graph-details-more");
-  if (!await menu.evaluate((element) => (element as HTMLDetailsElement).open)) {
-    await menu.locator(":scope > summary").click();
-  }
-  const sheetToggle = details.locator(".graph-details-sheet-toggle");
-  if (await sheetToggle.isVisible()) await expect(sheetToggle).toHaveAttribute("aria-expanded", "true");
-  return menu;
+/** The selected item's action row (open, center, pin, the Knowledge Map), scrolled into view. */
+async function localDetailsActions(details: Locator) {
+  const actions = details.locator(".graph-detail-actions");
+  await actions.scrollIntoViewIfNeeded();
+  return actions;
 }
 
 async function revealLocalCue(page: Page, cue: Locator) {
@@ -562,8 +562,6 @@ async function revealLocalCue(page: Page, cue: Locator) {
           top = Math.max(top, control.getBoundingClientRect().bottom);
         }
       }
-      const footer = aside.querySelector<HTMLElement>(".graph-details-footer")!;
-      bottom = Math.min(bottom, footer.getBoundingClientRect().top);
       const cueBounds = element.getBoundingClientRect();
       const owner = element.closest("button")!;
       const hits = [[cueBounds.left + 1, cueBounds.top + 1], [cueBounds.right - 1, cueBounds.bottom - 1]]
@@ -645,11 +643,6 @@ async function readLocalTextTail(target: Locator, tail: string) {
       if (!control.getClientRects().length || getComputedStyle(control).position !== "sticky") continue;
       const box = control.getBoundingClientRect();
       if (box.bottom > panel.top && box.top < panel.bottom) panel.top = Math.max(panel.top, box.bottom);
-    }
-    const footer = scroller.querySelector<HTMLElement>(".graph-details-footer");
-    if (footer && getComputedStyle(footer).position === "sticky") {
-      const box = footer.getBoundingClientRect();
-      if (box.bottom > panel.top && box.top < panel.bottom) panel.bottom = Math.min(panel.bottom, box.top);
     }
     const fragments: Array<{ top: number; bottom: number; left: number; right: number;
       width: number; height: number; insidePanel: boolean; insideViewport: boolean; hit: boolean }> = [];
@@ -740,7 +733,7 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(title).toHaveText("Boundary document 000");
     await page.keyboard.press("Tab");
     await expect(clear).toBeFocused();
-    await (await openLocalDetailsMore(details)).getByRole("button", { name: locale === "en" ? "Pin" : "고정", exact: true }).click();
+    await (await localDetailsActions(details)).getByRole("button", { name: locale === "en" ? "Pin" : "고정", exact: true }).click();
     await expect(details.getByRole("button", { name: locale === "en" ? "Unpin" : "고정 해제", exact: true, includeHidden: true })).toHaveCount(1);
     await clear.click();
     const idleState = await page.evaluate(() => window.__localCoverageFixture.read());
@@ -969,13 +962,13 @@ test("Local revision-only refresh preserves an already pinned native drag until 
   };
   await (await openList(page)).locator('button[data-local-graph-id="node:related"]').click();
   await expect(title).toHaveText("Architecture Notes");
-  await (await openLocalDetailsMore(details)).getByRole("button", { name: "Pin", exact: true }).click();
+  await (await localDetailsActions(details)).getByRole("button", { name: "Pin", exact: true }).click();
   const unpin = details.getByRole("button", { name: "Unpin", exact: true, includeHidden: true });
   await expect(unpin).toHaveCount(1);
   await showGraph(page);
   await observe("pinned-before-center");
   // Real Center keeps the selected node outside the overlaid Details drawer.
-  await (await openLocalDetailsMore(details)).getByRole("button", { name: "Center", exact: true }).click();
+  await (await localDetailsActions(details)).getByRole("button", { name: "Center", exact: true }).click();
   // Camera state changes synchronously; Sigma's painted conversion matrix is
   // updated at render. Wait for paint, not an arbitrary timer or a canvas hit.
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -1068,7 +1061,7 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   const details = graph.locator(".graph-details");
   await seed.click();
   await expect(details.locator("h5.graph-details-title")).toHaveText("Decision Log");
-  await (await openLocalDetailsMore(details)).getByRole("button", { name: "Pin", exact: true }).click();
+  await (await localDetailsActions(details)).getByRole("button", { name: "Pin", exact: true }).click();
   await expect(details.getByRole("button", { name: "Unpin", exact: true, includeHidden: true })).toHaveCount(1);
   const before = await page.evaluate(() => window.__localCoverageFixture.read());
   const geometry = await localStageGeometry(graph);
@@ -1125,7 +1118,7 @@ for (const { locale, size } of [
   { locale: "en", size: { name: "320px reader", viewport: { width: 1440, height: 900 }, hostWidth: 344 } },
   { locale: "ko", size: { name: "390px short screen", viewport: { width: 390, height: 640 }, hostWidth: 1100 } },
 ] as const) {
-  test(`Local ${locale} ${size.name} exposes all long-title actions before Tab and keeps the page as the Details scroller`, async ({ page }, testInfo) => {
+  test(`Local ${locale} ${size.name} keeps the long-title close control and every action whole, with the page as the Details scroller`, async ({ page }, testInfo) => {
     const errors = await mount(page, "details-actions-long", locale, "light", size.viewport, size.hostWidth);
     const graph = page.getByTestId("graph-view");
     const details = graph.locator(".graph-details");
@@ -1143,8 +1136,9 @@ for (const { locale, size } of [
     await expect(details).toBeFocused();
     await expect(nodes.locator('button[data-local-graph-id="node:related"]')).toHaveAttribute("aria-pressed", "true");
     await expect(details.locator(".graph-details-title-row")).toBeInViewport({ ratio: 1 });
-    const firstActions = await expectAllLocalDetailsActions(details, "long-title-all-actions-before-next-tab");
-    expect(firstActions.actions).toHaveLength(4);
+    // The title row and its close control come first; the action row follows the fields.
+    const firstActions = await expectAllLocalDetailsActions(details, "long-title-close-before-next-tab", ".graph-details-close,.graph-details-sheet-toggle");
+    expect(firstActions.actions.length).toBeGreaterThanOrEqual(1);
     const expand = details.getByRole("button", { name: words.expand, exact: true });
     await expect(expand).toBeEnabled();
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
@@ -1155,14 +1149,15 @@ for (const { locale, size } of [
     // expose the controls. Exactly one explicit Expand callback is allowed.
     await page.keyboard.press("Tab");
     await expect(details.getByRole("button", { name: locale === "en" ? "Clear selection" : "선택 해제", exact: true })).toBeFocused();
-    const more = await openLocalDetailsMore(details);
-    await expect(more.getByRole("link", { name: words.map, exact: true }))
+    const actions = await localDetailsActions(details);
+    await expect(actions.getByRole("link", { name: words.map, exact: true }))
       .toHaveAttribute("href", `/workspaces/${fixtureWorkspaceId}/graph?focused_doc_id=${relatedEntityId}`);
-    await expectAllLocalDetailsActions(details, "long-title-revealed-more-actions");
-    await more.getByRole("button", { name: words.pin, exact: true }).click();
+    // Open, center, pin, the Knowledge Map and expand: one row, every target whole.
+    const rowActions = await expectAllLocalDetailsActions(details, "long-title-revealed-actions", ".graph-detail-actions a,.graph-detail-actions button");
+    expect(rowActions.actions).toHaveLength(5);
+    await actions.getByRole("button", { name: words.pin, exact: true }).click();
     await expect(details.getByRole("button", { name: words.unpin, exact: true, includeHidden: true })).toHaveCount(1);
-    await expectAllLocalDetailsActions(details);
-    await details.locator(".graph-details-more > summary").click();
+    await expectAllLocalDetailsActions(details, undefined, ".graph-detail-actions a,.graph-detail-actions button");
     await expand.click();
     await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.read().graphActions)).toBe(initial.graphActions + 1);
     await expect(expand).toBeEnabled();
@@ -1198,13 +1193,16 @@ for (const { locale, size } of [
     await page.keyboard.press("Enter");
     await expect(details).toBeFocused();
     await expect(details.getByRole("button", { name: words.unpin, exact: true, includeHidden: true })).toHaveCount(1);
-    await expectAllLocalDetailsActions(details);
+    // Reselection reveals the title row first; the action row follows the fields.
+    await expectAllLocalDetailsActions(details, undefined, ".graph-details-close,.graph-details-sheet-toggle");
+    await localDetailsActions(details);
+    await expectAllLocalDetailsActions(details, undefined, ".graph-detail-actions a,.graph-detail-actions button");
     // SAME-ID activation still hands off, with the original selected node
     // and retained pin rather than a new selection/query/renderer.
     await nodes.locator('button[data-local-graph-id="node:related"]').click();
     await page.keyboard.press("Space");
     await expect(details).toBeFocused();
-    await expectAllLocalDetailsActions(details);
+    await expectAllLocalDetailsActions(details, undefined, ".graph-details-close,.graph-details-sheet-toggle");
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(expanded);
     expect(await localStageGeometry(graph)).toEqual(geometry);
     expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
@@ -1308,7 +1306,7 @@ const CUE_COLORS = {
 const NAVIGATION_COPY = {
   en: { incoming: "Incoming", outgoing: "Outgoing", ringRelations: "Relationships further out", counts: "250 nodes · 750 relationships",
     chips: { context: "Context", version: "Version", library: "Library", ask: "Ask turn", chat: "Conversation", folder: "Folder" } },
-  ko: { incoming: "들어오는 관계", outgoing: "나가는 관계", ringRelations: "2단계 이상 관계", counts: "노드 250 · 관계 750",
+  ko: { incoming: "들어오는 관계", outgoing: "나가는 관계", ringRelations: "2단계 이상 관계", counts: "노드 250개 · 관계 750개",
     chips: { context: "컨텍스트", version: "버전", library: "라이브러리", ask: "질문 턴", chat: "대화", folder: "폴더" } },
 } as const;
 

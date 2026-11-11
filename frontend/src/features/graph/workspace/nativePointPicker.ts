@@ -1,6 +1,7 @@
 import type { CosmosPointPickFrame, CosmosPointPicker, CosmosPointPickResult } from "./cosmosPointPickingTypes";
 import { withGraphGlState } from "./graphGlState";
 import { createWorkspaceGpuReadback, type WorkspaceGpuReadback } from "./gpuReadback";
+import { WORKSPACE_NATIVE_GLYPH_SHAPES } from "../shared/workspaceGlyphGeometry";
 
 /** CSS pixels from a point's centre that still target it: the accessible hover and click target of the native map. */
 const NATIVE_POINT_TARGET_PX = 12;
@@ -145,7 +146,7 @@ export function createWorkspaceNativePointPicker(
 ): CosmosPointPicker {
   if (!sizes.length || sizes.length !== shapes.length || sizes.length > 2 ** 24
     || !sizes.every(value => Number.isFinite(value) && value >= 0)
-    || !shapes.every(value => value === 0 || value === 1 || value === 3)) throw new Error("Invalid native picking geometry");
+    || !shapes.every(value => WORKSPACE_NATIVE_GLYPH_SHAPES.includes(value))) throw new Error("Invalid native picking geometry");
   const diameters = sizes.slice(), kinds = shapes.slice();
   const maximumDiameter = diameters.reduce((maximum, diameter) => Math.max(maximum, diameter), 0);
   let gl: WebGL2RenderingContext | null = null, program: WebGLProgram | null = null;

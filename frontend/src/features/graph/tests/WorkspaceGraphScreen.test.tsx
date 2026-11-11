@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { i18n } from "../../../shared/i18n";
-import { isWorkspaceGraphResponse, type WorkspaceGraphScene } from "../../../shared/api/workspaceGraph";
+import type { WorkspaceGraphNode, WorkspaceGraphScene } from "../../../shared/api/workspaceGraph";
 import { ApiError } from "../../../shared/api/client";
 import * as settingsApi from "../../../shared/api/operations";
 import { invalidateWorkspaceLabsPreferences } from "../../../shared/hooks/useLabsPreferences";
@@ -18,7 +18,6 @@ import { invalidateWorkspaceGraphCapability } from "../useWorkspaceGraphCapabili
 import { clearWorkspaceGraphState, freshWorkspaceGraphState, saveWorkspaceGraphState } from "../workspaceGraphModel";
 import type { WorkspaceMapColumns } from "../map/sceneColumns";
 import * as mapBudgetPolicy from "../shared/workspaceMapBudget";
-import * as folderScenePreparation from "../map/folderScene";
 import { visibleWorkspaceGraphDocumentCount } from "../workspace/WorkspaceGraphToolbar";
 
 const { authState, canvasCenterOnMock, canvasColumnsMock, canvasNavigationCallbackMock, canvasPauseMock, canvasPinCallbackMock, canvasResumeMock, canvasSelectCallbackMock, canvasStatusCallbackMock, canvasViewportCallbackMock, getWorkspaceGraphCapabilityMock, queryWorkspaceGraphMock, workspaceState } = vi.hoisted(() => ({
@@ -109,7 +108,7 @@ vi.mock("../workspace/WorkspaceMapCanvas", async () => {
         centerOn: canvasCenterOnMock,
         fit: vi.fn(),
         pauseLayout: () => { previousPaused.current = true; canvasPauseMock(); },
-        pin: vi.fn(() => null),
+        pin: vi.fn((_id: string, shouldPin: boolean) => shouldPin ? { x: 12, y: 34 } : null),
         reset: vi.fn(),
         resumeLayout: () => { previousPaused.current = false; canvasResumeMock(); },
         setViewport: vi.fn(),
@@ -210,7 +209,7 @@ describe("WorkspaceGraphScreen", () => {
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
     expect(queryWorkspaceGraphMock.mock.calls[0][1].budget).toEqual({ documents: 2_000, relations: 6_000 });
-    await userEvent.click(screen.getByText("View", { selector: "summary" }));
+    await userEvent.click(screen.getByText("View", { selector: "summary > span" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
     expect(queryWorkspaceGraphMock.mock.calls[1][1]).toMatchObject({
@@ -227,7 +226,7 @@ describe("WorkspaceGraphScreen", () => {
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
-    await userEvent.click(screen.getByText("View", { selector: "summary" }));
+    await userEvent.click(screen.getByText("View", { selector: "summary > span" }));
     expect(screen.queryByRole("combobox", { name: "Map node limit" })).not.toBeInTheDocument();
     expect(screen.getByText("Mobile and unrecognized devices use a maximum of 2,000 map nodes.")).toBeVisible();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
@@ -240,7 +239,7 @@ describe("WorkspaceGraphScreen", () => {
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
-    await userEvent.click(screen.getByText("View", { selector: "summary" }));
+    await userEvent.click(screen.getByText("View", { selector: "summary > span" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
@@ -262,7 +261,7 @@ describe("WorkspaceGraphScreen", () => {
     openMapList();
     const oldSelect = canvasSelectCallbackMock.mock.calls.at(-1)![0];
     const oldPin = canvasPinCallbackMock.mock.calls.at(-1)![0];
-    await userEvent.click(screen.getByText("View", { selector: "summary" }));
+    await userEvent.click(screen.getByText("View", { selector: "summary > span" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
     const largeSignal = queryWorkspaceGraphMock.mock.calls[1][2].signal as AbortSignal;
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "2k");
@@ -286,7 +285,7 @@ describe("WorkspaceGraphScreen", () => {
     renderScreen();
     await screen.findByText(i18n.t("graph:workspaceGraph.ui.unavailable"));
     expect(screen.queryByTestId("workspace-graph-canvas")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Map items" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "List" })).not.toBeInTheDocument();
     expect(canvasColumnsMock).not.toHaveBeenCalled();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
   });
@@ -300,7 +299,7 @@ describe("WorkspaceGraphScreen", () => {
     act(() => { canvasPinCallbackMock.mock.calls.at(-1)![0]("context:alpha", { x: 123, y: 456 }); });
     act(() => { canvasViewportCallbackMock.mock.calls.at(-1)![0]({ zoom: 2, pan: { x: 25, y: 50 } }); });
     await waitFor(() => expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-viewport", JSON.stringify({ zoom: 2, pan: { x: 25, y: 50 } })));
-    await userEvent.click(screen.getByText("View", { selector: "summary" }));
+    await userEvent.click(screen.getByText("View", { selector: "summary > span" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
@@ -323,7 +322,7 @@ describe("WorkspaceGraphScreen", () => {
     const view = renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
-    await userEvent.click(screen.getByText("View", { selector: "summary" }));
+    await userEvent.click(screen.getByText("View", { selector: "summary > span" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), "10k");
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
@@ -343,7 +342,7 @@ describe("WorkspaceGraphScreen", () => {
     renderScreen();
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
-    await userEvent.click(screen.getByText("View", { selector: "summary" }));
+    await userEvent.click(screen.getByText("View", { selector: "summary > span" }));
     let queued: FrameRequestCallback | undefined;
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { queued = callback; return 700; });
     const cancelFrame = vi.spyOn(window, "cancelAnimationFrame");
@@ -384,7 +383,7 @@ describe("WorkspaceGraphScreen", () => {
       await waitFor(() => expect(canvas()).toHaveAttribute("data-viewport", JSON.stringify(viewport)));
     };
     const chooseScale = async (scale: "2k" | "10k") => {
-      const summary = screen.getByText("View", { selector: "summary" });
+      const summary = screen.getByText("View", { selector: "summary > span" });
       if (!summary.closest("details")!.open) await userEvent.click(summary);
       const calls = queryWorkspaceGraphMock.mock.calls.length;
       await userEvent.selectOptions(screen.getByRole("combobox", { name: "Map node limit" }), scale);
@@ -439,7 +438,7 @@ describe("WorkspaceGraphScreen", () => {
         const link = entry === "list-open"
           ? within(row as HTMLElement).getByRole("link", { name: "Open document: Alpha" })
           : within(screen.getByRole("region", { name: "Details" }))
-            .getByRole("link", { name: entry === "details-open" ? "Open" : "Explore" });
+            .getByRole("link", { name: entry === "details-open" ? "Open" : "Explore neighborhood" });
         await act(async () => { fireEvent.click(link); });
         expect(screen.getByTestId("document-destination")).toBeInTheDocument();
         expect(JSON.parse(window.sessionStorage.getItem(key) ?? "{}").state).toMatchObject({
@@ -456,39 +455,6 @@ describe("WorkspaceGraphScreen", () => {
       }
     },
   );
-
-  it.each([false, true])("flushes queued explicit intent before a folder member SPA link (mobile=%s)", async (mobile) => {
-    mobileLayout = mobile;
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    render(<MemoryRouter initialEntries={["/graph"]}><Routes>
-      <Route path="/graph" element={<WorkspaceGraphScreen />} />
-      <Route path="/context" element={<p data-testid="document-destination">Document destination</p>} />
-    </Routes></MemoryRouter>);
-    await screen.findByTestId("workspace-graph-node-list");
-    openMapList();
-    if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
-    const scope = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : document;
-    await userEvent.click(within(scope as HTMLElement).getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.research, scope);
-    const link = within(scope as HTMLElement).getByRole("region", { name: "Folder members and relationships" })
-      .querySelector<HTMLAnchorElement>('a[href^="/context"]')!;
-    vi.useFakeTimers();
-    try {
-      act(() => canvasPinCallbackMock.mock.calls.at(-1)![0]("context:alpha", { x: 123, y: 456 }));
-      vi.spyOn(window, "requestAnimationFrame").mockReturnValue(700);
-      const cancelFrame = vi.spyOn(window, "cancelAnimationFrame");
-      const viewport = { zoom: 3, pan: { x: 75, y: 125 } };
-      act(() => canvasViewportCallbackMock.mock.calls.at(-1)![0](viewport));
-      await act(async () => { fireEvent.click(link); });
-      expect(screen.getByTestId("document-destination")).toBeInTheDocument();
-      expect(JSON.parse(window.sessionStorage.getItem(`${workspaceGraphStorageScope("workspace-one", "actor-one")}latest`) ?? "{}").state)
-        .toMatchObject({ pinnedIds: ["context:alpha"], pinnedPositions: { "context:alpha": { x: 123, y: 456 } }, viewport });
-      expect(cancelFrame).toHaveBeenCalledWith(700);
-      expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
 
   it.each([
     { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true },
@@ -549,7 +515,7 @@ describe("WorkspaceGraphScreen", () => {
     renderScreen();
 
     expect(screen.getByText("Building Knowledge Map…")).toBeInTheDocument();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
@@ -571,9 +537,9 @@ describe("WorkspaceGraphScreen", () => {
     const edgeIds = Array.from(document.querySelectorAll("[data-graph-edge-id]"))
       .map((element) => element.getAttribute("data-graph-edge-id"));
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids")
-      ?.split(",").filter((id) => !isTreeRailId(id)).sort()).toEqual(nodeIds.sort());
+      ?.split(",").sort()).toEqual(nodeIds.sort());
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-edge-ids")
-      ?.split(",").filter((id) => !isTreeRailId(id)).sort()).toEqual(edgeIds.sort());
+      ?.split(",").sort()).toEqual(edgeIds.sort());
 
     const originalNodeIds = screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids");
     const originalEdgeIds = screen.getByTestId("workspace-graph-canvas").getAttribute("data-edge-ids");
@@ -598,7 +564,7 @@ describe("WorkspaceGraphScreen", () => {
   it("keeps one authoritative column object and mounted canvas through matching, no-match and cleared search", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const canvas = screen.getByTestId("workspace-graph-canvas");
     const initialColumns = canvasColumnsMock.mock.calls.at(-1)?.[0];
@@ -645,7 +611,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(scene);
     try {
       renderScreen();
-      await screen.findByRole("heading", { name: "Map items" });
+      await screen.findByRole("heading", { name: "List" });
       openMapList();
       fireEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
         .getByRole("button", { name: /^Alpha/ }));
@@ -675,7 +641,7 @@ describe("WorkspaceGraphScreen", () => {
   it("keeps a synthetic 2k/4.7k Map list folded without a search and pages it ten rows at a time", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(largeScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
 
     const nodeList = screen.getByTestId("workspace-graph-node-list");
     const edgeList = screen.getByTestId("workspace-graph-edge-list");
@@ -704,16 +670,16 @@ describe("WorkspaceGraphScreen", () => {
     payload.edges[2001] = { ...payload.edges[2001], relation_kind: "citation_page", layer: "evidence" };
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), { target: { value: "Document 0001" } });
 
     const nodeList = screen.getByTestId("workspace-graph-node-list");
     const edgeList = screen.getByTestId("workspace-graph-edge-list");
-    expect(screen.getByText("“Document 0001”: 1 documents or clusters · 5 relationships")).toBeInTheDocument();
+    expect(screen.getByText("“Document 0001” matches 1 node · 5 relationships")).toBeInTheDocument();
     expect([nodeList.dataset.totalCount, edgeList.dataset.totalCount]).toEqual(["1", "5"]);
     const groupHead = (name: RegExp) => within(edgeList).getByRole("button", { name });
-    expect(groupHead(/^Matches → other documents/)).toHaveAttribute("aria-expanded", "true");
-    expect(groupHead(/^Other documents → matches/)).toHaveAttribute("aria-expanded", "false");
+    expect(groupHead(/^Matches → other nodes/)).toHaveAttribute("aria-expanded", "true");
+    expect(groupHead(/^Other nodes → matches/)).toHaveAttribute("aria-expanded", "false");
     expect(edgeList.querySelectorAll('[data-relation-group="outgoing"] li')).toHaveLength(3);
     fireEvent.click(groupHead(/^Relationships/));
     expect(edgeList.querySelectorAll("li")).toHaveLength(0);
@@ -733,7 +699,7 @@ describe("WorkspaceGraphScreen", () => {
     ]);
     expect(rail("Outgoing")).toEqual([["link", "citation"], ["citation", "link"], ["link", null]]);
     expect(rail("Incoming")).toEqual([[null, "link"], ["link", "link"]]);
-    const relationSearch = within(details).getByRole("searchbox", { name: "Find in this document's relationships" });
+    const relationSearch = within(details).getByRole("searchbox", { name: "Find in the selected node's relationships" });
     fireEvent.change(relationSearch, { target: { value: "citation" } });
     expect(within(details).getByText("1 of 5 match")).toBeInTheDocument();
     expect(within(details).getByRole("button", {
@@ -752,7 +718,7 @@ describe("WorkspaceGraphScreen", () => {
   it("emphasizes focused node, action and relationship rows without selecting or centering", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const canvas = screen.getByTestId("workspace-graph-canvas");
     const node = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Alpha/ });
@@ -777,7 +743,7 @@ describe("WorkspaceGraphScreen", () => {
   it("discards filtered row focus without losing selection or reviving focus after clearing Find", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const row = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Alpha/ });
     act(() => row.focus());
@@ -794,7 +760,7 @@ describe("WorkspaceGraphScreen", () => {
   it.each(["lens", "actor", "workspace", "purge"])("does not carry list focus across %s ownership changes", async (change) => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const { rerender } = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     act(() => within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Alpha/ }).focus());
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "context:alpha");
@@ -805,7 +771,7 @@ describe("WorkspaceGraphScreen", () => {
       if (change === "purge") clearWorkspaceGraphStorage();
       rerender(graphTree());
     }
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "");
   });
@@ -813,7 +779,7 @@ describe("WorkspaceGraphScreen", () => {
   it("enables the default Combined lens and its union metrics through lens changes", async () => {
     queryWorkspaceGraphMock.mockResolvedValue({ ...baseScene(), metric_basis: "visible_published_links_and_citations.pre_quick.v1" });
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const lens = screen.getByRole("combobox", { name: "Lens" });
     expect(lens).toHaveValue("combined");
@@ -825,7 +791,7 @@ describe("WorkspaceGraphScreen", () => {
     await waitFor(() => expect(queryWorkspaceGraphMock.mock.lastCall?.[1]).toMatchObject({ lens: "links" }));
     fireEvent.change(lens, { target: { value: "combined" } });
     await waitFor(() => expect(queryWorkspaceGraphMock.mock.lastCall?.[1]).toMatchObject({ lens: "combined" }));
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(screen.getByTestId("workspace-graph-node-list")).toHaveTextContent("2 references · 0 evidence");
   });
@@ -833,7 +799,7 @@ describe("WorkspaceGraphScreen", () => {
   it("preserves a manually scrolled 2k list after selection while other Map UI changes", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(largeScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const list = screen.getByTestId("workspace-graph-node-list");
     await userEvent.click(within(list).getByRole("button", { name: /Knowledge Document 0000/ }));
@@ -850,7 +816,7 @@ describe("WorkspaceGraphScreen", () => {
   it("centers a list selection and puts its details above the list, without moving keyboard focus on Escape", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const row = within(screen.getByTestId("workspace-graph-node-list"))
       .getByRole("button", { name: /^Alpha/ });
@@ -862,10 +828,14 @@ describe("WorkspaceGraphScreen", () => {
     expect(details.closest(".inspector-panel")).toBeInTheDocument();
     expect(details.compareDocumentPosition(screen.getByTestId("workspace-graph-node-list"))
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const actions = within(screen.getByRole("region", { name: "Details" }));
-    expect(actions.getByRole("link", { name: "Open" })).toHaveAttribute("title", "Open document");
-    expect(actions.getByRole("button", { name: "Center" })).toHaveAttribute("title", "Center on map");
-    expect(actions.getByRole("link", { name: "Explore" })).toHaveAttribute("title", "Explore neighborhood");
+    // The graphs' one action row: open, center, pin, then the Context graph.
+    const actionRow = details.querySelector(".graph-detail-actions")!;
+    expect([...actionRow.querySelectorAll("a,button")].map((action) => action.textContent))
+      .toEqual(["Open", "Center", "Pin", "Explore neighborhood"]);
+    fireEvent.click(within(actionRow as HTMLElement).getByRole("button", { name: "Pin" }));
+    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-pinned-positions", JSON.stringify({ "context:alpha": { x: 12, y: 34 } }));
+    fireEvent.click(within(actionRow as HTMLElement).getByRole("button", { name: "Unpin" }));
+    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-pinned-ids", "");
     expect(row).toHaveFocus();
     await userEvent.keyboard("{Escape}");
     expect(row).toHaveFocus();
@@ -887,7 +857,7 @@ describe("WorkspaceGraphScreen", () => {
     const dialog = screen.getByRole("dialog", { name: "Knowledge Map canvas" });
     expect(within(dialog).getByText(/A selection is active/)).toBeInTheDocument();
     const clear = within(dialog).getByRole("button", { name: "Clear selection" });
-    expect(clear).toHaveTextContent(/^Clear$/);
+    expect(clear).toHaveTextContent(/^Clear selection$/);
     await userEvent.click(clear);
     await waitFor(() => expect(within(dialog).getByRole("button", {
       name: "Close canvas",
@@ -904,7 +874,7 @@ describe("WorkspaceGraphScreen", () => {
     await screen.findByTestId("workspace-graph-canvas");
     openMapList();
     selectMockMapId("context:alpha");
-    const card = screen.getByRole("region", { name: "Selection summary" });
+    const card = screen.getByRole("region", { name: "Details" });
     expect(within(card).getByText("Alpha")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Map details sheet" })).not.toBeInTheDocument();
     expect(document.querySelector(".workspace-graph-screen")).toHaveAttribute("data-selection-card", "true");
@@ -934,7 +904,7 @@ describe("WorkspaceGraphScreen", () => {
   it("clears Map selection from a background callback", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     await userEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
       .getByRole("button", { name: /^Alpha/ }));
@@ -971,20 +941,27 @@ describe("WorkspaceGraphScreen", () => {
       source: edge.source === "context:1999" ? "context:1997" : edge.source,
       target: edge.target === "context:1999" ? "context:1998" : edge.target,
     }));
+    // A folder holding only the unlinked document hides with it, but the
+    // Unlinked count names documents only.
+    const folder = uiFolder(UI_FOLDERS.secondary, "Only unlinked", "Only unlinked");
+    scene.nodes.push(folder);
+    scene.edges.push(uiContainment(folder.id, "context:unlinked"));
     queryWorkspaceGraphMock.mockResolvedValue(scene);
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids"))
-      .not.toContain("context:unlinked");
+      .not.toMatch(/context:unlinked|Only unlinked|folder:/);
     expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "1999");
     const unlinked = screen.getByRole("button", { name: "Unlinked 1" });
+    expect(unlinked).toHaveAttribute("title", "1 unlinked document hidden from this map.");
     expect(unlinked).toHaveAttribute("aria-pressed", "false");
     await userEvent.click(unlinked);
     expect(unlinked).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids"))
       .toContain("context:unlinked");
-    expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
+    expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids")).toContain(folder.id);
+    expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2001");
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
     await userEvent.click(unlinked);
     expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "1999");
@@ -1003,7 +980,7 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(scene);
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Unlinked 1" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), {
@@ -1024,7 +1001,7 @@ describe("WorkspaceGraphScreen", () => {
   it("keeps one prominent map search and stages published-document search in Refine", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     expect(screen.getByRole("searchbox", { name: "Find in visible map" })).toBeInTheDocument();
@@ -1070,7 +1047,7 @@ describe("WorkspaceGraphScreen", () => {
   it("edits kinds and quick filters only in Refine, with one Apply and an applied-only summary", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     const summary = screen.getByText(/More data filters/, { selector: "summary" });
@@ -1115,7 +1092,7 @@ describe("WorkspaceGraphScreen", () => {
     async (close) => {
       queryWorkspaceGraphMock.mockResolvedValue(baseScene());
       renderScreen();
-      await screen.findByRole("heading", { name: "Map items" });
+      await screen.findByRole("heading", { name: "List" });
       openMapList();
       const trigger = screen.getByRole("button", { name: "Refine" });
       await userEvent.click(trigger);
@@ -1142,7 +1119,7 @@ describe("WorkspaceGraphScreen", () => {
   it("validates the single Refine Apply and explains an empty kind selection", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Refine" }));
     const dialog = screen.getByRole("dialog", { name: "Refine data" });
@@ -1169,7 +1146,7 @@ describe("WorkspaceGraphScreen", () => {
   it("offers Resume after Pause and Reset returns the layout control to Pause", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     fireEvent.click(screen.getByRole("button", { name: "Pause layout" }));
@@ -1187,7 +1164,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValueOnce(baseScene());
     queryWorkspaceGraphMock.mockImplementation(() => new Promise(() => {}));
     const { rerender } = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(screen.getAllByText("Alpha")).not.toHaveLength(0);
 
@@ -1213,7 +1190,7 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const { rerender } = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
       lens: "evidence", search: "private actor-one terms", document_kinds: ["library"],
@@ -1227,7 +1204,7 @@ describe("WorkspaceGraphScreen", () => {
       expect(nextRequest).toMatchObject({ lens: "combined", document_kinds: ["context", "library", "agent"], quick_filters: [] });
     }
     expect(window.sessionStorage.getItem(key)).toBeNull();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
   });
 
@@ -1260,7 +1237,7 @@ describe("WorkspaceGraphScreen", () => {
     }
     const tree = () => <MemoryRouter><WorkspaceGraphScreen /><AuthorityPaintProbe /></MemoryRouter>;
     const view = render(tree());
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     window.sessionStorage.removeItem(key);
     workspaceState.selectedWorkspace = { id: "workspace-one", role };
@@ -1297,7 +1274,7 @@ describe("WorkspaceGraphScreen", () => {
   it.each([false, true])("rejects old native selection, pins and viewport callbacks after a same-actor role change (owner again: %s)", async (ownerAgain) => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const oldSelect = canvasSelectCallbackMock.mock.calls.at(-1)![0];
     const oldPin = canvasPinCallbackMock.mock.calls.at(-1)![0];
@@ -1305,13 +1282,13 @@ describe("WorkspaceGraphScreen", () => {
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
     view.rerender(graphTree());
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     if (ownerAgain) {
       workspaceState.selectedWorkspace = { id: "workspace-one", role: "owner" };
       view.rerender(graphTree());
       await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
-      await screen.findByRole("heading", { name: "Map items" });
+      await screen.findByRole("heading", { name: "List" });
       openMapList();
     }
     await act(async () => {
@@ -1336,14 +1313,14 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockImplementationOnce(() => new Promise<WorkspaceGraphScene>((resolve) => { resolveExpansion = resolve; }));
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     fireEvent.click(screen.getByRole("button", { name: /Expand cluster/ }));
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
     view.rerender(graphTree());
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(queryWorkspaceGraphMock.mock.calls[1]?.[2]?.signal.aborted).toBe(true);
     const oldExpansion = expandedScene(null, "owner-only-expansion");
@@ -1366,7 +1343,7 @@ describe("WorkspaceGraphScreen", () => {
       };
       queryWorkspaceGraphMock.mockResolvedValue(replacement);
       const view = renderScreen();
-      await screen.findByRole("heading", { name: "Map items" });
+      await screen.findByRole("heading", { name: "List" });
       openMapList();
       fireEvent.click(screen.getByRole("button", { name: /Expand cluster/ }));
       await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
@@ -1436,16 +1413,16 @@ describe("WorkspaceGraphScreen", () => {
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeUrl });
     try {
       const view = renderScreen();
-      await screen.findByRole("heading", { name: "Map items" });
+      await screen.findByRole("heading", { name: "List" });
       openMapList();
-      const oldExport = screen.getByRole("button", { name: "Export visible map" });
+      const oldExport = screen.getByRole("button", { name: "Export filtered graph" });
       fireEvent.click(oldExport);
       expect(createUrl).toHaveBeenCalledTimes(1);
       expect(download).toHaveBeenCalledTimes(1);
       workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
       view.rerender(graphTree());
       await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
-      expect(screen.queryByRole("button", { name: "Export visible map" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Export filtered graph" })).not.toBeInTheDocument();
       fireEvent.click(oldExport);
       expect(createUrl).toHaveBeenCalledTimes(1);
       expect(download).toHaveBeenCalledTimes(1);
@@ -1462,13 +1439,13 @@ describe("WorkspaceGraphScreen", () => {
     workspaceState.selectedWorkspace = null;
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
     workspaceState.selectedWorkspace = { id: "workspace-one", role: "viewer" };
     view.rerender(graphTree());
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
   });
 
@@ -1488,7 +1465,7 @@ describe("WorkspaceGraphScreen", () => {
     });
     const tree = () => <MemoryRouter><WorkspaceGraphGate><WorkspaceGraphScreen /></WorkspaceGraphGate></MemoryRouter>;
     const view = render(tree());
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const saved = freshWorkspaceGraphState();
     saved.viewerId = "actor-one";
@@ -1550,7 +1527,7 @@ describe("WorkspaceGraphScreen", () => {
       <MemoryRouter><WorkspaceGraphScreen /><PaintProbe /></MemoryRouter>
     );
     const { rerender } = render(tree());
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     if (scope === "actor") authState.userId = "actor-two";
     else workspaceState.selectedId = "workspace-two";
@@ -1579,7 +1556,7 @@ describe("WorkspaceGraphScreen", () => {
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2);
     expect(queryWorkspaceGraphMock.mock.calls[1]?.[1]).not.toHaveProperty("search");
@@ -1610,7 +1587,7 @@ describe("WorkspaceGraphScreen", () => {
     const view = renderScreen();
     try {
       await act(async () => {});
-      expect(screen.getByRole("heading", { name: "Map items" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "List" })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Refine" }));
       fireEvent.change(screen.getByRole("combobox", { name: "Folder" }), {
         target: { value: "unplaced" },
@@ -1643,7 +1620,7 @@ describe("WorkspaceGraphScreen", () => {
       error_code: "forbidden", message: "Not available", request_id: "test", warnings: [],
     }));
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Lens" }), "evidence");
     await screen.findAllByText(i18n.t("graph:workspaceGraph.ui.unavailable"));
@@ -1659,7 +1636,7 @@ describe("WorkspaceGraphScreen", () => {
     const view = renderScreen();
     try {
       await act(async () => {});
-      expect(screen.getByRole("heading", { name: "Map items" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "List" })).toBeInTheDocument();
       if (purge === "all") clearWorkspaceGraphStorage();
       else clearWorkspaceGraphState("workspace-one", "actor-one");
       act(() => window.dispatchEvent(new Event("pagehide")));
@@ -1711,7 +1688,7 @@ describe("WorkspaceGraphScreen", () => {
     }
     const tree = () => <MemoryRouter><WorkspaceGraphScreen /><PageExitProbe /></MemoryRouter>;
     const view = render(tree());
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     // No purge epoch changed yet: the first committed new scope must reject
     // the old pagehide listener even before passive scope cleanup runs.
@@ -1748,7 +1725,7 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     await waitFor(() => expect(screen.queryByText("Building Knowledge Map…")).not.toBeInTheDocument());
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(owner === "correct" ? 1 : 2);
@@ -1815,7 +1792,7 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValueOnce(baseScene());
     queryWorkspaceGraphMock.mockImplementationOnce(() => new Promise<WorkspaceGraphScene>((resolve) => { resolveExpansion = resolve; }));
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     fireEvent.click(screen.getByRole("button", { name: /Expand cluster/ }));
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
@@ -1974,7 +1951,7 @@ describe("WorkspaceGraphScreen", () => {
     });
 
     renderScreen(`/graph?focus=${focusId}`);
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
@@ -2056,7 +2033,7 @@ describe("WorkspaceGraphScreen", () => {
     });
 
     renderScreen(`/graph?focus=${unavailableFocusId}`);
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute(
@@ -2080,7 +2057,7 @@ describe("WorkspaceGraphScreen", () => {
     });
 
     renderScreen(`/graph?focus=${focusId}`);
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     expect(queryWorkspaceGraphMock.mock.calls[0]?.[1]).toMatchObject({
@@ -2102,7 +2079,7 @@ describe("WorkspaceGraphScreen", () => {
   it("stages folder/time filters while display settings remain client-only", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     await userEvent.click(screen.getByRole("button", { name: "Refine" }));
@@ -2138,7 +2115,7 @@ describe("WorkspaceGraphScreen", () => {
     }));
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const trigger = screen.getByRole("button", { name: "Refine" });
     await userEvent.click(trigger);
@@ -2193,7 +2170,7 @@ describe("WorkspaceGraphScreen", () => {
     );
     queryWorkspaceGraphMock.mockResolvedValue(payload);
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     await userEvent.click(screen.getByRole("button", { name: "Refine" }));
     let dialog = screen.getByRole("dialog", { name: "Refine data" });
@@ -2258,10 +2235,10 @@ describe("WorkspaceGraphScreen", () => {
     await screen.findByTestId("workspace-graph-node-list");
     openMapList();
     const canvas = await screen.findByTestId("workspace-graph-canvas");
-    expect(screen.queryByRole("heading", { name: "Map items" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "List" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Open Map details sheet" }));
     expect(screen.getByRole("dialog", { name: "Map details sheet" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Map items" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "List" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Hide Map details" }));
 
     const open = screen.getByRole("button", { name: "Open canvas fullscreen" });
@@ -2297,7 +2274,7 @@ describe("WorkspaceGraphScreen", () => {
     await screen.findByText(i18n.t("graph:workspaceGraph.ui.unavailable"));
     expect(screen.queryByTestId("workspace-graph-canvas")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open canvas fullscreen" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Map items" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "List" })).not.toBeInTheDocument();
     expect(queryWorkspaceGraphMock).toHaveBeenCalledOnce();
     expect(queryWorkspaceGraphMock.mock.calls[0][1].budget).toEqual({ documents: 2000, relations: 6000 });
   });
@@ -2336,7 +2313,7 @@ describe("WorkspaceGraphScreen", () => {
       .mockResolvedValueOnce(opened)
       .mockResolvedValueOnce(expandedScene(null, "cluster:final"));
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     await userEvent.click(screen.getByRole("button", { name: /^Expand cluster/ }));
@@ -2379,12 +2356,12 @@ describe("WorkspaceGraphScreen", () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
     expect(screen.getByText("지식 지도 구성 중…")).toBeInTheDocument();
-    await screen.findByRole("heading", { name: "지도 항목" });
+    await screen.findByRole("heading", { name: "목록" });
     openMapList();
     expect(screen.getByRole("heading", { name: "지식 지도" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "레이아웃 일시 중지" })).toBeInTheDocument();
     // The relation chip is short; its tooltip keeps the full kind name.
-    const chips = within(screen.getByTestId("workspace-graph-edge-list")).getAllByText("링크");
+    const chips = within(screen.getByTestId("workspace-graph-edge-list")).getAllByText("링크", { selector: ".relation-list-chip" });
     expect(chips.map((chip) => chip.getAttribute("title"))).toEqual(chips.map(() => "위키 링크"));
     await userEvent.click(screen.getByRole("button", { name: "세부 필터" }));
     expect(screen.getByRole("dialog", { name: "데이터 세부 필터" })).toBeInTheDocument();
@@ -2394,7 +2371,7 @@ describe("WorkspaceGraphScreen", () => {
   it("closes Refine as the topmost Escape layer and restores the actual trigger", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     await userEvent.click(within(screen.getByTestId("workspace-graph-node-list"))
       .getByRole("button", { name: /Alpha/ }));
@@ -2412,7 +2389,7 @@ describe("WorkspaceGraphScreen", () => {
   it("portals Refine, isolates and locks its underlay, contains focus, and restores exact state", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     const view = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
     const shell = view.container.querySelector<HTMLElement>(".app-shell");
     const region = view.container.querySelector<HTMLElement>(".feature-main.workspace-graph");
@@ -2456,7 +2433,7 @@ describe("WorkspaceGraphScreen", () => {
   it("targets Folder and Time controls and restores each triggering control on close", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(baseScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
 
     await userEvent.click(screen.getByText("More data filters"));
@@ -2478,56 +2455,43 @@ describe("WorkspaceGraphScreen", () => {
     await waitFor(() => expect(timeTrigger).toHaveFocus());
   });
 
-  it("relation-first: the optional folder context does not replace original document and cross-relation columns", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(mixedFolderUiScene());
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    const columns = latestMockMapColumns();
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    selectMockMapId("cluster:mixed");
-    await userEvent.click(screen.getByRole("button", { name: i18n.t("graph:workspaceGraph.folders.groupByFolder") }));
-    expect(latestMockMapColumns()).toBe(columns);
-    expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
-    expect(canvas).toHaveAttribute("data-selected-id", "cluster:mixed");
-    expect(columns.nodeIds.filter((id) => !isTreeRailId(id))).toEqual(["cluster:mixed", "context:alpha"]);
-    expect(columns.edgeIds.filter((id) => !isTreeRailId(id))).toEqual(["edge:alpha-mixed"]);
-    // Original aggregate self-relations remain in the accessible list, not
-    // newly split into cross-folder native physics rows.
-    expect(document.querySelector('[data-graph-edge-id="edge:mixed-self"]')).toBeInTheDocument();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("relation-first: enabling folder context preserves saved pins, focus and paused controls", async () => {
-    const payload = folderUiScene();
+  it("keeps a folder node's pin and selection through restore and cluster expansion", async () => {
+    const folder = uiFolder(UI_FOLDERS.research, "Research", "Research");
+    const withFolder = (scene: WorkspaceGraphScene): WorkspaceGraphScene => ({ ...scene,
+      nodes: [...scene.nodes, folder], edges: [...scene.edges, uiContainment(folder.id, "context:alpha")] });
+    const payload = withFolder(baseScene());
     const saved = freshWorkspaceGraphState();
     saved.viewerId = "actor-one";
-    saved.pinnedIds = ["context:alpha"];
-    saved.pinnedPositions = { "context:alpha": { x: 77, y: 88 } };
+    saved.selectedId = folder.id;
+    saved.pinnedIds = [folder.id];
+    saved.pinnedPositions = { [folder.id]: { x: 10, y: 20 } };
     saveWorkspaceGraphState("workspace-one", "actor-one", payload.graph_revision, saved);
-    queryWorkspaceGraphMock.mockResolvedValue(payload);
+    // The expansion reveals no new document, so nothing else claims the selection.
+    const expanded = expandedScene(null, "cluster:residual");
+    expanded.nodes = expanded.nodes.filter((node) => node.id !== "context:gamma");
+    queryWorkspaceGraphMock.mockResolvedValueOnce(payload).mockResolvedValueOnce(withFolder(expanded));
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Pause layout" }));
-    const row = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /Alpha/ });
-    act(() => row.focus());
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("graph:workspaceGraph.folders.groupByFolder") }));
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    expect(canvas).toHaveAttribute("data-focused-id", "context:alpha");
-    expect(canvas).toHaveAttribute("data-pinned-ids", "context:alpha");
-    expect(canvas).toHaveAttribute("data-pinned-positions", JSON.stringify(saved.pinnedPositions));
-    expect(screen.getByRole("button", { name: "Resume layout" })).toBeEnabled();
-    expect(canvasPauseMock).toHaveBeenCalledTimes(1);
+    const expectFolderKept = () => {
+      const canvas = screen.getByTestId("workspace-graph-canvas");
+      expect(canvas).toHaveAttribute("data-selected-id", folder.id);
+      expect(canvas).toHaveAttribute("data-pinned-ids", folder.id);
+      expect(canvas).toHaveAttribute("data-pinned-positions", JSON.stringify(saved.pinnedPositions));
+    };
+    expectFolderKept();
+    expect(screen.getByRole("heading", { name: "Research" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Expand cluster/ }));
+    await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
+    await waitFor(expectFolderKept);
   });
 
   it("relation-first: the actual 2k document scene keeps normal live pause and resume controls", async () => {
     queryWorkspaceGraphMock.mockResolvedValue(largeFolderUiScene());
     renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByRole("heading", { name: "List" });
     openMapList();
-    expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
-    await userEvent.click(screen.getByRole("button", { name: i18n.t("graph:workspaceGraph.folders.groupByFolder") }));
+    // Folders and containment ride along with a full 2K scene without making it static.
     expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
     expect(workspaceMapAdmissionCounts(latestMockMapColumns()).nodeCount).toBe(2_000);
   });
@@ -2558,642 +2522,6 @@ describe("WorkspaceGraphScreen", () => {
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
   });
 
-  it("folder context: leaves a legacy response usable with an explicit disabled option", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(baseScene());
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    expect(screen.getByRole("button", { name: "Folder context" })).toBeDisabled();
-    expect(screen.getByText("Folder context is unavailable for this response; the map and list remain usable.")).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-canvas")).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-node-list")).toBeInTheDocument();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(["documents", "folders"] as const)("folder context: falls back explicitly when authoritative %s exceed metadata budgets", async (category) => {
-    const payload = category === "documents" ? largeFolderUiScene(25_001) : folderAncestorBudgetScene(25_001);
-    expect(isWorkspaceGraphResponse({ data: payload })).toBe(true);
-    queryWorkspaceGraphMock.mockResolvedValue(payload);
-    renderScreen();
-    if (category === "documents") {
-      await screen.findByText(i18n.t("graph:workspaceGraph.ui.unavailable"));
-      expect(screen.queryByTestId("workspace-graph-canvas")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("workspace-graph-node-list")).not.toBeInTheDocument();
-      expect(queryWorkspaceGraphMock).toHaveBeenCalledOnce();
-      return;
-    }
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    expect(screen.getByRole("button", { name: "Folder context" })).toBeDisabled();
-    expect(screen.getByText("Folder context is unavailable for this response; the map and list remain usable.")).toBeInTheDocument();
-    expectOriginalDocumentMapColumns();
-    expect(screen.getByTestId("workspace-graph-canvas")).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-node-list")).toBeInTheDocument();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(["legacy", "folder_budget"] as const)("folder context: preserves ordinary-map controls after metadata becomes %s", async (fallback) => {
-    const initial = mixedFolderUiScene();
-    const unavailable = fallback === "legacy" ? baseScene() : folderAncestorBudgetScene(25_001);
-    expect(isWorkspaceGraphResponse({ data: initial })).toBe(true);
-    expect(isWorkspaceGraphResponse({ data: unavailable })).toBe(true);
-    queryWorkspaceGraphMock.mockResolvedValueOnce(initial).mockResolvedValueOnce(unavailable).mockResolvedValueOnce(initial);
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
-    selectMockMapId("cluster:mixed");
-    await userEvent.click(within(screen.getByRole("region", { name: "Details" })).getByRole("button", { name: "Expand cluster" }));
-    await screen.findByText("Folder context is unavailable for this response; the map and list remain usable.");
-    expectOriginalDocumentMapColumns();
-    expect(screen.getByRole("button", { name: "Folder context" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Folder context" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
-    await userEvent.click(screen.getByRole("button", { name: "Pause layout" }));
-    expect(screen.getByRole("button", { name: "Resume layout" })).toBeEnabled();
-    fireEvent.change(screen.getByRole("combobox", { name: "Lens" }), { target: { value: "links" } });
-    await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Folder context" })).toBeEnabled());
-    expect(screen.getByRole("button", { name: "Folder context" })).toHaveAttribute("aria-pressed", "true");
-    expectOriginalDocumentMapColumns();
-    expect(screen.queryByRole("button", { name: "Fixed layout for large maps" })).not.toBeInTheDocument();
-  });
-
-  it("lazy folder context: prepares only on demand and reuses the same scene across cosmetic changes", async () => {
-    const prepare = vi.spyOn(folderScenePreparation, "prepareWorkspaceMapFolderScene");
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByTestId("workspace-graph-canvas");
-    openMapList();
-    expect(prepare).not.toHaveBeenCalled();
-    const columns = latestMockMapColumns();
-    const toggle = screen.getByRole("button", { name: "Folder context" });
-    expect(toggle).toBeEnabled();
-    await userEvent.click(toggle);
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(document.querySelectorAll("[data-map-folder-id]")).toHaveLength(3);
-    await act(async () => { await i18n.changeLanguage("ko"); });
-    await act(async () => { await i18n.changeLanguage("en"); });
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), { target: { value: "Alpha" } });
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(latestMockMapColumns()).toBe(columns);
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    expect(document.querySelectorAll("[data-map-folder-id]")).toHaveLength(0);
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(["actor", "workspace"] as const)("lazy folder context: does not prepare old or replacement scenes until the new %s opts in", async (scope) => {
-    const prepare = vi.spyOn(folderScenePreparation, "prepareWorkspaceMapFolderScene");
-    const initial = folderUiScene(), replacement = folderUiScene();
-    queryWorkspaceGraphMock.mockResolvedValueOnce(initial);
-    let resolveNext!: (scene: WorkspaceGraphScene) => void;
-    queryWorkspaceGraphMock.mockImplementationOnce(() => new Promise<WorkspaceGraphScene>((resolve) => { resolveNext = resolve; }));
-    const view = renderScreen();
-    await screen.findByTestId("workspace-graph-canvas");
-    openMapList();
-    expect(prepare).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    expect(prepare).toHaveBeenCalledTimes(1);
-    if (scope === "actor") authState.userId = "actor-two";
-    else workspaceState.selectedId = "workspace-two";
-    view.rerender(graphTree());
-    await waitFor(() => expect(resolveNext).toBeTypeOf("function"));
-    expect(screen.queryByTestId("workspace-graph-canvas")).not.toBeInTheDocument();
-    expect(prepare).toHaveBeenCalledTimes(1);
-    await act(async () => { resolveNext(replacement); });
-    await screen.findByTestId("workspace-graph-canvas");
-    openMapList();
-    expect(prepare).toHaveBeenCalledTimes(1);
-    const toggle = screen.getByRole("button", { name: "Folder context" });
-    expect(toggle).toBeEnabled();
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await userEvent.click(toggle);
-    expect(prepare).toHaveBeenCalledTimes(2);
-    expect(prepare.mock.calls[1][0]).toBe(replacement);
-  });
-
-  it("folder context: toggles only the primary-folder index without selecting Directory or fetching again", async () => {
-    const payload = folderUiScene();
-    expect(isWorkspaceGraphResponse({ data: payload })).toBe(true);
-    queryWorkspaceGraphMock.mockResolvedValue(payload);
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    const toggle = screen.getByRole("button", { name: "Folder context" });
-    const columns = latestMockMapColumns();
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await userEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("combobox", { name: "Lens" })).toHaveValue("combined");
-    expect(latestMockMapColumns()).toBe(columns);
-    expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
-    expect(document.querySelectorAll("[data-map-folder-id]")).toHaveLength(3);
-    expect(document.querySelector('[data-map-folder-id="' + UI_FOLDERS.secondary + '"]')).not.toBeInTheDocument();
-    await userEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(latestMockMapColumns()).toBe(columns);
-    expect(document.querySelectorAll("[data-map-folder-id]")).toHaveLength(0);
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("folder context: follows primary parents and document URLs without replacing original selection or centering phantom folders", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    selectMockMapId("context:alpha");
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    const columns = latestMockMapColumns();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.research);
-    let details = screen.getByRole("region", { name: "Folder members and relationships" });
-    expect(details).toHaveAttribute("data-map-folder-details", UI_FOLDERS.research);
-    expect(within(details).getByRole("heading", { name: "Direct members (1 document)" })).toBeInTheDocument();
-    expect(within(details).getByRole("link", { name: "Open" })).toHaveAttribute("href", UI_CONTEXT_PATH);
-    expect(canvas).toHaveAttribute("data-selected-id", "context:alpha");
-    await userEvent.click(within(details).getByRole("button", { name: "Parent folder: Root" }));
-    details = screen.getByRole("region", { name: "Folder members and relationships" });
-    expect(details).toHaveAttribute("data-map-folder-details", UI_FOLDERS.root);
-    expect(within(details).getByRole("heading", { name: "Direct members (0 documents)" })).toBeInTheDocument();
-    expect(within(details).queryAllByRole("link", { name: "Open" })).toHaveLength(0);
-    await userEvent.click(within(details).getByRole("button", { name: "Sources" }));
-    details = screen.getByRole("region", { name: "Folder members and relationships" });
-    expect(within(details).getByRole("link", { name: "Open" })).toHaveAttribute("href", UI_LIBRARY_PATH);
-    expect(within(details).queryByText("Secondary only")).not.toBeInTheDocument();
-    expect(latestMockMapColumns()).toBe(columns);
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    await userEvent.click(within(details).getByRole("button", { name: "Close folder details" }));
-    expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
-    expect(canvas).toHaveAttribute("data-selected-id", "context:alpha");
-    await selectFolderFromIndex(UI_FOLDERS.library);
-    details = screen.getByRole("region", { name: "Folder members and relationships" });
-    await userEvent.click(within(details).getByRole("button", { name: /Library Beta/ }));
-    expect(screen.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Library Beta" })).toBeInTheDocument();
-    expect(canvas).toHaveAttribute("data-selected-id", "library:beta");
-    expect(canvasCenterOnMock).toHaveBeenCalledExactlyOnceWith("library:beta");
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([false, true])("folder context: a secondary aggregate membership row selects only its original source node (mobile=%s)", async (mobile) => {
-    mobileLayout = mobile;
-    const payload = mixedFolderUiScene();
-    expect(isWorkspaceGraphResponse({ data: payload })).toBe(true);
-    queryWorkspaceGraphMock.mockResolvedValue(payload);
-    renderScreen();
-    await screen.findByTestId("workspace-graph-node-list");
-    openMapList();
-    if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
-    const dialog = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : undefined;
-    const surface = dialog ? within(dialog) : screen;
-    await userEvent.click(surface.getByRole("button", { name: "Folder context" }));
-    const columns = latestMockMapColumns();
-    await selectFolderFromIndex(UI_FOLDERS.library, dialog);
-    const details = surface.getByRole("region", { name: "Folder members and relationships" });
-    const members = within(details).getByTestId(mobile ? "workspace-map-folder-members-mobile" : "workspace-map-folder-members");
-    const row = within(members).getByRole("button", { name: /Mixed knowledge group/ });
-    expect(row).toHaveTextContent("Library · Aggregate membership · 2 documents");
-    expect(within(details).getByRole("heading", { name: "Direct members (2 documents)" })).toBeInTheDocument();
-    expect(within(details).queryByRole("link", { name: "Open" })).not.toBeInTheDocument();
-    expect(columns.nodeIds).toContain("cluster:mixed");
-    expect(columns.nodeIds.some((id) => id.startsWith("folder-fragment:"))).toBe(false);
-    canvasCenterOnMock.mockClear();
-    await userEvent.click(row);
-    expect(surface.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "cluster:mixed");
-    expect(canvasCenterOnMock).toHaveBeenCalledExactlyOnceWith("cluster:mixed");
-    expect(latestMockMapColumns()).toBe(columns);
-    if (mobile) {
-      await userEvent.click(surface.getByRole("button", { name: "Close canvas" }));
-      await userEvent.click(screen.getByRole("button", { name: "Open Map details sheet" }));
-    }
-    expect(screen.getByRole("heading", { name: "Mixed knowledge group" })).toBeInTheDocument();
-    if (!mobile) {
-      const sourceRow = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Mixed knowledge group/ });
-      act(() => sourceRow.focus());
-      expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-focused-id", "cluster:mixed");
-    }
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("folder context: original native nodes and cross-folder relationships remain selectable while metadata is open", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    const columns = latestMockMapColumns();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.research);
-    selectMockMapId("edge:alpha-beta");
-    expect(screen.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "edge:alpha-beta");
-    const authored = [...columns.edgeIds.keys()].filter((index) => !isTreeRailId(columns.edgeIds[index]));
-    expect(authored.map((index) => columns.edgeIds[index])).toEqual(["edge:alpha-beta"]);
-    expect(authored.map((index) => columns.edgeCrossFolder[index])).toEqual([1]);
-    expect(authored.map((index) => columns.edgeWeights[index])).toEqual([3]);
-    expect(latestMockMapColumns()).toBe(columns);
-    selectMockMapId("library:beta");
-    expect(screen.getByRole("heading", { name: "Library Beta" })).toBeInTheDocument();
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("folder context: original selection survives visible search, source-row focus, language and fullscreen", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(mixedFolderUiScene());
-    renderScreen();
-    await screen.findByTestId("workspace-graph-node-list");
-    openMapList();
-    selectMockMapId("cluster:mixed");
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    const columns = latestMockMapColumns();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    const row = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Mixed knowledge group/ });
-    act(() => row.focus());
-    expect(canvas).toHaveAttribute("data-focused-id", "cluster:mixed");
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in visible map" }), { target: { value: "Mixed" } });
-    expect(canvas).toHaveAttribute("data-selected-id", "cluster:mixed");
-    expect(latestMockMapColumns()).toBe(columns);
-    await userEvent.click(within(screen.getByRole("region", { name: "Details" })).getByRole("button", { name: "Center" }));
-    expect(canvasCenterOnMock).toHaveBeenLastCalledWith("cluster:mixed");
-    await act(async () => { await i18n.changeLanguage("ko"); });
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "cluster:mixed");
-    expect(screen.getByRole("button", { name: "폴더 보조 정보" })).toHaveAttribute("aria-pressed", "true");
-    await act(async () => { await i18n.changeLanguage("en"); });
-    act(() => {
-      mobileLayout = true;
-      for (const listener of mobileMediaListeners) listener();
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
-    const remounted = screen.getByTestId("workspace-graph-canvas");
-    expect(remounted).toBe(canvas);
-    expect(remounted).toHaveAttribute("data-selected-id", "cluster:mixed");
-    expect(latestMockMapColumns()).toBe(columns);
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("folder context: metadata-only and weighted scene refreshes retain original source selection, not invented fragments", async () => {
-    const before = mixedFolderUiScene();
-    const renamed = mixedFolderUiScene();
-    renamed.nodes[1].label = "Renamed knowledge group";
-    renamed.graph_revision = "revision-renamed";
-    const weighted = structuredClone(renamed);
-    weighted.edges[0].occurrence_weight = 2;
-    weighted.folder_topology!.edge_slices[0].occurrence_weight = 2;
-    for (const payload of [before, renamed, weighted]) expect(isWorkspaceGraphResponse({ data: payload })).toBe(true);
-    queryWorkspaceGraphMock.mockResolvedValueOnce(before).mockResolvedValueOnce(renamed).mockResolvedValueOnce(weighted);
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    const columns = latestMockMapColumns();
-    selectMockMapId("cluster:mixed");
-    await userEvent.click(within(screen.getByRole("region", { name: "Details" })).getByRole("button", { name: "Expand cluster" }));
-    await screen.findByRole("heading", { name: "Renamed knowledge group" });
-    expect(latestMockMapColumns().identity.visibleFingerprint).toBe(columns.identity.visibleFingerprint);
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "cluster:mixed");
-    await userEvent.click(within(screen.getByRole("region", { name: "Details" })).getByRole("button", { name: "Expand cluster" }));
-    await waitFor(() => expect(latestMockMapColumns().identity.visibleFingerprint).not.toBe(columns.identity.visibleFingerprint));
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "cluster:mixed");
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3);
-  });
-
-  it.each(["actor", "workspace", "request"] as const)("folder context: invalidates independently selected folder details on a %s change", async (change) => {
-    queryWorkspaceGraphMock.mockResolvedValue(mixedFolderUiScene());
-    const view = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.library);
-    expect(screen.getByRole("region", { name: "Folder members and relationships" })).toBeInTheDocument();
-    if (change === "request") fireEvent.change(screen.getByRole("combobox", { name: "Lens" }), { target: { value: "links" } });
-    else {
-      if (change === "actor") authState.userId = "actor-two";
-      else workspaceState.selectedId = "workspace-two";
-      view.rerender(graphTree());
-      expect(screen.queryByTestId("workspace-graph-canvas")).not.toBeInTheDocument();
-    }
-    expect(screen.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2));
-    const toggle = await screen.findByRole("button", { name: "Folder context" });
-    if (change !== "request") expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    openMapList();
-    const source = within(screen.getByTestId("workspace-graph-node-list")).getByRole("button", { name: /^Mixed knowledge group/ });
-    await userEvent.click(source);
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "cluster:mixed");
-    expect(canvasCenterOnMock).toHaveBeenLastCalledWith("cluster:mixed");
-  });
-
-  it("folder context: preserves camera, paused layout, original selection, search and pins through both toggle directions", async () => {
-    const payload = folderUiScene();
-    const saved = freshWorkspaceGraphState();
-    saved.viewerId = "actor-one";
-    saved.viewportEngine = "cosmos";
-    saved.viewport = { zoom: 0.173, pan: { x: 33, y: 44 } };
-    saved.pinnedIds = ["context:alpha"];
-    saved.pinnedPositions = { "context:alpha": { x: 77, y: 88 } };
-    saveWorkspaceGraphState("workspace-one", "actor-one", payload.graph_revision, saved);
-    queryWorkspaceGraphMock.mockResolvedValue(payload);
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    selectMockMapId("context:alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Pause layout" }));
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    const columns = latestMockMapColumns();
-    const search = screen.getByRole("searchbox", { name: "Find in visible map" });
-    fireEvent.change(search, { target: { value: "Alpha" } });
-    for (let index = 0; index < 2; index += 1) {
-      await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-      expect(latestMockMapColumns()).toBe(columns);
-      expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
-      expect(canvas).toHaveAttribute("data-selected-id", "context:alpha");
-      expect(canvas).toHaveAttribute("data-pinned-ids", "context:alpha");
-      expect(canvas).toHaveAttribute("data-pinned-positions", JSON.stringify(saved.pinnedPositions));
-      expect(canvas).toHaveAttribute("data-viewport", JSON.stringify(saved.viewport));
-      expect(search).toHaveValue("Alpha");
-      expect(screen.getByRole("button", { name: "Resume layout" })).toBeEnabled();
-    }
-    expect(canvasPauseMock).toHaveBeenCalledTimes(1);
-    expect(canvasResumeMock).not.toHaveBeenCalled();
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("folder context: accepts original drag pins and normal Reset without suppressing or restoring obsolete positions", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    const view = renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    fireEvent.doubleClick(canvas);
-    expect(canvas).toHaveAttribute("data-pinned-ids", "context:alpha");
-    expect(canvas).toHaveAttribute("data-pinned-positions", JSON.stringify({ "context:alpha": { x: 999, y: 888 } }));
-    act(() => window.dispatchEvent(new Event("pagehide")));
-    view.unmount();
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-pinned-positions", JSON.stringify({ "context:alpha": { x: 999, y: 888 } }));
-    expect(screen.getByRole("button", { name: "Folder context" })).toHaveAttribute("aria-pressed", "false");
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    await userEvent.click(screen.getByRole("button", { name: "Reset viewport, pins, and selection" }));
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-pinned-ids", "");
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-pinned-positions", "{}");
-  });
-
-  it("folder context: visible search keeps original columns, fingerprint and camera with no server requests", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    const columns = latestMockMapColumns();
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    const search = screen.getByRole("searchbox", { name: "Find in visible map" });
-    for (const value of ["A", "Alpha", "no visible match", ""]) {
-      fireEvent.change(search, { target: { value } });
-      expect(latestMockMapColumns()).toBe(columns);
-      expect(latestMockMapColumns().identity.visibleFingerprint).toBe(columns.identity.visibleFingerprint);
-      expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
-    }
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(["actor", "workspace"])("folder context: hides old folder details in the first new-%s paint and resets optional context", async (scope) => {
-    queryWorkspaceGraphMock.mockResolvedValueOnce(folderUiScene());
-    let resolveNext: ((scene: WorkspaceGraphScene) => void) | null = null;
-    queryWorkspaceGraphMock.mockImplementation(() => new Promise<WorkspaceGraphScene>((resolve) => { resolveNext = resolve; }));
-    const paints: Array<{ folder: boolean; canvas: boolean; toggle: boolean }> = [];
-    function FolderPaintProbe() {
-      useLayoutEffect(() => {
-        if (authState.userId === "actor-one" && workspaceState.selectedId === "workspace-one") return;
-        paints.push({
-          folder: document.querySelector("[data-map-folder-details]") !== null,
-          canvas: screen.queryByTestId("workspace-graph-canvas") !== null,
-          toggle: screen.queryByRole("button", { name: "Folder context" }) !== null,
-        });
-      });
-      return null;
-    }
-    const tree = () => <MemoryRouter><WorkspaceGraphScreen /><FolderPaintProbe /></MemoryRouter>;
-    const view = render(tree());
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.research);
-    if (scope === "actor") authState.userId = "actor-two";
-    else workspaceState.selectedId = "workspace-two";
-    view.rerender(tree());
-    expect(paints[0]).toEqual({ folder: false, canvas: false, toggle: false });
-    await waitFor(() => expect(resolveNext).toBeTypeOf("function"));
-    await act(async () => { resolveNext!(folderUiScene()); });
-    const toggle = await screen.findByRole("button", { name: "Folder context" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    expectOriginalDocumentMapColumns();
-    expect(latestMockMapColumns().identity).toMatchObject(scope === "actor"
-      ? { actorId: "actor-two", workspaceId: "workspace-one" }
-      : { actorId: "actor-one", workspaceId: "workspace-two" });
-  });
-
-  it("folder context: Escape closes only independent metadata before clearing original document selection", async () => {
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    selectMockMapId("context:alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.research);
-    await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "context:alpha");
-    expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "");
-  });
-
-  it.each([
-    { mobile: false, action: "close" }, { mobile: true, action: "close" },
-    { mobile: false, action: "escape" }, { mobile: true, action: "escape" },
-    { mobile: false, action: "member" }, { mobile: true, action: "member" },
-  ])("folder context: restores keyboard focus after $action without disturbing the document map (mobile=$mobile)", async ({ mobile, action }) => {
-    mobileLayout = mobile;
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByTestId("workspace-graph-node-list");
-    openMapList();
-    if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
-    const panel = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : document;
-    const scope = mobile ? within(panel as HTMLElement) : screen;
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    await userEvent.dblClick(canvas);
-    selectMockMapId("library:beta");
-    await userEvent.click(scope.getByRole("button", { name: "Pause layout" }));
-    const originalColumns = latestMockMapColumns();
-    const pins = canvas.dataset.pinnedPositions;
-    await userEvent.click(scope.getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.research, panel);
-    const origin = panel.querySelector<HTMLButtonElement>(`button[data-map-folder-id="${UI_FOLDERS.research}"]`)!;
-    const details = scope.getByRole("region", { name: "Folder members and relationships" });
-    const close = within(details).getByRole("button", { name: "Close folder details" });
-    if (action === "close") await userEvent.click(close);
-    if (action === "escape") {
-      act(() => close.focus());
-      await userEvent.keyboard("{Escape}");
-    }
-    if (action === "member") await userEvent.click(within(details).getByRole("button", { name: /^Alpha/ }));
-    const focusTarget = action === "member" ? scope.getByRole("button", { name: "Zoom in" }) : origin;
-    await waitFor(() => expect(focusTarget).toHaveFocus());
-    expect(scope.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
-    expect(canvas).toHaveAttribute("data-selected-id", action === "member" ? "context:alpha" : "library:beta");
-    expect(canvas).toHaveAttribute("data-layout-paused", "true");
-    expect(canvas.dataset.pinnedPositions).toBe(pins);
-    expect(latestMockMapColumns()).toBe(originalColumns);
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-    if (action === "member") expect(canvasCenterOnMock).toHaveBeenCalledExactlyOnceWith("context:alpha");
-    else expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    if (mobile) expect(panel.contains(document.activeElement)).toBe(true);
-  });
-
-  it.each([false, true])("folder context: closing details returns to its visible view control when the originating index is collapsed (mobile=%s)", async (mobile) => {
-    mobileLayout = mobile;
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByTestId("workspace-graph-node-list");
-    openMapList();
-    if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
-    const panel = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : document;
-    const scope = mobile ? within(panel as HTMLElement) : screen;
-    if (!mobile) await userEvent.click(screen.getByText("View", { selector: "summary" }));
-    const toggle = scope.getByRole("button", { name: "Folder context" });
-    await userEvent.click(toggle);
-    await selectFolderFromIndex(UI_FOLDERS.research, panel);
-    const index = panel.querySelector<HTMLDetailsElement>(".workspace-graph-folder-index")!;
-    await userEvent.click(index.querySelector("summary")!);
-    expect(index.open).toBe(false);
-    await userEvent.click(within(scope.getByRole("region", { name: "Folder members and relationships" }))
-      .getByRole("button", { name: "Close folder details" }));
-    const focusTarget = mobile ? toggle : screen.getByText("View", { selector: "summary" });
-    await waitFor(() => expect(focusTarget).toHaveFocus());
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it.each([false, true])("folder context: parent, child and related-folder keyboard navigation focuses the destination without changing the map (mobile=%s)", async (mobile) => {
-    mobileLayout = mobile;
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByTestId("workspace-graph-node-list");
-    openMapList();
-    if (mobile) await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
-    const panel = mobile ? screen.getByRole("dialog", { name: "Knowledge Map canvas" }) : document;
-    const scope = mobile ? within(panel as HTMLElement) : screen;
-    const canvas = screen.getByTestId("workspace-graph-canvas");
-    await userEvent.dblClick(canvas);
-    selectMockMapId("library:beta");
-    await userEvent.click(scope.getByRole("button", { name: "Pause layout" }));
-    const columns = latestMockMapColumns();
-    const retainedState = { pins: canvas.dataset.pinnedPositions, viewport: canvas.dataset.viewport };
-    await userEvent.click(scope.getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.research, panel);
-
-    for (const [buttonName, destination, heading] of [
-      ["Parent folder: Root", UI_FOLDERS.root, "Root"],
-      ["Sources", UI_FOLDERS.library, "Sources"],
-      ["Research", UI_FOLDERS.research, "Research"],
-    ] as const) {
-      const details = scope.getByRole("region", { name: "Folder members and relationships" });
-      const navigation = within(details).getByRole("button", { name: buttonName });
-      act(() => navigation.focus());
-      await userEvent.keyboard("{Enter}");
-      const destinationDetails = scope.getByRole("region", { name: "Folder members and relationships" });
-      expect(destinationDetails).toHaveAttribute("data-map-folder-details", destination);
-      expect(within(destinationDetails).getByRole("heading", { name: heading, level: 2 })).toHaveFocus();
-      expect(panel.contains(document.activeElement)).toBe(true);
-      const close = within(destinationDetails).getByRole("button", { name: "Close folder details" });
-      // jsdom has no layout. Give the real modal trap a visible tab target,
-      // rather than treating every descendant as hidden via offsetParent=null.
-      if (mobile) Object.defineProperty(close, "offsetParent", { configurable: true, value: destinationDetails });
-      await userEvent.tab();
-      expect(close).toHaveFocus();
-      expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
-      expect(canvas).toHaveAttribute("data-selected-id", "library:beta");
-      expect(canvas).toHaveAttribute("data-layout-paused", "true");
-      expect(canvas.dataset.pinnedPositions).toBe(retainedState.pins);
-      expect(canvas.dataset.viewport).toBe(retainedState.viewport);
-      expect(latestMockMapColumns()).toBe(columns);
-      expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-      expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    }
-  });
-
-  it("folder context: keeps the index and parent/member navigation inside the mobile fullscreen modal", async () => {
-    mobileLayout = true;
-    queryWorkspaceGraphMock.mockResolvedValue(folderUiScene());
-    renderScreen();
-    await screen.findByTestId("workspace-graph-node-list");
-    openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Open canvas fullscreen" }));
-    const dialog = screen.getByRole("dialog", { name: "Knowledge Map canvas" });
-    const toggle = within(dialog).getByRole("button", { name: "Folder context" });
-    await userEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-    const index = dialog.querySelector(".workspace-graph-folder-index");
-    expect(index?.closest(".workspace-graph-canvas-controls")).not.toBeNull();
-    await selectFolderFromIndex(UI_FOLDERS.research, dialog);
-    let details = within(dialog).getByRole("region", { name: "Folder members and relationships" });
-    expect(within(details).getByTestId("workspace-map-folder-members-mobile")).toBeInTheDocument();
-    expect(within(details).getByRole("link", { name: "Open" })).toHaveAttribute("href", UI_CONTEXT_PATH);
-    await userEvent.click(within(details).getByRole("button", { name: "Parent folder: Root" }));
-    details = within(dialog).getByRole("region", { name: "Folder members and relationships" });
-    await userEvent.click(within(details).getByRole("button", { name: "Sources" }));
-    details = within(dialog).getByRole("region", { name: "Folder members and relationships" });
-    expect(within(details).getByRole("link", { name: "Open" })).toHaveAttribute("href", UI_LIBRARY_PATH);
-    await userEvent.click(within(details).getByRole("button", { name: "Close folder details" }));
-    expect(within(dialog).queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Knowledge Map canvas" })).toBe(dialog);
-    expect(canvasCenterOnMock).not.toHaveBeenCalled();
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("folder context: bounds the authoritative 2k-member DOM list and preserves native keyboard navigation", async () => {
-    const payload = largeFolderUiScene();
-    expect(isWorkspaceGraphResponse({ data: payload })).toBe(true);
-    queryWorkspaceGraphMock.mockResolvedValue(payload);
-    renderScreen();
-    await screen.findByRole("heading", { name: "Map items" });
-    openMapList();
-    await userEvent.click(screen.getByRole("button", { name: "Folder context" }));
-    await selectFolderFromIndex(UI_FOLDERS.research);
-    const members = screen.getByTestId("workspace-map-folder-members");
-    expect(members).toHaveAttribute("data-total-count", "2000");
-    expect(members.querySelectorAll("li[data-map-folder-member]").length).toBeLessThan(30);
-    const first = within(members).getByRole("button", { name: /Knowledge Document 0000/ });
-    act(() => first.focus());
-    fireEvent.keyDown(first, { key: "End" });
-    await waitFor(() => expect(within(members).getByRole("button", { name: /Knowledge Document 1999/ })).toHaveFocus());
-    const last = within(members).getByRole("button", { name: /Knowledge Document 1999/ });
-    expect(last.closest("li")).toHaveAttribute("aria-posinset", "2000");
-    expect(last.closest("li")).toHaveAttribute("aria-setsize", "2000");
-    fireEvent.keyDown(last, { key: "Home" });
-    await waitFor(() => expect(within(members).getByRole("button", { name: /Knowledge Document 0000/ })).toHaveFocus());
-    expect(members.querySelectorAll("li[data-map-folder-member]").length).toBeLessThan(30);
-    fireEvent.keyDown(within(members).getByRole("button", { name: /Knowledge Document 0000/ }), { key: "End" });
-    await waitFor(() => expect(within(members).getByRole("button", { name: /Knowledge Document 1999/ })).toHaveFocus());
-    await userEvent.keyboard("{Enter}");
-    expect(screen.getByRole("heading", { name: "Knowledge Document 1999" })).toBeInTheDocument();
-    expect(canvasCenterOnMock).toHaveBeenLastCalledWith("context:1999");
-    expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "context:1999");
-    expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
-  }, 30_000);
-
   it("localizes generic failures and can clear saved state before retrying", async () => {
     await i18n.changeLanguage("ko");
     const staleKey = `${workspaceGraphStorageScope("workspace-one", "actor-one")}obsolete-revision`;
@@ -3213,7 +2541,7 @@ describe("WorkspaceGraphScreen", () => {
 
     expect(window.sessionStorage.getItem(staleKey)).toBeNull();
     await screen.findByRole("heading", {
-      name: i18n.t("graph:workspaceGraph.list.title"),
+      name: i18n.t("graph:graph.list.title"),
     });
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(2);
   });
@@ -3407,24 +2735,10 @@ const UI_FOLDERS = {
 const UI_CONTEXT_PATH = "/context?target=00000000-0000-4000-8000-000000000001";
 const UI_LIBRARY_PATH = "/library?item=00000000-0000-4000-8000-000000000002&tab=preview";
 
-/** TreeRail folder hubs and containment lines, which no list row stands for. */
-function isTreeRailId(id: string): boolean {
-  return id.startsWith("folder:") || id.startsWith("contains:");
-}
-
 function latestMockMapColumns(): WorkspaceMapColumns {
   const columns = canvasColumnsMock.mock.calls.at(-1)?.[0] as WorkspaceMapColumns | undefined;
   if (!columns) throw new Error("Expected mounted mock Map columns.");
   return columns;
-}
-
-function expectOriginalDocumentMapColumns(): void {
-  const columns = latestMockMapColumns();
-  expect(columns.nodeKinds).toHaveLength(columns.nodeIds.length);
-  // TreeRail folder hubs are the only non-document points; retired folder fragments never return.
-  columns.nodeIds.forEach((id, index) => expect(id.startsWith("folder:")).toBe(columns.nodeKinds[index] === 3));
-  expect(columns.nodeIds.every((id) => !id.startsWith("folder-fragment:"))).toBe(true);
-  expect(columns).not.toHaveProperty("preparedScene");
 }
 
 function selectMockMapId(id: string | null): void {
@@ -3433,17 +2747,14 @@ function selectMockMapId(id: string | null): void {
   act(() => select(id));
 }
 
-async function selectFolderFromIndex(id: string, scope: ParentNode = document): Promise<void> {
-  const button = scope.querySelector<HTMLButtonElement>(`button[data-map-folder-id="${id}"]`);
-  if (!button) throw new Error("Expected visible primary folder index button.");
-  const details = button.closest("details");
-  if (details && !details.open) {
-    const summary = details.querySelector("summary");
-    if (!summary) throw new Error("Expected an accessible folder index summary.");
-    await userEvent.click(summary);
-    expect(details).toHaveAttribute("open");
-  }
-  await userEvent.click(button);
+function uiFolder(folderId: string, label: string, path: string): WorkspaceGraphNode {
+  return { grain: "folder", id: `folder:${folderId}`, folder_id: folderId, label, path };
+}
+
+function uiContainment(source: string, target: string): WorkspaceGraphScene["edges"][number] {
+  return { id: `contains:${source}|${target}`, source, target, relation_kind: "tree", label: null,
+    layer: "knowledge", direction: "directed", aggregate: false, relation_count: 1, occurrence_weight: 1,
+    cross_folder: false, primary: true };
 }
 
 /** API-shaped visible input; the canvas is mocked, not a GPU/real-server claim. */
@@ -3476,74 +2787,21 @@ function folderUiScene(): WorkspaceGraphScene {
     { value: UI_FOLDERS.library, label: "Sources", count: 1 },
     { value: UI_FOLDERS.secondary, label: "Secondary only", count: 1 },
   ];
-  scene.folder_topology = {
-    schema_version: "workspace-graph-folders.v1",
-    folders: [
-      { id: UI_FOLDERS.root, label: "Root", parent_folder_id: null, direct_member_count: 0 },
-      { id: UI_FOLDERS.research, label: "Research", parent_folder_id: UI_FOLDERS.root, direct_member_count: 1 },
-      { id: UI_FOLDERS.library, label: "Sources", parent_folder_id: UI_FOLDERS.root, direct_member_count: 1 },
-    ],
-    memberships: [
-      { node_id: "context:alpha", folder_id: UI_FOLDERS.research, entity_kind: "context", member_count: 1 },
-      { node_id: "library:beta", folder_id: UI_FOLDERS.library, entity_kind: "library", member_count: 1 },
-    ],
-    edge_slices: [{ edge_id: "edge:alpha-beta", source_folder_id: UI_FOLDERS.research,
-      source_entity_kind: "context", target_folder_id: UI_FOLDERS.library, target_entity_kind: "library",
-      relation_count: 1, occurrence_weight: 3 }],
-  };
-  return scene;
-}
-
-function mixedFolderUiScene(): WorkspaceGraphScene {
-  const scene = folderUiScene();
-  scene.representation = "aggregated";
-  scene.capabilities.expand = true;
-  scene.nodes = [scene.nodes[0], { grain: "cluster", id: "cluster:mixed", label: "Mixed knowledge group",
-    cluster_kind: "link_cluster", member_count: 3, relation_count: 2 }];
-  scene.counts = { candidate_documents: 4, candidate_relations: 3,
-    rendered_documents: 1, rendered_clusters: 1, rendered_relations: 2 };
-  scene.edges = [
-    { id: "edge:alpha-mixed", source: "context:alpha", target: "cluster:mixed", relation_kind: "wikilink",
-      label: "links to", layer: "knowledge", direction: "directed", aggregate: true,
-      relation_count: 1, occurrence_weight: 1, cross_folder: false },
-    { id: "edge:mixed-self", source: "cluster:mixed", target: "cluster:mixed", relation_kind: "wikilink",
-      label: "links to", layer: "knowledge", direction: "directed", aggregate: true,
-      relation_count: 2, occurrence_weight: 5, cross_folder: true },
-  ];
-  scene.folder_topology!.folders[1].direct_member_count = 2;
-  scene.folder_topology!.folders[2].direct_member_count = 2;
-  scene.folder_topology!.memberships = [
-    { node_id: "context:alpha", folder_id: UI_FOLDERS.research, entity_kind: "context", member_count: 1 },
-    { node_id: "cluster:mixed", folder_id: UI_FOLDERS.research, entity_kind: "context", member_count: 1 },
-    { node_id: "cluster:mixed", folder_id: UI_FOLDERS.library, entity_kind: "library", member_count: 2 },
-  ];
-  scene.folder_topology!.edge_slices = [
-    { edge_id: "edge:alpha-mixed", source_folder_id: UI_FOLDERS.research, source_entity_kind: "context",
-      target_folder_id: UI_FOLDERS.research, target_entity_kind: "context", relation_count: 1, occurrence_weight: 1 },
-    { edge_id: "edge:mixed-self", source_folder_id: UI_FOLDERS.research, source_entity_kind: "context",
-      target_folder_id: UI_FOLDERS.library, target_entity_kind: "library", relation_count: 1, occurrence_weight: 3 },
-    { edge_id: "edge:mixed-self", source_folder_id: UI_FOLDERS.library, source_entity_kind: "library",
-      target_folder_id: UI_FOLDERS.library, target_entity_kind: "library", relation_count: 1, occurrence_weight: 2 },
-  ];
+  scene.nodes.push(uiFolder(UI_FOLDERS.root, "Root", "Root"),
+    uiFolder(UI_FOLDERS.research, "Research", "Root / Research"),
+    uiFolder(UI_FOLDERS.library, "Sources", "Root / Sources"));
+  scene.edges.push(uiContainment(`folder:${UI_FOLDERS.root}`, `folder:${UI_FOLDERS.research}`),
+    uiContainment(`folder:${UI_FOLDERS.root}`, `folder:${UI_FOLDERS.library}`),
+    uiContainment(`folder:${UI_FOLDERS.research}`, "context:alpha"),
+    uiContainment(`folder:${UI_FOLDERS.library}`, "library:beta"));
   return scene;
 }
 
 function largeFolderUiScene(count = 2_000): WorkspaceGraphScene {
   const scene = largeScene(count);
-  scene.edges = scene.edges.map((edge) => ({ ...edge, occurrence_weight: 1 }));
-  scene.folder_topology = {
-    schema_version: "workspace-graph-folders.v1",
-    folders: [
-      { id: UI_FOLDERS.root, label: "Root", parent_folder_id: null, direct_member_count: 0 },
-      { id: UI_FOLDERS.research, label: "Research", parent_folder_id: UI_FOLDERS.root, direct_member_count: count },
-    ],
-    memberships: scene.nodes.map((node) => ({ node_id: node.id, folder_id: UI_FOLDERS.research,
-      entity_kind: "context", member_count: 1 })),
-    edge_slices: scene.edges.map((edge) => ({ edge_id: edge.id,
-      source_folder_id: UI_FOLDERS.research, source_entity_kind: "context",
-      target_folder_id: UI_FOLDERS.research, target_entity_kind: "context",
-      relation_count: 1, occurrence_weight: 1 })),
-  };
+  scene.nodes.push(uiFolder(UI_FOLDERS.root, "Root", "Root"), uiFolder(UI_FOLDERS.research, "Research", "Root / Research"));
+  scene.edges.push(uiContainment(`folder:${UI_FOLDERS.root}`, `folder:${UI_FOLDERS.research}`),
+    ...scene.nodes.slice(0, count).map((node) => uiContainment(`folder:${UI_FOLDERS.research}`, node.id)));
   return scene;
 }
 
@@ -3554,20 +2812,3 @@ async function draftFolderRule(dialog: HTMLElement, value: string, mode: "includ
   await userEvent.click(ui.getByRole("button", { name: /^(?:Add|Update) folder rule$/ }));
 }
 
-function folderAncestorBudgetScene(count: number): WorkspaceGraphScene {
-  const scene = folderUiScene();
-  const folderId = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
-  scene.nodes = [{ ...documentNode("context:alpha", "Alpha", "00000000-0000-4000-8000-000000000001"),
-    primary_folder_id: folderId(count - 1) }];
-  scene.edges = [];
-  scene.counts = { candidate_documents: 1, candidate_relations: 0,
-    rendered_documents: 1, rendered_clusters: 0, rendered_relations: 0 };
-  scene.folder_topology = { schema_version: "workspace-graph-folders.v1",
-    folders: Array.from({ length: count }, (_unused, index) => ({
-      id: folderId(index), label: `Folder ${index}`, parent_folder_id: index ? folderId(index - 1) : null,
-      direct_member_count: index === count - 1 ? 1 : 0,
-    })),
-    memberships: [{ node_id: "context:alpha", folder_id: folderId(count - 1), entity_kind: "context", member_count: 1 }],
-    edge_slices: [] };
-  return scene;
-}

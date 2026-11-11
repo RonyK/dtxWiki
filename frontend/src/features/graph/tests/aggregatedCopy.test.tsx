@@ -92,7 +92,7 @@ async function renderMap(payload: WorkspaceGraphScene, language: "en" | "ko" = "
       <MemoryRouter initialEntries={["/graph"]}><WorkspaceGraphScreen /></MemoryRouter>
     </div>,
   );
-  await screen.findByRole("heading", { name: i18n.t("graph:workspaceGraph.list.title") });
+  await screen.findByRole("heading", { name: i18n.t("graph:graph.list.title") });
   const header = document.querySelector(".workspace-graph-coverage")?.textContent ?? "";
   const banner = Array.from(document.querySelectorAll(".workspace-graph-notice > p"))
     .map((notice) => notice.textContent?.replace(/\s+/g, " ").trim() ?? "").join(" | ");

@@ -23,6 +23,8 @@ from backend.tests.utils.workspace_graph_corpora import (
     add_hidden_draft_decoys,
     corpus_actor,
     fixture_time,
+    relation_edges,
+    represented_nodes,
 )
 
 pytestmark = pytest.mark.integration
@@ -34,17 +36,17 @@ _MOBILE_BUDGET = {"documents": 2_000, "relations": 6_000}
 def _assert_complete_bounded_accounting(payload, *, documents, relations, budget):
     assert payload.counts.candidate_documents == documents
     assert payload.counts.candidate_relations == relations
-    assert len(payload.nodes) <= budget["documents"]
-    assert len(payload.edges) <= budget["relations"]
+    assert len(represented_nodes(payload)) <= budget["documents"]
+    assert len(relation_edges(payload)) <= budget["relations"]
     assert (
         sum(
             1 if node.grain == "document" else node.member_count
-            for node in payload.nodes
+            for node in represented_nodes(payload)
         )
         == documents
     )
-    assert sum(edge.relation_count for edge in payload.edges) == relations
-    assert sum(edge.occurrence_weight for edge in payload.edges) == relations
+    assert sum(edge.relation_count for edge in relation_edges(payload)) == relations
+    assert sum(edge.occurrence_weight for edge in relation_edges(payload)) == relations
     node_ids = {node.id for node in payload.nodes}
     assert len(node_ids) == len(payload.nodes)
     assert len({edge.id for edge in payload.edges}) == len(payload.edges)
@@ -115,12 +117,16 @@ def _assert_capacity_boundaries(session_factory):
         assert exact.completeness == "complete"
         assert exact.truncated is False
         assert exact.omission_reasons == []
-        assert {node.entity_id for node in exact.nodes} == set(corpus.document_ids)
+        assert {node.entity_id for node in represented_nodes(exact)} == set(
+            corpus.document_ids
+        )
         assert all(
-            edge.direction == "directed" and not edge.aggregate for edge in exact.edges
+            edge.direction == "directed" and not edge.aggregate
+            for edge in relation_edges(exact)
         )
         assert {
-            (edge.source, edge.target, edge.relation_kind) for edge in exact.edges
+            (edge.source, edge.target, edge.relation_kind)
+            for edge in relation_edges(exact)
         } == (_authored_edges(session, corpus))
         exact_wire = exact.model_dump_json()
         exact_revision = exact.graph_revision
