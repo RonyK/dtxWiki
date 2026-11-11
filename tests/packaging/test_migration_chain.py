@@ -140,11 +140,17 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     assert manifest["schema_releases"]["0.1.4"]["head"] == RELEASE_014_REVISION
     assert manifest["schema_releases"]["0.2.1"]["head"] == RELEASE_021_REVISION
     assert manifest["schema_releases"]["0.2.3"]["head"] == RELEASE_023_REVISION
+    released_revisions: set[str] = set()
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
         assert entry["group"] == f"v{major}_{minor}"
         revision = script.get_revision(entry["head"])
         assert Path(revision.path).parent.name == entry["group"]
+        released_revisions.update(_revision_ancestors(graph, entry["head"]))
+    assert all(
+        Path(script.get_revision(revision).path).parent.name == "unreleased"
+        for revision in set(graph) - released_revisions
+    ), "unreleased revisions must remain under versions/unreleased"
 
 
 def test_versions_directory_holds_only_graph_revisions():
