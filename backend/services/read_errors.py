@@ -103,6 +103,12 @@ class IdempotencyKeyConflictError(ReadServiceError):
         )
 
 
+class OperationOutcomeUnknownError(ReadServiceError):
+    """A REST lookup-only retry found no unexpired receipt; nothing executed."""
+
+    error_code = "operation_outcome_unknown"
+
+
 class BundleExpiredError(ReadServiceError):
     error_code = "bundle_expired"
 
@@ -170,9 +176,7 @@ class ReviewDecisionIdConflictError(ReadServiceError):
     error_code = "decision_id_conflict"
 
     def __init__(self) -> None:
-        super().__init__(
-            "decision_id was already used for a different review decision"
-        )
+        super().__init__("decision_id was already used for a different review decision")
 
 
 class RevisionSubmissionRequiredError(ReadServiceError):

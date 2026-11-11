@@ -4116,6 +4116,11 @@
             "pattern": "^[A-Za-z0-9._:-]+$",
             "title": "Idempotency Key",
             "type": "string"
+          },
+          "retry_only": {
+            "default": false,
+            "title": "Retry Only",
+            "type": "boolean"
           }
         },
         "required": [
@@ -8087,6 +8092,11 @@
             "pattern": "^[A-Za-z0-9._:-]+$",
             "title": "Idempotency Key",
             "type": "string"
+          },
+          "retry_only": {
+            "default": false,
+            "title": "Retry Only",
+            "type": "boolean"
           },
           "version_id": {
             "format": "uuid",
@@ -17054,6 +17064,11 @@
             ],
             "title": "Page Type"
           },
+          "retry_only": {
+            "default": false,
+            "title": "Retry Only",
+            "type": "boolean"
+          },
           "session_version_id": {
             "anyOf": [
               {
@@ -22796,6 +22811,11 @@
             "minLength": 1,
             "title": "Reason",
             "type": "string"
+          },
+          "retry_only": {
+            "default": false,
+            "title": "Retry Only",
+            "type": "boolean"
           },
           "version_id": {
             "format": "uuid",

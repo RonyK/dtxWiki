@@ -54,32 +54,6 @@ def _create(page_service, actor, workspace_id, body_md):
     return response.data
 
 
-def _begin_published_edit(page_service, actor, workspace_id, body_md):
-    # Discarding a private-only page's sole edit archives it; it must not be
-    # reopened. A scenario that restarts editing needs a published baseline.
-    published = page_service.write_page(
-        workspace_slug="default",
-        slug=f"session-flow-{uuid4()}",
-        title="Session Flow Page",
-        body_md=body_md,
-        actor_kind="human",
-        actor_id="session-flow-publisher",
-        actor_provenance="browser_session",
-    )
-    response = dispatch(
-        "begin_context_edit",
-        {
-            "workspace_id": str(workspace_id),
-            "page_id": str(published.id),
-            "idempotency_key": "initial-begin",
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    assert response.envelope.result_status == "succeeded", response.envelope
-    return response.data
-
-
 def _update(page_service, actor, workspace_id, base, body_md, key):
     return dispatch(
         "update_context_edit",
@@ -809,6 +783,25 @@ def test_discarding_an_edited_new_page_archives_it_and_hides_it(
     assert seen.envelope.result_status == "failed"
     assert seen.envelope.error_code == "not_found"
 
+    # Cleared pointers do not let another author open an empty session.
+    forbidden = dispatch(
+        "begin_context_edit",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(created.id),
+            "idempotency_key": "foreign-begin",
+        },
+        actor=other_editor,
+        page_service=page_service,
+    )
+    assert forbidden.envelope.error_code == "not_found", forbidden.envelope
+    with page_service.session_factory() as session:
+        assert session.scalars(
+            select(ContextPageVersion.id).where(
+                ContextPageVersion.page_id == created.id
+            )
+        ).all() == [created.version_id]
+
 
 def test_discarding_an_edit_of_a_published_page_restores_its_head(
     page_service, actor, mcp_default_actor
@@ -1024,9 +1017,7 @@ def test_an_ai_save_never_lands_on_an_edit_begun_after_the_one_it_saw(
     the person's new work."""
 
     workspace_id = _workspace(page_service)
-    created = _begin_published_edit(
-        page_service, actor, workspace_id, "# Doc\n\nFirst body.\n"
-    )
+    created = _create(page_service, actor, workspace_id, "# Doc\n\nFirst body.\n")
     ai_saved = _save(
         page_service,
         actor,
@@ -1058,6 +1049,7 @@ def test_an_ai_save_never_lands_on_an_edit_begun_after_the_one_it_saw(
         idempotency_key="browser-begin",
     )
     assert begun.version_id != created.version_id
+    assert begun.body_md == ""
     # The new row starts above every revision this author had on the page.
     assert begun.editing_revision > seen_by_ai
     typed = page_service.autosave_page(
@@ -1103,9 +1095,7 @@ def test_an_update_naming_its_edit_refuses_any_other_one(page_service, actor):
     revision that happens to match the edit open now is not enough."""
 
     workspace_id = _workspace(page_service)
-    created = _begin_published_edit(
-        page_service, actor, workspace_id, "# Doc\n\nFirst body.\n"
-    )
+    created = _create(page_service, actor, workspace_id, "# Doc\n\nFirst body.\n")
     bound = _save(
         page_service,
         actor,
@@ -1131,8 +1121,9 @@ def test_an_update_naming_its_edit_refuses_any_other_one(page_service, actor):
         page_service=page_service,
     )
     assert discarded.envelope.result_status == "succeeded", discarded.envelope
+    assert discarded.data.page_archived is True
 
-    # The published page remains accessible, but no private edit is open.
+    # No edit is open after discarding the private-only page.
     none_open = _save(
         page_service,
         actor,
@@ -1143,12 +1134,7 @@ def test_an_update_naming_its_edit_refuses_any_other_one(page_service, actor):
         "u-2",
         version_id=str(created.version_id),
     )
-    assert none_open.envelope.result_status == "conflict", none_open.envelope
-    assert none_open.envelope.error_code == "no_open_edit", none_open.envelope
-    assert [detail.field for detail in none_open.envelope.error_details] == [
-        "version_id"
-    ]
-    assert "no open edit" in none_open.envelope.error_details[0].message
+    assert none_open.envelope.error_code == "not_found", none_open.envelope
 
     begun = dispatch(
         "begin_context_edit",
@@ -1162,6 +1148,8 @@ def test_an_update_naming_its_edit_refuses_any_other_one(page_service, actor):
     )
     assert begun.envelope.result_status == "succeeded", begun.envelope
     second = begun.data
+    assert second.body_md == ""
+    assert second.editing_revision > bound.data.editing_revision
 
     # The right revision for the open edit, but the old edit's id: refused.
     wrong_row = _save(

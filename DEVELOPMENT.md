@@ -1047,11 +1047,14 @@ object is no longer accepted. MCP update requires `version_id`, removes the
 MCP image upload also uses `version_id`; edit responses use `page_id`, and
 structure maps expose the document's hash as `content_hash`.
 
-Keyed writes require `idempotency_key` before their first send, including page
+MCP keyed writes require `idempotency_key` before their first send, including page
 creation, review resubmission, and AgentPage drafts. After a lost response, call
 `get_operation_status` with that key and follow its `next_action`; the former
-`retry_only` input is removed. A successful edit's receipt provides its saved
-changes and next revision, so confirmation alone does not require another read.
+MCP `retry_only` input is removed. REST editing requests retain `retry_only`:
+they replay an existing unexpired receipt or return `operation_outcome_unknown`
+without executing a missing or expired operation. A successful edit's receipt
+provides its saved changes and next revision, so confirmation alone does not
+require another read.
 Read only any omitted content needed for further work.
 
 Keyed calls insert an `mcp_tool_call` row once `dispatch` has authorized them

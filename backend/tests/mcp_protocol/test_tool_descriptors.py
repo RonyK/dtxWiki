@@ -51,6 +51,8 @@ def test_lists_tools_with_input_schemas_and_no_wire_output_schema():
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
     for tool in tools:
         assert tool.inputSchema["type"] == "object"
+        # REST lookup-only retry fields must not leak through shared commands.
+        assert "retry_only" not in tool.inputSchema["properties"]
         assert "properties" in tool.inputSchema
         assert tool.inputSchema["additionalProperties"] is False
         # outputSchema is deliberately never advertised on the wire (75% of
@@ -181,8 +183,9 @@ def test_every_advertised_input_schema_is_host_portable():
     assert len(item["properties"]["op"]["enum"]) == 11
     for field in ("old_text", "new_text", "block", "expected", "content", "at"):
         assert field in item["properties"], field
-    assert "replace_block (requires block, expected, content" in (
-        item["properties"]["op"]["description"]
+    assert (
+        "replace_block (requires block, expected, content"
+        in (item["properties"]["op"]["description"])
     )
     assert "title" in item["properties"], "a field named title must survive"
 

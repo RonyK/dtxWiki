@@ -1209,17 +1209,16 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
     ).json()["data"]
     page_id = created["id"]
 
-    first = client.post(
-        f"{pages_url(page_service)}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-15",
-            "title": created["title"],
-            "body_md": "# First autosave\n",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    )
+    autosave_url = f"{pages_url(page_service)}/{page_id}/autosave"
+    first_request = {
+        "idempotency_key": "t-15",
+        "title": created["title"],
+        "body_md": "# First autosave\n",
+        "base_version_id": created["version_id"],
+        "base_content_hash": created["content_hash"],
+        "expected_editing_revision": created["editing_revision"],
+    }
+    first = client.post(autosave_url, json=first_request)
     assert first.status_code == 200, first.text
     first_data = first.json()["data"]
     assert first_data["version_status"] == "editing"
@@ -1238,6 +1237,42 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
     assert second.status_code == 200, second.text
     second_data = second.json()["data"]
     assert second_data["version_id"] == first_data["version_id"]
+
+    # REST receipt lookups replay the original outcome even after another
+    # save, and neither a conflicting payload nor an unknown key may write.
+    before_retry = page_version_and_pointer_snapshot(page_service, UUID(page_id))
+    replay = client.post(autosave_url, json={**first_request, "retry_only": True})
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["data"] == first_data
+
+    changed_retry = client.post(
+        autosave_url,
+        json={
+            **first_request,
+            "body_md": "# Different intent\n",
+            "retry_only": True,
+        },
+    )
+    assert changed_retry.status_code == 409, changed_retry.text
+    assert changed_retry.json()["error_code"] == "idempotency_key_conflict"
+
+    missing_retry = client.post(
+        autosave_url,
+        json={
+            **first_request,
+            "idempotency_key": "never-sent-autosave",
+            "body_md": "# Must not autosave\n",
+            "base_version_id": second_data["version_id"],
+            "base_content_hash": second_data["content_hash"],
+            "expected_editing_revision": second_data["editing_revision"],
+            "retry_only": True,
+        },
+    )
+    assert missing_retry.status_code == 404, missing_retry.text
+    assert missing_retry.json()["error_code"] == "operation_outcome_unknown"
+    assert (
+        page_version_and_pointer_snapshot(page_service, UUID(page_id)) == before_retry
+    )
 
     with page_service.session_factory() as session:
         page_versions = session.scalars(

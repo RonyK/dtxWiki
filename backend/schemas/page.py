@@ -438,6 +438,8 @@ class PageAutosaveRequest(PageUpdateRequest):
         description="Browser-session save: stage a shared, unpublished draft.",
     )
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
+    # REST retains lookup-only retries; MCP uses get_operation_status instead.
+    retry_only: bool = False
 
 
 class UpdateContextEditRequest(InputRequest):
@@ -554,7 +556,7 @@ class PageRestoreRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class BeginContextEditRequest(BaseModel):
+class BeginContextEditCommand(BaseModel):
     """P8.3: resume-or-open the caller's own editing session.
 
     Both fields optional: omit both to start from whatever the current head
@@ -570,7 +572,13 @@ class BeginContextEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SubmitContextEditRequest(InputRequest):
+class BeginContextEditRequest(BeginContextEditCommand):
+    __doc__ = BeginContextEditCommand.__doc__
+
+    retry_only: bool = False
+
+
+class SubmitContextEditCommand(InputRequest):
     version_id: UUID
     expected_editing_revision: int = Field(ge=1)
     reason: str = Field(default="author submitted for review", min_length=1)
@@ -579,11 +587,19 @@ class SubmitContextEditRequest(InputRequest):
     model_config = ConfigDict(extra="forbid")
 
 
-class DiscardContextEditRequest(BaseModel):
+class SubmitContextEditRequest(SubmitContextEditCommand):
+    retry_only: bool = False
+
+
+class DiscardContextEditCommand(BaseModel):
     version_id: UUID
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
 
     model_config = ConfigDict(extra="forbid")
+
+
+class DiscardContextEditRequest(DiscardContextEditCommand):
+    retry_only: bool = False
 
 
 class DiscardContextEditResult(BaseModel):

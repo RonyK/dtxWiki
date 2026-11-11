@@ -50,8 +50,8 @@
   idempotency key. Record arrival and completion in the existing MCP call log,
   retaining each retry's history; recover successful results from atomic write
   receipts and preserve the conversation when retrying a first write.
-- Remove `retry_only` from MCP and browser save requests. Require retry keys for
-  Context creation, review revisions and Agent draft writes.
+- Remove `retry_only` from MCP while preserving REST lookup-only retries.
+  Require retry keys for Context creation, review revisions and Agent draft writes.
 - Use top-level `page_id` and optional `version_id` for partial reads; remove
   `target`. Context write results return `page_id`; structure maps return
   `content_hash`. Uploads take `version_id`, and Context updates require it and use

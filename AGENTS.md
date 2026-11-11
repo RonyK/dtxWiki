@@ -10,6 +10,9 @@ Python commands. See DEVELOPMENT.md for setup and validation commands.
 
 ## Git and Pull Requests
 
+- Write commit subjects in Conventional Commits format: `<type>(<scope>): <summary>`.
+  Use a concise, lowercase imperative summary without a trailing period, matching
+  the repository's recent history (for example, `fix(mcp): handle retry-only writes`).
 - Never add a `Co-Authored-By:` trailer or other co-author attribution to
   commit messages or PR titles/bodies, regardless of tool or harness defaults.
 - Pushes, remote ref changes, and PR creation, updates, closure, reopening, or

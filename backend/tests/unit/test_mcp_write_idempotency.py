@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
 from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from backend.services.mcp_write_idempotency import (
     IDEMPOTENCY_WINDOW,
     execute_idempotent_write,
 )
+from backend.services.read_errors import OperationOutcomeUnknownError
 
 
 class _Result(BaseModel):
@@ -124,6 +126,9 @@ def test_existing_hit_transforms_return_value_without_rewriting_stored_result(
             )
         )
 
+    def _must_not_execute() -> _Result:
+        pytest.fail("A lookup-only retry must not execute the command")
+
     with session_factory.begin() as session:
         replay = execute_idempotent_write(
             session,
@@ -134,10 +139,11 @@ def test_existing_hit_transforms_return_value_without_rewriting_stored_result(
             idempotency_key="transform-key",
             fingerprint="transform-fingerprint",
             result_model=_Result,
-            execute=lambda: _Result(value="must-not-run"),
+            execute=_must_not_execute,
             replay_transform=lambda result: result.model_copy(
                 update={"value": f"replayed:{result.value}"}
             ),
+            retry_only=True,
         )
 
     assert replay == _Result(value="replayed:committed")
@@ -183,6 +189,29 @@ def test_expired_key_is_reclaimed_as_a_new_intent(session_factory, monkeypatch) 
         execute_count += 1
         return _Result(value="new-result")
 
+    # A receipt lookup leaves an expired intent intact; only a normal resend
+    # may reclaim its key and execute a new intent below.
+    with session_factory.begin() as session:
+        with pytest.raises(OperationOutcomeUnknownError):
+            execute_idempotent_write(
+                session,
+                workspace_id=workspace_id,
+                actor_kind="human",
+                actor_id="expired-idempotency-actor",
+                tool_name="patch_draft",
+                idempotency_key="expired-key",
+                fingerprint="new-fingerprint",
+                result_model=_Result,
+                execute=_execute_new_intent,
+                retry_only=True,
+            )
+        preserved = session.get(MCPWriteIdempotency, expired_id)
+        assert preserved is not None
+        assert preserved.request_fingerprint == "expired-fingerprint"
+        assert preserved.result_payload == {"value": "expired-result"}
+        assert preserved.expires_at == now - timedelta(seconds=1)
+    assert execute_count == 0
+
     with session_factory.begin() as session:
         result = execute_idempotent_write(
             session,
@@ -218,10 +247,9 @@ def test_expired_key_is_reclaimed_as_a_new_intent(session_factory, monkeypatch) 
 def test_operation_lifecycle_keeps_arrival_separate_and_prefers_atomic_receipt(
     session_factory, monkeypatch, mcp_default_actor
 ):
-    # One lifecycle traversal replaces the removed retry_only checks: status
-    # starts from the arrival, a receipt proves a commit, a late worker cannot
-    # touch a newer attempt, only a failure known to repeat asks for a fix, and
-    # a key reused by another command reports the latest call.
+    # MCP status starts from the arrival; a receipt proves a commit. A late
+    # worker cannot touch a newer attempt, only a failure known to repeat asks
+    # for a fix, and a key reused by another command reports the latest call.
     clock = [utc_now()]
     monkeypatch.setattr(
         "backend.services.mcp_operation_attempt.utc_now", lambda: clock[0]

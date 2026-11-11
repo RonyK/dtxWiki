@@ -21,14 +21,14 @@ from backend.schemas.page import (
     PAGE_LIST_CURSOR_MAX_LENGTH,
     PAGE_LIST_CURSOR_PATTERN,
     PAGE_LIST_LIMIT_MAX,
-    BeginContextEditRequest,
-    DiscardContextEditRequest,
+    BeginContextEditCommand,
+    DiscardContextEditCommand,
     DiscardContextEditResult,
     DraftReviewReason,
     ListMyContextEditsResult,
     PagePayload,
     PrivateContextPageCreateRequest,
-    SubmitContextEditRequest,
+    SubmitContextEditCommand,
     UpdateContextEditRequest,
 )
 
@@ -156,7 +156,7 @@ class CreateContextPageToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class BeginContextEditInput(BeginContextEditRequest):
+class BeginContextEditInput(BeginContextEditCommand):
     workspace_id: UUID
     page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
@@ -199,7 +199,7 @@ class UpdateContextEditToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SubmitContextEditForReviewInput(SubmitContextEditRequest):
+class SubmitContextEditForReviewInput(SubmitContextEditCommand):
     workspace_id: UUID
     page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
@@ -214,7 +214,7 @@ class SubmitContextEditForReviewToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class DiscardContextEditInput(DiscardContextEditRequest):
+class DiscardContextEditInput(DiscardContextEditCommand):
     workspace_id: UUID
     page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD

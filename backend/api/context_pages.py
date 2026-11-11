@@ -628,6 +628,7 @@ def begin_context_edit(
             idempotency_key=request_body.idempotency_key,
             base_version_id=request_body.base_version_id,
             base_content_hash=request_body.base_content_hash,
+            retry_only=request_body.retry_only,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -666,6 +667,7 @@ def submit_context_edit_for_review(
             expected_editing_revision=request_body.expected_editing_revision,
             idempotency_key=request_body.idempotency_key,
             reason=request_body.reason,
+            retry_only=request_body.retry_only,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -701,6 +703,7 @@ def discard_context_edit(
             actor_kind=actor.actor_kind,
             actor_id=actor.actor_id,
             idempotency_key=request_body.idempotency_key,
+            retry_only=request_body.retry_only,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -856,6 +859,7 @@ def autosave_page(
             session_version_id=request_body.session_version_id,
             on_stale=request_body.on_stale,
             destination_node_id=request_body.destination_node_id,
+            retry_only=request_body.retry_only,
             share_draft=request_body.share_draft,
         )
     except PageServiceError as exc:

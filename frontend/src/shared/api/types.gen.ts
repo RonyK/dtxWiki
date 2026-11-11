@@ -4949,6 +4949,11 @@ export interface components {
              * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
              */
             idempotency_key: string;
+            /**
+             * Retry Only
+             * @default false
+             */
+            retry_only: boolean;
         };
         /** Body_add_library_item_version_api_v1_workspaces__workspace_id__library_items__item_id__versions_post */
         Body_add_library_item_version_api_v1_workspaces__workspace_id__library_items__item_id__versions_post: {
@@ -6479,6 +6484,11 @@ export interface components {
              * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
              */
             idempotency_key: string;
+            /**
+             * Retry Only
+             * @default false
+             */
+            retry_only: boolean;
             /**
              * Version Id
              * Format: uuid
@@ -9606,6 +9616,11 @@ export interface components {
             on_stale: "conflict" | "preserve_as_alternative";
             /** Page Type */
             page_type?: ("overview" | "source" | "entity" | "concept" | "synthesis" | "comparison" | "decision" | "contradiction" | "query" | "guide") | null;
+            /**
+             * Retry Only
+             * @default false
+             */
+            retry_only: boolean;
             /** Session Version Id */
             session_version_id?: string | null;
             /**
@@ -11629,6 +11644,11 @@ export interface components {
              * @default author submitted for review
              */
             reason: string;
+            /**
+             * Retry Only
+             * @default false
+             */
+            retry_only: boolean;
             /**
              * Version Id
              * Format: uuid

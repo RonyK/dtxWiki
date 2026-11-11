@@ -44,6 +44,7 @@ from backend.repositories.workspace_scoped import (
     get_in_workspace,
     join_in_workspace,
     select_in_workspace,
+    select_projection_in_workspace,
 )
 from backend.schemas.common import DraftReviewReason
 from backend.schemas.context_edit import EditOperation
@@ -2035,6 +2036,7 @@ class PageService:
         idempotency_key: str,
         base_version_id: UUID | None = None,
         base_content_hash: str | None = None,
+        retry_only: bool = False,
         chat_session_id: UUID | None = None,
     ) -> PagePayload:
         """Start or resume this actor's own editing session on ``page_id`` (P8.3).
@@ -2060,11 +2062,7 @@ class PageService:
                 acquire_write_intent(session)
                 self._lock_context_media_usage_intent_for_page(session, page_id)
                 page = context_page_repo.get_page_by_id_for_update(session, page_id)
-                if (
-                    page is None
-                    or page.workspace_id != workspace_id
-                    or page.lifecycle_status == "archived"
-                ):
+                if page is None or page.workspace_id != workspace_id:
                     raise PageNotFoundError("page not found")
                 existing = session.scalar(
                     select(ContextPageVersion).where(
@@ -2096,12 +2094,27 @@ class PageService:
                     )
                 # Knowing a page UUID does not grant access to its author's
                 # unsubmitted private edit. Do not create an empty edit for
-                # another author: a new fork requires a readable base.
+                # another author. The author may start empty again after
+                # discarding their private work, which clears the pointers.
                 readable_version_id = self._editable_version_id_for_actor(
                     session, page, actor_kind, actor_id
                 )
                 if readable_version_id is None:
-                    raise PageNotFoundError("page not found")
+                    own_discarded_id = session.scalar(
+                        select_projection_in_workspace(
+                            ContextPageVersion,
+                            workspace_id=workspace_id,
+                            columns=(ContextPageVersion.id,),
+                            predicates=(
+                                ContextPageVersion.page_id == page.id,
+                                ContextPageVersion.version_status == "discarded",
+                                ContextPageVersion.created_by_actor_kind == actor_kind,
+                                ContextPageVersion.created_by_actor_id == actor_id,
+                            ),
+                        ).limit(1)
+                    )
+                    if own_discarded_id is None:
+                        raise PageNotFoundError("page not found")
                 reopened = self._reopen_own_pending_submission(
                     session,
                     page,
@@ -2142,20 +2155,23 @@ class PageService:
                         ),
                     )
                 base_id = page.current_published_version_id or readable_version_id
-                base = self._require_page_version(session, page, base_id)
+                base = (
+                    self._require_page_version(session, page, base_id)
+                    if base_id is not None
+                    else None
+                )
                 if base_version_id is not None or base_content_hash is not None:
-                    if (
-                        base_version_id != base.id
-                        or base_content_hash != base.content_hash
-                    ):
+                    actual_id = base.id if base is not None else None
+                    actual_hash = base.content_hash if base is not None else None
+                    if base_version_id != actual_id or base_content_hash != actual_hash:
                         raise PageConflictError(
-                            server_version_id=base.id,
-                            server_content_hash=base.content_hash,
+                            server_version_id=actual_id,
+                            server_content_hash=actual_hash,
                         )
                 version = self._insert_version_copy(
                     session,
                     page_id=page.id,
-                    parent_version_id=base.id,
+                    parent_version_id=base.id if base is not None else None,
                     source_version=base,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
@@ -2232,6 +2248,7 @@ class PageService:
                 compatible_fingerprints=legacy_fingerprints,
                 result_model=PagePayload,
                 execute=_execute,
+                retry_only=retry_only,
             )
 
     def _reopen_own_pending_submission(
@@ -2360,6 +2377,7 @@ class PageService:
         expected_editing_revision: int,
         idempotency_key: str,
         reason: str = "author submitted for review",
+        retry_only: bool = False,
         chat_session_id: UUID | None = None,
     ) -> PagePayload:
         """Submit the caller's private edit or shared browser draft for review.
@@ -2392,6 +2410,7 @@ class PageService:
                 expected_editing_revision=expected_editing_revision,
                 idempotency_key=idempotency_key,
                 reason=reason,
+                retry_only=retry_only,
                 needs_review=True,
                 chat_session_id=chat_session_id,
             )
@@ -2410,6 +2429,7 @@ class PageService:
         idempotency_key: str,
         reason: str,
         needs_review: bool,
+        retry_only: bool = False,
         risk_signals: dict[str, bool] | None = None,
         chat_session_id: UUID | None = None,
     ) -> PagePayload:
@@ -2571,6 +2591,7 @@ class PageService:
             ),
             result_model=PagePayload,
             execute=_execute,
+            retry_only=retry_only,
         )
 
     def discard_context_edit(
@@ -2581,6 +2602,7 @@ class PageService:
         actor_kind: str,
         actor_id: str,
         idempotency_key: str,
+        retry_only: bool = False,
     ) -> DiscardContextEditResult:
         """Discard the caller's own open "editing" row (P8.3).
 
@@ -2721,6 +2743,7 @@ class PageService:
                 ),
                 result_model=DiscardContextEditResult,
                 execute=_execute,
+                retry_only=retry_only,
             )
 
     def draft_still_open(
@@ -3956,6 +3979,7 @@ class PageService:
         tags: list[str] | None = None,
         aliases: list[str] | None = None,
         destination_node_id: UUID | None = None,
+        retry_only: bool = False,
         with_edit_receipt: bool = False,
         editing_version_id: UUID | None = None,
         share_draft: bool = False,
@@ -4229,6 +4253,7 @@ class PageService:
                     receipt_base=receipt_base,
                     with_edit_receipt=with_edit_receipt,
                 ),
+                retry_only=retry_only,
             )
 
     def _save_prepared_context_edit_in_session(

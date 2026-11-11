@@ -18,6 +18,7 @@ from backend.schemas.page import PagePayload
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.read_errors import (
     IdempotencyKeyConflictError,
+    OperationOutcomeUnknownError,
 )
 
 IDEMPOTENCY_WINDOW = timedelta(hours=24)
@@ -42,8 +43,11 @@ def execute_idempotent_write[ResultT: BaseModel](
     result_model: type[ResultT],
     execute: Callable[[], ResultT],
     replay_transform: Callable[[ResultT], ResultT] | None = None,
+    retry_only: bool = False,
 ) -> ResultT:
     if idempotency_key is None:
+        if retry_only:
+            raise ValueError("retry_only requires an idempotency_key")
         return execute()
 
     # pysqlite does not emit a real transaction for a SELECT-only outer scope.
@@ -71,6 +75,10 @@ def execute_idempotent_write[ResultT: BaseModel](
             result_model=result_model,
             replay_transform=replay_transform,
         )
+    if retry_only:
+        # REST lookup-only retries must never claim a missing or expired key.
+        # MCP exposes this recovery through its separate status tool.
+        raise OperationOutcomeUnknownError()
     if row is not None:
         session.execute(
             delete(MCPWriteIdempotency).where(MCPWriteIdempotency.id == row.id)

@@ -263,6 +263,8 @@ def status_code_for_read_error(exc: ReadServiceError) -> int:
         "review_decision_undo_unavailable",
     }:
         return 409
+    if exc.error_code == "operation_outcome_unknown":
+        return 404
     if isinstance(exc, ReadNotFoundError):
         return 404
     if isinstance(exc, ScopeDeniedError | RejectedByPolicyError):

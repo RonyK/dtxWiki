@@ -156,6 +156,7 @@ describe("pages api", () => {
       session_version_id: "v2",
       expected_editing_revision: 1,
       on_stale: "conflict",
+      retry_only: false,
     });
 
     expect(page.version_id).toBe("v2");
@@ -172,6 +173,7 @@ describe("pages api", () => {
           session_version_id: "v2",
           expected_editing_revision: 1,
           on_stale: "conflict",
+          retry_only: false,
           share_draft: true,
         }),
       }),
@@ -483,6 +485,7 @@ describe("pages api", () => {
       base_content_hash: "a".repeat(64),
       expected_editing_revision: 1,
       on_stale: "conflict",
+      retry_only: false,
     });
 
     expect(ok).toBe(true);
@@ -511,6 +514,7 @@ describe("pages api", () => {
       base_content_hash: "a".repeat(64),
       expected_editing_revision: 1,
       on_stale: "conflict",
+      retry_only: false,
     });
 
     expect(ok).toBe(true);
@@ -552,6 +556,7 @@ describe("pages api", () => {
       base_content_hash: "a".repeat(64),
       expected_editing_revision: 1,
       on_stale: "conflict",
+      retry_only: false,
     });
 
     expect(ok).toBe(false);
@@ -584,6 +589,7 @@ describe("pages api", () => {
       base_content_hash: "a".repeat(64),
       expected_editing_revision: 1,
       on_stale: "conflict",
+      retry_only: false,
     });
 
     expect(ok).toBe(true);
@@ -613,6 +619,7 @@ describe("pages api", () => {
         base_content_hash: "a".repeat(64),
         expected_editing_revision: 1,
         on_stale: "conflict",
+        retry_only: false,
       });
 
       expect(ok).toBe(true);
