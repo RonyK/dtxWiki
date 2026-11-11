@@ -2567,6 +2567,9 @@ describe("ContextScreen", () => {
       screen.getByRole("treeitem", { name: "Decision Log" }),
     );
     await screen.findByText("Needle body");
+    expect(
+      screen.queryByRole("button", { name: "On the web; open Share" }),
+    ).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Share" }));
 
     const dialog = screen.getByRole("dialog", { name: "Share Decision Log" });
@@ -2595,6 +2598,15 @@ describe("ContextScreen", () => {
       expected_published_version_id: "version-1",
       is_public: true,
     });
+
+    // The reader now marks the page as web-published; the mark reopens Share.
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "On the web; open Share" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Share Decision Log" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps Share mounted and disables explicit close while web publishing is pending", async () => {

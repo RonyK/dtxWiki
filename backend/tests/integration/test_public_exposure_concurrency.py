@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -10,6 +11,7 @@ from backend.models.context import ContextPage
 from backend.models.workspace import Workspace
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.page_service import (
+    PageNotFoundError,
     PagePublicVersionConflictError,
     PageService,
 )
@@ -87,8 +89,20 @@ def test_concurrent_unlisted_share_and_publish_never_exposes_stale_version(
             page = session.get(ContextPage, original.id)
             assert workspace.visibility == "team"
             assert page.current_published_version_id == published.version_id
-            assert page.is_public is False
-            assert page.public_exposure_scope is None
-            assert page.public_exposed_version_id is None
+            if share_result == "shared":
+                assert page.is_public is True
+                assert page.public_exposure_scope == "unlisted_web"
+                assert page.public_exposed_version_id == published.version_id
+            else:
+                assert page.is_public is False
+                assert page.public_exposure_scope is None
+                assert page.public_exposed_version_id is None
+        if share_result == "shared":
+            public = service.read_public_page("default", "share-publish-race")
+            assert "Version two." in public.body_md
+            assert "Version one." not in public.body_md
+        else:
+            with pytest.raises(PageNotFoundError):
+                service.read_public_page("default", "share-publish-race")
     finally:
         engine.dispose()

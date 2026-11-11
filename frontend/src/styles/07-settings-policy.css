@@ -3203,13 +3203,13 @@ button.history-card {
     min-height: 44px;
   }
 
-  /* `.reader-chip-action` used to sit in the floor above. It is the only
-     interactive chip in `.reader-meta-row`, so raising its box to 44px made it
-     exactly twice the height of the plain 22px `.reader-chip` siblings it sits
-     beside — one pill towering over the row read as a layout bug rather than as
-     an affordance. The affordance is already carried by the accent fill, the
-     border and the trailing arrow, so the pill keeps the shared chip height and
-     the touch floor moves to a transparent overlay that costs no layout. */
+  /* `.reader-chip-action` used to sit in the floor above. Raising an
+     interactive chip in `.reader-meta-row` to 44px made it exactly twice the
+     height of the plain 22px `.reader-chip` siblings it sits beside — one pill
+     towering over the row read as a layout bug rather than as an affordance.
+     The affordance is already carried by the tinted fill and the border, so the
+     pill keeps the shared chip height and the touch floor moves to a
+     transparent overlay that costs no layout. */
   .reader-chip-action {
     position: relative;
   }

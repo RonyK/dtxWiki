@@ -8,6 +8,7 @@ import {
   Folder,
   GitCompareArrows,
   GitMerge,
+  Globe,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -3029,6 +3030,19 @@ function ContextReader({
               ) : null}
             </span>
           </span>
+        ) : null}
+        {/* The web link follows every later published version, so members see
+            that state next to the version readers receive. */}
+        {isPublic ? (
+          <button
+            aria-label={t("reader.webPublishedAction")}
+            className="reader-chip reader-chip-action context-web-published-chip"
+            onClick={() => setShareOpen(true)}
+            type="button"
+          >
+            <Globe size={13} aria-hidden="true" />
+            <span>{t("reader.webPublished")}</span>
+          </button>
         ) : null}
         {/* A pending draft is a lifecycle state, not a property of the page, so
             it reads as a status pill here — the neutral chips beside it carry
