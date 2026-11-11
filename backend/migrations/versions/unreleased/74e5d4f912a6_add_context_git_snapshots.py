@@ -7,10 +7,10 @@ Revises: 00ba02774c4a
 import sqlalchemy as sa
 from alembic import op
 
-from backend.migrations.revision_modules.v0_2._74e5d4f912a6_context_git import (
+from backend.migrations.revision_modules.unreleased._74e5d4f912a6_context_git import (
     active_block_maps,
 )
-from backend.migrations.revision_modules.v0_2._74e5d4f912a6_context_git import (
+from backend.migrations.revision_modules.unreleased._74e5d4f912a6_context_git import (
     context_content_to_git as conversion,
 )
 
