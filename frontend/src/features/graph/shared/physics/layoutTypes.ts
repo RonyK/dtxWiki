@@ -30,7 +30,7 @@ export type LocalLayoutPositions = Record<string, GraphPoint>;
 
 // Changing any layout force or sizing input invalidates saved coordinates.
 export const LOCAL_LAYOUT_PARAMS = {
-  version: "local-d3-force-v1",
+  version: "local-d3-force-v2",
   preTicks: 300,
   relationDistance: 60,
   membershipDistance: 45,

@@ -5,7 +5,8 @@ import {
   workspaceMapCommunityIdentityKey,
   type WorkspaceMapCommunityOutcome,
 } from "../map/communityJob";
-import { WORKSPACE_MAP_NODE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
+import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, workspaceMapContainedDocumentCounts,
+  type WorkspaceMapColumns } from "../map/sceneColumns";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
 import { readGraphTokens } from "../shared/graphTokens";
 import { GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, outlinePathData, shapeOutline } from "../shared/nodeShapes";
@@ -127,6 +128,8 @@ const LABEL_HEARTBEAT_MS = 200;
 const LABEL_MOTION_EPSILON_PX = 0.5;
 /** Titles fade in and out instead of popping, unless motion is reduced. */
 const LABEL_FADE_MS = 120;
+/** Overview label slots reserved for the TreeRail folders holding the most documents. */
+const MAJOR_FOLDER_LABELS = 8;
 /** A camera gesture without zoom events this long no longer holds titles. */
 const LABEL_GESTURE_LAPSE_MS = 1_000;
 /** GPU rows reach titles a few simulation steps late; titles look this far ahead at most. */
@@ -152,8 +155,8 @@ function restoredCoordinates(
 ): Float32Array | null {
   const snapshotBudget = snapshot?.budget ?? WORKSPACE_MAP_DEFAULT_BUDGET;
   if (!snapshot || snapshotBudget.documents !== budget.documents || snapshotBudget.relations !== budget.relations
-    || !isWorkspaceMapWithinBudget({ nodeCount: snapshot.columns.nodeIds.length, edgeCount: snapshot.columns.edgeIds.length }, budget)
-    || !isWorkspaceMapWithinBudget({ nodeCount: columns.nodeIds.length, edgeCount: columns.edgeIds.length }, budget)
+    || !isWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(snapshot.columns), budget)
+    || !isWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(columns), budget)
     || !sameGraphVisibleIdentity(columns.identity, snapshot.columns.identity)
     || !sameWorkspaceMapIndexedGeometry(columns, snapshot.columns)
     || !(snapshot.positions instanceof Float32Array)
@@ -173,7 +176,7 @@ export function createWorkspaceCosmosAdapter(
 ): WorkspaceCosmosAdapter {
   const budget = { ...(options.budget ?? WORKSPACE_MAP_DEFAULT_BUDGET) };
   const solver = createWorkspaceLayoutSolver(budget);
-  assertWorkspaceMapWithinBudget({ nodeCount: initialColumns.nodeIds.length, edgeCount: initialColumns.edgeIds.length }, budget);
+  assertWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(initialColumns), budget);
   const support = detectWorkspaceMapWebGL();
   if (!support.supported) throw new WorkspaceMapWebGLError(support.reason);
   const mode = options.forcedColors ? "forced"
@@ -182,13 +185,20 @@ export function createWorkspaceCosmosAdapter(
   const interactionInk = options.forcedColors ? tokens.node.context
     : mode === "dark" ? "#f8fafc" : "#0f172a";
   let columns = initialColumns;
-  let sparseScene = columns.edgeIds.length <= 1_000;
-  let readableScene = isReadableWorkspaceMapScene(columns.nodeIds.length, columns.edgeIds.length, budget);
+  let admittedFor: WorkspaceMapColumns | null = null;
+  let admittedValue = { nodeCount: 0, edgeCount: 0 };
+  // Budget and scale decisions count documents and relations, not TreeRail structure.
+  const admitted = () => {
+    if (admittedFor !== columns) { admittedFor = columns; admittedValue = workspaceMapAdmissionCounts(columns); }
+    return admittedValue;
+  };
+  let sparseScene = admitted().edgeCount <= 1_000;
+  let readableScene = isReadableWorkspaceMapScene(admitted().nodeCount, admitted().edgeCount, budget);
   // The explicit renderer budget bounds forces as well as drawing. This is
-  // not a target-hardware performance qualification. Folders remain metadata.
-  const canAnimateLayout = () => canAnimateWorkspaceRelationLayout(columns.nodeIds.length, budget);
+  // not a target-hardware performance qualification. Folders exert no force.
+  const canAnimateLayout = () => canAnimateWorkspaceRelationLayout(admitted().nodeCount, budget);
   let buffers = buildCosmosSceneBuffers(columns, tokens, budget, { forcedColors: options.forcedColors });
-  buffers.positions = solver.initialPositions(columns.nodeKeys, buffers.positions);
+  buffers.positions = solver.initialPositions(columns, buffers.positions);
   // Canonical worker/public/snapshot units never depend on GPU capability.
   // Resolve this SDK-only conversion before the first coordinate upload.
   let nativeSpace = createWorkspaceNativeCoordinateSpace(WORKSPACE_MAP_CANONICAL_SPACE_SIZE * 2);
@@ -336,7 +346,7 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function keepOverviewContext(): boolean {
-    return columns.nodeIds.length > 1_000 && readableScene;
+    return admitted().nodeCount > 1_000 && readableScene;
   }
 
   function canInitializeRelationPhysics(): boolean {
@@ -365,7 +375,7 @@ export function createWorkspaceCosmosAdapter(
     // A settled PC map has no running forces to adopt a released body. Wake
     // that real edit once; pin restoration, no-op echoes and live alpha stay
     // untouched. The normal permission gate still owns pause/motion/lifecycle.
-    if (released && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents
+    if (released && admitted().nodeCount > WORKSPACE_MAP_DEFAULT_BUDGET.documents
       && !graph.isSimulationRunning) reheatRelationPhysics(.15);
   }
 
@@ -390,10 +400,10 @@ export function createWorkspaceCosmosAdapter(
     // fallback collision clearance, never gravity/charge/spring/rest distance.
     const nativeCollision = nativeSpace.toNativeCollisionBasis(collisionBasis);
     const radii = solver.collisionRadii(buffers.pointSizes, buffers.pointShapes, collisionBasis,
-      maxPointDiameterCss(), nativeSpace.scale, columns.nodeIds.length);
+      maxPointDiameterCss(), nativeSpace.scale, admitted().nodeCount);
     if (radii) graph.setPointCollisionRadii(radii);
     graph.setConfigPartial(solver.collisionConfig(forceBasisApplied,
-      nativeSpace.toNativeCollisionBasis(forceBasis), nativeCollision, nativeSpace.scale, columns.nodeIds.length));
+      nativeSpace.toNativeCollisionBasis(forceBasis), nativeCollision, nativeSpace.scale, admitted().nodeCount));
     forceBasisApplied = true;
     collisionBasisApplied = true;
     return true;
@@ -450,7 +460,7 @@ export function createWorkspaceCosmosAdapter(
       initialCamera?.tick(alpha);
       // Expanded default-native PC maps retain upstream natural cooling.
       // Explicit Resume and moved drag/pin gestures still wake their forces.
-      if (alpha < 0.02 && columns.nodeIds.length <= WORKSPACE_MAP_DEFAULT_BUDGET.documents) reheatRelationPhysics(0.04);
+      if (alpha < 0.02 && admitted().nodeCount <= WORKSPACE_MAP_DEFAULT_BUDGET.documents) reheatRelationPhysics(0.04);
     },
     onDragStart(event) {
       draggedPoint = nativeHoveredIndex !== null && columns.nodeKeys[nativeHoveredIndex] && !destroyed && !contextLost
@@ -862,7 +872,7 @@ export function createWorkspaceCosmosAdapter(
   // One camera per visible scene. `restored` is a camera or coordinates that the
   // caller already owns; scale and layout owner are read when the camera is armed.
   function createSceneCamera(restored: boolean): InitialWorkspaceCamera {
-    const policy = solver.cameraPolicy(columns.nodeIds.length);
+    const policy = solver.cameraPolicy(admitted().nodeCount);
     return createInitialWorkspaceCamera({
       framingPolicy: policy.framingPolicy,
       terminalFit: policy.terminalFit,
@@ -897,7 +907,7 @@ export function createWorkspaceCosmosAdapter(
   // Only a PC native map above 2K contracts for ~8 s after it is shown and frames
   // itself while it does; 2K and the diagnostic physics keep their own camera.
   function framesNativePcScene(): boolean {
-    return solver.cameraPolicy(columns.nodeIds.length).terminalFit !== undefined;
+    return solver.cameraPolicy(admitted().nodeCount).terminalFit !== undefined;
   }
 
   // Every new visible scene of such a map, not only the mount, gets a fresh camera
@@ -1213,7 +1223,7 @@ export function createWorkspaceCosmosAdapter(
     graph.setLinkColors(next.linkColors);
     graph.setLinkStyles(next.linkStyles);
     graph.render(undefined, 0);
-    solver.attachLargePointPicker(columns.nodeIds.length, () => {
+    solver.attachLargePointPicker(admitted().nodeCount, () => {
       graph.attachPointPicker(createWorkspaceNativePointPicker(next.drawPointSizes, next.pointShapes, failRelationSimulation));
       nativePointPickerAttached = true;
     });
@@ -1248,11 +1258,19 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function resetLabelCandidates() {
-    rankedLabelIndices = Array.from({ length: columns.nodeIds.length }, (_, index) => index)
-      .filter((index) => columns.nodeKinds[index] !== 3)
-      .sort((left, right) => columns.nodeSizes[right] - columns.nodeSizes[left]
-        || (columns.nodeKeys[left] < columns.nodeKeys[right] ? -1 : columns.nodeKeys[left] > columns.nodeKeys[right] ? 1 : 0))
-      .slice(0, 40);
+    const byKey = (left: number, right: number) =>
+      columns.nodeKeys[left] < columns.nodeKeys[right] ? -1 : columns.nodeKeys[left] > columns.nodeKeys[right] ? 1 : 0;
+    const rows = Array.from({ length: columns.nodeIds.length }, (_, index) => index);
+    // Major folders name the map's regions first: the TreeRail hubs holding
+    // the most documents, except one that holds every document.
+    const contained = workspaceMapContainedDocumentCounts(columns), documents = admitted().nodeCount;
+    const folders = rows.filter((index) => columns.nodeKinds[index] === WORKSPACE_MAP_NODE_KIND.folder
+      && contained[index] > 0 && contained[index] < documents)
+      .sort((left, right) => contained[right] - contained[left] || byKey(left, right))
+      .slice(0, MAJOR_FOLDER_LABELS);
+    rankedLabelIndices = [...folders, ...rows.filter((index) => columns.nodeKinds[index] !== WORKSPACE_MAP_NODE_KIND.folder)
+      .sort((left, right) => columns.nodeSizes[right] - columns.nodeSizes[left] || byKey(left, right))
+      .slice(0, 40 - folders.length)];
     syncLabelCandidates(true);
   }
 
@@ -1400,6 +1418,9 @@ export function createWorkspaceCosmosAdapter(
       label.textContent = text;
       label.dataset.fullTitle = String(full);
       label.dataset.labelPriority = priorityKind;
+      const folder = node !== undefined && columns.nodeKinds[node] === WORKSPACE_MAP_NODE_KIND.folder;
+      label.dataset.labelKind = folder ? "folder" : "document";
+      label.style.fontWeight = folder ? "600" : "";
       const nodeId = node === undefined ? "" : columns.nodeIds[node];
       // A reused slot must not publish the previous node's GPU coordinates
       // while its new identity waits for the bounded tracking refresh. A slot
@@ -1981,7 +2002,7 @@ export function createWorkspaceCosmosAdapter(
   return {
     captureCoordinates() {
       if (!ready || destroyed || contextLost || simulationFailed
-        || !isWorkspaceMapWithinBudget({ nodeCount: columns.nodeIds.length, edgeCount: columns.edgeIds.length }, budget)) return null;
+        || !isWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(columns), budget)) return null;
       try {
         const positions = solver.positions(buffers.positions, readPositions).slice();
         if (positions.length !== columns.nodeIds.length * 2 || !positions.every(Number.isFinite)) return null;
@@ -2103,11 +2124,11 @@ export function createWorkspaceCosmosAdapter(
     },
     replaceColumns(nextColumns) {
       if (destroyed || simulationFailed) return;
-      assertWorkspaceMapWithinBudget({ nodeCount: nextColumns.nodeIds.length, edgeCount: nextColumns.edgeIds.length }, budget);
+      assertWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(nextColumns), budget);
       initialCamera?.cancel();
       const sameIdentity = sameGraphVisibleIdentity(columns.identity, nextColumns.identity);
       const next = buildCosmosSceneBuffers(nextColumns, tokens, budget, { forcedColors: options.forcedColors });
-      next.positions = solver.initialPositions(nextColumns.nodeKeys, next.positions);
+      next.positions = solver.initialPositions(nextColumns, next.positions);
       const sameScope = columns.identity.actorId === nextColumns.identity.actorId
         && columns.identity.workspaceId === nextColumns.identity.workspaceId;
       if (sameIdentity && sameWorkspaceMapIndexedGeometry(columns, nextColumns)) {
@@ -2155,8 +2176,8 @@ export function createWorkspaceCosmosAdapter(
       appliedCommunity = null;
       communityTerminal = false;
       columns = nextColumns;
-      sparseScene = columns.edgeIds.length <= 1_000;
-      readableScene = isReadableWorkspaceMapScene(columns.nodeIds.length, columns.edgeIds.length, budget);
+      sparseScene = admitted().edgeCount <= 1_000;
+      readableScene = isReadableWorkspaceMapScene(admitted().nodeCount, admitted().edgeCount, budget);
       buffers = next;
       nodeById = new Map(columns.nodeIds.map((id, index) => [id, index]));
       edgeById = new Map(columns.edgeIds.map((id, index) => [id, index]));

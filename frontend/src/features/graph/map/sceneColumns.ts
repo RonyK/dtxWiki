@@ -9,15 +9,23 @@ export const WORKSPACE_MAP_NODE_KIND = {
   context: 0,
   library: 1,
   cluster: 2,
+  /** A TreeRail folder drawn as a containment hub; not a document. */
+  folder: 3,
   agent: 4,
 } as const;
 
 export const WORKSPACE_MAP_EDGE_KIND = {
   link: 0,
   citation: 1,
+  /** TreeRail containment: parent folder or document -> child. Not a relation. */
+  membership: 2,
 } as const;
 
-const COLUMN_VERSION = "workspace-map-relation-columns-v3";
+/** Prefix of the Map-only ids and keys of TreeRail folder hubs and containment lines. */
+export const WORKSPACE_MAP_FOLDER_PREFIX = "folder:";
+const CONTAINMENT_PREFIX = "contains:";
+
+const COLUMN_VERSION = "workspace-map-relation-columns-v4";
 const MAX_EDGE_COUNT = 0xffffffff;
 
 export type WorkspaceMapBuildOptions = {
@@ -41,6 +49,8 @@ export type WorkspaceMapColumns = {
   nodeKeys: string[];
   nodeLabels: string[];
   nodeFolderKeys: Array<string | null>;
+  /** Row of each node's nearest visible TreeRail container (folder or document), or -1. */
+  nodeContainerIndices?: Int32Array;
   nodeKinds: Uint8Array;
   nodeSizes: Float32Array;
   /**
@@ -59,7 +69,16 @@ export type WorkspaceMapColumns = {
   edgeCrossFolder: Uint8Array;
 };
 
-type VisibleNode = { node: WorkspaceGraphNode; key: string; kind: number };
+type VisibleNode = {
+  key: string;
+  id: string;
+  label: string;
+  kind: number;
+  folderKey: string | null;
+  documentCount: number;
+  /** Key of the nearest visible TreeRail container, or null at the top. */
+  containerKey: string | null;
+};
 type VisibleEdge = {
   id: string;
   source: number;
@@ -88,7 +107,48 @@ function nodeKind(node: WorkspaceGraphNode): number {
     : node.entity_kind === "agent" ? WORKSPACE_MAP_NODE_KIND.agent : WORKSPACE_MAP_NODE_KIND.library;
 }
 
-export type WorkspaceRelationVisual = keyof typeof WORKSPACE_MAP_EDGE_KIND;
+export type WorkspaceRelationVisual = Exclude<keyof typeof WORKSPACE_MAP_EDGE_KIND, "membership">;
+
+/**
+ * Documents beneath each node through TreeRail containment, excluding the node
+ * itself. Linear and loop-safe: rows are summed deepest first.
+ */
+export function workspaceMapContainedDocumentCounts(
+  columns: Pick<WorkspaceMapColumns, "nodeKinds" | "nodeContainerIndices">,
+): Uint32Array {
+  const count = columns.nodeKinds.length, containers = columns.nodeContainerIndices;
+  const contained = new Uint32Array(count);
+  if (!containers) return contained;
+  const parentOf = (node: number) => containers[node] >= 0 && containers[node] < count && containers[node] !== node
+    ? containers[node] : -1;
+  const depth = new Int32Array(count).fill(-1);
+  for (let start = 0; start < count; start++) {
+    const walk: number[] = [];
+    let node = start;
+    while (node >= 0 && depth[node] < 0 && !walk.includes(node)) { walk.push(node); node = parentOf(node); }
+    let base = node >= 0 && depth[node] >= 0 ? depth[node] + 1 : 0;
+    for (let index = walk.length - 1; index >= 0; index--) depth[walk[index]] = base++;
+  }
+  const order = [...depth.keys()].sort((left, right) => depth[right] - depth[left]);
+  for (const node of order) {
+    const parent = parentOf(node);
+    if (parent >= 0 && depth[parent] < depth[node]) {
+      contained[parent] += contained[node] + (columns.nodeKinds[node] === WORKSPACE_MAP_NODE_KIND.folder ? 0 : 1);
+    }
+  }
+  return contained;
+}
+
+/** What the 2K/10K budget admits: documents and relations, never TreeRail hubs or containment. */
+export function workspaceMapAdmissionCounts(columns: Pick<WorkspaceMapColumns, "nodeKinds" | "edgeKinds">): {
+  nodeCount: number;
+  edgeCount: number;
+} {
+  let nodeCount = 0, edgeCount = 0;
+  for (const kind of columns.nodeKinds) if (kind !== WORKSPACE_MAP_NODE_KIND.folder) nodeCount++;
+  for (const kind of columns.edgeKinds) if (kind !== WORKSPACE_MAP_EDGE_KIND.membership) edgeCount++;
+  return { nodeCount, edgeCount };
+}
 
 /**
  * The one relation kind -> stroke mapping. The map and the sidebar chips
@@ -133,35 +193,86 @@ export function buildWorkspaceMapColumns(
   if (!options.workspaceId || !options.actorId || !options.selectionKey) {
     throw new Error("Workspace Map identity requires workspace, actor and selection keys.");
   }
-  const visible = scene.nodes
-    .filter((node) => !options.excludedNodeIds?.has(node.id))
-    .map((node): VisibleNode | null => {
-      const key = semanticNodeKey(node);
-      return key && node.id ? { node, key, kind: nodeKind(node) } : null;
-    })
-    .filter((value): value is VisibleNode => value !== null)
-    .sort((left, right) => compare(left.key, right.key)
-      || compare(left.node.id, right.node.id));
-
-  const nodes: VisibleNode[] = [];
+  const sceneNodes = new Map(scene.nodes.map((node) => [node.id, node]));
+  const shown = scene.nodes.filter((node) => !options.excludedNodeIds?.has(node.id)
+    && semanticNodeKey(node) !== null && node.id.length > 0)
+    .sort((left, right) => compare(semanticNodeKey(left)!, semanticNodeKey(right)!) || compare(left.id, right.id));
+  const documentNodes: WorkspaceGraphNode[] = [];
   const seenKeys = new Set<string>();
   const seenIds = new Set<string>();
-  for (const entry of visible) {
-    if (seenKeys.has(entry.key) || seenIds.has(entry.node.id)) continue;
-    seenKeys.add(entry.key);
-    seenIds.add(entry.node.id);
-    nodes.push(entry);
+  for (const node of shown) {
+    const key = semanticNodeKey(node)!;
+    if (seenKeys.has(key) || seenIds.has(node.id)) continue;
+    seenKeys.add(key);
+    seenIds.add(node.id);
+    documentNodes.push(node);
   }
 
-  const indexById = new Map(nodes.map((entry, index) => [entry.node.id, index]));
+  // TreeRail containment. A node hangs from its nearest visible container: the
+  // parent document when it is shown, otherwise its primary folder. A cluster
+  // starts in the folder where most of its members live.
+  const folders = new Map(scene.folder_topology?.folders.map((folder) => [folder.id, folder]));
+  const clusterFolders = new Map<string, { folderId: string | null; members: number }>();
+  for (const row of scene.folder_topology?.memberships ?? []) {
+    const best = clusterFolders.get(row.node_id);
+    if (!best || row.member_count > best.members
+      || row.member_count === best.members && compare(row.folder_id ?? "", best.folderId ?? "") < 0) {
+      clusterFolders.set(row.node_id, { folderId: row.folder_id, members: row.member_count });
+    }
+  }
+  const folderKey = (folderId: string) => WORKSPACE_MAP_FOLDER_PREFIX + folderId;
+  const folderLabels = new Map<string, string>();
+  const containerOf = (node: WorkspaceGraphNode): string | null => {
+    const seen = new Set<string>();
+    let current = node;
+    while (current.grain === "document" && current.parent_document_id && !seen.has(current.id)) {
+      seen.add(current.id);
+      const parent = sceneNodes.get(current.parent_document_id);
+      if (!parent) break;
+      if (seenIds.has(parent.id)) return semanticNodeKey(parent);
+      current = parent;
+    }
+    const folderId = node.grain === "document" ? node.primary_folder_id : clusterFolders.get(node.id)?.folderId ?? null;
+    if (folderId === null) return null;
+    if (node.grain === "document" && !folderLabels.has(folderId)) folderLabels.set(folderId, node.primary_folder_label);
+    return folderKey(folderId);
+  };
+  const entries: VisibleNode[] = documentNodes.map((node) => ({
+    key: semanticNodeKey(node)!,
+    id: node.id,
+    label: node.label,
+    kind: nodeKind(node),
+    folderKey: node.grain === "document" ? node.primary_folder_id : null,
+    documentCount: node.grain === "cluster" ? positiveCount(node.member_count) ?? 1 : 1,
+    containerKey: containerOf(node),
+  }));
+  // Every folder a shown node needs, with its whole visible ancestor chain.
+  const hubs = new Map<string, VisibleNode>();
+  for (const start of entries.map((entry) => entry.containerKey)) {
+    let folderId = start?.startsWith(WORKSPACE_MAP_FOLDER_PREFIX) ? start.slice(WORKSPACE_MAP_FOLDER_PREFIX.length) : null;
+    while (folderId !== null && !hubs.has(folderKey(folderId))) {
+      const parent = folders.get(folderId)?.parent_folder_id ?? null;
+      hubs.set(folderKey(folderId), {
+        key: folderKey(folderId), id: folderKey(folderId),
+        label: folders.get(folderId)?.label ?? folderLabels.get(folderId) ?? folderId,
+        kind: WORKSPACE_MAP_NODE_KIND.folder, folderKey: null, documentCount: 1,
+        containerKey: parent === null ? null : folderKey(parent),
+      });
+      folderId = parent;
+    }
+  }
+  const nodes = [...entries, ...hubs.values()].sort((left, right) => compare(left.key, right.key));
+
+  const indexById = new Map(nodes.map((entry, index) => [entry.id, index]));
+  const indexByKey = new Map(nodes.map((entry, index) => [entry.key, index]));
   const nodeKeys = nodes.map((entry) => entry.key);
-  const nodeIds = nodes.map((entry) => entry.node.id);
-  const nodeLabels = nodes.map((entry) => entry.node.label);
-  const nodeFolderKeys = nodes.map((entry) => entry.node.grain === "document"
-    ? entry.node.primary_folder_id : null);
+  const nodeIds = nodes.map((entry) => entry.id);
+  const nodeLabels = nodes.map((entry) => entry.label);
+  const nodeFolderKeys = nodes.map((entry) => entry.folderKey);
+  const nodeContainerIndices = Int32Array.from(nodes, (entry) =>
+    entry.containerKey === null ? -1 : indexByKey.get(entry.containerKey) ?? -1);
   const nodeKinds = Uint8Array.from(nodes.map((entry) => entry.kind));
-  const nodeDocumentCounts = Uint32Array.from(nodes.map((entry) => entry.node.grain === "cluster"
-    ? positiveCount(entry.node.member_count) ?? 1 : 1));
+  const nodeDocumentCounts = Uint32Array.from(nodes.map((entry) => entry.documentCount));
 
   const candidateEdges = scene.edges.flatMap((edge): VisibleEdge[] => {
     const source = indexById.get(edge.source);
@@ -169,6 +280,7 @@ export function buildWorkspaceMapColumns(
     const kind = relationKind(edge.relation_kind);
     const count = positiveCount(edge.relation_count);
     if (source === undefined || target === undefined || source === target
+      || nodeKinds[source] === WORKSPACE_MAP_NODE_KIND.folder || nodeKinds[target] === WORKSPACE_MAP_NODE_KIND.folder
       || kind === null || count === null || !edge.id) return [];
     const weight = edge.occurrence_weight ?? count;
     if (!Number.isSafeInteger(weight) || weight < 1) {
@@ -183,7 +295,13 @@ export function buildWorkspaceMapColumns(
       weight,
       crossFolder: edge.cross_folder ? 1 : 0,
     }];
-  }).sort((left, right) => compare(nodeKeys[left.source], nodeKeys[right.source])
+  }).concat(nodes.flatMap((entry, target): VisibleEdge[] => {
+    const source = entry.containerKey === null ? undefined : indexByKey.get(entry.containerKey);
+    return source === undefined ? [] : [{
+      id: `${CONTAINMENT_PREFIX}${entry.containerKey}|${entry.key}`, source, target,
+      kind: WORKSPACE_MAP_EDGE_KIND.membership, count: 1, weight: 1, crossFolder: 0,
+    }];
+  })).sort((left, right) => compare(nodeKeys[left.source], nodeKeys[right.source])
     || compare(nodeKeys[left.target], nodeKeys[right.target])
     || left.kind - right.kind
     || left.count - right.count
@@ -197,8 +315,13 @@ export function buildWorkspaceMapColumns(
     edges.push(edge);
   }
 
+  // Documents grow with their relations only; a folder hub grows with what it contains.
   const degree = new Float64Array(nodes.length);
   for (const edge of edges) {
+    if (edge.kind === WORKSPACE_MAP_EDGE_KIND.membership) {
+      if (nodeKinds[edge.source] === WORKSPACE_MAP_NODE_KIND.folder) degree[edge.source] += 1;
+      continue;
+    }
     degree[edge.source] += edge.count;
     degree[edge.target] += edge.count;
   }
@@ -209,8 +332,8 @@ export function buildWorkspaceMapColumns(
   // Only inputs that can affect this browser's layout are hashed. Metadata
   // such as graph_revision, generated_at, facet counts and projection-row
   // IDs cannot alter coordinates or make an invisible decoy affect the key.
-  // Directory membership is retained as display metadata below, never a
-  // relation-layout input or a reason to reorder parallel springs.
+  // TreeRail containment is layout input (hubs, lines and start paths), so
+  // it is hashed; folder labels are not.
   const fingerprintSource = JSON.stringify([
     COLUMN_VERSION,
     GRAPH_NODE_RADIUS_PX.workspace,
@@ -218,6 +341,7 @@ export function buildWorkspaceMapColumns(
       entry.key,
       entry.kind,
       nodeSizes[index],
+      nodes[index].containerKey,
     ]),
     edges.map((edge) => [
       nodeKeys[edge.source],
@@ -240,6 +364,7 @@ export function buildWorkspaceMapColumns(
     nodeKeys,
     nodeLabels,
     nodeFolderKeys,
+    nodeContainerIndices,
     nodeKinds,
     nodeSizes,
     nodeDocumentCounts,

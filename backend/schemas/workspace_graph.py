@@ -245,6 +245,10 @@ class WorkspaceGraphDocumentNode(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     primary_folder_id: UUID | None = None
     primary_folder_label: str = Field(min_length=1, max_length=200)
+    # TreeRail container when it is a document rendered in this scene: the
+    # nearest document ancestor below the primary folder. Otherwise null and
+    # the primary folder contains the document.
+    parent_document_id: str | None = Field(default=None, min_length=1, max_length=220)
     reference_count: int = Field(default=0, ge=0)
     evidence_count: int = Field(default=0, ge=0)
     also_appears_in: list[WorkspaceGraphPlacementRef] = Field(
@@ -574,6 +578,21 @@ class WorkspaceGraphScenePayload(BaseModel):
             for edge in self.edges
         ):
             raise ValueError("workspace graph edge endpoints must exist")
+
+        documents_by_id = {
+            node.id: node for node in self.nodes if node.grain == "document"
+        }
+        for node in documents_by_id.values():
+            seen = {node.id}
+            parent_id = node.parent_document_id
+            while parent_id is not None:
+                if parent_id in seen or parent_id not in documents_by_id:
+                    raise ValueError(
+                        "parent_document_id must name another rendered document "
+                        "without a containment cycle"
+                    )
+                seen.add(parent_id)
+                parent_id = documents_by_id[parent_id].parent_document_id
 
         if self.focus is not None and self.focus.node_id is not None:
             focus_grain = next(

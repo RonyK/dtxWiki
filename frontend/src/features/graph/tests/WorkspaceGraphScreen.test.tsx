@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { workspaceMapAdmissionCounts } from "../map/sceneColumns";
 import userEvent from "@testing-library/user-event";
 import { useLayoutEffect } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -570,9 +571,9 @@ describe("WorkspaceGraphScreen", () => {
     const edgeIds = Array.from(document.querySelectorAll("[data-graph-edge-id]"))
       .map((element) => element.getAttribute("data-graph-edge-id"));
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids")
-      ?.split(",").sort()).toEqual(nodeIds.sort());
+      ?.split(",").filter((id) => !isTreeRailId(id)).sort()).toEqual(nodeIds.sort());
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-edge-ids")
-      ?.split(",").sort()).toEqual(edgeIds.sort());
+      ?.split(",").filter((id) => !isTreeRailId(id)).sort()).toEqual(edgeIds.sort());
 
     const originalNodeIds = screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids");
     const originalEdgeIds = screen.getByTestId("workspace-graph-canvas").getAttribute("data-edge-ids");
@@ -2489,8 +2490,8 @@ describe("WorkspaceGraphScreen", () => {
     expect(latestMockMapColumns()).toBe(columns);
     expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
     expect(canvas).toHaveAttribute("data-selected-id", "cluster:mixed");
-    expect(columns.nodeIds).toEqual(["cluster:mixed", "context:alpha"]);
-    expect(columns.edgeIds).toEqual(["edge:alpha-mixed"]);
+    expect(columns.nodeIds.filter((id) => !isTreeRailId(id))).toEqual(["cluster:mixed", "context:alpha"]);
+    expect(columns.edgeIds.filter((id) => !isTreeRailId(id))).toEqual(["edge:alpha-mixed"]);
     // Original aggregate self-relations remain in the accessible list, not
     // newly split into cross-folder native physics rows.
     expect(document.querySelector('[data-graph-edge-id="edge:mixed-self"]')).toBeInTheDocument();
@@ -2528,7 +2529,7 @@ describe("WorkspaceGraphScreen", () => {
     expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: i18n.t("graph:workspaceGraph.folders.groupByFolder") }));
     expect(screen.getByRole("button", { name: "Pause layout" })).toBeEnabled();
-    expect(latestMockMapColumns().nodeIds).toHaveLength(2_000);
+    expect(workspaceMapAdmissionCounts(latestMockMapColumns()).nodeCount).toBe(2_000);
   });
 
   it("relation-first: retains user pause through language, mobile resize and fullscreen transitions", async () => {
@@ -2689,7 +2690,6 @@ describe("WorkspaceGraphScreen", () => {
     expect(screen.getByRole("combobox", { name: "Lens" })).toHaveValue("combined");
     expect(latestMockMapColumns()).toBe(columns);
     expect(screen.getByTestId("workspace-graph-canvas")).toBe(canvas);
-    expect([...columns.nodeKinds]).not.toContain(3);
     expect(document.querySelectorAll("[data-map-folder-id]")).toHaveLength(3);
     expect(document.querySelector('[data-map-folder-id="' + UI_FOLDERS.secondary + '"]')).not.toBeInTheDocument();
     await userEvent.click(toggle);
@@ -2760,7 +2760,7 @@ describe("WorkspaceGraphScreen", () => {
     expect(within(details).getByRole("heading", { name: "Direct members (2 documents)" })).toBeInTheDocument();
     expect(within(details).queryByRole("link", { name: "Open" })).not.toBeInTheDocument();
     expect(columns.nodeIds).toContain("cluster:mixed");
-    expect(columns.nodeIds.some((id) => id.startsWith("folder"))).toBe(false);
+    expect(columns.nodeIds.some((id) => id.startsWith("folder-fragment:"))).toBe(false);
     canvasCenterOnMock.mockClear();
     await userEvent.click(row);
     expect(surface.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
@@ -2791,9 +2791,10 @@ describe("WorkspaceGraphScreen", () => {
     selectMockMapId("edge:alpha-beta");
     expect(screen.queryByRole("region", { name: "Folder members and relationships" })).not.toBeInTheDocument();
     expect(screen.getByTestId("workspace-graph-canvas")).toHaveAttribute("data-selected-id", "edge:alpha-beta");
-    expect(columns.edgeIds).toEqual(["edge:alpha-beta"]);
-    expect([...columns.edgeCrossFolder]).toEqual([1]);
-    expect([...columns.edgeWeights]).toEqual([3]);
+    const authored = [...columns.edgeIds.keys()].filter((index) => !isTreeRailId(columns.edgeIds[index]));
+    expect(authored.map((index) => columns.edgeIds[index])).toEqual(["edge:alpha-beta"]);
+    expect(authored.map((index) => columns.edgeCrossFolder[index])).toEqual([1]);
+    expect(authored.map((index) => columns.edgeWeights[index])).toEqual([3]);
     expect(latestMockMapColumns()).toBe(columns);
     selectMockMapId("library:beta");
     expect(screen.getByRole("heading", { name: "Library Beta" })).toBeInTheDocument();
@@ -3406,6 +3407,11 @@ const UI_FOLDERS = {
 const UI_CONTEXT_PATH = "/context?target=00000000-0000-4000-8000-000000000001";
 const UI_LIBRARY_PATH = "/library?item=00000000-0000-4000-8000-000000000002&tab=preview";
 
+/** TreeRail folder hubs and containment lines, which no list row stands for. */
+function isTreeRailId(id: string): boolean {
+  return id.startsWith("folder:") || id.startsWith("contains:");
+}
+
 function latestMockMapColumns(): WorkspaceMapColumns {
   const columns = canvasColumnsMock.mock.calls.at(-1)?.[0] as WorkspaceMapColumns | undefined;
   if (!columns) throw new Error("Expected mounted mock Map columns.");
@@ -3415,8 +3421,9 @@ function latestMockMapColumns(): WorkspaceMapColumns {
 function expectOriginalDocumentMapColumns(): void {
   const columns = latestMockMapColumns();
   expect(columns.nodeKinds).toHaveLength(columns.nodeIds.length);
-  expect(Array.from(columns.nodeKinds)).not.toContain(3);
-  expect(columns.nodeIds.every((id) => !id.startsWith("folder:") && !id.startsWith("folder-fragment:"))).toBe(true);
+  // TreeRail folder hubs are the only non-document points; retired folder fragments never return.
+  columns.nodeIds.forEach((id, index) => expect(id.startsWith("folder:")).toBe(columns.nodeKinds[index] === 3));
+  expect(columns.nodeIds.every((id) => !id.startsWith("folder-fragment:"))).toBe(true);
   expect(columns).not.toHaveProperty("preparedScene");
 }
 

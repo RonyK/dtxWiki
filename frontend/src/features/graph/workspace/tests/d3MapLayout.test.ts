@@ -23,7 +23,7 @@ describe("Map D3 consumer failure boundary", () => {
     const shapes = Float32Array.from([0, 0]);
     const viewport = { width: 1000, height: 500 };
     const keys = ["context:a", "context:b"];
-    const columns = { nodeKeys: keys, edgeIds: ["edge:a"], edgeSources: Uint32Array.from([0]),
+    const columns = { nodeKeys: keys, nodeFolderKeys: [null, null], edgeIds: ["edge:a"], edgeSources: Uint32Array.from([0]),
       edgeTargets: Uint32Array.from([1]), edgeKinds: Uint8Array.from([0]),
       edgeCounts: Uint32Array.from([1]), edgeWeights: Float64Array.from([1]) } as WorkspaceMapColumns;
     const error = new Error("GPU position upload lost its rendering context");
@@ -50,7 +50,7 @@ describe("Map D3 consumer failure boundary", () => {
     const dense = Float32Array.from([0, 0, .1, 0, 10_000, 0]);
     const spread = Float32Array.from([0, 0, 5_000, 0, 10_000, 0]);
     const keys = ["context:a", "context:b", "context:c"];
-    const input = { columns: { nodeKeys: keys, edgeIds: ["edge:a"], edgeSources: Uint32Array.from([0]), edgeTargets: Uint32Array.from([1]),
+    const input = { columns: { nodeKeys: keys, nodeFolderKeys: [null, null, null], edgeIds: ["edge:a"], edgeSources: Uint32Array.from([0]), edgeTargets: Uint32Array.from([1]),
       edgeKinds: Uint8Array.from([0]), edgeCounts: Uint32Array.from([1]), edgeWeights: Float64Array.from([1]) } as WorkspaceMapColumns,
     positions: dense, diameters: Float32Array.from([6, 6, 6]), shapes: new Float32Array(3), pins: [], reducedMotion: false,
     viewport: { width: 1000, height: 500 } };
@@ -58,6 +58,7 @@ describe("Map D3 consumer failure boundary", () => {
     const ticks = () => mock.driver.update.mock.calls.map(call => call[2].settleTicks);
     const layout = createWorkspaceD3Layout(input, { onPositions, onState, onError });
     expect(mock.options!.initialTicks).toBe(150);
+    expect(mock.options!.initialAlpha).toBe(1);
     mock.options!.onIndexedTick!(dense, keys);
     expect(ticks()).toEqual([160]);
     // The Worker holds newer rows than this provisional frame until one is accepted.
@@ -96,5 +97,12 @@ describe("Map D3 consumer failure boundary", () => {
     expect(calibratedBasis.mock.calls[0][0].referenceZoom).toBe(.001);
     expect(published).toHaveBeenCalledExactlyOnceWith(farSeparated);
     expect(onError).not.toHaveBeenCalled();
+
+    // Two TreeRail branches of two rows each: a structured start keeps a low temperature.
+    createWorkspaceD3Layout({ ...input, positions: Float32Array.from([0, 0, .1, 0, 10_000, 0, 5, 5]),
+      diameters: Float32Array.from([6, 6, 6, 6]), shapes: new Float32Array(4),
+      columns: { ...input.columns, nodeKeys: [...keys, "context:d"], nodeContainerIndices: Int32Array.from([-1, -1, 0, 1]) } },
+    { onPositions, onState, onError });
+    expect(mock.options!.initialAlpha).toBe(.25);
   });
 });

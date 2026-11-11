@@ -9,6 +9,7 @@ export type D3WorkerOptions = {
   autoStart?: boolean;
   initialPositionsAreSolved?: boolean;
   initialTicks?: number;
+  initialAlpha?: number;
 };
 export type D3ReconcileOptions = { pinsOnly?: boolean; reheat?: boolean };
 export type D3WorkerCommand =

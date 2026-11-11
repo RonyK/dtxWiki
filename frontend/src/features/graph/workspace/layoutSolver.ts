@@ -1,6 +1,7 @@
 import type { GraphConfig } from "./cosmosNative";
 import { WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
-import { d3PhyllotaxisPositions } from "../shared/physics/initialPositions";
+import type { WorkspaceMapColumns } from "../map/sceneColumns";
+import { workspaceContainerIndices, workspaceDirectoryStartPositions } from "./directoryStartPositions";
 import { workspaceInitialCameraPolicy } from "./initialCameraPolicy";
 import { buildWorkspaceNativeCollisionRadii } from "./nativeCollisionRadii";
 import { buildWorkspaceNativeCanonicalForceConfig } from "./nativeForceProfile";
@@ -18,17 +19,8 @@ export function createWorkspaceLayoutSolver(budget: WorkspaceMapBudget) {
   const ownsPositionRows = budget.documents <= WORKSPACE_MAP_DEFAULT_BUDGET.documents;
   return Object.freeze({
     diagnosticsName: ownsPositionRows ? "d3-worker" : "cosmos-native",
-    initialPositions(keys: readonly string[], fallback: Float32Array): Float32Array {
-      if (!ownsPositionRows) return fallback;
-      const ordered = [...keys].sort();
-      const rows = d3PhyllotaxisPositions(keys.length);
-      const byKey = new Map(ordered.map((key, index) => [key, index]));
-      const result = new Float32Array(rows.length);
-      keys.forEach((key, index) => {
-        const source = byKey.get(key)!;
-        result[index * 2] = rows[source * 2]; result[index * 2 + 1] = rows[source * 2 + 1];
-      });
-      return result;
+    initialPositions(columns: Pick<WorkspaceMapColumns, "nodeKeys" | "nodeContainerIndices">, fallback: Float32Array): Float32Array {
+      return ownsPositionRows ? workspaceDirectoryStartPositions(workspaceContainerIndices(columns), columns.nodeKeys) : fallback;
     },
     positions(current: Float32Array, readNative: () => Float32Array): Float32Array {
       return ownsPositionRows ? current : readNative();

@@ -1,6 +1,7 @@
-import type { WorkspaceMapColumns } from "../map/sceneColumns";
+import { WORKSPACE_MAP_EDGE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
 import { createD3WorkerLayout, type D3WorkerLayoutState } from "../shared/physics/d3WorkerLayout";
 import type { LocalLayoutInput, LocalLayoutPositions } from "../local/layoutTypes";
+import { directoryStartIsStructured, workspaceContainerIndices } from "./directoryStartPositions";
 import { buildWorkspaceD3UnitBasis, isReusableWorkspaceD3UnitBasis, measureWorkspaceD3BodyOverlap,
   workspaceD3FitZoom, type WorkspaceD3UnitBasis } from "./d3MapUnits";
 
@@ -14,7 +15,7 @@ export type WorkspaceD3Layout = {
   isRunning(): boolean;
 };
 
-/** Indexed Map binding. Original relation rows enter D3; folders never do. */
+/** Indexed Map binding. Relations and TreeRail containment lines are the D3 links; folders never add any other force. */
 export type WorkspaceD3LayoutInput = {
   columns: WorkspaceMapColumns;
   positions: Float32Array;
@@ -44,6 +45,9 @@ const CONTACT_PASS_TICKS = 80;
 const MAX_CONTACT_PASSES = 3;
 const FIT_CLEARANCE_SLACK = .97;
 const MATERIAL_OVERLAP_CSS = .5;
+// A directory-shaped start only needs relaxing; full heat would erase its
+// depth. A start with no folder split carries no structure to protect.
+const DIRECTORY_START_ALPHA = .25;
 
 export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: WorkspaceD3LayoutOptions): WorkspaceD3Layout {
   const keys = input.columns.nodeKeys;
@@ -66,7 +70,8 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
   let calibrationPasses = 0;
   const edges: LocalLayoutInput["edges"] = input.columns.edgeIds.map((_, index) => ({
     sourceKey: keys[input.columns.edgeSources[index]], targetKey: keys[input.columns.edgeTargets[index]],
-    kind: input.columns.edgeKinds[index] === 1 ? "citation" : "link",
+    kind: input.columns.edgeKinds[index] === WORKSPACE_MAP_EDGE_KIND.citation ? "citation"
+      : input.columns.edgeKinds[index] === WORKSPACE_MAP_EDGE_KIND.membership ? "membership" : "link",
     count: input.columns.edgeCounts[index], occurrences: input.columns.edgeWeights[index],
   }));
   const scene = (): LocalLayoutInput => ({
@@ -90,6 +95,7 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
   const layout = createD3WorkerLayout(currentScene, {
     cachedPositions, fixedPositions, autoStart: false, reducedMotion,
     initialPositionsAreSolved: reused, initialTicks: INITIAL_SOLVE_TICKS,
+    initialAlpha: directoryStartIsStructured(workspaceContainerIndices(input.columns), input.columns.nodeKeys) ? DIRECTORY_START_ALPHA : 1,
     onIndexedTick(positions, workerKeys) {
       if (destroyed) return;
       try {

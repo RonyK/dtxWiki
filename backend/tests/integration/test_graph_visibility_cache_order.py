@@ -124,9 +124,24 @@ def test_reader_cache_order_preserves_each_readers_fresh_graph_scene(
         )
         session.add(folder)
         session.add(_tree_edge(workspace_id, folder.id, seed.id, weight=1.0))
-        # These rows are visible internally, but target a draft invisible to
-        # the viewer. They must be excluded before the viewer's 1,024-row
-        # partition window, even if an internal reader populated all caches.
+        # These folders are visible internally, but sit under a draft that
+        # is invisible to the viewer. They must be excluded before the
+        # viewer's 1,024-row partition window, even if an internal reader
+        # populated all caches. (A draft's own placement is the draft
+        # document, so the sentinels are folders below it.)
+        draft_placement = WorkspaceTreeNode(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            section="context",
+            node_kind="page_ref",
+            sort_key="private",
+            title="PRIVATE PLACEMENT",
+            slug=f"private-{uuid4().hex}",
+            target_kind="context_page",
+            target_id=hidden.id,
+            visibility_status="visible",
+        )
+        session.add(draft_placement)
         for index in range(1025):
             placement_id = uuid4()
             session.add(
@@ -134,13 +149,11 @@ def test_reader_cache_order_preserves_each_readers_fresh_graph_scene(
                     id=placement_id,
                     workspace_id=workspace_id,
                     section="context",
-                    node_kind="page_ref",
+                    node_kind="folder",
+                    parent_id=draft_placement.id,
                     sort_key=f"private-{index}",
                     title=f"PRIVACY SENTINEL {index}",
                     slug=f"private-{uuid4().hex}",
-                    target_kind="context_page",
-                    target_id=hidden.id,
-                    primary_placement=False,
                     visibility_status="visible",
                 )
             )

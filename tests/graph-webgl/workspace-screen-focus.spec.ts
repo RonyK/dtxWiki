@@ -624,8 +624,10 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   await expect(list).toHaveAttribute("data-total-count", "10000");
   await expectSettledNativeScene(page);
   const expanded = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-  expect(expanded.positions).toHaveLength(20000);
-  expect(expanded.linkAlphas).toHaveLength(30000);
+  // 10,000 documents and 30,000 relations, plus the one TreeRail folder that
+  // holds every document and its 10,000 containment lines.
+  expect(expanded.positions).toHaveLength((10000 + 1) * 2);
+  expect(expanded.linkAlphas).toHaveLength(30000 + 10000);
   expect(expanded.positions.every(Number.isFinite)).toBe(true);
   expect(expanded.glError).toBe(0);
   const requests = await page.evaluate(() => window.__workspaceScreenFocus.requests);
@@ -671,7 +673,8 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   await scale.selectOption("2k");
   await expect(list).toHaveAttribute("data-total-count", "2000");
   await expectSettledNativeScene(page);
-  expect((await page.evaluate(() => window.__workspaceScreenFocus.snapshot())).positions).toHaveLength(4000);
+  // 2,000 documents plus their one TreeRail folder.
+  expect((await page.evaluate(() => window.__workspaceScreenFocus.snapshot())).positions).toHaveLength((2000 + 1) * 2);
   expect(errors).toEqual([]);
 });
 
@@ -1382,7 +1385,8 @@ for (const { language, mobile } of [
         ? "Open canvas fullscreen" : "캔버스 전체 화면으로 열기", exact: true }).click();
       await expectSettledNativeScene(page);
       const native = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-      expect(native.positions).toHaveLength(4000);
+      // 2,000 documents plus one TreeRail hub for each of the 300 placed folders.
+      expect(native.positions).toHaveLength((2000 + 300) * 2);
       expect(native.glError).toBe(0);
       expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
       await evidenceScreenshot(page, testInfo, `refine-${language}-mobile-2k-fullscreen.png`);

@@ -48,7 +48,7 @@ import { clearWorkspaceGraphStorage, workspaceGraphStorageEpoch } from "../../sh
 import { useWorkspaceRoute } from "../../shared/lib/workspaceRoutes";
 import { useWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import type { GraphCanvasHandle } from "./GraphCanvas";
-import { buildWorkspaceMapColumns } from "./map/sceneColumns";
+import { buildWorkspaceMapColumns, workspaceMapAdmissionCounts } from "./map/sceneColumns";
 import { prepareWorkspaceMapFolderSceneOnce } from "./map/folderPreparationCache";
 import type { WorkspaceMapPreparedFolderScene } from "./map/folderScene";
 import { canAnimateWorkspaceRelationLayout } from "./shared/workspaceLayoutPolicy";
@@ -1168,7 +1168,7 @@ export function WorkspaceGraphScreen() {
     exportWorkspaceGraph(scene, renderScene);
   };
 
-  const staticLayout = !canAnimateWorkspaceRelationLayout(mapColumns?.nodeIds.length ?? 0, mapBudget);
+  const staticLayout = !canAnimateWorkspaceRelationLayout(mapColumns ? workspaceMapAdmissionCounts(mapColumns).nodeCount : 0, mapBudget);
   const handleMapRendererStatus = (status: "loading" | "ready" | "error") => {
     if (!sceneIsCurrent()) return;
     const pending = pendingListCenterRef.current;

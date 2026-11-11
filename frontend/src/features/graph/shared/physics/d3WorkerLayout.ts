@@ -120,7 +120,7 @@ export function createD3WorkerLayout(input: LocalLayoutInput, options: D3WorkerL
   worker.addEventListener("message", onMessage); worker.addEventListener("error", onError); worker.addEventListener("messageerror", onError);
   send({ type: "init", input, options: { cachedPositions: options.cachedPositions, fixedPositions: options.fixedPositions,
     reducedMotion: options.reducedMotion, autoStart: options.autoStart, initialPositionsAreSolved: options.initialPositionsAreSolved,
-    initialTicks: options.initialTicks } });
+    initialTicks: options.initialTicks, initialAlpha: options.initialAlpha } });
   const localPoint = (key: string, point?: GraphPoint): GraphPoint | null => {
     const index = byKey.get(key);
     if (destroyed || index === undefined || key !== seed && point !== undefined && !finite(point)) return null;

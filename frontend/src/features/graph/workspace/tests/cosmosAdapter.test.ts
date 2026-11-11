@@ -13,7 +13,7 @@ import { buildCosmosSceneBuffers } from "../cosmosScene";
 import { buildWorkspaceRelationCollisionBasis, buildWorkspaceRelationForceConfig } from "../relationPhysics";
 import { readGraphTokens } from "../../shared/graphTokens";
 import { WORKSPACE_MAP_DEFAULT_BUDGET, WORKSPACE_MAP_PC_10K_BUDGET, type WorkspaceMapBudget } from "../../shared/workspaceMapBudget";
-import { d3PhyllotaxisPositions } from "../../shared/physics/initialPositions";
+import { workspaceContainerIndices, workspaceDirectoryStartPositions } from "../directoryStartPositions";
 import * as nativeTracking from "../gpuTrackedPositions";
 
 const { graph, community, createGraph, createNativeGraph } = vi.hoisted(() => {
@@ -2137,7 +2137,7 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
     expect(graph.getPointPositions()).not.toEqual(positions);
     const glyphs = buildCosmosSceneBuffers(input, readGraphTokens(document.body, "light"));
     const freshBasis = budget === WORKSPACE_MAP_DEFAULT_BUDGET
-      ? buildWorkspaceRelationCollisionBasis(d3PhyllotaxisPositions(input.nodeIds.length), glyphs.pointSizes, 734, 608)
+      ? buildWorkspaceRelationCollisionBasis(workspaceDirectoryStartPositions(workspaceContainerIndices(input), input.nodeKeys), glyphs.pointSizes, 734, 608)
       : freshCollisionBasis(input);
     expect(adapter.captureCoordinates()!.collisionBasis).toEqual(freshBasis);
     expect(adapter.captureCoordinates()!.forceBasis).toEqual(freshBasis);

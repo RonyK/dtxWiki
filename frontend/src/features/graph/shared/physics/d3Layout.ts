@@ -48,6 +48,8 @@ export type LocalLayoutOptions = {
   initialPositionsAreSolved?: boolean;
   /** Stop the first solve early; the caller finishes this cooling with update(settleAtCurrentAlpha). */
   initialTicks?: number;
+  /** Cooling temperature of the first solve; below 1 keeps more of the start positions. */
+  initialAlpha?: number;
   /** Worker lifecycle resumes permission without automatically reheating cooled nodes. */
   preserveCoolingOnResume?: boolean;
 };
@@ -257,8 +259,10 @@ export function createD3Layout(
       ? LOCAL_LAYOUT_PARAMS.membershipDistance
       : LOCAL_LAYOUT_PARAMS.relationDistance);
   const refreshLinkStrength = (): void => {
-    // d3's default strength is inverse minimum endpoint degree. Keep it exact
-    // when occurrences are absent; only authored Map occurrences add a gain.
+    // d3 divides by the smaller endpoint degree to stay stable. The larger
+    // endpoint (also the larger glyph) multiplies by its root degree, so a
+    // well-connected node gathers its neighbours. Authored Map occurrences add
+    // their bounded gain; scenes without occurrences use 1.
     const degrees = new Map<string, number>();
     for (const link of linkForce.links()) {
       const source = typeof link.source === "object" ? link.source.key : String(link.source);
@@ -269,8 +273,10 @@ export function createD3Layout(
     linkForce.strength(link => {
       const source = typeof link.source === "object" ? link.source.key : String(link.source);
       const target = typeof link.target === "object" ? link.target.key : String(link.target);
-      const degree = Math.min(degrees.get(source) ?? 1, degrees.get(target) ?? 1);
-      return Math.min(1, (link.occurrences === undefined ? 1 : boundedRelationWeight(link.occurrences)) / degree);
+      const smaller = Math.min(degrees.get(source) ?? 1, degrees.get(target) ?? 1);
+      const larger = Math.max(degrees.get(source) ?? 1, degrees.get(target) ?? 1);
+      const gain = link.occurrences === undefined ? 1 : boundedRelationWeight(link.occurrences);
+      return Math.min(1, gain * Math.sqrt(larger) / smaller);
     });
   };
   refreshLinkStrength();
@@ -380,7 +386,7 @@ export function createD3Layout(
     setState("cooled");
   });
   if (restored) simulation.alpha(0);
-  else simulation.tick(boundedTicks(options.initialTicks));
+  else simulation.alpha(options.initialAlpha ?? 1).tick(boundedTicks(options.initialTicks));
   notify();
   options.onState?.({ ...state });
   if (!restored) startLive();

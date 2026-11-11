@@ -9,7 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { GraphCanvasHandle, RendererStatus } from "../GraphCanvas";
-import { WORKSPACE_MAP_EDGE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
+import { WORKSPACE_MAP_EDGE_KIND, workspaceMapAdmissionCounts, type WorkspaceMapColumns } from "../map/sceneColumns";
 import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../shared/rendererTypes";
 import { readGraphTokens } from "../shared/graphTokens";
 import { sameWorkspaceMapIndexedGeometry } from "../shared/workspaceMapGeometry";
@@ -295,8 +295,7 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
       };
 
       try {
-        assertWorkspaceMapWithinBudget({ nodeCount: columnsRef.current.nodeIds.length,
-          edgeCount: columnsRef.current.edgeIds.length }, rendererBudget);
+        assertWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(columnsRef.current), rendererBudget);
       } catch {
         publishFailure("runtime");
         return;
@@ -328,13 +327,13 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
           const snapshotBudget = snapshot?.budget ?? WORKSPACE_MAP_DEFAULT_BUDGET;
           const preservesSnapshot = snapshot && snapshotBudget.documents === rendererBudget.documents
             && snapshotBudget.relations === rendererBudget.relations
-            && isWorkspaceMapWithinBudget({ nodeCount: snapshot.columns.nodeIds.length,
-              edgeCount: snapshot.columns.edgeIds.length }, rendererBudget)
+            && isWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(snapshot.columns), rendererBudget)
             && preservesAppliedPins(snapshot.columns, columnsRef.current);
           const adapter = createWorkspaceCosmosAdapter(container, columnsRef.current, {
             hoverChip: hoverChipRef.current,
             relationLabel: (kind) => translationRef.current(kind === WORKSPACE_MAP_EDGE_KIND.citation
-              ? "graph.legend.edge.citation" : "graph.legend.edge.link"),
+              ? "graph.legend.edge.citation" : kind === WORKSPACE_MAP_EDGE_KIND.membership
+                ? "graph.legend.edge.membership" : "graph.legend.edge.link"),
             budget: rendererBudget,
             forcedColors,
             initialPaused,
@@ -477,8 +476,7 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
       const adapter = adapterRef.current;
       if (!adapter) return;
       try {
-        assertWorkspaceMapWithinBudget({ nodeCount: columns.nodeIds.length,
-          edgeCount: columns.edgeIds.length }, budgetRef.current);
+        assertWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(columns), budgetRef.current);
       } catch {
         pendingColumnsRef.current = null;
         sessionCoordinatesRef.current = null;
@@ -592,8 +590,8 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
         <div
           aria-hidden="true"
           className="graph-canvas"
-          data-map-edge-count={columns.edgeIds.length}
-          data-map-node-count={columns.nodeIds.length}
+          data-map-edge-count={workspaceMapAdmissionCounts(columns).edgeCount}
+          data-map-node-count={workspaceMapAdmissionCounts(columns).nodeCount}
           data-testid="graph-canvas"
           ref={containerRef}
         />
