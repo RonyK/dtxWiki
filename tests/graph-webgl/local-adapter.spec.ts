@@ -347,7 +347,8 @@ async function renderedColors(page: Page): Promise<{
       if (red < 235 || green < 235 || blue < 235) nonwhite++;
       if (red > 75 && red < 190 && green < 125 && blue > 110 && blue > red) purple++;
       if (red < 90 && green > 100 && blue > 75 && blue < 200 && green > red) teal++;
-      if (red > 150 && green < 85 && blue < 115) link++;
+      // #e11d48 at GRAPH_EDGE_FADE's 1..0.8 over white; blue - green tells it from membership pink.
+      if (red > 150 && green < 110 && blue < 135 && blue - green < 55) link++;
       if (red < 80 && green > 120 && blue < 130) citation++;
       if (red < 90 && green < 150 && blue > 170) coAccess++;
       if (red > 160 && green < 90 && blue > 90 && blue < 180) membership++;

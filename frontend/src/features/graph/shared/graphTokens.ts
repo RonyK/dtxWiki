@@ -80,6 +80,28 @@ export const GRAPH_EDGE_PATTERN = {
 /** Every relationship line, in both graphs and their legends, is this wide (CSS px). */
 export const GRAPH_EDGE_WIDTH_PX = 1.5;
 
+/**
+ * Relationship-line opacity: one rule set for both graphs, from 1 down to 0.6.
+ * Citation ink is lighter than other lines. Long lines fade by their length in
+ * the fitted view: opaque at the near length, towards transparent at the far
+ * one, never below the floor; scenes up to `maxRelations` fade less. While a
+ * selection is shown its lines are opaque and other lines keep `dimmed` of
+ * their ink; forced colours never fade. The
+ * Map's overview of over 1,000 documents adds community ink (cosmosScene.ts).
+ */
+export const GRAPH_LINE_INK = { line: 1, citation: 0.97, dimmed: 0.1 } as const;
+export const GRAPH_LINE_FADE = {
+  small: { maxRelations: 1_000, rangePx: [40, 350], floor: 0.89 },
+  large: { rangePx: [30, 220], floor: 0.76 },
+} as const;
+
+/** GRAPH_LINE_FADE for a line of this fitted-view length in a scene of this many relations. */
+export function graphLineFade(fitLengthPx: number, relations: number): number {
+  const { rangePx: [near, far], floor } = relations <= GRAPH_LINE_FADE.small.maxRelations
+    ? GRAPH_LINE_FADE.small : GRAPH_LINE_FADE.large;
+  return Math.max(floor, Math.min(1, (far - fitLengthPx) / (far - near)));
+}
+
 /** A relationship that was removed in the replayed history. */
 export const GRAPH_REMOVED_EDGE_COLOR = "#dc2626";
 

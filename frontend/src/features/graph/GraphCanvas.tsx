@@ -35,7 +35,7 @@ type GraphCanvasProps = {
   active: boolean;
   focusedId: string | null;
   forcedColors: boolean;
-  /** The reader paused the layout: scene and tab changes keep it paused until resumed. */
+  /** The reader paused the layout. Tab changes keep it; the view clears it for a new scene. */
   layoutPaused?: boolean;
   onHover: (id: string | null) => void;
   onPin: (id: string, position: { x: number; y: number }) => void;

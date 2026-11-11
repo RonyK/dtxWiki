@@ -5,13 +5,52 @@ import {
   type ProgramDefinition,
   type ProgramInfo,
 } from "sigma/rendering";
+import type Sigma from "sigma";
 import type { EdgeDisplayData, NodeDisplayData, RenderParams } from "sigma/types";
-import { floatColor } from "sigma/utils";
+import { parseColor, rgbaToFloat } from "sigma/utils";
 
-import { GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, type GraphEdgeVisualKind } from "../shared/graphTokens";
+import {
+  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_INK, graphLineFade, type GraphEdgeVisualKind,
+} from "../shared/graphTokens";
 
 // Every line has the legend's one CSS-pixel width; half of it on each side.
 export const LOCAL_EDGE_HALF_WIDTH_PX = GRAPH_EDGE_WIDTH_PX / 2;
+
+/**
+ * The edge reducer's line state, as on the Map: "selected" while a selection
+ * or history step is emphasised (opaque), "forced" in forced colours (ink, no fade).
+ */
+export type LocalLineState = "rest" | "selected" | "forced";
+
+// Lines are measured in the camera of the renderer's last Fit, so the reader's
+// zoom never changes a line's opacity. Before any Fit: Sigma's home view.
+const HOME_CAMERA = { x: 0.5, y: 0.5, angle: 0, ratio: 1 };
+const fitCameras = new WeakMap<Sigma, typeof HOME_CAMERA>();
+
+/** Records the camera ratio a Fit used: GRAPH_LINE_FADE measures lines in that view. */
+export function setLocalFitRatio(renderer: Sigma, ratio: number): void {
+  fitCameras.set(renderer, { ...HOME_CAMERA, ratio });
+}
+
+/** The Map's line opacity rules (GRAPH_LINE_INK, GRAPH_LINE_FADE) for one Context line. */
+function lineOpacity(renderer: Sigma, source: NodeDisplayData, target: NodeDisplayData, data: EdgeDisplayData): number {
+  const state = (data as EdgeDisplayData & { lineState?: LocalLineState }).lineState;
+  if (state === "selected") return 1;
+  const ink = data.type === "citation" ? GRAPH_LINE_INK.citation : GRAPH_LINE_INK.line;
+  if (state === "forced") return ink;
+  const cameraState = fitCameras.get(renderer) ?? HOME_CAMERA;
+  const start = renderer.framedGraphToViewport(source, { cameraState });
+  const end = renderer.framedGraphToViewport(target, { cameraState });
+  return ink * graphLineFade(Math.hypot(end.x - start.x, end.y - start.y), renderer.getGraph().size);
+}
+
+const inks = new Map<string, ReturnType<typeof parseColor>>();
+/** The colour's alpha times the line opacity, in whole 1/255 steps (Sigma's packing). */
+function fadedAlpha(color: string, opacity: number): { ink: ReturnType<typeof parseColor>; alpha: number } {
+  let ink = inks.get(color);
+  if (ink === undefined) { ink = parseColor(color); inks.set(color, ink); }
+  return { ink, alpha: (ink.a * opacity * 255) | 0 };
+}
 
 // Sigma sizes an arrowhead from the edge's `size`, which hover and history
 // emphasis change. The head keeps one size; only its line is emphasised.
@@ -34,8 +73,12 @@ type ProcessVisibleItem = (
 const arrowHead = LocalArrowHeadProgram.prototype as unknown as { processVisibleItem: ProcessVisibleItem };
 const processArrowHead = arrowHead.processVisibleItem;
 arrowHead.processVisibleItem = function (edgeIndex, startIndex, sourceData, targetData, data) {
+  // The head fades with its line. Sigma packs the head's colour from a string.
+  const { ink, alpha } = fadedAlpha(data.color,
+    lineOpacity((this as { renderer: Sigma }).renderer, sourceData, targetData, data));
   processArrowHead.call(this, edgeIndex, startIndex, sourceData, targetData, {
     ...data,
+    color: `rgba(${ink.r}, ${ink.g}, ${ink.b}, ${alpha / 255})`,
     size: ARROW_HEAD_THICKNESS,
   });
 };
@@ -173,7 +216,8 @@ function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
       targetData: NodeDisplayData,
       data: EdgeDisplayData,
     ): void {
-      const color = floatColor(data.color);
+      const { ink, alpha } = fadedAlpha(data.color, lineOpacity(this.renderer, sourceData, targetData, data));
+      const color = rgbaToFloat(ink.r, ink.g, ink.b, alpha, true);
       for (const [along, across] of QUAD_CORNERS) {
         this.array[startIndex++] = sourceData.x;
         this.array[startIndex++] = sourceData.y;

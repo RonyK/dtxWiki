@@ -8,9 +8,11 @@ import { colorToArray, floatColor } from "sigma/utils";
 
 import type { GraphRenderScene, GraphPoint, GraphViewport } from "../shared/rendererTypes";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
-import { GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type GraphNodeShape } from "../shared/graphTokens";
+import {
+  GRAPH_LINE_INK, GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type GraphNodeShape,
+} from "../shared/graphTokens";
 import { FORCED_OUTLINE_INSETS, GRAPH_RING_BAND_PX, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, TRIANGLE_RADIUS_FACTOR, drawShapeRing } from "../shared/nodeShapes";
-import { LOCAL_EDGE_PROGRAMS } from "./edgePrograms";
+import { LOCAL_EDGE_PROGRAMS, setLocalFitRatio, type LocalLineState } from "./edgePrograms";
 import { createLocalLayout, type LocalLayout } from "./layout";
 import { createLocateTrace } from "./locateTrace";
 import { buildLocalScene, type LocalScene, type LocalSceneNode, type LocalSceneEdge } from "./sceneInput";
@@ -205,11 +207,11 @@ function finitePoint(point: GraphPoint | undefined): point is GraphPoint {
 }
 
 /** Preblend, rather than hide, so quiet points remain visible and pickable. */
-function quietColor(color: string, surface: string): string {
+function quietColor(color: string, surface: string, share = 0.14): string {
   const foreground = colorToArray(color);
   const background = colorToArray(surface);
   const channels = foreground.slice(0, 3).map((value, index) =>
-    Math.round(value * 0.14 + background[index] * 0.86));
+    Math.round(value * share + background[index] * (1 - share)));
   return `rgb(${channels.join(", ")})`;
 }
 
@@ -357,7 +359,8 @@ export function createSigmaGraphAdapter(
     type: edge.kind,
     size: 1,
     color: tokens.edge[edge.kind],
-    quietColor: quietColor(tokens.edge[edge.kind], tokens.surface),
+    // The Map's dimmed line share (GRAPH_LINE_INK.dimmed).
+    quietColor: quietColor(tokens.edge[edge.kind], tokens.surface, GRAPH_LINE_INK.dimmed),
     label,
   });
 
@@ -710,6 +713,9 @@ export function createSigmaGraphAdapter(
         size: presentation?.highlighted ? 2.5 : hoveredId === key ? Number(data.size) * 1.5 : data.size,
         type: presentation?.removed ? "action" : data.type,
         color: presentation?.removed ? GRAPH_REMOVED_EDGE_COLOR : presentation?.highlighted ? tokens.highlight : quiet ? data.quietColor : data.color,
+        // The Map's line rules: no fade while a selection is shown, none in forced colours.
+        lineState: (mode === "forced" ? "forced"
+          : highlightedStar !== null || presentation?.highlighted ? "selected" : "rest") satisfies LocalLineState,
         forceLabel: Boolean(presentation?.eventCaption),
         hidden: presentation?.hidden ?? false,
       };
@@ -1104,7 +1110,9 @@ export function createSigmaGraphAdapter(
       const width = container.clientWidth, height = container.clientHeight;
       const ratio = insets ? Math.max(width / Math.max(1, width - insets.left - insets.right),
         height / Math.max(1, height - insets.top - insets.bottom)) : 1;
-      camera.setState({ x: 0.5, y: 0.5, angle: 0, ratio: insets ? camera.getBoundedRatio(ratio) : 1 });
+      const fitRatio = insets ? camera.getBoundedRatio(ratio) : 1;
+      setLocalFitRatio(sigma, fitRatio);
+      camera.setState({ x: 0.5, y: 0.5, angle: 0, ratio: fitRatio });
       if (insets && width && height) {
         const center = sigma.viewportToFramedGraph({ x: (width + insets.left - insets.right) / 2,
           y: (height + insets.top - insets.bottom) / 2 });

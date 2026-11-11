@@ -8,7 +8,7 @@ import {
 import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, workspaceMapContainedDocumentCounts,
   type WorkspaceMapColumns } from "../map/sceneColumns";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
-import { GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, readGraphTokens } from "../shared/graphTokens";
+import { GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_FADE, GRAPH_LINE_INK, readGraphTokens } from "../shared/graphTokens";
 import { FORCED_OUTLINE_INSETS, GRAPH_RING_BAND_PX, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, outlinePathData, shapeOutline } from "../shared/nodeShapes";
 import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../shared/rendererTypes";
 import { canAnimateWorkspaceRelationLayout } from "../shared/workspaceLayoutPolicy";
@@ -197,7 +197,7 @@ export function createWorkspaceCosmosAdapter(
     if (admittedFor !== columns) { admittedFor = columns; admittedValue = workspaceMapAdmissionCounts(columns); }
     return admittedValue;
   };
-  let sparseScene = admitted().edgeCount <= 1_000;
+  let sparseScene = admitted().edgeCount <= GRAPH_LINE_FADE.small.maxRelations;
   let readableScene = isReadableWorkspaceMapScene(admitted().nodeCount, admitted().edgeCount, budget);
   // The explicit renderer budget bounds forces as well as drawing. This is
   // not a target-hardware performance qualification. Folders exert no force.
@@ -346,11 +346,13 @@ export function createWorkspaceCosmosAdapter(
   let publishedLayoutStatus: { status: WorkspaceMapLayoutStatus | null; identity: GraphVisibleIdentity } | null = null;
 
   function baseLinkDistanceRange(): [number, number] {
-    return sparseScene ? [40, 350] : readableScene ? [30, 220] : [10, 60];
+    const { small, large } = GRAPH_LINE_FADE;
+    return sparseScene ? [...small.rangePx] : readableScene ? [...large.rangePx] : [10, 60];
   }
 
   function linkTransparencyFloor(): number {
-    return options.forcedColors ? 1 : sparseScene ? 0.65 : readableScene ? 0.35 : 0.03;
+    const { small, large } = GRAPH_LINE_FADE;
+    return options.forcedColors ? 1 : sparseScene ? small.floor : readableScene ? large.floor : 0.64;
   }
 
   function keepOverviewContext(): boolean {
@@ -453,7 +455,7 @@ export function createWorkspaceCosmosAdapter(
     // Keep non-neighbors subdued but visible so users retain their location.
     pointGreyoutColor: keepOverviewContext() ? tokens.node.folder : undefined,
     pointGreyoutOpacity: keepOverviewContext() ? 0.3 : undefined,
-    linkGreyoutOpacity: keepOverviewContext() ? 0.08 : 0.1,
+    linkGreyoutOpacity: keepOverviewContext() ? 0.08 : GRAPH_LINE_INK.dimmed,
     // No native focused point: its ring is always a circle and its colour
     // keeps a fixed alpha. The shape-following overlay draws the selection.
     hoveredPointRingColor: interactionInk,
@@ -1865,12 +1867,13 @@ export function createWorkspaceCosmosAdapter(
       pointGreyoutColor: searchPoints !== null || keepOverviewContext() ? tokens.node.folder : undefined,
       pointGreyoutOpacity: keepOverviewContext() && star ? 0.3
         : searchPoints !== null ? 0.55 : keepOverviewContext() ? 0.3 : undefined,
-      linkGreyoutOpacity: keepOverviewContext() ? 0.08 : 0.1,
-      // Multiply the small-map .45/.4 alphas into .945/.84 for the active
-      // star. Config-only emphasis preserves any native position transition.
-      linkOpacity: star && !keepOverviewContext() && !options.forcedColors ? 2.1 : 1,
+      linkGreyoutOpacity: keepOverviewContext() ? 0.08 : GRAPH_LINE_INK.dimmed,
+      // Lift the active star's lines, citations included, to full opacity; dimmed
+      // lines keep GRAPH_LINE_INK.dimmed of that. Config-only emphasis
+      // preserves any native position transition.
+      linkOpacity: star && !keepOverviewContext() && !options.forcedColors ? 1 / GRAPH_LINE_INK.citation : 1,
       linkVisibilityMinTransparency: star && !options.forcedColors
-        ? keepOverviewContext() ? .9 : 1 : linkTransparencyFloor(),
+        ? keepOverviewContext() ? .97 : 1 : linkTransparencyFloor(),
     });
     if (keepOverviewContext() && !options.forcedColors) {
       const communities = appliedCommunity?.identityKey === workspaceMapCommunityIdentityKey(columns)
@@ -2208,7 +2211,7 @@ export function createWorkspaceCosmosAdapter(
       appliedCommunity = null;
       communityTerminal = false;
       columns = nextColumns;
-      sparseScene = admitted().edgeCount <= 1_000;
+      sparseScene = admitted().edgeCount <= GRAPH_LINE_FADE.small.maxRelations;
       readableScene = isReadableWorkspaceMapScene(admitted().nodeCount, admitted().edgeCount, budget);
       buffers = next;
       nodeById = new Map(columns.nodeIds.map((id, index) => [id, index]));
@@ -2230,7 +2233,7 @@ export function createWorkspaceCosmosAdapter(
           linkVisibilityMinTransparency: linkTransparencyFloor(),
           pointGreyoutColor: keepOverviewContext() ? tokens.node.folder : undefined,
           pointGreyoutOpacity: keepOverviewContext() ? 0.3 : undefined,
-          linkGreyoutOpacity: keepOverviewContext() ? 0.08 : 0.1,
+          linkGreyoutOpacity: keepOverviewContext() ? 0.08 : GRAPH_LINE_INK.dimmed,
         });
         if (!sameIdentity) graph.stop();
         graph.setPinnedPoints([]);

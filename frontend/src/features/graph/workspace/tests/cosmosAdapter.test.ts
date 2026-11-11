@@ -2645,7 +2645,8 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
     config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
     expect(graph.setLinkColors.mock.lastCall![0]).toEqual(colors);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({
-      linkOpacity: 2.1, linkVisibilityMinTransparency: 1, linkGreyoutOpacity: .1,
+      // Selected lines reach 1, citations included; the rest keep the dimmed share.
+      linkOpacity: expect.closeTo(1 / .97), linkVisibilityMinTransparency: 1, linkGreyoutOpacity: .1,
     }));
     config.onPointMouseOut?.(undefined);
     adapter.select(null);
@@ -2776,12 +2777,12 @@ describe("Cosmos Map interaction contracts", () => {
     vi.clearAllMocks();
     adapter.replaceColumns({ ...input, nodeFolderKeys: input.nodeIds.map((_, index) => `folder-${index}`), edgeCrossFolder: new Uint8Array(2).fill(1) });
     adapter.select("node-0");
-    expect(graph.setLinkColors.mock.lastCall![0][3]).toBeCloseTo(.95);
+    expect(graph.setLinkColors.mock.lastCall![0][3]).toBe(1);
     expect(graph.setLinkColors.mock.lastCall![0][7]).toBeGreaterThan(0);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ pointGreyoutOpacity: .3, linkGreyoutOpacity: .08 }));
     adapter.select(null);
-    expect(graph.setLinkColors.mock.lastCall![0][3]).toBeCloseTo(.35);
-    expect(graph.setLinkColors.mock.lastCall![0][7]).toBeCloseTo(.18);
+    expect(graph.setLinkColors.mock.lastCall![0][3]).toBeCloseTo(.94);
+    expect(graph.setLinkColors.mock.lastCall![0][7]).toBeCloseTo(.79);
     expect(before[1]).toBe(7);
     expect(forceCommits()).toEqual([]);
     for (const method of [graph.setLinkStrength, graph.setLinks, graph.setPointPositions, graph.start,
@@ -2895,7 +2896,7 @@ describe("Cosmos Map interaction contracts", () => {
     const palette = sdk.colors();
     graph.setPointPositions.mockClear(); graph.start.mockClear(); community.compute.mockClear();
     adapter.select("node-0");
-    expect(sdk.colors()[3]).toBeCloseTo(.95); expect(sdk.colors()[7]).toBeCloseTo(.35);
+    expect(sdk.colors()[3]).toBe(1); expect(sdk.colors()[7]).toBeCloseTo(.94);
     expect(sdk.running()).toBe(false); expect(sdk.activePositions()).toBe(false);
     expect(graph.getPointPositions()).toEqual(coordinates);
     adapter.select(null); expect(sdk.colors()).toEqual(palette);
@@ -3175,7 +3176,7 @@ describe("Cosmos Map interaction contracts", () => {
     await mount();
     const config = createGraph.mock.calls[0][1];
     // Every line is the legend's one width; no scene-size scale.
-    expect(config).toMatchObject({ linkDefaultWidth: 1.5, linkVisibilityMinTransparency: .65,
+    expect(config).toMatchObject({ linkDefaultWidth: 1.5, linkVisibilityMinTransparency: .89,
       hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6 });
     graph.setConfigPartial.mockClear();
     config.onZoom?.({ transform: { k: 0.02 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);

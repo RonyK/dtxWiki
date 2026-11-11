@@ -1,5 +1,5 @@
 import { workspaceBaseBodyDiameterCss } from "../shared/workspaceGlyphGeometry";
-import type { GraphVisualTokens } from "../shared/graphTokens";
+import { GRAPH_LINE_INK, type GraphVisualTokens } from "../shared/graphTokens";
 import { rgb } from "./cosmosColor";
 import { estimateWorkspaceCountWidthCss, workspaceClusterCountText, workspaceClusterDiameterCss, type WorkspaceCountMeasure } from "./pointImages";
 import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, type WorkspaceMapColumns } from "../map/sceneColumns";
@@ -79,9 +79,9 @@ export function buildCosmosRelationColors(
       && communityIds[columns.edgeSources[edge]] !== communityIds[columns.edgeTargets[edge]];
     // Cross-community lines remain visible, but need less overview ink than
     // local structure. Direct incident stars win over both density bands.
-    colors[edge * 4 + 3] = emphasized.has(edge) ? .95
-      : columns.edgeKinds[edge] === 1 ? (crossCommunity ? .2 : .38)
-        : crossCommunity ? .18 : .35;
+    colors[edge * 4 + 3] = emphasized.has(edge) ? 1
+      : columns.edgeKinds[edge] === 1 ? (crossCommunity ? .81 : .96)
+        : crossCommunity ? .79 : .94;
   }
   return colors;
 }
@@ -247,8 +247,10 @@ export function buildCosmosSceneBuffers(
     links[edge * 2 + 1] = target;
     // Legend strokes: solid link, dashed citation, short-dash containment (Cosmos style per kind).
     linkStyles[edge] = kind;
-    const alpha = denseOverview ? (kind === 1 ? .38 : .35)
-      : kind === 1 ? (readableScene ? 0.4 : 0.35) : (readableScene ? 0.45 : 0.5);
+    // GRAPH_LINE_INK, shared with the Context graph; the overview and an
+    // unadmitted budget keep their own ink on the same 1..0.6 scale.
+    const alpha = denseOverview ? (kind === 1 ? .96 : .94)
+      : kind === 1 ? (readableScene ? GRAPH_LINE_INK.citation : .94) : (readableScene ? GRAPH_LINE_INK.line : 1);
     writeColor(
       linkColors,
       edge,

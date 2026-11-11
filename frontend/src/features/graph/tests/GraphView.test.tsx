@@ -150,7 +150,7 @@ describe("GraphView", () => {
 
   it("separates type and scope, keeps camera controls inside the canvas, and collapses secondary content", async () => {
     const user = userEvent.setup();
-    renderGraph({ openContents: false });
+    const view = renderGraph({ openContents: false });
     const graph = screen.getByTestId("graph-view");
     const frame = graph.querySelector(".graph-frame")!;
     const stage = frame.querySelector(".graph-local-stage")!;
@@ -173,6 +173,13 @@ describe("GraphView", () => {
     expect(graph.querySelector(".graph-frame-filters")).not.toHaveAttribute("open");
     await user.click(screen.getByText("Refine"));
     expect(screen.getByLabelText("Ask turn")).toBeInTheDocument();
+    // As on the Map, a new scene clears the pause: a changed filter, then a new query.
+    await user.click(screen.getByRole("button", { name: "Pause layout" }));
+    await user.click(screen.getByLabelText("Ask turn"));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-layout-paused", "false");
+    await user.click(screen.getByRole("button", { name: "Pause layout" }));
+    view.rerender(graphElement({ onCollapse: () => Promise.resolve(), onExpand: () => Promise.resolve(), payload: graphFixture() }));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-layout-paused", "false");
     await user.click(screen.getByRole("button", { name: "List" }));
     expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
     // The list replaces the canvas area inside the frame; the canvas stays mounted underneath.

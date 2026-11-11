@@ -155,6 +155,17 @@ export function GraphView({
   const [rendererStatus, setRendererStatus] = useState<RendererStatus>("loading");
   const [showLabels, setShowLabels] = useState(true);
   const [layoutPaused, setLayoutPaused] = useState(false);
+  // As on the Map, a new scene clears the reader's pause: a new query (depth,
+  // scope, history view, expand, refresh) or a changed filter. Timeline steps
+  // and the locale replay the same data and keep it.
+  const pauseSourceRef = useRef({ wirePayload, filters, historyVisibility });
+  useEffect(() => {
+    const source = pauseSourceRef.current;
+    if (source.wirePayload === wirePayload && source.filters === filters
+      && source.historyVisibility === historyVisibility) return;
+    pauseSourceRef.current = { wirePayload, filters, historyVisibility };
+    setLayoutPaused(false);
+  }, [filters, historyVisibility, wirePayload]);
   const [staticOpen, setStaticOpen] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [timelinePositions, setTimelinePositions] = useState<Record<string, string | null>>({});
