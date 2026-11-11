@@ -845,7 +845,7 @@ readiness를 수행하며, 실패 시 자동 rollback하지 않고 복구 명령
 ```bash
 # systemd + private wheel index
 sudo dtxwiki update --check               # 새 버전 유무만 (가능하면 exit 10)
-sudo dtxwiki update --version 0.2.3       # 특정 버전 핀
+sudo dtxwiki update --version 0.2.4       # 특정 버전 핀
 sudo dtxwiki update --index-url https://pypi.internal/simple   # 사설 wheel index
 ```
 
