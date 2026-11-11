@@ -134,7 +134,8 @@ REQUIRED_WORKFLOW = [
     (
         "retry: generate and hold a new idempotency_key before each write. "
         "If the response is lost, call get_operation_status with the same key "
-        "and follow next_action. A resend must keep every original argument, "
+        "and the same conversation_token, and follow next_action. "
+        "A resend must keep every original argument, "
         "including expected_editing_revision; changed content needs a new key. "
         "Results are retained for 24 hours and describe the original commit, "
         "not the latest state. Never create a new key just because a response "

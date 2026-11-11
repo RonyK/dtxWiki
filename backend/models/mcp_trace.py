@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +30,18 @@ class MCPToolCall(UuidPrimaryKeyMixin, Base):
             "mcp_session_id",
             "started_at",
             "id",
+        ),
+        # Only keyed calls are looked up by key; unkeyed calls skip the index.
+        Index(
+            "ix_mcp_tool_call_actor_key_started",
+            "workspace_id",
+            "actor_kind",
+            "actor_id",
+            "idempotency_key",
+            "started_at",
+            "id",
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+            sqlite_where=text("idempotency_key IS NOT NULL"),
         ),
         UniqueConstraint(
             "workspace_id",
@@ -87,6 +100,12 @@ class MCPToolCall(UuidPrimaryKeyMixin, Base):
         default="llmwiki.mcp.v1",
     )
     tool_name: Mapped[str] = mapped_column(Text, nullable=False)
+    # Keyed calls record their actor and key at arrival, before dispatch, so
+    # their lifecycle can be looked up by key. Other calls leave these null.
+    actor_kind: Mapped[str | None] = mapped_column(Text)
+    actor_id: Mapped[str | None] = mapped_column(Text)
+    idempotency_key: Mapped[str | None] = mapped_column(Text)
+    retryable: Mapped[bool | None] = mapped_column(Boolean)
     input_summary: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
@@ -172,47 +191,3 @@ class MCPWriteIdempotency(UuidPrimaryKeyMixin, Base):
         UTCDateTime(), default=utc_now, nullable=False
     )
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
-
-
-class MCPOperationAttempt(UuidPrimaryKeyMixin, Base):
-    """Receipt of an authorized keyed MCP call, separate from its domain write."""
-
-    __tablename__ = "mcp_operation_attempt"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "actor_kind",
-            "actor_id",
-            "tool_name",
-            "idempotency_key",
-            name="uq_mcp_operation_attempt_scope",
-        ),
-        Index(
-            "ix_mcp_operation_attempt_actor_key",
-            "workspace_id",
-            "actor_kind",
-            "actor_id",
-            "idempotency_key",
-            "started_at",
-        ),
-        Index("ix_mcp_operation_attempt_expiry", "workspace_id", "expires_at"),
-    )
-
-    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
-    actor_kind: Mapped[str] = mapped_column(Text, nullable=False)
-    actor_id: Mapped[str] = mapped_column(Text, nullable=False)
-    tool_name: Mapped[str] = mapped_column(Text, nullable=False)
-    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
-    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
-    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
-    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
-    result_payload: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON(none_as_null=True)
-    )
-    authorization_context: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON(none_as_null=True)
-    )
-    error_code: Mapped[str | None] = mapped_column(Text)
-    error_message: Mapped[str | None] = mapped_column(Text)
-    retryable: Mapped[bool | None] = mapped_column(Boolean)

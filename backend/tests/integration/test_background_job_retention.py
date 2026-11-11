@@ -11,8 +11,8 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.db import make_engine
 from backend.models.base import Base
 from backend.models.job import Job
-from backend.models.mcp_trace import MCPOperationAttempt, MCPWriteIdempotency
-from backend.models.workspace import Workspace
+from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
+from backend.models.workspace import MCPClient, Workspace
 from backend.services.background_job_retention import prune_background_history
 
 pytestmark = pytest.mark.xdist_group("postgres")
@@ -139,27 +139,38 @@ def test_retention_preserves_active_period_and_domain_history_while_draining_bac
             boundary = receipt("boundary", now)
             other = receipt("other-expired", old, workspace_id=other_workspace_id)
             session.add_all([expired, valid, boundary, other])
-            expired_attempt = MCPOperationAttempt(
+            client = MCPClient(workspace_id=workspace_id, name="retention-client")
+            other_client = MCPClient(
+                workspace_id=other_workspace_id, name="retention-client"
+            )
+            session.add_all([client, other_client])
+            session.flush()
+            # Status lookup's 24-hour window must not delete historical calls.
+            old_call = MCPToolCall(
                 workspace_id=workspace_id,
+                client_id=client.id,
+                request_id=uuid4(),
                 actor_kind="human",
                 actor_id="retention-actor",
                 tool_name="patch_context_edit",
-                idempotency_key="expired-attempt",
-                attempts=1,
+                idempotency_key="old-call",
+                result_status="succeeded",
                 started_at=old,
-                expires_at=old,
+                completed_at=old,
             )
-            other_attempt = MCPOperationAttempt(
+            other_call = MCPToolCall(
                 workspace_id=other_workspace_id,
+                client_id=other_client.id,
+                request_id=uuid4(),
                 actor_kind="human",
                 actor_id="retention-actor",
                 tool_name="patch_context_edit",
-                idempotency_key="other-attempt",
-                attempts=1,
+                idempotency_key="other-call",
+                result_status="succeeded",
                 started_at=old,
-                expires_at=old,
+                completed_at=old,
             )
-            session.add_all([expired_attempt, other_attempt])
+            session.add_all([old_call, other_call])
 
         first = prune_background_history(
             session_factory, workspace_id, now=now, batch_size=100
@@ -167,7 +178,6 @@ def test_retention_preserves_active_period_and_domain_history_while_draining_bac
         assert first.jobs_deleted == 0
         assert first.next_job_cursor == job_id(100)
         assert first.receipts_deleted == 1
-        assert first.attempts_deleted == 1
 
         second = prune_background_history(
             session_factory,
@@ -190,8 +200,8 @@ def test_retention_preserves_active_period_and_domain_history_while_draining_bac
             }
             assert session.get(Job, job_id(110)) is not None
             assert session.get(MCPWriteIdempotency, expired.id) is None
-            assert session.get(MCPOperationAttempt, expired_attempt.id) is None
-            assert session.get(MCPOperationAttempt, other_attempt.id) is not None
+            assert session.get(MCPToolCall, old_call.id) is not None
+            assert session.get(MCPToolCall, other_call.id) is not None
             assert all(
                 session.get(MCPWriteIdempotency, row.id) is not None
                 for row in (valid, boundary, other)
@@ -225,9 +235,10 @@ def test_retention_preserves_active_period_and_domain_history_while_draining_bac
                 )
             )
             session.execute(
-                delete(MCPOperationAttempt).where(
-                    MCPOperationAttempt.workspace_id.in_(workspace_ids)
-                )
+                delete(MCPToolCall).where(MCPToolCall.workspace_id.in_(workspace_ids))
+            )
+            session.execute(
+                delete(MCPClient).where(MCPClient.workspace_id.in_(workspace_ids))
             )
             session.execute(delete(Job).where(Job.workspace_id.in_(workspace_ids)))
             session.execute(delete(Workspace).where(Workspace.id.in_(workspace_ids)))

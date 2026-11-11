@@ -699,6 +699,14 @@ class ActivityService:
             )
             .where(MCPToolCall.workspace_id == workspace_id)
         )
+        # Arrivals become activity only after final capture; their completion
+        # time and visibility edges are then stable.
+        statement = where_in_workspace(
+            statement,
+            MCPToolCall,
+            workspace_id=workspace_id,
+            conditions=(MCPToolCall.result_status != "in_progress",),
+        )
         if item_ids is not None:
             statement = where_in_workspace(
                 statement,

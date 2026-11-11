@@ -1159,8 +1159,13 @@ def _resolve_outline_version(
     request: ReadContextOutlineInput | ReadStructureMapInput,
     actor,
 ):
+    # Identify the page without judging access; the version resolver decides
+    # what this actor may read. Only a legacy path needs name resolution.
+    locator = parse_page_input(request.page_id)
+    if locator.workspace_id is not None and locator.workspace_id != ctx.workspace_id:
+        return None, None
     try:
-        page_id = resolve_page_input(
+        page_id = locator.page_id or resolve_page_input(
             request.page_id, LinkContext(session, ctx.workspace_id, actor)
         )
     except PageLocatorNotFound:

@@ -1054,6 +1054,17 @@ creation, review resubmission, and AgentPage drafts. After a lost response, call
 changes and next revision, so confirmation alone does not require another read.
 Read only any omitted content needed for further work.
 
+Keyed calls insert an `mcp_tool_call` row once `dispatch` has authorized them
+and update that same row when the worker finishes, including after the caller
+disconnects. Each retry keeps its own call row. Status starts from the latest
+row for the actor and idempotency key within a 24-hour window, then reads the
+receipt in `mcp_write_idempotency` committed with the document change; expiry
+does not delete the call history. Only keyed rows carry the actor and key, and
+account deletion clears that actor. Resends and status lookups re-check only
+the call's authentication, workspace, scope, role and connection; permissions
+on the target are checked when the request actually runs. Chats aggregates a
+call once, when final capture also records its artifact visibility links.
+
 Use `cite` with the owning page
 and editing version, `expected_editing_revision`, `idempotency_key`, and explicit
 `add`/`remove` document references. Targets use `target_kind` and document UUID,

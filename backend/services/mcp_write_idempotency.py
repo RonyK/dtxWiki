@@ -42,7 +42,6 @@ def execute_idempotent_write[ResultT: BaseModel](
     result_model: type[ResultT],
     execute: Callable[[], ResultT],
     replay_transform: Callable[[ResultT], ResultT] | None = None,
-    replay_authorizer: Callable[[dict], None] | None = None,
 ) -> ResultT:
     if idempotency_key is None:
         return execute()
@@ -71,7 +70,6 @@ def execute_idempotent_write[ResultT: BaseModel](
             compatible_fingerprints=compatible_fingerprints,
             result_model=result_model,
             replay_transform=replay_transform,
-            replay_authorizer=replay_authorizer,
         )
     if row is not None:
         session.execute(
@@ -112,7 +110,6 @@ def execute_idempotent_write[ResultT: BaseModel](
             compatible_fingerprints=compatible_fingerprints,
             result_model=result_model,
             replay_transform=replay_transform,
-            replay_authorizer=replay_authorizer,
         )
 
     try:
@@ -122,9 +119,6 @@ def execute_idempotent_write[ResultT: BaseModel](
         # commit from preserving a visible pending claim or partial side effect.
         result = execute()
         payload = result.model_dump(mode="json")
-        authorization = getattr(result, "_operation_authorization", None)
-        if authorization is not None:
-            payload["_operation_authorization"] = authorization
         if isinstance(result, PagePayload) and result._edit_receipt is not None:
             # Keep command metadata internal; PagePayload's REST schema and
             # ordinary model serialization still omit this private receipt.
@@ -166,10 +160,7 @@ def _replay_result[ResultT: BaseModel](
     compatible_fingerprints: Collection[str] = (),
     result_model: type[ResultT],
     replay_transform: Callable[[ResultT], ResultT] | None = None,
-    replay_authorizer: Callable[[dict], None] | None = None,
 ) -> ResultT:
-    if replay_authorizer is not None:
-        replay_authorizer(dict(row.result_payload))
     if (
         row.request_fingerprint != fingerprint
         and row.request_fingerprint not in compatible_fingerprints
@@ -180,19 +171,27 @@ def _replay_result[ResultT: BaseModel](
         # transaction. If one is ever observable, fail closed instead of
         # executing a second mutation against an indeterminate first attempt.
         raise RuntimeError("idempotency claim has no committed result")
-    payload = dict(row.result_payload)
-    authorization = payload.pop("_operation_authorization", None)
+    result = restore_ledger_result(row.result_payload, result_model)
+    if replay_transform is not None:
+        return replay_transform(result)
+    return result
+
+
+def restore_ledger_result[ResultT: BaseModel](
+    stored: dict, result_model: type[ResultT]
+) -> ResultT:
+    """Rebuild a committed result as a replay, for resends and status lookups."""
+
+    payload = dict(stored)
     receipt = payload.pop("_edit_receipt", None)
     can_submit_for_review = payload.pop("_can_submit_for_review", False) is True
     metadata_overrides = payload.pop("_metadata_overrides", [])
     placement_changed = payload.pop("_placement_changed", False)
     placement_parent_node_id = payload.pop("_placement_parent_node_id", None)
     result = result_model.model_validate(payload)
-    if authorization is not None:
-        result._operation_authorization = authorization
-    if isinstance(result, PagePayload) and receipt is not None:
-        result._edit_receipt = _stored_edit_receipt(receipt)
     if isinstance(result, PagePayload):
+        if receipt is not None:
+            result._edit_receipt = _stored_edit_receipt(receipt)
         result._can_submit_for_review = can_submit_for_review
         result._metadata_overrides = metadata_overrides
         result._placement_changed = placement_changed
@@ -204,6 +203,4 @@ def _replay_result[ResultT: BaseModel](
         result._replayed = True
     elif "replayed" in type(result).model_fields:
         result = result.model_copy(update={"replayed": True})
-    if replay_transform is not None:
-        return replay_transform(result)
     return result

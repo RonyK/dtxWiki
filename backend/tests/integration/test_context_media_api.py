@@ -1051,7 +1051,19 @@ def test_asset_uploaded_then_orphaned_by_discard_cannot_be_adopted_later(
     monkeypatch.setenv("DTXWIKI_LIBRARY_BLOB_ROOT", str(tmp_path / "library"))
     client = _make_client(session_factory)
     workspace_id = _workspace_id(client)
-    editing_page = _create_editing_page(client, workspace_id)
+    # Restart editing on a published page. Discarding a private-only page's
+    # sole edit archives that page, so it cannot be used as a restart fixture.
+    published = _publish_editing(
+        client,
+        _create_editing_page(client, workspace_id),
+        body_md="# Published base",
+    )
+    begun = client.post(
+        f"{_pages_url(client)}/{published['id']}/begin-edit",
+        json={"idempotency_key": f"begin-{uuid4()}"},
+    )
+    assert begun.status_code == 200, begun.text
+    editing_page = begun.json()["data"]
     orphaned_asset = _upload_png(
         client,
         page=editing_page,

@@ -58,13 +58,15 @@ def list_calls_naming_page(
     Matches the captured input's ``page_id`` or the ``page_id`` capture kept
     from the response in ``result_detail`` (a create names its new page only
     there). Failed calls have no artifact edge, so this deliberately reads the
-    trace itself rather than the edge table.
+    trace itself rather than the edge table. Lock rows for the retention update
+    so a concurrent completion cannot replace previews after they are purged.
     """
 
     page = str(page_id)
     return list(
         session.scalars(
-            select(MCPToolCall).where(
+            select(MCPToolCall)
+            .where(
                 MCPToolCall.workspace_id == workspace_id,
                 MCPToolCall.tool_name.in_(sorted(tool_names)),
                 or_(
@@ -72,5 +74,8 @@ def list_calls_naming_page(
                     MCPToolCall.result_detail["page_id"].as_string() == page,
                 ),
             )
+            .order_by(MCPToolCall.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         ).all()
     )

@@ -31,7 +31,7 @@ from backend.models.inbox import (
 )
 from backend.models.mail import EmailOutbox
 from backend.models.mcp_chat import McpChatSession
-from backend.models.mcp_trace import MCPWriteIdempotency
+from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
 from backend.models.oauth import (
     OAuthAccessTokenJti,
     OAuthCode,
@@ -149,6 +149,14 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
     UserAttribution(
         (MCPWriteIdempotency.actor_id,),
         "delete",
+        workspace_scoped=True,
+        actor_kind=("actor_kind", "human"),
+        as_text=True,
+    ),
+    # Call history outlives its 24-hour retry window; only the identity goes.
+    UserAttribution(
+        (MCPToolCall.actor_id,),
+        "clear",
         workspace_scoped=True,
         actor_kind=("actor_kind", "human"),
         as_text=True,

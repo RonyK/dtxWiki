@@ -504,6 +504,10 @@ class ActivityFeedService:
                     conditions.append(_review_decision_audit_event_clause())
             elif source == "job":
                 conditions.append(Job.job_type.not_in(HIDDEN_JOB_TYPES))
+            elif source == "mcp":
+                # Lifecycle arrivals become activity only after final capture;
+                # their completion time and visibility edges are then stable.
+                conditions.append(MCPToolCall.result_status != "in_progress")
             elif source == "review":
                 conditions.append(ReviewItem.status == "pending")
             columns = (

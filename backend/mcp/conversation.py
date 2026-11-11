@@ -34,7 +34,6 @@ def resolve_conversation_token(
     requested_workspace_id: UUID | None = None,
     requested_workspace_authorized: bool,
     require_token: bool = False,
-    tool_name: str | None = None,
     idempotency_key: str | None = None,
 ) -> ConversationResolution:
     # C-03: no default — every caller must PROVE the requested workspace was
@@ -59,22 +58,20 @@ def resolve_conversation_token(
                 error_code="conversation_token_required",
             )
         if (
-            _is_new_sentinel(requested_token)
+            idempotency_key
             and requested_workspace_authorized
             and requested_workspace_id is not None
-            and tool_name
-            and idempotency_key
         ):
-            # A lost first response must not turn a retry into a different chat.
-            # Include every operation-scope component and serialize boundaries,
-            # so keys/actor ids containing punctuation cannot alias one another.
+            # One key is one operation, so its conversation is derived from the
+            # key: a resend after a lost first response, and a status lookup
+            # for it, land in the conversation of the original call. Serialize
+            # the components so keys and actor ids cannot alias one another.
             scope = json.dumps(
                 [
-                    "dtxwiki-keyed-conversation-v1",
+                    "dtxwiki-keyed-conversation-v2",
                     str(requested_workspace_id),
                     actor.actor_kind,
                     actor.actor_id,
-                    tool_name,
                     idempotency_key,
                 ],
                 separators=(",", ":"),

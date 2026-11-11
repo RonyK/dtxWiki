@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.schemas.common import MCPResultEnvelope
 from backend.schemas.context_write import (
@@ -138,7 +138,6 @@ class SubmitRevisionForReviewResult(BaseModel):
     # prior result instead of creating a duplicate draft.
     deduplicated: bool = False
     replayed: bool = False
-    _operation_authorization: dict = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 

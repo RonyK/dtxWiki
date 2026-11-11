@@ -15,7 +15,7 @@ comes from the single attribution registry in ``backend.models.user_attribution`
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -1182,12 +1182,15 @@ class UserDeletionService:
                 )
             )
         elif entry.cleanup == "clear":
+            # Each column clears only where it names the user; match() would OR
+            # the columns together and clear the others on those rows too.
             for column in entry.columns:
+                single = replace(entry, columns=(column,))
                 session.execute(
                     update_in_workspace(
                         model,
                         workspace_id=workspace_id,
-                        conditions=(column == user_id,),
+                        conditions=single.match(user_id),
                         values={column.key: None},
                     )
                 )

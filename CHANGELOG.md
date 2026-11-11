@@ -44,9 +44,12 @@
 
 ### MCP editing contract
 
+- Advance the tool contract to revision 31; refresh cached `tools/list` results.
+  Preserve the `block_map_stale` advisory introduced in revision 30.
 - Recover lost write responses with `get_operation_status` using only the original
-  idempotency key. Track arrival, completion and interruption separately from
-  atomic write receipts; preserve the conversation when retrying a first write.
+  idempotency key. Record arrival and completion in the existing MCP call log,
+  retaining each retry's history; recover successful results from atomic write
+  receipts and preserve the conversation when retrying a first write.
 - Remove `retry_only` from MCP and browser save requests. Require retry keys for
   Context creation, review revisions and Agent draft writes.
 - Use top-level `page_id` and optional `version_id` for partial reads; remove

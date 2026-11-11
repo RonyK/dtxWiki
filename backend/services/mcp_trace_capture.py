@@ -14,6 +14,8 @@ from backend.models.mcp_chat import McpChatArtifactKind, McpChatArtifactVerb
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
+from backend.repositories.workspace_scoped import select_in_workspace
+from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.mcp_artifact_activity import ArtifactLinkCandidate
 from backend.services.mcp_chat_service import (
     CONTEXT_EDIT_TOOLS,
@@ -26,6 +28,7 @@ from backend.services.mcp_read_projection import (
     validate_read_projection,
 )
 from backend.services.mcp_trace_redaction import (
+    null_previews,
     redact_edit_receipt,
     redact_error_details,
     redact_tool_capture,
@@ -73,13 +76,26 @@ def persist_mcp_tool_trace(
     if workspace_id is None or request_id is None:
         return None
 
+    acquire_workspace_write_intent(session)
     client = resolve_trace_mcp_client(
         session,
         workspace_id=workspace_id,
         actor=actor,
     )
     touch_mcp_client_last_used(client, used_at=completed_at)
-    tool_call = MCPToolCall(
+    tool_call = session.scalar(
+        select_in_workspace(
+            MCPToolCall,
+            workspace_id=workspace_id,
+            conditions=(MCPToolCall.request_id == request_id,),
+        ).with_for_update()
+    )
+    # A keyed call's row was inserted at arrival and is finalized here once.
+    # A finalized row already carries its counts and visibility edges, so a
+    # second capture of the same request changes nothing.
+    if tool_call is not None and tool_call.outcome is not None:
+        return tool_call
+    values = dict(
         client_id=client.id,
         workspace_id=workspace_id,
         mcp_session_id=mcp_session_trace_uuid(mcp_session_id),
@@ -96,6 +112,7 @@ def persist_mcp_tool_trace(
         ),
         warnings=_jsonable(envelope.get("warnings") or []),
         error_code=envelope.get("error_code"),
+        retryable=envelope.get("retryable"),
         audit_event_id=_uuid_or_none(envelope.get("audit_event_id")),
         change_set_id=_uuid_or_none(_data(payload).get("change_set_id")),
         agent_input_bundle_id=_uuid_or_none(_data(payload).get("bundle_id")),
@@ -109,7 +126,18 @@ def persist_mcp_tool_trace(
         completed_at=completed_at,
         latency_ms=latency_ms,
     )
-    session.add(tool_call)
+    if tool_call is not None and (tool_call.result_detail or {}).get("previews_purged"):
+        # The owner may purge while dispatch is still running, including a
+        # discard between the domain commit and this final capture.
+        values["input_summary"], _ = null_previews(values["input_summary"])
+        detail, _ = null_previews(values["result_detail"] or {})
+        values["result_detail"] = {**detail, "previews_purged": True}
+    if tool_call is None:
+        tool_call = MCPToolCall(**values)
+        session.add(tool_call)
+    else:
+        for field, value in values.items():
+            setattr(tool_call, field, value)
     session.flush()
 
     # A call the server rejected before dispatch (no conversation to attach to)

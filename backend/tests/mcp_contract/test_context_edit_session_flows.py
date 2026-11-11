@@ -54,6 +54,32 @@ def _create(page_service, actor, workspace_id, body_md):
     return response.data
 
 
+def _begin_published_edit(page_service, actor, workspace_id, body_md):
+    # Discarding a private-only page's sole edit archives it; it must not be
+    # reopened. A scenario that restarts editing needs a published baseline.
+    published = page_service.write_page(
+        workspace_slug="default",
+        slug=f"session-flow-{uuid4()}",
+        title="Session Flow Page",
+        body_md=body_md,
+        actor_kind="human",
+        actor_id="session-flow-publisher",
+        actor_provenance="browser_session",
+    )
+    response = dispatch(
+        "begin_context_edit",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(published.id),
+            "idempotency_key": "initial-begin",
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert response.envelope.result_status == "succeeded", response.envelope
+    return response.data
+
+
 def _update(page_service, actor, workspace_id, base, body_md, key):
     return dispatch(
         "update_context_edit",
@@ -120,8 +146,15 @@ def _review_statuses_for_page(page_service, page_id):
 
 
 def _save(
-    page_service, actor, workspace_id, page_id, body_md, revision, key,
-    *, version_id,
+    page_service,
+    actor,
+    workspace_id,
+    page_id,
+    body_md,
+    revision,
+    key,
+    *,
+    version_id,
 ):
     """update_context_edit as an agent sends it: no base, only the revision
     it last saw and the edit's version_id."""
@@ -168,13 +201,21 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     full_link = f"/p/{workspace_id}/{created.id}"
 
     first = _update(
-        page_service, actor, workspace_id, created,
-        f"# Hello\n\nFirst save. [Self]({short_link})", "u-1"
+        page_service,
+        actor,
+        workspace_id,
+        created,
+        f"# Hello\n\nFirst save. [Self]({short_link})",
+        "u-1",
     )
     assert first.envelope.result_status == "succeeded", first.envelope
     second = _update(
-        page_service, actor, workspace_id, first.data,
-        f"# Hello\n\nSecond save. [Self]({short_link})", "u-2"
+        page_service,
+        actor,
+        workspace_id,
+        first.data,
+        f"# Hello\n\nSecond save. [Self]({short_link})",
+        "u-2",
     )
     assert second.envelope.result_status == "succeeded", second.envelope
 
@@ -186,11 +227,13 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     assert _review_statuses_for_page(page_service, created.id) == []
     assert second.data.review_item_id is None
 
-    operations = [{
-        "op": "replace_text",
-        "old_text": f"Second save. [Self]({full_link})",
-        "new_text": f"Patched. [Self]({short_link})",
-    }]
+    operations = [
+        {
+            "op": "replace_text",
+            "old_text": f"Second save. [Self]({full_link})",
+            "new_text": f"Patched. [Self]({short_link})",
+        }
+    ]
     patched = _patch(
         page_service,
         actor,
@@ -240,10 +283,15 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     }
     assert stored.body_md == f"# Hello\n\nPatched. [Self]({full_link})"
     assert patched.data.lint_report == {
-        "fixes": [{
-            "module_id": "links", "rule_id": "link.internal-noncanonical",
-            "before": short_link, "after": full_link, "category": "format",
-        }],
+        "fixes": [
+            {
+                "module_id": "links",
+                "rule_id": "link.internal-noncanonical",
+                "before": short_link,
+                "after": full_link,
+                "category": "format",
+            }
+        ],
         "findings": [],
     }
 
@@ -976,7 +1024,9 @@ def test_an_ai_save_never_lands_on_an_edit_begun_after_the_one_it_saw(
     the person's new work."""
 
     workspace_id = _workspace(page_service)
-    created = _create(page_service, actor, workspace_id, "# Doc\n\nFirst body.\n")
+    created = _begin_published_edit(
+        page_service, actor, workspace_id, "# Doc\n\nFirst body.\n"
+    )
     ai_saved = _save(
         page_service,
         actor,
@@ -1053,7 +1103,9 @@ def test_an_update_naming_its_edit_refuses_any_other_one(page_service, actor):
     revision that happens to match the edit open now is not enough."""
 
     workspace_id = _workspace(page_service)
-    created = _create(page_service, actor, workspace_id, "# Doc\n\nFirst body.\n")
+    created = _begin_published_edit(
+        page_service, actor, workspace_id, "# Doc\n\nFirst body.\n"
+    )
     bound = _save(
         page_service,
         actor,
@@ -1080,7 +1132,7 @@ def test_an_update_naming_its_edit_refuses_any_other_one(page_service, actor):
     )
     assert discarded.envelope.result_status == "succeeded", discarded.envelope
 
-    # No edit is open: naming the discarded one says so.
+    # The published page remains accessible, but no private edit is open.
     none_open = _save(
         page_service,
         actor,
@@ -1092,6 +1144,7 @@ def test_an_update_naming_its_edit_refuses_any_other_one(page_service, actor):
         version_id=str(created.version_id),
     )
     assert none_open.envelope.result_status == "conflict", none_open.envelope
+    assert none_open.envelope.error_code == "no_open_edit", none_open.envelope
     assert [detail.field for detail in none_open.envelope.error_details] == [
         "version_id"
     ]
@@ -1451,9 +1504,7 @@ def test_the_same_chat_keeps_refining_one_submitted_version(page_service, actor)
         )
 
     first = call("begin_context_edit", None, idempotency_key="b-1")
-    replayed = call(
-        "begin_context_edit", "conv_same", idempotency_key="b-1"
-    )
+    replayed = call("begin_context_edit", "conv_same", idempotency_key="b-1")
     assert replayed.version_id == first.version_id
     first = call(
         "patch_context_edit",

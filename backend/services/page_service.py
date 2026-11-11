@@ -64,6 +64,7 @@ from backend.schemas.page import (
 )
 from backend.services.actor_visible_read import (
     PUBLISHED_CONTEXT_VERSION_STATUSES,
+    context_page_visible,
     context_parent_projection,
     context_version_is_visible,
 )
@@ -2044,8 +2045,8 @@ class PageService:
         ``chat_session_id`` (the MCP chat) submitted the page's latest draft
         and its review is still pending, that same version is reopened
         instead (``_reopen_own_pending_submission``). Otherwise a fresh row is
-        parented on the current published head (or the page's own current
-        head for a page that has never published), matching the "base
+        parented on the current published version (or an actor-visible shared
+        draft before first publication), matching the "base
         version/hash the caller means to build from" contract. Shared by
         Browser REST and MCP -- there is exactly one implementation.
 
@@ -2059,7 +2060,11 @@ class PageService:
                 acquire_write_intent(session)
                 self._lock_context_media_usage_intent_for_page(session, page_id)
                 page = context_page_repo.get_page_by_id_for_update(session, page_id)
-                if page is None:
+                if (
+                    page is None
+                    or page.workspace_id != workspace_id
+                    or page.lifecycle_status == "archived"
+                ):
                     raise PageNotFoundError("page not found")
                 existing = session.scalar(
                     select(ContextPageVersion).where(
@@ -2089,6 +2094,14 @@ class PageService:
                             actor_provenance=actor_provenance,
                         ),
                     )
+                # Knowing a page UUID does not grant access to its author's
+                # unsubmitted private edit. Do not create an empty edit for
+                # another author: a new fork requires a readable base.
+                readable_version_id = self._editable_version_id_for_actor(
+                    session, page, actor_kind, actor_id
+                )
+                if readable_version_id is None:
+                    raise PageNotFoundError("page not found")
                 reopened = self._reopen_own_pending_submission(
                     session,
                     page,
@@ -2128,37 +2141,21 @@ class PageService:
                             actor_provenance=actor_provenance,
                         ),
                     )
-                base_id = page.current_published_version_id or page.current_version_id
-                base = (
-                    self._require_page_version(session, page, base_id)
-                    if base_id is not None
-                    else None
-                )
-                if base is not None and base.version_status == "editing":
-                    # `page.current_version_id` is a page-global pointer that
-                    # ordinary autosaves (`_set_current_version`) legitimately
-                    # leave pointing at an "editing" row while it is still
-                    # private to its own author (P8.1). We already know this
-                    # actor has no open "editing" row of their own (the
-                    # `existing` check above returned early otherwise), so an
-                    # "editing" row found here always belongs to a DIFFERENT
-                    # author. Using it as a base would copy that author's
-                    # private, unsubmitted content into this actor's new
-                    # editing row -- exactly the cross-author leak P8 exists to
-                    # close. Treat it as "nothing to build from" instead.
-                    base = None
+                base_id = page.current_published_version_id or readable_version_id
+                base = self._require_page_version(session, page, base_id)
                 if base_version_id is not None or base_content_hash is not None:
-                    actual_id = base.id if base is not None else None
-                    actual_hash = base.content_hash if base is not None else None
-                    if base_version_id != actual_id or base_content_hash != actual_hash:
+                    if (
+                        base_version_id != base.id
+                        or base_content_hash != base.content_hash
+                    ):
                         raise PageConflictError(
-                            server_version_id=actual_id,
-                            server_content_hash=actual_hash,
+                            server_version_id=base.id,
+                            server_content_hash=base.content_hash,
                         )
                 version = self._insert_version_copy(
                     session,
                     page_id=page.id,
-                    parent_version_id=base.id if base is not None else None,
+                    parent_version_id=base.id,
                     source_version=base,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
@@ -2426,29 +2423,20 @@ class PageService:
             page = context_page_repo.get_page_by_id_for_update(session, page_id)
             if page is None:
                 raise PageNotFoundError("page not found")
-            version = self._require_page_version(session, page, version_id)
-            # A DIFFERENT author's version -- editing or not -- must be
-            # opaque not-found here (P2.2/P2.6): a 409 Conflict would itself
-            # confirm "this id exists" to a non-owner regardless of which
-            # fields come back populated. The version's OWN author gets a
-            # clear conflict instead when it simply is not "editing" any
-            # more (already submitted, published, or discarded) -- that is
-            # ordinary same-author feedback, not a disclosure to someone
-            # else.
-            if (
-                version.created_by_actor_kind != actor_kind
-                or version.created_by_actor_id != actor_id
-            ):
-                raise PageNotFoundError("page version not found")
-            browser_draft = self._is_unreviewed_browser_draft(
+            version = self._own_page_version(
+                session, page, version_id, actor_kind, actor_id
+            )
+            browser_draft = version is not None and self._is_unreviewed_browser_draft(
                 session=session,
                 page=page,
                 version=version,
                 actor_provenance=actor_provenance,
             )
-            if version.version_status != "editing" and not browser_draft:
-                self._require_named_open_edit(
-                    session, page, version.id, actor_kind, actor_id
+            if version is None or (
+                version.version_status != "editing" and not browser_draft
+            ):
+                version = self._require_named_open_edit(
+                    session, page, version_id, actor_kind, actor_id
                 )
             if version.editing_revision != expected_editing_revision:
                 # The caller's own open edit (ownership checked above):
@@ -2619,15 +2607,12 @@ class PageService:
                 page = context_page_repo.get_page_by_id_for_update(session, page_id)
                 if page is None:
                     raise PageNotFoundError("page not found")
-                version = self._require_page_version(session, page, version_id)
-                if (
-                    version.created_by_actor_kind != actor_kind
-                    or version.created_by_actor_id != actor_id
-                ):
-                    raise PageNotFoundError("page version not found")
-                if version.version_status != "editing":
-                    self._require_named_open_edit(
-                        session, page, version.id, actor_kind, actor_id
+                version = self._own_page_version(
+                    session, page, version_id, actor_kind, actor_id
+                )
+                if version is None or version.version_status != "editing":
+                    version = self._require_named_open_edit(
+                        session, page, version_id, actor_kind, actor_id
                     )
                 version.version_status = "discarded"
                 session.add(version)
@@ -2852,18 +2837,12 @@ class PageService:
                 page = context_page_repo.get_page_by_id_for_update(session, page_id)
                 if page is None:
                     raise PageNotFoundError("page not found")
-                version = self._require_page_version(session, page, version_id)
-                # A DIFFERENT author's version -- editing or not -- must be
-                # opaque not-found here (P2.2/P2.6), matching
-                # submit_context_edit_for_review/discard_context_edit exactly.
-                if (
-                    version.created_by_actor_kind != actor_kind
-                    or version.created_by_actor_id != actor_id
-                ):
-                    raise PageNotFoundError("page version not found")
-                if version.version_status != "editing":
-                    self._require_named_open_edit(
-                        session, page, version.id, actor_kind, actor_id
+                version = self._own_page_version(
+                    session, page, version_id, actor_kind, actor_id
+                )
+                if version is None or version.version_status != "editing":
+                    version = self._require_named_open_edit(
+                        session, page, version_id, actor_kind, actor_id
                     )
                 if version.editing_revision != expected_editing_revision:
                     disclosed_id, disclosed_hash = self._disclosable_version_fields(
@@ -5723,22 +5702,59 @@ class PageService:
             )
         )
 
-    @staticmethod
     def _require_named_open_edit(
+        self,
         session: Session,
         page: ContextPage,
         version_id: UUID,
         actor_kind: str,
         actor_id: str,
-    ) -> None:
-        """Refuse a save that names an editing row other than the open one.
+    ) -> ContextPageVersion:
+        """Return the caller's open edit if ``version_id`` names it, else refuse.
 
-        Only this actor's own open row is ever named back (its id and
-        revision, as every own-edit conflict does), so a caller learns
-        nothing about anyone else's work.
+        One rule for every write that names a version: the answer depends only
+        on the caller's own open edit, never on the version named, so a real
+        id and a made-up one get the same answer and nothing about anyone
+        else's work is disclosed. With an open edit the conflict names it
+        back; without one the caller has no open edit, unless the page itself
+        is not visible to the caller, which is the ordinary not-found.
         """
 
-        named_edit = session.scalar(
+        open_edit = context_page_repo.get_open_edit_for_actor(
+            session,
+            workspace_id=page.workspace_id,
+            page_id=page.id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+        if open_edit is not None and open_edit.id == version_id:
+            return open_edit
+        if open_edit is None:
+            if self.actor_context is not None and not context_page_visible(
+                page, self.actor_context, workspace_id=page.workspace_id
+            ):
+                raise PageNotFoundError("page not found")
+            raise PageConflictError(
+                server_version_id=None,
+                server_content_hash=None,
+                no_open_edit=True,
+            )
+        raise PageConflictError(
+            server_version_id=open_edit.id,
+            server_content_hash=open_edit.content_hash,
+            server_editing_revision=open_edit.editing_revision,
+            error_code="editing_revision_conflict",
+        )
+
+    @staticmethod
+    def _own_page_version(
+        session: Session,
+        page: ContextPage,
+        version_id: UUID,
+        actor_kind: str,
+        actor_id: str,
+    ) -> ContextPageVersion | None:
+        version = session.scalar(
             select_in_workspace(
                 ContextPageVersion,
                 workspace_id=page.workspace_id,
@@ -5748,33 +5764,12 @@ class PageService:
                 ],
             )
         )
-        if named_edit is None or (
-            named_edit.created_by_actor_kind != actor_kind
-            or named_edit.created_by_actor_id != actor_id
+        if version is None or (
+            version.created_by_actor_kind != actor_kind
+            or version.created_by_actor_id != actor_id
         ):
-            # A request naming somebody else's private edit must remain
-            # opaque even when this actor has no editing row of its own.
-            raise PageNotFoundError("page version not found")
-        open_edit = context_page_repo.get_open_edit_for_actor(
-            session,
-            workspace_id=page.workspace_id,
-            page_id=page.id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-        )
-        if open_edit is None:
-            raise PageConflictError(
-                server_version_id=None,
-                server_content_hash=None,
-                no_open_edit=True,
-            )
-        if open_edit.id != version_id:
-            raise PageConflictError(
-                server_version_id=open_edit.id,
-                server_content_hash=open_edit.content_hash,
-                server_editing_revision=open_edit.editing_revision,
-                error_code="editing_revision_conflict",
-            )
+            return None
+        return version
 
     def _require_page_version(
         self,

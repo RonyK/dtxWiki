@@ -275,10 +275,12 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         _assert_release_upgrade(engine, release_data, now, first=True)
         _assert_labs_policy_upgrade(engine, config, workspace_id)
         _assert_archived_inbox_indexes(engine)
-        _assert_model_parity(engine)
         # Current runtime uses the current model. Advance to head before its
         # real publication, then traverse the historical downgrade as before.
+        # Later revisions may reshape parity tables, so the current model is
+        # compared with the head schema it describes.
         command.upgrade(config, "head")
+        _assert_model_parity(engine)
         _seed_runtime_links(engine, release_data)
         command.downgrade(config, REVISION)
         assert "labs_policy" not in {

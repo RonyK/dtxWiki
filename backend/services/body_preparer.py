@@ -8,7 +8,12 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 from backend.context_media.domain import validate_markdown_media_policy
-from backend.domain.input_policy import validate_body, validate_labels, validate_title
+from backend.domain.input_policy import (
+    SHORT_TEXT_SPACES,
+    validate_body,
+    validate_labels,
+    validate_title,
+)
 from backend.domain.prepared_body import PreparedBody, PreparedMetadata
 from backend.services.lint.base import LintContext, LintPolicy, LintStage
 from backend.services.lint.registry import LintRegistry
@@ -306,7 +311,7 @@ class BodyPreparer:
             # not a request to revert metadata updated elsewhere meanwhile.
             if incoming is not None and (baseline is None or incoming != previous):
                 return incoming
-            return normalize(current) if current is not None else default
+            return (normalize(current) if current is not None else None) or default
 
         title = resolve(
             "title",
@@ -315,7 +320,7 @@ class BodyPreparer:
             baseline.title if baseline else None,
             fallback.title,
             "제목 없음",
-            lambda value: value,
+            _normalize_title,
         )
         page_type = resolve(
             "page_type",
@@ -370,3 +375,9 @@ class BodyPreparer:
             tags = tags if tags is not None else parsed.tags
             aliases = aliases if aliases is not None else parsed.aliases
         return body, PreparedMetadata(page_type, tags, aliases, title), tuple(overrides)
+
+
+def _normalize_title(value: str) -> str | None:
+    # The single title policy: the value written to the managed frontmatter is
+    # the value stored as the page title, and a blank title means "not given".
+    return value.strip(SHORT_TEXT_SPACES) or None

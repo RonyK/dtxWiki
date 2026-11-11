@@ -9,7 +9,7 @@ from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
 
 from backend.models.job import Job
-from backend.models.mcp_trace import MCPOperationAttempt, MCPWriteIdempotency
+from backend.models.mcp_trace import MCPWriteIdempotency
 from backend.repositories.workspace_scoped import (
     delete_in_workspace,
     select_in_workspace,
@@ -26,7 +26,6 @@ class RetentionBatch:
     jobs_deleted: int
     receipts_deleted: int
     next_job_cursor: UUID | None
-    attempts_deleted: int = 0
 
 
 def prune_background_history(
@@ -78,19 +77,9 @@ def prune_background_history(
         .order_by(MCPWriteIdempotency.id)
         .limit(batch_size)
     )
-    attempt_scope = (MCPOperationAttempt.expires_at < now,)
-    attempts = (
-        select_in_workspace(
-            MCPOperationAttempt, workspace_id=workspace_id, conditions=attempt_scope
-        )
-        .with_only_columns(MCPOperationAttempt.id)
-        .order_by(MCPOperationAttempt.id)
-        .limit(batch_size)
-    )
     with session_factory() as session:
         scanned = session.execute(candidates).all()
         receipt_ids = list(session.scalars(receipts))
-        attempt_ids = list(session.scalars(attempts))
     expired_periods = [
         (job_id, key)
         for job_id, job_type, key in scanned
@@ -98,8 +87,7 @@ def prune_background_history(
     ]
     jobs_deleted = 0
     receipts_deleted = 0
-    attempts_deleted = 0
-    if expired_periods or receipt_ids or attempt_ids:
+    if expired_periods or receipt_ids:
         with session_factory() as session, session.begin():
             acquire_workspace_write_intent(session)
             if session.get_bind().dialect.name == "postgresql":
@@ -132,18 +120,6 @@ def prune_background_history(
                             .with_for_update(skip_locked=True)
                         )
                     )
-                if attempt_ids:
-                    attempt_ids = list(
-                        session.scalars(
-                            select_in_workspace_by_ids(
-                                MCPOperationAttempt,
-                                workspace_id=workspace_id,
-                                resource_ids=attempt_ids,
-                            )
-                            .with_only_columns(MCPOperationAttempt.id)
-                            .with_for_update(skip_locked=True)
-                        )
-                    )
             if expired_periods:
                 result = session.execute(
                     delete_in_workspace(
@@ -173,22 +149,9 @@ def prune_background_history(
                     ).execution_options(synchronize_session=False)
                 )
                 receipts_deleted = result.rowcount
-            if attempt_ids:
-                result = session.execute(
-                    delete_in_workspace(
-                        MCPOperationAttempt,
-                        workspace_id=workspace_id,
-                        conditions=(
-                            *attempt_scope,
-                            MCPOperationAttempt.id.in_(attempt_ids),
-                        ),
-                    ).execution_options(synchronize_session=False)
-                )
-                attempts_deleted = result.rowcount
 
     return RetentionBatch(
         jobs_deleted=jobs_deleted,
         receipts_deleted=receipts_deleted,
         next_job_cursor=scanned[-1].id if len(scanned) == batch_size else None,
-        attempts_deleted=attempts_deleted,
     )

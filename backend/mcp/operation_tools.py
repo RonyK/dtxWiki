@@ -1,67 +1,76 @@
 """Recover a keyed operation's result without resending its authored content."""
 
-from uuid import UUID
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from backend.app.container import ToolCallContext
 from backend.mcp.context_tools import _begin_edit_result, _edit_result
 from backend.mcp.envelope import error_envelope, ok_envelope, validation_error_envelope
 from backend.mcp.protocol.wire_defaults import omit_declared_defaults
+from backend.schemas.agent import AgentPageDraftResult
+from backend.schemas.context_write import CiteResult
+from backend.schemas.mcp.context_tools import CiteResult as MCPCiteResult
 from backend.schemas.mcp.operation_tools import (
     GetOperationStatusInput,
     GetOperationStatusOutput,
     OperationStatusResult,
 )
-from backend.schemas.page import PagePayload
-from backend.services.mcp_operation_attempt import (
-    NOT_SEEN_GUIDANCE,
-    lookup_operation_status,
-)
-from backend.services.mcp_write_idempotency import _stored_edit_receipt
-from backend.services.read_errors import ReadServiceError
+from backend.schemas.mcp.review_tools import SubmitRevisionForReviewResult
+from backend.schemas.page import DiscardContextEditResult, PagePayload
+from backend.services.mcp_operation_attempt import lookup_operation_status
+from backend.services.mcp_write_idempotency import restore_ledger_result
 
 
-def _public_result(snapshot) -> dict:
-    payload = dict(snapshot.result_payload or {})
-    if not snapshot.from_ledger:
-        return payload
-    if snapshot.tool_name in {
-        "begin_context_edit",
-        "create_context_page",
-        "update_context_edit",
-        "autosave_page",
-        "patch_context_edit",
-        "submit_context_edit_for_review",
-    }:
-        receipt = payload.pop("_edit_receipt", None)
-        overrides = payload.pop("_metadata_overrides", [])
-        can_submit = payload.pop("_can_submit_for_review", False)
-        placement_changed = payload.pop("_placement_changed", False)
-        placement_parent = payload.pop("_placement_parent_node_id", None)
-        page = PagePayload.model_validate(payload)
-        page._edit_receipt = (
-            _stored_edit_receipt(receipt) if receipt is not None else None
-        )
-        page._metadata_overrides = overrides
-        page._can_submit_for_review = can_submit is True
-        page._placement_changed = placement_changed
-        page._placement_parent_node_id = (
-            UUID(placement_parent) if placement_parent is not None else None
-        )
-        page._replayed = True
-        if snapshot.tool_name == "begin_context_edit":
-            # Use the declared begin result, including its public page_id
-            # spelling, while preserving begin's full-body reading behavior.
-            result = _begin_edit_result(page)
-        else:
-            result = _edit_result(page)
-        return omit_declared_defaults(type(result), result.model_dump(mode="json"))
-    # Agent, cite, discard and revision results already have public shapes.
-    payload = {key: value for key, value in payload.items() if not key.startswith("_")}
-    if "replayed" in payload or snapshot.tool_name == "cite":
-        payload["replayed"] = True
-    return payload
+@dataclass(frozen=True)
+class KeyedTool:
+    """Where a keyed tool's receipt is stored and how its result is served."""
+
+    command: str
+    result_model: type[BaseModel]
+    serve: Callable[[Any], BaseModel] | None = None
+
+
+def _mcp_cite_result(result: CiteResult) -> MCPCiteResult:
+    return MCPCiteResult.model_validate(result.model_dump())
+
+
+# The one registry of keyed MCP writes. Arrival recording, receipt lookup and
+# result recovery all read it, so a new keyed tool is registered here once.
+KEYED_TOOLS: dict[str, KeyedTool] = {
+    "create_context_page": KeyedTool("create_context_page", PagePayload, _edit_result),
+    "begin_context_edit": KeyedTool(
+        "begin_context_edit", PagePayload, _begin_edit_result
+    ),
+    "update_context_edit": KeyedTool("autosave_page", PagePayload, _edit_result),
+    "patch_context_edit": KeyedTool("patch_context_edit", PagePayload, _edit_result),
+    "submit_context_edit_for_review": KeyedTool(
+        "submit_context_edit_for_review", PagePayload, _edit_result
+    ),
+    "discard_context_edit": KeyedTool(
+        "discard_context_edit", DiscardContextEditResult
+    ),
+    "cite": KeyedTool("cite", CiteResult, _mcp_cite_result),
+    "write_agent_page_draft": KeyedTool(
+        "write_agent_page_draft", AgentPageDraftResult
+    ),
+    "submit_revision_for_review": KeyedTool(
+        "submit_revision_for_review", SubmitRevisionForReviewResult
+    ),
+}
+KEYED_TOOL_COMMANDS = {name: tool.command for name, tool in KEYED_TOOLS.items()}
+
+
+def keyed_result(tool_name: str, stored: dict[str, Any]) -> dict[str, Any]:
+    """The stored result as a same-key resend would serve it."""
+
+    tool = KEYED_TOOLS[tool_name]
+    result = restore_ledger_result(stored, tool.result_model)
+    if tool.serve is not None:
+        result = tool.serve(result)
+    return omit_declared_defaults(type(result), result.model_dump(mode="json"))
 
 
 def get_operation_status(
@@ -87,20 +96,16 @@ def get_operation_status(
             actor_kind=actor.actor_kind,
             actor_id=actor.actor_id,
             idempotency_key=request.idempotency_key,
+            commands=KEYED_TOOL_COMMANDS,
             timeout_seconds=timeout,
         )
-    original_tool = (
-        "update_context_edit"
-        if snapshot.tool_name == "autosave_page"
-        else snapshot.tool_name
-    )
-    if original_tool is not None:
-        # The status key is not a capability: apply the recorded tool's current
-        # scope/role/grant gates before releasing its result or error.
+    if snapshot.tool_name is not None:
+        # The key is not a capability: the recorded tool's own scope and role
+        # still apply, exactly as they would to a resend.
         from backend.mcp.router import PolicyRejection, resolve_target_actor
 
         original_actor = resolve_target_actor(
-            tool_name=original_tool,
+            tool_name=snapshot.tool_name,
             payload={"workspace_id": str(ctx.workspace_id)},
             actor=actor,
             session_factory=ctx.db.control_session_factory(),
@@ -111,30 +116,14 @@ def get_operation_status(
             return GetOperationStatusOutput(
                 envelope=error_envelope(actor, original_actor.error_code)
             )
-    if original_tool == "submit_revision_for_review":
-        from backend.mcp.review_tools import authorize_revision_operation
-
-        try:
-            authorized = authorize_revision_operation(
-                ctx, snapshot.authorization_context or {}
-            )
-        except ReadServiceError as exc:
-            return GetOperationStatusOutput(
-                envelope=error_envelope(actor, exc.error_code)
-            )
-        if not authorized:
-            return GetOperationStatusOutput(
-                envelope=ok_envelope(actor),
-                data=OperationStatusResult(
-                    status="not_seen",
-                    next_action="resend_same_request",
-                    guidance=NOT_SEEN_GUIDANCE,
-                ),
-            )
     data = OperationStatusResult(
         status=snapshot.status,
         next_action=snapshot.next_action,
-        result=_public_result(snapshot) if snapshot.status == "committed" else None,
+        result=(
+            keyed_result(snapshot.tool_name, snapshot.receipt_payload)
+            if snapshot.receipt_payload is not None
+            else None
+        ),
         error=snapshot.error,
         guidance=snapshot.guidance,
         retry_after_seconds=snapshot.retry_after_seconds,

@@ -3,15 +3,15 @@ from __future__ import annotations
 from datetime import timedelta
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from backend.mcp.operation_tools import KEYED_TOOL_COMMANDS
 from backend.models.base import utc_now
-from backend.models.mcp_trace import MCPOperationAttempt, MCPWriteIdempotency
+from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
 from backend.models.workspace import Workspace
 from backend.schemas.context_write import UpdateDraftResult
 from backend.services.mcp_operation_attempt import (
-    finish_operation_attempt,
     lookup_operation_status,
     start_operation_attempt,
 )
@@ -216,10 +216,12 @@ def test_expired_key_is_reclaimed_as_a_new_intent(session_factory, monkeypatch) 
 
 
 def test_operation_lifecycle_keeps_arrival_separate_and_prefers_atomic_receipt(
-    session_factory, monkeypatch
+    session_factory, monkeypatch, mcp_default_actor
 ):
-    # One lifecycle traversal replaces the removed retry_only checks. It also
-    # checks a late worker, process loss and a key reused by another command.
+    # One lifecycle traversal replaces the removed retry_only checks: status
+    # starts from the arrival, a receipt proves a commit, a late worker cannot
+    # touch a newer attempt, only a failure known to repeat asks for a fix, and
+    # a key reused by another command reports the latest call.
     clock = [utc_now()]
     monkeypatch.setattr(
         "backend.services.mcp_operation_attempt.utc_now", lambda: clock[0]
@@ -228,22 +230,56 @@ def test_operation_lifecycle_keeps_arrival_separate_and_prefers_atomic_receipt(
         workspace_id = session.scalar(
             select(Workspace.id).where(Workspace.slug == "default")
         )
+    actor = mcp_default_actor(actor_id="operation-actor", scopes=("*",))
     scope = dict(
         workspace_id=workspace_id,
-        actor_kind="human",
-        actor_id="operation-actor",
+        actor_kind=actor.actor_kind,
+        actor_id=actor.actor_id,
         idempotency_key="operation-key",
+    )
+    arrival_scope = dict(
+        workspace_id=workspace_id, actor=actor, idempotency_key="operation-key"
     )
 
     def status(**changes):
         with session_factory() as session:
-            return lookup_operation_status(session, **{**scope, **changes})
+            return lookup_operation_status(
+                session, **{**scope, "commands": KEYED_TOOL_COMMANDS, **changes}
+            )
 
+    def receipt(tool_name, result):
+        with session_factory.begin() as session:
+            session.add(
+                MCPWriteIdempotency(
+                    **scope,
+                    tool_name=tool_name,
+                    request_fingerprint=f"{tool_name}-fixture",
+                    result_payload=result,
+                    created_at=clock[0],
+                    expires_at=clock[0] + IDEMPOTENCY_WINDOW,
+                )
+            )
+
+    def finalize(identity, **values):
+        # What the final capture records on the arrival row.
+        with session_factory.begin() as session:
+            session.execute(
+                update(MCPToolCall)
+                .where(MCPToolCall.id == identity.id)
+                .values(
+                    completed_at=clock[0],
+                    result_status="failed" if values.get("error_code") else "succeeded",
+                    **values,
+                )
+            )
+
+    # A receipt written outside MCP has no arrival and is never served.
+    receipt("lint_fix_page", {"value": "browser"})
     unseen = status()
     assert (unseen.status, unseen.next_action) == ("not_seen", "resend_same_request")
     assert "once" in unseen.guidance and "24 hours" in unseen.guidance
     first = start_operation_attempt(
-        session_factory, **scope, tool_name="patch_context_edit"
+        session_factory, **arrival_scope, tool_name="patch_context_edit"
     )
     assert status().status == "in_progress"
     assert status(actor_id="another-actor").status == "not_seen"
@@ -254,56 +290,66 @@ def test_operation_lifecycle_keeps_arrival_separate_and_prefers_atomic_receipt(
     assert interrupted.next_action == "resend_same_request"
 
     second = start_operation_attempt(
-        session_factory, **scope, tool_name="patch_context_edit"
+        session_factory, **arrival_scope, tool_name="patch_context_edit"
     )
-    finish_operation_attempt(
-        session_factory, first, error_code="old-worker-error", retryable=False
-    )
+    finalize(first, error_code="old-worker-error", retryable=False)
     assert status().status == "in_progress"
-    finish_operation_attempt(
-        session_factory,
+    finalize(
         second,
         error_code="validation_failed",
-        error_message="Fix the operation.",
+        result_summary="Fix the operation.",
         retryable=False,
     )
     assert status().next_action == "fix_request"
+    clock[0] += timedelta(seconds=1)
     third = start_operation_attempt(
-        session_factory, **scope, tool_name="patch_context_edit"
+        session_factory, **arrival_scope, tool_name="patch_context_edit"
     )
-    with session_factory.begin() as session:
-        session.add(
-            MCPWriteIdempotency(
-                **scope,
-                tool_name="patch_context_edit",
-                request_fingerprint="fixture",
-                result_payload={"value": "saved"},
-                created_at=clock[0],
-                expires_at=clock[0] + IDEMPOTENCY_WINDOW,
-            )
-        )
+    finalize(third, error_code="internal_error", retryable=None)
+    unknown = status()
+    assert (unknown.next_action, unknown.guidance) == (
+        "resend_same_request",
+        unseen.guidance,
+    )
+    clock[0] += timedelta(seconds=1)
+    fourth = start_operation_attempt(
+        session_factory, **arrival_scope, tool_name="patch_context_edit"
+    )
+    receipt("patch_context_edit", {"value": "saved"})
     # The worker has not finalized, yet the domain transaction proves success.
     committed = status()
     assert (committed.status, committed.next_action) == ("committed", "use_result")
-    assert committed.result_payload == {"value": "saved"}
-    finish_operation_attempt(
-        session_factory, third, error_code="completion-error", retryable=True
-    )
-    assert status().status == "committed"
+    assert committed.receipt_payload == {"value": "saved"}
     clock[0] += timedelta(seconds=1)
-    fourth = start_operation_attempt(
-        session_factory, **scope, tool_name="discard_context_edit"
+    fifth = start_operation_attempt(
+        session_factory, **arrival_scope, tool_name="discard_context_edit"
     )
     assert status().status == "in_progress"  # latest tool, not the prior patch
-    finish_operation_attempt(
-        session_factory, fourth, result_payload={"discarded": True}
-    )
-    assert status().result_payload == {"discarded": True}
+    receipt("discard_context_edit", {"discarded": True})
+    finalize(fifth)
+    assert status().receipt_payload == {"discarded": True}
     with session_factory() as session:
-        row = session.get(MCPOperationAttempt, third.id)
-        assert row.attempts == 3
+        rows = session.scalars(
+            select(MCPToolCall)
+            .where(MCPToolCall.idempotency_key == scope["idempotency_key"])
+            .order_by(MCPToolCall.started_at, MCPToolCall.id)
+        ).all()
+        assert [row.id for row in rows] == [
+            first.id,
+            second.id,
+            third.id,
+            fourth.id,
+            fifth.id,
+        ]
+        assert rows[0].error_code == "old-worker-error"
+        assert rows[1].error_code == "validation_failed"
+        assert rows[4].result_status == "succeeded"
+        assert rows[3].result_detail is None
     clock[0] += IDEMPOTENCY_WINDOW + timedelta(seconds=1)
     assert status().status == "not_seen"
+    with session_factory() as session:
+        assert session.get(MCPToolCall, first.id) is not None
+        assert session.get(MCPToolCall, fourth.id) is not None
 
 
 def test_execution_failure_rolls_back_claim_and_partial_side_effect(

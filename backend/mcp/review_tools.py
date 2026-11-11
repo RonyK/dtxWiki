@@ -6,7 +6,6 @@ revised draft. There is intentionally NO approve/reject/request_changes tool —
 an AI can never adjudicate (Risk 6, structural).
 """
 
-from uuid import UUID
 
 from pydantic import ValidationError
 
@@ -34,8 +33,7 @@ from backend.services.mcp_write_idempotency import (
     execute_idempotent_write,
     request_fingerprint,
 )
-from backend.services.read_errors import ReadNotFoundError, ReadServiceError
-from backend.services.review_service import _revision_content_hash
+from backend.services.read_errors import ReadServiceError
 
 
 def list_requested_changes(
@@ -139,26 +137,6 @@ def submit_revision_for_review(
             principal=principal,
         )
         with session_factory.begin() as session:
-            content_hash = _revision_content_hash(request.update, request.create)
-            authorization = {
-                "principal_id": str(principal),
-                "review_item_id": str(request.review_item_id),
-                "content_hash": content_hash,
-            }
-
-            def authorize_replay(stored):
-                prior_authorization = stored.get("_operation_authorization", {})
-                if prior_authorization.get("principal_id") != str(principal):
-                    raise ReadNotFoundError("review item not found")
-                ctx.services.review.authorize_revision_submission(
-                    session,
-                    workspace_id=ctx.workspace_id,
-                    review_item_id=UUID(prior_authorization["review_item_id"]),
-                    principal=principal,
-                    principal_role=principal_role,
-                    content_hash=prior_authorization.get("content_hash"),
-                )
-
             # The revised draft is stamped with THIS AI conversation's chat
             # session. Create the row up-front (Codex #10) so a first-write
             # revision still routes chat_owner reviews instead of stamping NULL.
@@ -176,7 +154,7 @@ def submit_revision_for_review(
                 )
 
             def execute_revision():
-                result = ctx.services.review.submit_revision_for_review(
+                return ctx.services.review.submit_revision_for_review(
                     session=session,
                     workspace_id=ctx.workspace_id,
                     review_item_id=request.review_item_id,
@@ -191,8 +169,6 @@ def submit_revision_for_review(
                     note=request.note,
                     origin_chat_session_id=origin_chat_session_id,
                 )
-                result._operation_authorization = authorization
-                return result
 
             data = execute_idempotent_write(
                 session,
@@ -205,11 +181,9 @@ def submit_revision_for_review(
                     request.model_dump(
                         mode="json", exclude={"idempotency_key", "conversation_token"}
                     )
-                    | {"principal": str(principal)}
                 ),
                 result_model=SubmitRevisionForReviewResult,
                 execute=execute_revision,
-                replay_authorizer=authorize_replay,
             )
     except ValidationError as exc:
         return SubmitRevisionForReviewOutput(
@@ -222,36 +196,6 @@ def submit_revision_for_review(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
     return SubmitRevisionForReviewOutput(envelope=ok_envelope(actor), data=data)
-
-
-def authorize_revision_operation(ctx: ToolCallContext, authorization: dict) -> bool:
-    """Keep a shared MCP actor's revision outcomes scoped to their principal."""
-    with ctx.session_factory() as session:
-        principal = resolve_effective_principal(
-            session,
-            workspace_id=ctx.workspace_id,
-            mcp_session_id=ctx.conversation_token,
-            fallback_user_id=ctx.actor.user_id,
-        )
-    if principal is None or authorization.get("principal_id") != str(principal):
-        return False
-    try:
-        review_item_id = UUID(authorization.get("review_item_id"))
-    except (TypeError, ValueError, AttributeError):
-        return False
-    principal_role = _principal_role(
-        ctx, workspace_id=ctx.workspace_id, principal=principal
-    )
-    with ctx.session_factory() as session:
-        ctx.services.review.authorize_revision_submission(
-            session,
-            workspace_id=ctx.workspace_id,
-            review_item_id=review_item_id,
-            principal=principal,
-            principal_role=principal_role,
-            content_hash=authorization.get("content_hash"),
-        )
-    return True
 
 
 def _principal_role(ctx: ToolCallContext, *, workspace_id, principal) -> str:

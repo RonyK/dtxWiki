@@ -706,7 +706,7 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
 ):
     # Additional integration path: actual async cancellation must leave the
     # worker's separate arrival/completion transactions durable, and a failed
-    # arrival commit must prevent dispatch. A pure unit test or the DB-state
+    # arrival commit must prevent execution. A pure unit test or the DB-state
     # traversal cannot verify cancellation across asyncio.to_thread and commit.
     """An uncaught dispatch exception must not leak ``str(exc)`` to the
     client (SQLAlchemy errors carry the SQL statement + bound parameters)
@@ -717,7 +717,10 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         workspace_id = workspace.id
 
-    real_dispatch = runner_module.dispatch
+    from backend.mcp.operation_tools import KEYED_TOOL_COMMANDS
+    from backend.mcp.router import TOOL_HANDLERS
+
+    real_handler = TOOL_HANDLERS["create_context_page"]
     actor = _pat_actor(mcp_default_actor, actor_id="trace-fault-client", scopes=("*",))
     arguments = {
         "workspace_id": str(workspace_id),
@@ -730,8 +733,8 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
     def _boom(*_args, **_kwargs):
         raise RuntimeError("INSERT INTO pages (secret) VALUES ('do-not-leak')")
 
-    original_dispatch = runner_module.dispatch
-    monkeypatch.setattr(runner_module, "dispatch", _boom)
+    # Fail after authorization, once the arrival is committed.
+    monkeypatch.setitem(TOOL_HANDLERS, "create_context_page", _boom)
 
     async def run():
         return await call_tool_async(
@@ -762,6 +765,12 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
     assert trace is not None
     assert trace.result_status == "failed"
     assert trace.error_code == "internal_error"
+    assert trace.request_id == UUID(payload["envelope"]["request_id"])
+    assert trace.idempotency_key == "worker-lost-response"
+    with page_service.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(MCPToolCall)) == 1
+        assert session.scalar(select(McpChatSession.tool_call_count)) == 1
+        assert session.scalar(select(McpChatSession.error_count)) == 1
 
     from backend.services.mcp_operation_attempt import lookup_operation_status
 
@@ -773,9 +782,10 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
                 idempotency_key=key,
+                commands=KEYED_TOOL_COMMANDS,
             )
 
-    assert status().status == "failed"
+    assert (status().status, status().next_action) == ("failed", "resend_same_request")
     assert "do-not-leak" not in status().error["message"]
     entered, release, completed = (
         threading.Event(),
@@ -784,10 +794,10 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
     )
     real_finish = runner_module.finish_operation_attempt
 
-    def blocked_dispatch(*args, **kwargs):
+    def blocked_handler(*args, **kwargs):
         entered.set()
         assert release.wait(timeout=10)
-        return real_dispatch(*args, **kwargs)
+        return real_handler(*args, **kwargs)
 
     def tracked_finish(*args, **kwargs):
         try:
@@ -795,7 +805,7 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
         finally:
             completed.set()
 
-    monkeypatch.setattr(runner_module, "dispatch", blocked_dispatch)
+    monkeypatch.setitem(TOOL_HANDLERS, "create_context_page", blocked_handler)
     monkeypatch.setattr(runner_module, "finish_operation_attempt", tracked_finish)
 
     async def cancel_after_arrival():
@@ -812,16 +822,27 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
 
     anyio.run(cancel_after_arrival)
     assert status().status == "committed"
+    with page_service.session_factory() as session:
+        calls = session.scalars(
+            select(MCPToolCall).where(
+                MCPToolCall.idempotency_key == "worker-lost-response"
+            )
+        ).all()
+        assert len(calls) == 2
+        assert all(call.completed_at is not None for call in calls)
+        assert {call.result_status for call in calls} == {"failed", "succeeded"}
+        assert session.scalar(select(func.sum(McpChatSession.tool_call_count))) == 2
+        assert session.scalar(select(func.sum(McpChatSession.error_count))) == 1
 
     # A failed arrival commit must stop dispatch, even when storage is down.
     def unavailable(*args, **kwargs):
         raise RuntimeError("private-database-details")
 
     monkeypatch.setattr(runner_module, "start_operation_attempt", unavailable)
-    monkeypatch.setattr(
-        runner_module,
-        "dispatch",
-        lambda *a, **k: pytest.fail("dispatch ran without a durable arrival"),
+    monkeypatch.setitem(
+        TOOL_HANDLERS,
+        "create_context_page",
+        lambda *a, **k: pytest.fail("the tool ran without a durable arrival"),
     )
     arguments["idempotency_key"] = "arrival-unavailable"
     unavailable_result = anyio.run(run)
@@ -836,7 +857,6 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
 
     # Known storage errors travel through dispatch's common boundary and then
     # the normal runner trace path, without retaining a partial served read.
-    monkeypatch.setattr(runner_module, "dispatch", original_dispatch)
     page_id = uuid4()
 
     def _storage_boom(_payload, _ctx):
@@ -860,7 +880,7 @@ def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
             "read_context_outline",
             {
                 "workspace_id": str(workspace_id),
-                "target": {"page_id": str(page_id)},
+                "page_id": str(page_id),
                 "conversation_token": payload["envelope"]["conversation_token"],
             },
             actor=_pat_actor(

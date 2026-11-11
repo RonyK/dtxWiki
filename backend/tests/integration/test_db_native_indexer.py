@@ -186,9 +186,9 @@ def test_index_context_page_published_and_draft_scopes(session_factory):
 def test_index_context_page_excludes_private_editing_row_from_draft_scope(
     session_factory,
 ):
-    """P8.4: an autosave points `latest_draft_version_id` at the author's own
-    still-private "editing" row, so "distinct from the published head" alone
-    would chunk and embed an unsubmitted body under content_scope="draft"."""
+    """Legacy generic current/latest pointers may name a private edit
+    alongside a published snapshot. The indexer must exclude that private
+    body rather than treating every unpublished row as a shared draft."""
 
     indexer = _indexer()
     with session_factory.begin() as session:
@@ -208,8 +208,9 @@ def test_index_context_page_excludes_private_editing_row_from_draft_scope(
             "editing",
             version_no=2,
         )
-        # Exactly the pointer state page_service._set_current_version leaves
-        # behind after an ordinary autosave on an open editing session.
+        # Simulate legacy generic pointers to a private row while retaining
+        # the published snapshot. Current private autosaves on a published
+        # page leave its readable base and published-version pointer intact.
         page.current_published_version_id = published.id
         page.current_version_id = editing.id
         page.latest_draft_version_id = editing.id

@@ -9,7 +9,7 @@ import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel
@@ -23,6 +23,7 @@ from backend.mcp.envelope import (
     error_envelope,
     validation_error_envelope,
 )
+from backend.mcp.operation_tools import KEYED_TOOLS
 from backend.mcp.protocol.lifecycle import evaluate_actor_mcp_surface_lifecycle
 from backend.mcp.protocol.output_validation import (
     FAILURE_ENVELOPE_FIELDS,
@@ -184,6 +185,7 @@ async def call_tool_async(
     tool_context: ToolCallContext | None = None,
 ) -> CallToolResult:
     started_at = _utc_now()
+    call_request_id = uuid4()
     started = time.perf_counter()
     metric_status = "error"
     db = tool_context.db if tool_context is not None else None
@@ -322,8 +324,7 @@ async def call_tool_async(
             requested_workspace_id=trace_workspace_id,
             requested_workspace_authorized=requested_workspace_authorized,
             require_token=is_content_call,
-            tool_name=name if is_content_call else None,
-            idempotency_key=_operation_key(arguments) if is_content_call else None,
+            idempotency_key=_operation_key(arguments),
         )
         conversation_token = conversation.token
         # conversation_token is a transport concern consumed above for chat
@@ -397,8 +398,9 @@ async def call_tool_async(
             )
             # metric_status stays "error"; the finally emits it.
             return _tool_result(payload, is_error=True)
+        nag_workspace_id = trace_workspace_id or requested_workspace_id
         response = await asyncio.to_thread(
-            _dispatch_recorded_operation,
+            _run_tool,
             name,
             arguments,
             actor,
@@ -407,6 +409,19 @@ async def call_tool_async(
             conversation.token,
             search_service=search_service,
             tool_context=tool_context,
+            request_id=call_request_id,
+            started_at=started_at,
+            warn_token_not_supplied=(
+                not is_content_call
+                and name != "list_my_workspaces"
+                and requested_conversation_token is None
+            ),
+            nag_workspace_id=nag_workspace_id,
+            nag_session_factory=(
+                db.session_for(nag_workspace_id)
+                if db is not None and nag_workspace_id is not None
+                else fallback_session_factory
+            ),
         )
         payload = response.model_dump(mode="json")
         envelope = payload.get("envelope", {})
@@ -414,73 +429,6 @@ async def call_tool_async(
         if isinstance(payload.get("envelope"), dict):
             payload["envelope"] = envelope
         status = envelope.get("result_status")
-        if (
-            status == "succeeded"
-            and not is_content_call
-            and name != "list_my_workspaces"
-            and requested_conversation_token is None
-        ):
-            envelope.setdefault("warnings", []).append(
-                EnvelopeWarning(
-                    code=CONVERSATION_TOKEN_NOT_SUPPLIED_CODE,
-                    message=CONVERSATION_TOKEN_NOT_SUPPLIED_MESSAGE,
-                ).model_dump(mode="json")
-            )
-        if status == "succeeded" and conversation.token is not None:
-            nag_workspace_id = trace_workspace_id or requested_workspace_id
-            nag_session_factory = (
-                db.session_for(nag_workspace_id)
-                if db is not None and nag_workspace_id is not None
-                else fallback_session_factory
-            )
-            if nag_workspace_id is not None and nag_session_factory is not None:
-                try:
-                    with nag_session_factory() as session:
-                        branches = unresolved_diverged_branches_for_conversation(
-                            session,
-                            workspace_id=nag_workspace_id,
-                            conversation_token=conversation.token,
-                        )
-                except Exception:
-                    logger.exception("unresolved diverged branch nag lookup failed")
-                else:
-                    if branches:
-                        envelope.setdefault("warnings", []).append(
-                            EnvelopeWarning(
-                                code=UNRESOLVED_DIVERGED_BRANCH_CODE,
-                                message=unresolved_diverged_branch_warning_message(
-                                    branches, workspace_id=nag_workspace_id
-                                ),
-                            ).model_dump(mode="json")
-                        )
-                try:
-                    with nag_session_factory() as session:
-                        stale_pages = stale_pages_for_conversation(
-                            session,
-                            workspace_id=nag_workspace_id,
-                            conversation_token=conversation.token,
-                            actor=actor,
-                            # patch_draft (the only tool this ever excluded a
-                            # page for, to suppress a stale warning about the
-                            # page it just resolved) is deregistered;
-                            # patch_context_edit never diverges (always
-                            # applies to the caller's own row), so it has no
-                            # equivalent push_outcome to key off.
-                            excluded_page_ids=frozenset(),
-                        )
-                except Exception:
-                    # This notification is advisory, but its ownership and map
-                    # proof are not.  On any lookup/parser inconsistency, omit
-                    # it without reflecting database details into the envelope.
-                    logger.exception("conversation stale-page lookup failed")
-                else:
-                    if stale_pages:
-                        envelope.setdefault("warnings", []).append(
-                            EnvelopeWarning(
-                                code=CONVERSATION_READ_STALE_CODE,
-                                message=stale_conversation_warning_message(stale_pages),
-                            ).model_dump(mode="json")
-                        )
         metric_status = _metric_status(status)
         trace_arguments, trace_payload, payload = _capture_trace_and_wire_payload(
             name,
@@ -488,25 +436,29 @@ async def call_tool_async(
             payload,
             output_model=type(response),
         )
-        _persist_trace(
-            session_factory=fallback_session_factory,
-            db=db,
-            actor=actor,
-            name=name,
-            arguments=trace_arguments,
-            payload=trace_payload,
-            read_projection=getattr(response, "_served_read_projection", None),
-            edit_first_change=_edit_trace_preview(response),
-            mcp_session_id=conversation.token
-            or mcp_session_id
-            or str(envelope.get("request_id") or ""),
-            started_at=started_at,
-            latency_ms=int((time.perf_counter() - started) * 1000),
-            trace_workspace_id=trace_workspace_id,
-            fail_closed=(
-                status == "succeeded" and name in _CORRECTNESS_CRITICAL_TRACE_TOOLS
-            ),
-        )
+        # A keyed call's worker already captured it; capturing again would
+        # count it twice. Only a capture the worker could not commit is retried.
+        if not getattr(response, "_trace_finalized", False):
+            _persist_trace(
+                session_factory=fallback_session_factory,
+                db=db,
+                actor=actor,
+                name=name,
+                arguments=trace_arguments,
+                payload=trace_payload,
+                read_projection=getattr(response, "_served_read_projection", None),
+                edit_first_change=_edit_trace_preview(response),
+                mcp_session_id=conversation.token
+                or mcp_session_id
+                or str(envelope.get("request_id") or ""),
+                started_at=started_at,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                trace_workspace_id=trace_workspace_id,
+                fail_closed=(
+                    status == "succeeded"
+                    and name in _CORRECTNESS_CRITICAL_TRACE_TOOLS
+                ),
+            )
         logger.info(
             "tools/call name=%s actor=%s ms=%d status=%s",
             name,
@@ -649,6 +601,7 @@ async def call_tool_async(
             "tools/call name=%s actor=%s dispatch raised", name, actor.actor_id
         )
         envelope = error_envelope(actor, "internal_error", result_status="failed")
+        envelope.request_id = call_request_id
         if requested_workspace_id is not None:
             envelope.workspace_id = requested_workspace_id
         envelope.result_summary = (
@@ -699,7 +652,7 @@ def _operation_key(arguments: dict[str, Any]) -> str | None:
     )
 
 
-def _dispatch_recorded_operation(
+def _run_tool(
     name,
     arguments,
     actor,
@@ -709,119 +662,173 @@ def _dispatch_recorded_operation(
     *,
     search_service=None,
     tool_context=None,
+    request_id=None,
+    started_at=None,
+    warn_token_not_supplied=False,
+    nag_workspace_id=None,
+    nag_session_factory=None,
 ):
-    """Run and finalize in the worker, even when the async caller disconnects."""
+    """Dispatch, add conversation warnings and finalize a keyed call in the worker.
 
-    identity = None
-    operation_factory = None
-    key = _operation_key(arguments) if name in CONTENT_TOOLS else None
-    if key is not None:
-        from backend.app.container import DatabaseProvider, ServiceRegistry
-        from backend.mcp.router import PolicyRejection, resolve_target_actor
+    One order for every call, connected or not: a keyed call's arrival is
+    committed once ``dispatch`` has authorized it, the conversation warnings
+    are computed before its own capture moves the conversation's read
+    pointers, and the keyed call is captured here so a disconnect cannot lose
+    it. A dispatch exception propagates to ``call_tool_async``'s barrier, which
+    finalizes the same arrival row by its request id.
+    """
 
-        context = tool_context or ToolCallContext(
-            actor=actor,
-            db=DatabaseProvider(
-                None, session_factory=(session_factory or page_service.session_factory)
-            ),
-            page_service=page_service,
-            services=ServiceRegistry(),
-        )
-        services = context.services or ServiceRegistry()
-        scoped_actor = resolve_target_actor(
-            tool_name=name,
-            payload=arguments,
-            actor=context.actor,
-            session_factory=context.db.control_session_factory(),
-            db=context.db,
-            directory=services.workspace_directory,
-        )
-        if isinstance(scoped_actor, PolicyRejection):
-            return MCPErrorResponse(
-                envelope=error_envelope(actor, scoped_actor.error_code)
-            )
-        operation_factory = context.db.session_for(scoped_actor.workspace_id)
+    started = time.perf_counter()
+    key = _operation_key(arguments) if name in KEYED_TOOLS else None
+    arrival: dict[str, Any] = {}
+
+    def record_arrival(ctx: ToolCallContext) -> MCPErrorResponse | None:
         try:
-            from backend.services.mcp_chat_service import resolve_effective_principal
-
-            with operation_factory() as operation_session:
-                principal = resolve_effective_principal(
-                    operation_session,
-                    workspace_id=scoped_actor.workspace_id,
-                    mcp_session_id=conversation_token,
-                    fallback_user_id=scoped_actor.user_id,
-                )
-            authorization_context = {
-                "principal_id": str(principal) if principal is not None else None,
-            }
-            if "review_item_id" in arguments:
-                try:
-                    authorization_context["review_item_id"] = str(
-                        UUID(str(arguments["review_item_id"]))
-                    )
-                except (ValueError, TypeError, AttributeError):
-                    pass
-            identity = start_operation_attempt(
-                operation_factory,
-                workspace_id=scoped_actor.workspace_id,
-                actor_kind=scoped_actor.actor_kind,
-                actor_id=scoped_actor.actor_id,
+            arrival["identity"] = start_operation_attempt(
+                ctx.session_factory,
+                workspace_id=ctx.workspace_id,
+                actor=ctx.actor,
                 tool_name=name,
                 idempotency_key=key,
-                authorization_context=authorization_context,
+                arguments=arguments,
+                mcp_session_id=conversation_token,
+                request_id=request_id,
+                started_at=started_at,
             )
         except Exception:
             logger.exception("MCP operation arrival could not be committed")
             return MCPErrorResponse(
                 envelope=error_envelope(
-                    actor,
-                    "operation_tracking_unavailable",
-                    retryable=True,
+                    ctx.actor, "operation_tracking_unavailable", retryable=True
                 )
             )
+        arrival["ctx"] = ctx
+        return None
 
-    def finish(**values):
-        if identity is None:
-            return
-        try:
-            finish_operation_attempt(operation_factory, identity, **values)
-        except Exception:
-            # Dispatch may already have committed. Its atomic receipt still
-            # proves success; do not turn a completion-record failure into an
-            # apparent domain-write failure.
-            logger.exception("MCP operation completion could not be committed")
-
-    try:
-        response = dispatch(
-            name,
-            arguments,
-            actor,
-            page_service,
-            session_factory,
-            conversation_token,
-            search_service=search_service,
-            tool_context=tool_context,
-        )
-    except BaseException:
-        finish(
-            error_code="internal_error",
-            error_message="The operation ended unexpectedly; retry with the same key.",
-            retryable=True,
-        )
-        raise
+    response = dispatch(
+        name,
+        arguments,
+        actor,
+        page_service,
+        session_factory,
+        conversation_token,
+        search_service=search_service,
+        tool_context=tool_context,
+        before_execute=record_arrival if key is not None else None,
+    )
+    _add_conversation_warnings(
+        response,
+        actor,
+        conversation_token,
+        warn_token_not_supplied=warn_token_not_supplied,
+        workspace_id=nag_workspace_id,
+        session_factory=nag_session_factory,
+    )
+    identity = arrival.get("identity")
     if identity is None:
         return response
-    envelope = response.envelope
-    if envelope.result_status == "succeeded":
-        data = getattr(response, "data", None)
-        finish(result_payload=data.model_dump(mode="json") if data is not None else {})
-    else:
-        finish(
-            error_code=envelope.error_code or "internal_error",
-            error_message=(envelope.error_message or "The operation failed.")[:600],
-            retryable=envelope.retryable,
+    ctx = arrival["ctx"]
+    response.envelope.request_id = identity.request_id
+    response.envelope.conversation_token = conversation_token
+    try:
+        trace_arguments, trace_payload, _ = _capture_trace_and_wire_payload(
+            name,
+            arguments,
+            response.model_dump(mode="json"),
+            output_model=type(response),
         )
+        finish_operation_attempt(
+            ctx.session_factory,
+            identity,
+            actor=ctx.actor,
+            tool_name=name,
+            arguments=trace_arguments,
+            payload=trace_payload,
+            mcp_session_id=conversation_token,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            edit_first_change=_edit_trace_preview(response),
+        )
+    except Exception:
+        # Dispatch may already have committed, and its atomic receipt still
+        # proves success. A connected caller's runner retries this capture.
+        record_trace_persistence_failure()
+        logger.exception("MCP operation completion could not be committed")
+        return response
+    object.__setattr__(response, "_trace_finalized", True)
     return response
+
+
+def _add_conversation_warnings(
+    response,
+    actor: ActorContext,
+    conversation_token: str | None,
+    *,
+    warn_token_not_supplied: bool,
+    workspace_id: UUID | None,
+    session_factory,
+) -> None:
+    envelope = getattr(response, "envelope", None)
+    # Only a served result model carries warnings; anything else is left for
+    # the output contract check to reject.
+    if not isinstance(envelope, MCPResultEnvelope):
+        return
+    if envelope.result_status != "succeeded":
+        return
+    if warn_token_not_supplied:
+        envelope.warnings.append(
+            EnvelopeWarning(
+                code=CONVERSATION_TOKEN_NOT_SUPPLIED_CODE,
+                message=CONVERSATION_TOKEN_NOT_SUPPLIED_MESSAGE,
+            )
+        )
+    if conversation_token is None or workspace_id is None or session_factory is None:
+        return
+    try:
+        with session_factory() as session:
+            branches = unresolved_diverged_branches_for_conversation(
+                session,
+                workspace_id=workspace_id,
+                conversation_token=conversation_token,
+            )
+    except Exception:
+        logger.exception("unresolved diverged branch nag lookup failed")
+    else:
+        if branches:
+            envelope.warnings.append(
+                EnvelopeWarning(
+                    code=UNRESOLVED_DIVERGED_BRANCH_CODE,
+                    message=unresolved_diverged_branch_warning_message(
+                        branches, workspace_id=workspace_id
+                    ),
+                )
+            )
+    try:
+        with session_factory() as session:
+            stale_pages = stale_pages_for_conversation(
+                session,
+                workspace_id=workspace_id,
+                conversation_token=conversation_token,
+                actor=actor,
+                # patch_draft (the only tool this ever excluded a page for, to
+                # suppress a stale warning about the page it just resolved) is
+                # deregistered; patch_context_edit never diverges (always
+                # applies to the caller's own row), so it has no equivalent
+                # push_outcome to key off.
+                excluded_page_ids=frozenset(),
+            )
+    except Exception:
+        # This notification is advisory, but its ownership and map proof are
+        # not. On any lookup/parser inconsistency, omit it without reflecting
+        # database details into the envelope.
+        logger.exception("conversation stale-page lookup failed")
+    else:
+        if stale_pages:
+            envelope.warnings.append(
+                EnvelopeWarning(
+                    code=CONVERSATION_READ_STALE_CODE,
+                    message=stale_conversation_warning_message(stale_pages),
+                )
+            )
 
 
 def _metric_status(result_status) -> str:
