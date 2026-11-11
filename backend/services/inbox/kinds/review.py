@@ -17,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from functools import cache
 from uuid import UUID
 
+from sqlalchemy import and_, case, or_
 from sqlalchemy.orm import Session
 
 from backend.models.change import ChangeSet
@@ -34,6 +35,8 @@ from backend.services.inbox.base import (
 from backend.services.inbox.links import review_path
 from backend.services.inbox.scopes import WorkspaceInbox
 from backend.services.inbox.sources import STORED, ComputedSource
+from backend.services.inbox.status_pagination import chronological_after, uuid_key
+from backend.services.read_errors import ReadValidationError
 from backend.services.review_service import ReviewService
 from backend.utils.uuid import parse_uuid_or_none
 
@@ -95,17 +98,32 @@ def _attention_scan(
     limit: int,
     after: InboxPosition | None = None,
 ) -> ComputedScan:
-    rows, total = _reviews().actionable_reviews(
+    def key_before(item_key: str):
+        raw_id, separator, stage = item_key.partition(":")
+        if not separator or not stage:
+            raise ReadValidationError("invalid inbox cursor item key")
+        review_id = uuid_key(raw_id)
+        current_stage = case(
+            (ReviewItem.status == CHANGES_REQUESTED, CHANGES_REQUESTED),
+            else_=PENDING,
+        )
+        return or_(
+            ReviewItem.id < review_id,
+            and_(ReviewItem.id == review_id, current_stage < stage),
+        )
+
+    rows = _reviews().actionable_reviews(
         session,
         _workspace_id(viewer),
         principal=viewer.user_id,
         principal_role=viewer.role,
         limit=limit + 1,
-        after=after,
+        event_condition=lambda event_at: chronological_after(
+            event_at, REVIEW_ATTENTION, after, key_before
+        ),
     )
     return ComputedScan(
         [_attention_snapshot(review, request) for review, request in rows[:limit]],
-        total,
         len(rows) > limit,
     )
 

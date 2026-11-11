@@ -63,9 +63,9 @@ class ComputedSource(StatusSource):
     """Items derived on read from data the kind already owns.
 
     ``scan`` returns at most ``limit`` items after a shared chronological
-    position, the full total, and whether more candidates remain. ``lookup`` returns
-    the items that still exist for this viewer among the given keys, in one
-    query batch, keyed by their own ``item_key``.
+    position and whether more candidates remain. ``lookup`` returns the items
+    that still exist for this viewer among the given keys, in one query batch,
+    keyed by their own ``item_key``.
     """
 
     scan: Callable[[Session, InboxViewer, int, InboxPosition | None], ComputedScan]

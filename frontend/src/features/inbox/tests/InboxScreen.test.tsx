@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InboxItem, InboxPage } from "../../../shared/api/inbox";
@@ -10,7 +10,6 @@ vi.mock("../../../shared/workspace/WorkspaceContext", () => ({
 }));
 
 const BASE = "http://127.0.0.1:21080/api/v1/users/me/inbox";
-const WORKSPACE_ID = "00000000-0000-4000-8000-000000000004";
 
 function item(key: string, kind = "test.status", eventAt = "2026-10-28T00:00:00+00:00"): InboxItem {
   return {
@@ -28,9 +27,8 @@ function page(
   status_items: InboxItem[],
   items: InboxItem[],
   next_cursor: string | null = null,
-  status_overflow: InboxPage["status_overflow"] = [],
 ): InboxPage {
-  return { status_items, items, next_cursor, status_overflow };
+  return { status_items, items, next_cursor };
 }
 
 function response(data: unknown) {
@@ -49,22 +47,23 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function Navigation() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  return <><output aria-label="Current route">{location.pathname}</output><button onClick={() => navigate(`/workspaces/${WORKSPACE_ID}/inbox`)}>Open workspace inbox</button></>;
+function CurrentRoute() {
+  return <output aria-label="Current route">{useLocation().pathname}</output>;
 }
 
-function show(navigation = false) {
+function show() {
   return render(
     <MemoryRouter initialEntries={["/inbox"]}>
-      {navigation ? <Navigation /> : null}
+      <CurrentRoute />
       <InboxScreen />
     </MemoryRouter>,
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("InboxScreen pagination", () => {
   it("merges twenty-item pages into one chronological list with precise time and stable ties", async () => {
@@ -81,14 +80,12 @@ describe("InboxScreen pagination", () => {
         entries.slice(0, 20).filter((_, index) => index % 2 === 0),
         entries.slice(0, 20).filter((_, index) => index % 2 === 1),
         "mixed-page",
-        [{ kind: "test.status", total: 273 }],
       )))
       .mockImplementationOnce(() => continuation.promise);
     show();
 
     await screen.findByText("Item 20");
     expect(screen.getAllByRole("listitem")).toHaveLength(20);
-    expect(screen.queryByText(/273 in total/)).not.toBeInTheDocument();
     expect(screen.getAllByRole("region")).toHaveLength(1);
     const more = screen.getByRole("button", { name: "Load more" });
     act(() => {
@@ -105,11 +102,11 @@ describe("InboxScreen pagination", () => {
       entries.slice(20).filter((_, index) => index % 2 === 1),
     ))));
 
-    const messages = screen.getByRole("region", { name: "Messages" });
-    expect(within(messages).getAllByRole("listitem").map((row) => row.querySelector(".inbox-row-title")?.textContent))
+    const list = screen.getByRole("region", { name: "All" });
+    expect(within(list).getAllByRole("listitem").map((row) => row.querySelector(".inbox-row-title")?.textContent))
       .toEqual([...entries.slice(0, 36), entries[38], entries[36], entries[39], entries[37]]
         .map((entry) => entry.display?.title));
-    expect(within(messages).getAllByRole("list")).toHaveLength(1);
+    expect(within(list).getAllByRole("list")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 
@@ -139,49 +136,34 @@ describe("InboxScreen pagination", () => {
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 
-  it("resets the type filter query and ignores old continuation results across scope changes", async () => {
+  it("resets the type filter query, names the list after it, and ignores an old continuation", async () => {
     const oldFilter = deferred<Response>();
-    const oldScope = deferred<Response>();
     const current = deferred<Response>();
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(response(page([item("Original status")], [], "old-filter")))
       .mockImplementationOnce(() => oldFilter.promise)
-      .mockResolvedValueOnce(response(page([], [item("Filtered message", "test.message")], "old-scope")))
-      .mockImplementationOnce(() => oldScope.promise)
-      .mockResolvedValueOnce(response(page([], [item("Workspace message", "test.message")], "current")))
+      .mockResolvedValueOnce(response(page([], [item("Filtered message", "test.message")], "current")))
       .mockImplementationOnce(() => current.promise)
       .mockResolvedValueOnce(response(page([item("Only current status")], [])));
-    show(true);
+    show();
 
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     fireEvent.click(screen.getByRole("radio", { name: "Stored messages" }));
     await screen.findByText("Filtered message");
     expect(screen.queryByText("Original status")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Stored messages" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     await act(async () => oldFilter.resolve(response(page([item("Stale status")], []))));
     expect(screen.queryByText("Stale status")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Loading Inbox" })).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Open workspace inbox" }));
-    await screen.findByText("Workspace message");
-    expect(screen.queryByText("Filtered message")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-    await act(async () => oldScope.reject(new Error("stale failure")));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Loading Inbox" })).toBeDisabled();
     await act(async () => current.resolve(response(page([item("Current continuation")], []))));
     expect(screen.getByText("Current continuation")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(5,
-      `http://127.0.0.1:21080/api/v1/workspaces/${WORKSPACE_ID}/inbox?state=all&item_type=message&limit=20`,
-      expect.anything(),
-    );
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `${BASE}?state=all&item_type=message&limit=20`, expect.anything());
+
     fireEvent.click(screen.getByRole("radio", { name: "Current status" }));
     await screen.findByText("Only current status");
-    expect(screen.queryByText("Workspace message")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(7,
-      `http://127.0.0.1:21080/api/v1/workspaces/${WORKSPACE_ID}/inbox?state=all&item_type=status&limit=20`,
-      expect.anything(),
-    );
+    expect(screen.queryByText("Filtered message")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(5, `${BASE}?state=all&item_type=status&limit=20`, expect.anything());
   });
 
   it("refreshes the loaded depth across both arrays and preserves concurrent marks when deduplicating", async () => {
@@ -231,6 +213,25 @@ describe("InboxScreen pagination", () => {
     expect(fetchMock).toHaveBeenCalledTimes(8);
   });
 
+  it("folds the filters on a compact screen behind a summary of the current choices", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => response(page([item("A status")], [])));
+    show();
+
+    await screen.findByText("A status");
+    const toggle = screen.getByRole("button", { name: "Filters Account · Inbox · All" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("radio", { name: "Unread" })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
+    fireEvent.click(toggle);
+    expect(await screen.findByRole("button", { name: "Filters Account · Unread · All" })).toBe(toggle);
+  });
+
   it("marks an opened title while loading more and ignores the superseded continuation", async () => {
     const linked = { ...item("Open this status"), display: { title: "Open this status", href: "/opened", params: {} } };
     const continuation = deferred<Response>();
@@ -239,7 +240,7 @@ describe("InboxScreen pagination", () => {
       .mockImplementationOnce(() => continuation.promise)
       .mockResolvedValueOnce(response({ applied: true, item: { ...linked, unread: false } }))
       .mockResolvedValueOnce(response(page([{ ...linked, unread: false }], [], "more")));
-    show(true);
+    show();
 
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     fireEvent.click(screen.getByRole("link", { name: "Open this status" }));

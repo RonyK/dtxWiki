@@ -42,7 +42,7 @@ describe("InboxItemRow", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ data: { items: [], status_items: [], status_overflow: [], next_cursor: null } }),
+      json: async () => ({ data: { items: [], status_items: [], next_cursor: null } }),
     } as Response);
     render(
       <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000004/inbox"]}>
@@ -137,13 +137,13 @@ describe("InboxItemRow", () => {
       const archived = query.get("state") === "archived";
       // The first archive scan finds only entries whose source is gone.
       if (archived && !query.has("cursor")) {
-        return respond({ status_items: [], items: [], status_overflow: [], next_cursor: "archive-next" });
+        return respond({ status_items: [], items: [], next_cursor: "archive-next" });
       }
       const visible = messages.filter((item) => item.archived === archived);
       return respond({
         status_items: archived ? [] : visible.filter((item) => item.kind !== "review_result"),
         items: archived ? visible : visible.filter((item) => item.kind === "review_result"),
-        status_overflow: [], next_cursor: null,
+        next_cursor: null,
       });
     });
     const changed = vi.fn();
@@ -218,7 +218,6 @@ describe("InboxItemRow", () => {
         const shown = all.slice(offset, offset + 20);
         data = {
           status_items: shown.filter((item) => item.kind === "access_key_expiry"),
-          status_overflow: [],
           items: shown.filter((item) => item.kind !== "access_key_expiry"),
           next_cursor: offset + 20 < all.length ? String(offset + 20) : null,
         };
@@ -288,7 +287,7 @@ describe("InboxItemRow", () => {
       return {
         ok: true, status: 200,
         json: async () => ({ data: {
-          status_items: [], status_overflow: [], items,
+          status_items: [], items,
           next_cursor: archived && !more ? "archive-next" : null,
         } }),
       } as Response;

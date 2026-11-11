@@ -1,5 +1,5 @@
-import { Archive, ArchiveRestore, Hourglass, Info, Mail, MailOpen } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Archive, ArchiveRestore, ChevronDown, Hourglass, Info, Mail, MailOpen } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -20,6 +20,7 @@ import { CountChip } from "../../shared/components/CountChip";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
+import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { formatRelativeTimestamp } from "../../shared/lib/datetime";
 import { parseWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
@@ -58,7 +59,6 @@ function appendPage(current: InboxPage, next: InboxPage): InboxPage {
     ...current,
     status_items: appendItems(current.status_items, next.status_items),
     items: appendItems(current.items, next.items),
-    status_overflow: next.status_overflow,
     next_cursor: next.next_cursor,
   };
 }
@@ -146,6 +146,17 @@ function InboxRemovalToggle({
         <Info size={14} aria-hidden="true" />
       )}
     </button>
+  );
+}
+
+// One labelled box per filter, so the choices of one never read as part of
+// the next. The control already carries the name for assistive technology.
+function InboxFilter<T extends string>(props: ComponentProps<typeof SegmentedControl<T>>) {
+  return (
+    <div className="inbox-filter-group">
+      <span aria-hidden="true" className="eyebrow">{props.label}</span>
+      <SegmentedControl {...props} />
+    </div>
   );
 }
 
@@ -260,6 +271,11 @@ export function InboxScreen() {
     : ACCOUNT_INBOX_SCOPE;
   const [state, setState] = useState<InboxState>("all");
   const [itemType, setItemType] = useState<InboxItemTypeFilter>("all");
+  // On a phone or tablet the filters fold behind one line naming their values.
+  const compactFilters = useMediaQuery("(max-width: 1024px)");
+  const [compactFiltersOpen, setCompactFiltersOpen] = useState(false);
+  const filtersOpen = !compactFilters || compactFiltersOpen;
+  const filtersId = useId();
   const [page, setPage] = useState<InboxPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -455,12 +471,13 @@ export function InboxScreen() {
   // A bounded scan can find nothing to show yet still leave older entries.
   const nothingShown = nothingLoaded && !page.next_cursor;
   const scanEmpty = nothingLoaded && Boolean(page.next_cursor);
-  const groupTitle = (label: string, count: number) => (
-    <h2 className="inbox-group-title">
-      {label}
-      <CountChip compact value={count} />
-    </h2>
-  );
+  // The list is named after the type it shows, as chosen in the Type filter.
+  const listLabel = t(`itemType.${itemType}`);
+  const filterSummary = [
+    scopes.find((option) => option.scope.key === activeScope.key)?.label,
+    t(`state.${state}`),
+    listLabel,
+  ].filter(Boolean).join(" · ");
 
   return (
     <div className="workspace-screen single-column">
@@ -472,53 +489,67 @@ export function InboxScreen() {
             <p className="feature-subtitle">{t("description")}</p>
           </div>
         </div>
-        <div className="inbox-controls">
-          <SegmentedControl
-            label={t("scope.label")}
-            onChange={(key) => {
-              if (key === "account") {
-                navigate("/inbox");
-              } else if (workspaceChoice) {
-                navigate(workspacePath(workspaceChoice.id, "inbox"));
-              }
-            }}
-            options={scopes.map((option) => ({
-              key: option.scope.key,
-              // The space keeps the accessible name "Workspace <title>".
-              label: option.detail ? (
-                <>
-                  {option.label}{" "}
-                  <span className="inbox-scope-detail">{option.detail}</span>
-                </>
-              ) : (
-                option.label
-              ),
-              title: option.detail,
-            }))}
-            value={activeScope.key}
-          />
-          <SegmentedControl
-            compact
-            label={t("state.label")}
-            onChange={setState}
-            options={[
-              { key: "all", label: t("state.all") },
-              { key: "unread", label: t("state.unread") },
-              { key: "archived", label: t("state.archived") },
-            ]}
-            value={state}
-          />
-          <SegmentedControl
-            compact
-            label={t("itemType.label")}
-            onChange={setItemType}
-            options={[
-              { key: "all", label: t("itemType.all") },
-              { key: "status", label: t("itemType.status") },
-              { key: "message", label: t("itemType.message") },
-            ]}
-            value={itemType}
-          />
+        <div className={`inbox-filters${compactFilters ? " is-compact" : ""}`}>
+          {compactFilters ? (
+            <button
+              aria-controls={filtersId}
+              aria-expanded={filtersOpen}
+              className="inbox-filter-toggle"
+              onClick={() => setCompactFiltersOpen((open) => !open)}
+              type="button"
+            >
+              {/* The space keeps the accessible name "Filters <summary>". */}
+              <span>{t("filters.title")}</span>{" "}
+              {filtersOpen ? null : <span className="inbox-filter-summary">{filterSummary}</span>}
+              <ChevronDown aria-hidden="true" data-open={filtersOpen} size={14} />
+            </button>
+          ) : null}
+          <div className="inbox-controls" hidden={!filtersOpen} id={filtersId}>
+            <InboxFilter
+              label={t("scope.label")}
+              onChange={(key) => {
+                if (key === "account") {
+                  navigate("/inbox");
+                } else if (workspaceChoice) {
+                  navigate(workspacePath(workspaceChoice.id, "inbox"));
+                }
+              }}
+              options={scopes.map((option) => ({
+                key: option.scope.key,
+                // The space keeps the accessible name "Workspace <title>".
+                label: option.detail ? (
+                  <>
+                    {option.label}{" "}
+                    <span className="inbox-scope-detail">{option.detail}</span>
+                  </>
+                ) : (
+                  option.label
+                ),
+                title: option.detail,
+              }))}
+              value={activeScope.key}
+            />
+            <InboxFilter
+              label={t("state.label")}
+              onChange={setState}
+              options={[
+                { key: "all", label: t("state.all") },
+                { key: "unread", label: t("state.unread") },
+                { key: "archived", label: t("state.archived") },
+              ]}
+              value={state}
+            />
+            <InboxFilter
+              label={t("itemType.label")}
+              onChange={setItemType}
+              options={[
+                { key: "all", label: t("itemType.all") },
+                { key: "status", label: t("itemType.status") },
+                { key: "message", label: t("itemType.message") },
+              ]}
+              value={itemType}
+            />
+          </div>
         </div>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
         {!page ? (
@@ -539,8 +570,11 @@ export function InboxScreen() {
             ) : null}
             {nothingShown ? <p className="empty-state">{t(`empty.${state}`)}</p> : null}
             {visibleItems.length > 0 ? (
-              <section className="feature-section inbox-group" aria-label={t("items.label")}>
-                {groupTitle(t("items.label"), visibleItems.length)}
+              <section className="feature-section inbox-group" aria-label={listLabel}>
+                <h2 className="inbox-group-title">
+                  {listLabel}
+                  <CountChip compact value={visibleItems.length} />
+                </h2>
                 {rows(visibleItems)}
               </section>
             ) : null}

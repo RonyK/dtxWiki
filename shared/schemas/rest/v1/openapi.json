@@ -10578,25 +10578,6 @@
         "title": "InboxMarkResponse",
         "type": "object"
       },
-      "InboxOverflowPayload": {
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "kind",
-          "total"
-        ],
-        "title": "InboxOverflowPayload",
-        "type": "object"
-      },
       "InboxPagePayload": {
         "additionalProperties": false,
         "properties": {
@@ -10624,18 +10605,10 @@
             },
             "title": "Status Items",
             "type": "array"
-          },
-          "status_overflow": {
-            "items": {
-              "$ref": "#/components/schemas/InboxOverflowPayload"
-            },
-            "title": "Status Overflow",
-            "type": "array"
           }
         },
         "required": [
           "status_items",
-          "status_overflow",
           "items",
           "next_cursor"
         ],

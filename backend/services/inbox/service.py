@@ -154,7 +154,7 @@ class InboxService:
                     raise ValueError(
                         "inbox source returned continuation without candidates"
                     )
-                return InboxPage(status_items, [], items, None)
+                return InboxPage(status_items, items, None)
             selected_rows = [
                 row for _, row in batch if not isinstance(row, InboxSnapshot)
             ]
@@ -185,7 +185,6 @@ class InboxService:
                         if len(status_items) + len(items) == limit:
                             return InboxPage(
                                 status_items,
-                                [],
                                 items,
                                 _encode_cursor(position, viewer, state, item_type),
                             )
@@ -198,12 +197,12 @@ class InboxService:
                 # Only an eligible following row requires another page.
                 position = at
             if not more:
-                return InboxPage(status_items, [], items, None)
+                return InboxPage(status_items, items, None)
             budget -= len(batch)
             if budget <= 0:
                 break
         return InboxPage(
-            status_items, [], items, _encode_cursor(position, viewer, state, item_type)
+            status_items, items, _encode_cursor(position, viewer, state, item_type)
         )
 
     def mark(

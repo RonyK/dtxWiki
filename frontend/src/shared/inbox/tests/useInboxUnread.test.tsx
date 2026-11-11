@@ -11,7 +11,7 @@ function UnreadProbe() {
 }
 
 function page(nextCursor: string | null): InboxPage {
-  return { items: [], status_items: [], status_overflow: [], next_cursor: nextCursor };
+  return { items: [], status_items: [], next_cursor: nextCursor };
 }
 
 describe("useInboxUnread", () => {

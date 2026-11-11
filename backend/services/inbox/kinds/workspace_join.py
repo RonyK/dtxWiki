@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.base import utc_now
@@ -120,9 +120,6 @@ class _JoinRequests:
         after: InboxPosition | None = None,
     ) -> ComputedScan:
         visible = self._visible(viewer)
-        total = session.scalar(
-            select(func.count()).select_from(WorkspaceJoinRequest).where(visible)
-        )
 
         def key_before(item_key: str):
             workspace_key, separator, request_key = item_key.partition(":")
@@ -152,7 +149,6 @@ class _JoinRequests:
         ).all()
         return ComputedScan(
             [_snapshot(request) for request in requests[:limit]],
-            total or 0,
             len(requests) > limit,
         )
 

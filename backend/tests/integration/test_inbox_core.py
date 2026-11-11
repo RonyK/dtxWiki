@@ -46,7 +46,7 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
             ordered = [
                 item for item in ordered if (item.event_at, kind, item.item_key) < after
             ]
-        return ComputedScan(ordered[:limit], len(found), len(ordered) > limit)
+        return ComputedScan(ordered[:limit], len(ordered) > limit)
 
     def lookup(_session, _viewer, keys):
         lookups.append(tuple(keys))

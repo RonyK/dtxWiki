@@ -11,7 +11,7 @@ not shown.
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.models.api_token import ApiToken
@@ -77,9 +77,6 @@ class _ExpiringKeys:
     ) -> ComputedScan:
         now = utc_now()
         conditions = self._conditions(viewer, now)
-        total = session.scalar(
-            select(func.count()).select_from(ApiToken).where(*conditions)
-        )
         snapshots = []
         # Each stage is monotone in expires_at. Merge two bounded queries
         # rather than subtracting intervals in SQL, which loses subsecond
@@ -115,7 +112,7 @@ class _ExpiringKeys:
             ).all()
             snapshots.extend(self._snapshot(token, now) for token in tokens)
         snapshots.sort(key=lambda item: (item.event_at, item.item_key), reverse=True)
-        return ComputedScan(snapshots[:limit], total or 0, len(snapshots) > limit)
+        return ComputedScan(snapshots[:limit], len(snapshots) > limit)
 
     def lookup(
         self, session: Session, viewer: InboxViewer, item_keys: Sequence[str]

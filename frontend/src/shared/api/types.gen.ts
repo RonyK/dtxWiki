@@ -7391,13 +7391,6 @@ export interface components {
             data: components["schemas"]["InboxMarkPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
-        /** InboxOverflowPayload */
-        InboxOverflowPayload: {
-            /** Kind */
-            kind: string;
-            /** Total */
-            total: number;
-        };
         /** InboxPagePayload */
         InboxPagePayload: {
             /** Items */
@@ -7406,8 +7399,6 @@ export interface components {
             next_cursor: string | null;
             /** Status Items */
             status_items: components["schemas"]["InboxItemPayload"][];
-            /** Status Overflow */
-            status_overflow: components["schemas"]["InboxOverflowPayload"][];
         };
         /** InboxPageResponse */
         InboxPageResponse: {

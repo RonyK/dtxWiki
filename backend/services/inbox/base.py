@@ -52,8 +52,6 @@ class InboxSnapshot:
 @dataclass(frozen=True)
 class ComputedScan:
     items: Sequence[InboxSnapshot]
-    # Every item the source has for this viewer, not just the ones returned.
-    total: int
     has_more: bool = False
 
 
@@ -193,15 +191,8 @@ class InboxItem:
 
 
 @dataclass(frozen=True)
-class InboxOverflow:
-    kind: str
-    total: int
-
-
-@dataclass(frozen=True)
 class InboxPage:
     status_items: list[InboxItem]
-    status_overflow: list[InboxOverflow]
     items: list[InboxItem]
     next_cursor: str | None
 
