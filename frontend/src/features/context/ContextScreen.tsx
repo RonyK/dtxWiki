@@ -3051,6 +3051,11 @@ function ContextReader({
       {reviewNotice ? (
         <StatusBanner tone="info">{reviewNotice}</StatusBanner>
       ) : null}
+      {detail.block_map_stale ? (
+        <StatusBanner tone="warning">
+          {t("pages:editor.blockMapStaleWarning")}
+        </StatusBanner>
+      ) : null}
       {canEdit && nextReconciliationVersionId ? (
         <StatusBanner
           tone="warning"

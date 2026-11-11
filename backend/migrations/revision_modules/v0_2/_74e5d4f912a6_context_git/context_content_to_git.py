@@ -6,6 +6,7 @@ remain in SQL; only published snapshots acquire a separate exact Git copy.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -100,10 +101,33 @@ def _created_seconds(value) -> int:
     return int(stamp.astimezone(UTC).timestamp())
 
 
-def _write(repo, page_id: UUID, version_id: UUID, stamp, body: bytes, parents: list):
+def _metadata(block_map) -> bytes | None:
+    if block_map is None:
+        return None
+    if not isinstance(block_map, list) or any(
+        not isinstance(entry, dict) for entry in block_map
+    ):
+        raise RuntimeError("Context Git migration block map must be a list of objects")
+    return json.dumps(
+        {"schema_version": 1, "block_map": block_map},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _write(
+    repo, page_id: UUID, version_id: UUID, stamp, body: bytes, parents: list, block_map
+):
     content = repo.create_blob(body)
     page_tree = repo.TreeBuilder()
     page_tree.insert("content.md", content, pygit2.GIT_FILEMODE_BLOB)
+    metadata = _metadata(block_map)
+    if metadata is not None:
+        page_tree.insert(
+            "metadata.json", repo.create_blob(metadata), pygit2.GIT_FILEMODE_BLOB
+        )
     contexts = repo.TreeBuilder()
     contexts.insert(str(page_id), page_tree.write(), pygit2.GIT_FILEMODE_TREE)
     root = repo.TreeBuilder()
@@ -119,7 +143,9 @@ def _write(repo, page_id: UUID, version_id: UUID, stamp, body: bytes, parents: l
     )
 
 
-def _verify(repo, oid, page_id: UUID, version_id: UUID, stamp, body: bytes, parents):
+def _verify(
+    repo, oid, page_id: UUID, version_id: UUID, stamp, body: bytes, parents, block_map
+):
     commit = repo[oid]
     if not isinstance(commit, pygit2.Commit):
         raise RuntimeError("Context snapshot OID does not name a commit")
@@ -127,11 +153,23 @@ def _verify(repo, oid, page_id: UUID, version_id: UUID, stamp, body: bytes, pare
     context = repo[tree["context"].id]
     page = repo[context[str(page_id)].id]
     blob = repo[page["content.md"].id]
+    metadata = _metadata(block_map)
+    expected_files = {"content.md"}
+    if metadata is not None:
+        expected_files.add("metadata.json")
+        entry = page["metadata.json"]
+        archived = repo[entry.id]
+        if (
+            entry.filemode != pygit2.GIT_FILEMODE_BLOB
+            or not isinstance(archived, pygit2.Blob)
+            or archived.data != metadata
+        ):
+            raise RuntimeError("Context Git migration block map verification failed")
     signature = (_NAME, _EMAIL, _created_seconds(stamp), 0)
     if (
         len(tree) != 1
         or len(context) != 1
-        or len(page) != 1
+        or {entry.name for entry in page} != expected_files
         or page["content.md"].filemode != pygit2.GIT_FILEMODE_BLOB
         or not isinstance(blob, pygit2.Blob)
         or blob.data != body
@@ -196,14 +234,27 @@ def convert(connection: Connection, repositories_root: Path) -> None:
             version_id = _uuid(row["id"])
             body = row["body_md"].encode("utf-8")
             expected = _write(
-                repo, page_id, version_id, row["created_at"], body, parents
+                repo,
+                page_id,
+                version_id,
+                row["created_at"],
+                body,
+                parents,
+                row["block_map"],
             )
             if row["commit_oid"] is not None and row["commit_oid"] != str(expected):
                 raise RuntimeError(
                     "Context Git migration found an inconsistent existing OID"
                 )
             _verify(
-                repo, expected, page_id, version_id, row["created_at"], body, parents
+                repo,
+                expected,
+                page_id,
+                version_id,
+                row["created_at"],
+                body,
+                parents,
+                row["block_map"],
             )
             connection.execute(
                 versions.update()

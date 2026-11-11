@@ -1,6 +1,8 @@
 """One populated upgrade/downgrade/re-upgrade traversal per dialect."""
 
+import json
 import os
+from copy import deepcopy
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -13,11 +15,17 @@ from sqlalchemy.orm import Session
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
-from backend.context_versions.codecs import MarkdownCodec
 from backend.context_versions.domain import ContentPayload
-from backend.models.context import ContextPage
+from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.review import ReviewItem
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.context_lifecycle import is_publishable_draft
+from backend.tests.integration.test_context_review_publish import _seed_review
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
+from backend.utils.block_identity import (
+    compute_block_map_with_ids,
+    validated_block_map_for_version,
+)
 from backend.utils.content_hash import content_hash
 
 PARENT = "00ba02774c4a"
@@ -101,7 +109,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                     "earlier\r\n",
                     current_id,
                 ),
-                (editing_id, page_id, 3, "editing", "private work", current_id),
+                (editing_id, page_id, 3, "draft", "private work", current_id),
                 (other_id, other_page_id, 1, "published_snapshot", "other", None),
                 (
                     other_history_id,
@@ -112,10 +120,23 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                     other_id,
                 ),
                 (branch_id, other_page_id, 3, "draft", "branch work", other_history_id),
-                (draft_id, page_id, 4, "draft", "pending work", current_id),
+                (draft_id, page_id, 4, "draft", "pending work", editing_id),
                 (discarded_id, page_id, 5, "discarded", "discarded work", current_id),
             ]
+            initial_maps = {}
             for version_id, owner, number, status, content, parent in rows:
+                initial_map = deepcopy(block_map)
+                if version_id in (current_id, editing_id):
+                    initial_map = compute_block_map_with_ids(
+                        content,
+                        previous_body_md=None,
+                        previous_block_map=None,
+                        identity_seed=str(version_id),
+                    )
+                    initial_map[0]["lines"] += 1  # Legacy cache drift.
+                elif version_id in (other_id, draft_id, other_history_id):
+                    initial_map = None
+                initial_maps[version_id] = deepcopy(initial_map)
                 connection.execute(
                     versions.insert().values(
                         id=key(version_id),
@@ -124,7 +145,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                         version_no=number,
                         version_status=status,
                         body_md=content,
-                        block_map=block_map,
+                        block_map=initial_map,
                         parent_version_id=key(parent) if parent else None,
                         content_hash=content_hash(content),
                         graph_status="branched"
@@ -146,10 +167,23 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                     ContextPage.__table__.update()
                     .where(ContextPage.id == owner)
                     .values(
-                        current_version_id=published,
+                        current_version_id=draft_id if owner == page_id else published,
+                        latest_draft_version_id=draft_id if owner == page_id else None,
                         current_published_version_id=published,
                     )
                 )
+
+        with Session(engine) as session:
+            pending = _seed_review(
+                session, workspace_id, page_id, version_id=editing_id
+            )
+            pending_id = pending.id
+            session.commit()
+        with engine.connect() as connection:
+            before = {
+                UUID(str(row["id"])): row
+                for row in connection.execute(sa.select(versions)).mappings()
+            }
 
         # Same traversal: prove missing root is rejected before the new DDL.
         with pytest.raises(RuntimeError, match="absolute.*Config.attributes"):
@@ -184,7 +218,27 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
         assert converted[editing_id]["commit_oid"] is None
         for version_id, _owner, _number, _status, content, parent in rows:
             row = converted[version_id]
-            assert row["body_md"] == content and row["block_map"] == block_map
+            assert row["body_md"] == content
+            if version_id in (current_id, other_id, editing_id, draft_id):
+                assert (
+                    validated_block_map_for_version(row["block_map"], content)
+                    == row["block_map"]
+                )
+                if initial_maps[version_id] is not None:
+                    assert [entry["id"] for entry in row["block_map"]] == [
+                        entry["id"] for entry in initial_maps[version_id]
+                    ]
+            else:
+                assert row["block_map"] == initial_maps[version_id]
+            for field in (
+                "body_md",
+                "content_hash",
+                "last_saved_at",
+                "created_at",
+                "version_status",
+                "graph_status",
+            ):
+                assert row[field] == before[version_id][field]
             assert (
                 UUID(str(row["parent_version_id"]))
                 if row["parent_version_id"]
@@ -205,6 +259,20 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                 blob = repo[commit.tree["context"].id]
                 blob = repo[blob[str(_owner)].id]
                 assert repo[blob["content.md"].id].data == content.encode("utf-8")
+                if row["block_map"] is not None:
+                    assert json.loads(repo[blob["metadata.json"].id].data) == {
+                        "schema_version": 1,
+                        "block_map": row["block_map"],
+                    }
+                else:
+                    assert "metadata.json" not in blob
+        with Session(engine) as session:
+            assert session.get(ReviewItem, pending_id).status == "pending"
+            assert is_publishable_draft(
+                session,
+                session.get(ContextPage, page_id),
+                session.get(ContextPageVersion, editing_id),
+            )
 
         runtime = GitSnapshotStore(tmp_path / "runtime-repositories")
         runtime_historical = runtime.commit(
@@ -212,7 +280,9 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
             page_id=page_id,
             version_id=historical_id,
             created_at=now,
-            payload=MarkdownCodec().encode("earlier\r\n"),
+            payload=ContentPayload(
+                b"earlier\r\n", block_map=converted[historical_id]["block_map"]
+            ),
             parents=[],
         )
         assert runtime_historical == historical_oid
@@ -222,7 +292,9 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                 page_id=page_id,
                 version_id=current_id,
                 created_at=now,
-                payload=MarkdownCodec().encode(body),
+                payload=ContentPayload(
+                    body.encode("utf-8"), block_map=converted[current_id]["block_map"]
+                ),
                 parents=[runtime_historical],
             )
             == current_oid
@@ -256,7 +328,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
             }
         assert all(
             preserved[item]["body_md"] == converted[item]["body_md"]
-            and preserved[item]["block_map"] == block_map
+            and preserved[item]["block_map"] == converted[item]["block_map"]
             for item in converted
         )
         command.upgrade(config, REVISION)
@@ -269,37 +341,6 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                 for row in connection.execute(sa.select(table)).mappings()
             }
         assert restored == {item: row["commit_oid"] for item, row in converted.items()}
-
-        # Mix new body+identity snapshots with the immutable content-only
-        # history created above. Only an exact archived map can release SQL.
-        snapshots = GitSnapshotStore(root)
-        archived_history_oid = snapshots.commit(
-            workspace_id=workspace_id,
-            page_id=other_page_id,
-            version_id=other_history_id,
-            created_at=now,
-            payload=ContentPayload(b"reconcile base", block_map=block_map),
-            parents=[],
-        )
-        archived_current_oid = snapshots.commit(
-            workspace_id=workspace_id,
-            page_id=other_page_id,
-            version_id=other_id,
-            created_at=now,
-            payload=ContentPayload(b"other", block_map=block_map),
-            parents=[archived_history_oid],
-        )
-        snapshots.set_head(workspace_id, other_page_id, archived_current_oid)
-        restored.update(
-            {other_history_id: archived_history_oid, other_id: archived_current_oid}
-        )
-        with engine.begin() as connection:
-            for version_id in (other_history_id, other_id):
-                connection.execute(
-                    table.update()
-                    .where(table.c.id == key(version_id))
-                    .values(commit_oid=restored[version_id])
-                )
 
         # The same populated traversal exercises the destructive second
         # revision. A corrupt SQL copy must abort before nullable DDL or body
@@ -328,7 +369,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
             )
             connection.execute(
                 table.update()
-                .where(table.c.id == key(other_history_id))
+                .where(table.c.id == key(historical_id))
                 .values(block_map=[{"id": "not-the-archived-identity", "kind": "p"}])
             )
         # A matching body cannot detect identity loss: this independent guard
@@ -343,7 +384,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
         with engine.begin() as connection:
             connection.execute(
                 table.update()
-                .where(table.c.id == key(other_history_id))
+                .where(table.c.id == key(historical_id))
                 .values(block_map=block_map)
             )
         command.upgrade(config, BODY_REVISION)
@@ -360,7 +401,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
 
         released = stored_versions()
         assert released[historical_id]["body_md"] is None
-        assert released[historical_id]["block_map"] == block_map
+        assert released[historical_id]["block_map"] is None
         assert released[other_history_id]["body_md"] is None
         assert released[other_history_id]["block_map"] is None
         with engine.connect() as connection:
@@ -368,7 +409,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
             # NULL so raw-column predicates observe the released map.
             assert connection.scalar(
                 sa.select(table.c.block_map.is_(None)).where(
-                    table.c.id == key(other_history_id)
+                    table.c.id == key(historical_id)
                 )
             )
         for item in (
@@ -380,7 +421,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
             discarded_id,
         ):
             assert released[item]["body_md"] == converted[item]["body_md"]
-            assert released[item]["block_map"] == block_map
+            assert released[item]["block_map"] == converted[item]["block_map"]
         assert {item: row["commit_oid"] for item, row in released.items()} == restored
         assert next(
             item
@@ -429,7 +470,7 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
             for item, original in converted.items()
         )
         assert hydrated[historical_id]["block_map"] == block_map
-        assert hydrated[other_history_id]["block_map"] == block_map
+        assert hydrated[other_history_id]["block_map"] is None
         assert not next(
             item
             for item in sa.inspect(engine).get_columns("context_page_version")
@@ -438,9 +479,10 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
         command.upgrade(config, BODY_REVISION)
         rereleased = stored_versions()
         assert rereleased[historical_id]["body_md"] is None
-        assert rereleased[historical_id]["block_map"] == block_map
+        assert rereleased[historical_id]["block_map"] is None
         assert rereleased[other_history_id]["block_map"] is None
         assert {item: row["commit_oid"] for item, row in rereleased.items()} == restored
+
     finally:
         if dialect == "postgresql":
             drop_reflected_postgres_metadata(engine)

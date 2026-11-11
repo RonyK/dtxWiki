@@ -245,6 +245,14 @@ def validated_block_map_for_version(
     return stored
 
 
+def block_map_is_stale(stored: object, body_md: str) -> bool:
+    """Inspect a saved map without inventing identities or changing storage."""
+
+    return not isinstance(stored, list) or not _valid_previous_map(
+        stored, compute_blocks(body_md), require_cache_fields=True
+    )
+
+
 def heal_block_map(
     body_md: str,
     stored: list[dict] | None,
@@ -944,6 +952,14 @@ def _valid_previous_map(
     seen: set[str] = set()
     expected = serialize_blocks(old_blocks)
     for stored, content in zip(previous_block_map, expected, strict=True):
+        if not isinstance(stored, Mapping):
+            return False
+        rows = stored.get("rows")
+        if rows is not None and (
+            not isinstance(rows, list)
+            or any(not isinstance(row, Mapping) for row in rows)
+        ):
+            return False
         block_id = stored.get("id")
         if not isinstance(block_id, str) or not block_id or block_id in seen:
             return False

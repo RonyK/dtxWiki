@@ -90,6 +90,7 @@ TOOL_CONTRACT_DIGESTS = {
     27: "9d725068d7ba",
     28: "fa9da086e872",
     29: "bf0185b2915d",
+    30: "6ec173af647d",
 }
 
 
@@ -310,8 +311,7 @@ def test_both_http_mcp_modes_publish_the_same_server_version(page_service):
     # And the SDK really puts it in serverInfo, rather than substituting the
     # `mcp` package version for a falsy one.
     assert (
-        json_stateless_server.create_initialization_options().server_version
-        == expected
+        json_stateless_server.create_initialization_options().server_version == expected
     )
 
 

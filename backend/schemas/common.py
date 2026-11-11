@@ -230,7 +230,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  29 -- cite registers explicit document references on the caller's editing
 #        version (draft-write, CAS and idempotency). Reads/fetch expose separate
 #        references. The former claim-based candidate input is rejected.
-MCP_TOOL_CONTRACT_REVISION = 29
+#  30 -- begin_context_edit adds block_map_stale for missing or stale editing
+#        metadata; a whole-body save rebuilds it. Refresh cached tool catalogs
+#        and result schemas.
+MCP_TOOL_CONTRACT_REVISION = 30
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

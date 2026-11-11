@@ -43,6 +43,7 @@ function detail(overrides: Partial<ContextPageDetail> = {}): ContextPageDetail {
     is_public: false,
     updated_at: "2026-05-09T00:00:00Z",
     workspace_id: "workspace-1",
+    block_map_stale: false,
     body_markdown: null,
     version_info: null,
     tree_path: [],

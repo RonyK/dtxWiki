@@ -27,6 +27,15 @@
   maps for legacy content-only snapshots; release a map only after verifying its
   exact Git copy. Back up DB, Library and Git
   together: losing `repositories/` loses the historical bodies.
+- Normalize block maps during upgrade for the current published version and
+  approvable drafts in its live linear chain. Preserve matching block IDs and
+  leave historical snapshots and reconciliation manifests unchanged.
+- Warn when a restored version has a missing or stale block map. An explicit
+  whole-body Save rebuilds the map even when the text is unchanged, keeping
+  matching IDs. Approval undo also exposes this warning on the restored page.
+- Add the optional `block_map_stale` result field in tool contract revision 30.
+  MCP clients should refresh `tools/list` and save the whole body when this
+  advisory is true; existing clients can ignore the additive field.
 - Add `dtxwiki backup` to create the existing verified SQLite checkpoint without
   upgrading. Pause only running managed services and restore those services
   after releasing the runtime lock, including on backup failure.

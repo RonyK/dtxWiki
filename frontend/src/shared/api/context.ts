@@ -43,6 +43,7 @@ export type PendingReviewInfo = {
 
 export type ContextPageDetail = ContextPageSummary & {
   workspace_id: string;
+  block_map_stale: boolean;
   body_markdown: string | null;
   references?: ReferenceView[];
   references_hash?: string;
@@ -199,6 +200,7 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
     is_public: raw.is_public,
     updated_at: raw.updated_at,
     workspace_id: raw.workspace_id,
+    block_map_stale: raw.block_map_stale ?? false,
     body_markdown: raw.body_md,
     references: raw.references ?? [],
     references_hash: raw.references_hash,

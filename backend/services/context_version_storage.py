@@ -80,16 +80,6 @@ def prepare_publication(
             )
             if has_objects is not None:
                 raise ContextStorageServiceError("context_snapshot_invalid")
-        block_map = version.block_map
-        if block_map is None and version.commit_oid is None:
-            from backend.utils.block_identity import heal_block_map
-
-            block_map, _ = heal_block_map(
-                version.body_md, None, identity_seed=str(version.id)
-            )
-            # Keep preparation free of SQL writes: an autoflush here would
-            # advance last_saved_at before publication preserves it. Alignment
-            # restores the archived map into SQL with its timestamp intact.
         return writer.prepare_snapshot(
             workspace_id=page.workspace_id,
             page_id=page.id,
@@ -98,7 +88,7 @@ def prepare_publication(
             payload=ContentPayload(
                 data=version.body_md.encode("utf-8"),
                 descriptor=descriptor_for(version),
-                block_map=block_map,
+                block_map=version.block_map,
             ),
             parents=[previous.commit_oid]
             if previous is not None and previous.id != version.id

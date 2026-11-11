@@ -5965,6 +5965,12 @@
             "title": "Backlink Count",
             "type": "integer"
           },
+          "block_map_stale": {
+            "default": false,
+            "description": "Whether the stored block map is missing or differs from the body; a whole-body save rebuilds it.",
+            "title": "Block Map Stale",
+            "type": "boolean"
+          },
           "body_md": {
             "title": "Body Md",
             "type": "string"

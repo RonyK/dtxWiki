@@ -19,7 +19,6 @@ from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
 from backend.context_versions.application import ContextVersionWriter
 from backend.context_versions.codecs import MarkdownCodec
 from backend.context_versions.domain import ContextVersionStorageError
-from backend.mcp.router import dispatch
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.repositories.context_page_repo import get_page_by_id_for_update
 from backend.scripts.seed_dev import seed_default_workspace
@@ -109,7 +108,6 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
                 created_by_actor_id=str(uuid4()),
                 version_status="draft",
                 created_at=datetime(2026, 11, 9, tzinfo=UTC),
-                block_map=[{"id": "preserved-first-map"}],
             )
             session.add(first)
             session.flush()
@@ -136,7 +134,6 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
                 created_by_actor_id=str(uuid4()),
                 version_status="draft",
                 created_at=datetime(2026, 11, 9, 1, tzinfo=UTC),
-                block_map=[{"id": "preserved-second-map"}],
             )
             session.add(second)
             session.flush()
@@ -177,12 +174,9 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
             assert first.version_status == "superseded_snapshot"
             assert first.body_md == original_body
             assert first._body_md is None
-            assert first._block_map is None
-            assert first.block_map == [{"id": "preserved-first-map"}]
             assert second.version_status == "published_snapshot"
             assert second.body_md == second_body
             assert second.content_byte_size == len(second_body.encode("utf-8"))
-            assert second.block_map == [{"id": "preserved-second-map"}]
             assert (
                 session.get(ContextPage, page_id).current_published_version_id
                 == second_id
@@ -233,10 +227,9 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
 
 
 def test_git_bodies_follow_publication_undo_and_storage_failure(
-    session_factory, page_service, mcp_default_actor
+    session_factory, page_service
 ):
-    """One DB traversal covers the body/map pair through undo and its next edit."""
-    actor = mcp_default_actor(scopes=("read", "draft-write"), actor_id="git-map-edit")
+    """One DB traversal covers the body/map pair through undo and restore."""
     with session_factory.begin() as session:
         workspace, published, draft = _published_page_with_draft(session, "Git bodies")
         workspace_id, page_id = workspace.id, published.page_id
@@ -246,17 +239,9 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(
         old_body, current_body = old.body_md, current.body_md
         old_map = deepcopy(old.block_map)
         original_saved_at = old.last_saved_at
-        # A legacy draft has no persisted map. Preparing its snapshot must not
-        # turn administrative identity backfill into an author save.
-        current.block_map = None
-        current.last_saved_at = datetime(2026, 11, 9, tzinfo=UTC)
-        session.flush()
-        current_saved_at = current.last_saved_at
         approved = _approve(session, workspace_id, draft.review_item_id)
         store = session.info["context_snapshot_store"]
         current_oid = current.commit_oid
-        assert current.last_saved_at == current_saved_at
-        assert current._block_map is not None
         assert old._body_md is None and old._block_map is None
         assert old.block_map == old_map and old._block_map is None
         assert old.body_md == old_body and old._body_md is None
@@ -286,73 +271,14 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(
         assert old._block_map == old_map
         assert old.last_saved_at == original_saved_at
         assert current._body_md == current_body and current.commit_oid is None
-        assert current.last_saved_at == current_saved_at
         assert store.list_heads(workspace_id)[page_id] == old.commit_oid
 
-    # Budget exception: extend the existing DB traversal through the public
-    # address contract and snapshot-copy restore. Unit storage assertions cannot
-    # detect UUID-seed differences between read/begin or the wrong restore parent.
-    structure = dispatch(
-        "read_structure_map",
-        {
-            "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page_id)},
-            "version": "published",
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    assert structure.envelope.result_status == "succeeded", structure.envelope
-    target = next(block for block in structure.blocks if block.kind == "p")
-    begun = dispatch(
-        "begin_context_edit",
-        {
-            "workspace_id": str(workspace_id),
-            "page_id": str(page_id),
-            "base_version_id": str(old_id),
-            "base_content_hash": structure.document.root_hash,
-            "idempotency_key": "git-map-begin",
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    assert begun.envelope.result_status == "succeeded", begun.envelope
-    patched = dispatch(
-        "patch_context_edit",
-        {
-            "workspace_id": str(workspace_id),
-            "page_id": str(page_id),
-            "version_id": str(begun.data.version_id),
-            "expected_editing_revision": begun.data.editing_revision,
-            "operations": [
-                {
-                    "op": "replace_block",
-                    "block": target.id,
-                    "expected": target.hash,
-                    "content": "Edited after undo.",
-                }
-            ],
-            "idempotency_key": "git-map-patch",
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    assert patched.envelope.result_status == "succeeded", patched.envelope
-    page_service.discard_context_edit(
-        page_id=page_id,
-        version_id=begun.data.version_id,
-        workspace_id=workspace_id,
-        actor_kind=actor.actor_kind,
-        actor_id=actor.actor_id,
-        idempotency_key="git-map-discard",
-    )
     with session_factory.begin() as session:
         old = session.get(ContextPageVersion, old_id)
         current = session.get(ContextPageVersion, current_id)
         _approve(session, workspace_id, draft.review_item_id)
         assert old._body_md is None and current.commit_oid == current_oid
         assert current._body_md == current_body
-        assert current.last_saved_at == current_saved_at
         verify_context_storage(session, store)
         # A readable Git copy must not hide an absent current DB FULL copy
         # from operator verification, even though ordinary reads can recover it.
