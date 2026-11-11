@@ -42,6 +42,36 @@
 - Show the backup path, creation time, version change and loss of writes since
   the checkpoint before rollback, including `--dry-run` and `--yes`.
 
+## 0.2.4 — 2026-11-11
+
+Beta update improving Context graph navigation, history layout, and shared
+creation and confirmation controls. Installation and package metadata now
+target 0.2.4.
+
+### Context graph
+
+- Keep the static graph on the document's current direct relationships while
+  the interactive graph explores history or a wider neighborhood. Explain its
+  scope and report missing relationships using the static graph's own coverage.
+- Stabilize history layout as documents appear and disappear. Remember pins
+  outside the current frame and fix arriving pinned nodes once they settle,
+  with visible pending and pinning states and an announcement when fixed.
+- Add graph aspect-ratio controls and compact mode labels. Keep Details below
+  the canvas on narrow screens, preserve list and Details navigation, and let
+  Details popovers extend beyond short frames.
+
+### Shared interface controls
+
+- Share creation dialogs across Context, Library, and Agent, including mobile
+  and global Create actions. Preserve explorer width and visibility when
+  switching between reading and editing, and seed new Agent drafts with their
+  title.
+- Standardize action buttons and confirmation dialogs across editing, review,
+  account, and workspace settings. Keep confirmations open while work is in
+  progress and show failures in the dialog.
+- Keep Library batch-upload progress, retries, and failures visible after the
+  file picker closes.
+
 ### Release maintenance
 
 - Read the release version from `pyproject.toml` and synchronize package
@@ -57,6 +87,11 @@
   artifacts.
 - Restore the published 0.1.4 release notes and correct their attribution,
   preserving historical schema boundaries.
+- Use the same frontend validation gate locally and in CI, and update GitHub
+  Actions to their Node.js 24 runtime while retaining Node.js 22.18.0 for the
+  project toolchain.
+- Match the installed-wheel browser smoke check to the current Settings save
+  button so it can enable workspace experiments before checking the graph.
 
 ## 0.2.3 — 2026-11-07
 
