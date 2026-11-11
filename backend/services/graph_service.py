@@ -108,11 +108,13 @@ _DENOMINATOR_STATEMENT_LIMIT = 256
 _PARTITION_STATEMENTS: dict[tuple, Any] = {}
 _TREE_CHAIN_PREDICATES: dict[tuple, Any] = {}
 # The kinds whose rank divides by a count taken over the source page.
+# A page that contains sub-documents also owns their tree rows (TreeRail).
 _PAGE_DENOMINATOR_KINDS = (
     "wikilink",
     "citation_page",
     "citation_source",
     "citation_agent",
+    "tree",
 )
 
 
@@ -950,7 +952,7 @@ class GraphService:
             return result
         visible_target, visible_child = _denominator_visibility(workspace_id, actor)
         families = (
-            ("context_page", pages, _PAGE_DENOMINATOR_KINDS, visible_target),
+            ("context_page", pages, _PAGE_DENOMINATOR_KINDS, visible_child),
             (tree_kind, folders, ("tree",), visible_child),
         )
         # A source the grouped count left out has more stored relations than
@@ -982,6 +984,7 @@ class GraphService:
                         ("citation_page", "citation_source", "citation_agent"),
                         True,
                     ),
+                    ("tree", ("tree",), False),
                 )
             )
             for offset in range(0, len(large), RANK_DENOMINATOR_CAPPED_BATCH_SIZE):
@@ -1056,7 +1059,7 @@ class GraphService:
                     "context_page",
                     page_chunks,
                     _PAGE_DENOMINATOR_KINDS,
-                    visible_target,
+                    visible_child,
                 ),
                 (
                     "folder",
@@ -2139,11 +2142,12 @@ class GraphService:
         )
         if not parents:
             return []
+        # A folder or, for a sub-document, the parent document itself.
         folder = parents[0]
         siblings = self.neighbors(
             session,
             workspace_id,
-            kind=EntityKind.WORKSPACE_TREE_NODE.value,
+            kind=folder.kind,
             entity_id=folder.id,
             actor=actor,
             edge_kinds=("tree",),

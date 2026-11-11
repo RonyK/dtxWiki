@@ -5,7 +5,8 @@ import {
   workspaceMapCommunityIdentityKey,
   type WorkspaceMapCommunityOutcome,
 } from "../map/communityJob";
-import { WORKSPACE_MAP_NODE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
+import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, workspaceMapContainedDocumentCounts,
+  type WorkspaceMapColumns } from "../map/sceneColumns";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
 import { readGraphTokens } from "../shared/graphTokens";
 import { GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, outlinePathData, shapeOutline } from "../shared/nodeShapes";
@@ -17,22 +18,17 @@ import {
   buildCosmosRelationColors, buildCosmosSceneBuffers, buildWorkspacePointImages, incidentStar,
   isReadableWorkspaceMapScene, type CosmosSceneBuffers,
 } from "./cosmosScene";
-import { buildWorkspaceRelationCollisionBasis, buildWorkspaceRelationForceConfig, type WorkspaceRelationCollisionBasis } from "./relationPhysics";
+import { buildWorkspaceRelationCollisionBasis, type WorkspaceRelationCollisionBasis } from "./relationPhysics";
 import { detectWorkspaceMapWebGL } from "./webglSupport";
 import { createInitialWorkspaceCamera, type InitialWorkspaceCamera } from "./initialCamera";
-import { workspaceInitialCameraPolicy } from "./initialCameraPolicy";
 import { createWorkspaceNativeCoordinateSpace, WORKSPACE_MAP_CANONICAL_SPACE_SIZE } from "./nativeCoordinateSpace";
-import { buildWorkspaceForceAtlas2Units, isReusableWorkspaceForceAtlas2Units, isReusableWorkspaceForceAtlas2ContactUnits, type WorkspaceForceAtlas2Units } from "./forceAtlas2Units";
-import { createWorkspaceForceAtlas2WorkerLayout, type WorkspaceForceAtlas2WorkerLayout } from "./forceAtlas2WorkerLayout";
-import { isWorkspaceForceAtlas2Progress, type WorkspaceForceAtlas2Progress } from "./forceAtlas2Phases";
+import { createWorkspaceLayoutSolver, type WorkspacePositionLayout, type WorkspacePositionUnitBasis } from "./layoutSolver";
 import { placeWorkspaceMapLabels } from "./labelPlacement";
-import { buildWorkspaceNativeCollisionRadii } from "./nativeCollisionRadii";
-import { buildWorkspaceNativeCanonicalForceConfig } from "./nativeForceProfile";
 import { createWorkspaceNativePointPicker } from "./nativePointPicker";
 import { createWorkspaceTrackedPositions } from "./gpuTrackedPositions";
 
 /** Layout progress is separate from GPU readiness and never promises convergence. */
-export type WorkspaceMapLayoutStatus = "arranging" | "spacing" | "live" | "paused" | "motion-off";
+export type WorkspaceMapLayoutStatus = "arranging" | "live" | "paused" | "motion-off";
 
 export type WorkspaceCosmosCallbacks = {
   onHover(id: string | null): void;
@@ -44,7 +40,7 @@ export type WorkspaceCosmosCallbacks = {
   onContextStatus?(status: "lost" | "restored"): void;
   /** One-shot late GPU failure; host retires this scene and uses the list. */
   onRuntimeError?(error: unknown): void;
-  /** Change-only, scene-owned state; contact handoff alone is not spacing completion. */
+  /** Change-only lifecycle state for the current visible scene. */
   onLayoutStatusChange?(status: WorkspaceMapLayoutStatus | null, identity: GraphVisibleIdentity): void;
 };
 
@@ -83,12 +79,10 @@ export type WorkspaceMapCoordinateSnapshot = {
   collisionBasis?: WorkspaceRelationCollisionBasis;
   /** Force units are independent of the accepted worker's collision clearance. */
   forceBasis?: WorkspaceRelationCollisionBasis;
-  /** Immutable, same-visible-scene FA2 units across a palette renderer remount. */
-  forceAtlas2Units?: WorkspaceForceAtlas2Units;
-  /** Same-scene CPU phase only; not persisted and never reused across authority. */
-  forceAtlas2Progress?: WorkspaceForceAtlas2Progress;
-  /** Separate, once-calibrated contact reference; never a camera-derived update. */
-  forceAtlas2ContactUnits?: WorkspaceForceAtlas2Units;
+  /** Only accepted solved rows may skip cold D3 startup on a same-scene remount. */
+  layoutReady?: boolean;
+  /** Immutable CSS-to-world collision reference belonging to these solved rows. */
+  unitBasis?: WorkspacePositionUnitBasis;
 };
 
 export interface WorkspaceCosmosAdapter {
@@ -98,20 +92,20 @@ export interface WorkspaceCosmosAdapter {
   fit(): void;
   focus(id: string | null): void;
   getViewport(): GraphViewport | null;
-  pin(id: string, pinned: boolean, position?: GraphPoint): GraphPoint | null;
+  pin(id: string, pinned: boolean, position?: GraphPoint, intent?: { reconcile?: boolean }): GraphPoint | null;
   /** Explicit navigation only; host ownership is checked again at paint time. */
   revealAfterLayout(id: string, signal: AbortSignal, isCurrent: () => boolean, onFinished?: () => void): void;
   replaceColumns(columns: WorkspaceMapColumns): void;
   reset(): void;
   resize(): void;
-  resumeLayout(): void;
+  resumeLayout(reheat?: boolean): void;
   select(id: string | null): void;
   setEdgesVisible(enabled: boolean): void;
   setLabelsVisible(enabled: boolean): void;
   setReducedMotion(enabled: boolean): void;
   setSearchMatches(ids: ReadonlySet<string> | null): void;
   setViewport(viewport: GraphViewport): void;
-  stopLayout(): void;
+  stopLayout(preserveInitialFit?: boolean): void;
   whenSettled(): Promise<void>;
   zoomBy(factor: number): void;
 }
@@ -134,6 +128,8 @@ const LABEL_HEARTBEAT_MS = 200;
 const LABEL_MOTION_EPSILON_PX = 0.5;
 /** Titles fade in and out instead of popping, unless motion is reduced. */
 const LABEL_FADE_MS = 120;
+/** Overview label slots reserved for the TreeRail folders holding the most documents. */
+const MAJOR_FOLDER_LABELS = 8;
 /** A camera gesture without zoom events this long no longer holds titles. */
 const LABEL_GESTURE_LAPSE_MS = 1_000;
 /** GPU rows reach titles a few simulation steps late; titles look this far ahead at most. */
@@ -159,8 +155,8 @@ function restoredCoordinates(
 ): Float32Array | null {
   const snapshotBudget = snapshot?.budget ?? WORKSPACE_MAP_DEFAULT_BUDGET;
   if (!snapshot || snapshotBudget.documents !== budget.documents || snapshotBudget.relations !== budget.relations
-    || !isWorkspaceMapWithinBudget({ nodeCount: snapshot.columns.nodeIds.length, edgeCount: snapshot.columns.edgeIds.length }, budget)
-    || !isWorkspaceMapWithinBudget({ nodeCount: columns.nodeIds.length, edgeCount: columns.edgeIds.length }, budget)
+    || !isWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(snapshot.columns), budget)
+    || !isWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(columns), budget)
     || !sameGraphVisibleIdentity(columns.identity, snapshot.columns.identity)
     || !sameWorkspaceMapIndexedGeometry(columns, snapshot.columns)
     || !(snapshot.positions instanceof Float32Array)
@@ -179,7 +175,8 @@ export function createWorkspaceCosmosAdapter(
   options: WorkspaceCosmosOptions,
 ): WorkspaceCosmosAdapter {
   const budget = { ...(options.budget ?? WORKSPACE_MAP_DEFAULT_BUDGET) };
-  assertWorkspaceMapWithinBudget({ nodeCount: initialColumns.nodeIds.length, edgeCount: initialColumns.edgeIds.length }, budget);
+  const solver = createWorkspaceLayoutSolver(budget);
+  assertWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(initialColumns), budget);
   const support = detectWorkspaceMapWebGL();
   if (!support.supported) throw new WorkspaceMapWebGLError(support.reason);
   const mode = options.forcedColors ? "forced"
@@ -188,12 +185,20 @@ export function createWorkspaceCosmosAdapter(
   const interactionInk = options.forcedColors ? tokens.node.context
     : mode === "dark" ? "#f8fafc" : "#0f172a";
   let columns = initialColumns;
-  let sparseScene = columns.edgeIds.length <= 1_000;
-  let readableScene = isReadableWorkspaceMapScene(columns.nodeIds.length, columns.edgeIds.length, budget);
+  let admittedFor: WorkspaceMapColumns | null = null;
+  let admittedValue = { nodeCount: 0, edgeCount: 0 };
+  // Budget and scale decisions count documents and relations, not TreeRail structure.
+  const admitted = () => {
+    if (admittedFor !== columns) { admittedFor = columns; admittedValue = workspaceMapAdmissionCounts(columns); }
+    return admittedValue;
+  };
+  let sparseScene = admitted().edgeCount <= 1_000;
+  let readableScene = isReadableWorkspaceMapScene(admitted().nodeCount, admitted().edgeCount, budget);
   // The explicit renderer budget bounds forces as well as drawing. This is
-  // not a target-hardware performance qualification. Folders remain metadata.
-  const canAnimateLayout = () => canAnimateWorkspaceRelationLayout(columns.nodeIds.length, budget);
+  // not a target-hardware performance qualification. Folders exert no force.
+  const canAnimateLayout = () => canAnimateWorkspaceRelationLayout(admitted().nodeCount, budget);
   let buffers = buildCosmosSceneBuffers(columns, tokens, budget, { forcedColors: options.forcedColors });
+  buffers.positions = solver.initialPositions(columns, buffers.positions);
   // Canonical worker/public/snapshot units never depend on GPU capability.
   // Resolve this SDK-only conversion before the first coordinate upload.
   let nativeSpace = createWorkspaceNativeCoordinateSpace(WORKSPACE_MAP_CANONICAL_SPACE_SIZE * 2);
@@ -215,21 +220,9 @@ export function createWorkspaceCosmosAdapter(
   let collisionBasisApplied = false;
   let calibrationViewport: { width: number; height: number } | null = null;
   let preservesSessionCoordinates = initialCoordinates !== null;
-  const restoredUnits = options.initialCoordinates?.forceAtlas2Units;
-  let forceAtlas2Units: WorkspaceForceAtlas2Units | null = usesCpuLayout() && initialCoordinates
-    && isReusableWorkspaceForceAtlas2Units(restoredUnits, columns.nodeIds.length)
-    ? restoredUnits : null;
-  let cpuProgress = usesCpuLayout() && initialCoordinates && forceAtlas2Units
-    && isWorkspaceForceAtlas2Progress(options.initialCoordinates?.forceAtlas2Progress)
-    ? options.initialCoordinates.forceAtlas2Progress : undefined;
-  let cpuContactUnits = usesCpuLayout() && initialCoordinates && forceAtlas2Units
-    && cpuProgress?.phase === "contact"
-    && isReusableWorkspaceForceAtlas2ContactUnits(options.initialCoordinates?.forceAtlas2ContactUnits, forceAtlas2Units)
-    ? options.initialCoordinates.forceAtlas2ContactUnits : undefined;
-  // A legacy/partial snapshot cannot restore half of a contact checkpoint.
-  // Keep its actor-checked visible rows, but restart untrusted phase metadata
-  // together instead of synthesizing a contact reference or failing the view.
-  if (cpuProgress?.phase === "contact" && !cpuContactUnits) cpuProgress = undefined;
+  let layoutPhase = "arranging";
+  let positionLayoutReady = initialCoordinates !== null && options.initialCoordinates?.layoutReady === true;
+  let positionUnitBasis = initialCoordinates ? options.initialCoordinates?.unitBasis : undefined;
   let nodeById = new Map(columns.nodeIds.map((id, index) => [id, index]));
   let edgeById = new Map(columns.edgeIds.map((id, index) => [id, index]));
   let destroyed = false;
@@ -267,6 +260,8 @@ export function createWorkspaceCosmosAdapter(
   let cameraInteractedBeforeFit = false;
   let fitAfterCommunity = !preservesSessionCoordinates && !validViewport(options.initialViewport);
   let firstFitCompleted = false;
+  let publishedPositionFitPending = solver.shouldFitPublishedRows(preservesSessionCoordinates || validViewport(options.initialViewport));
+  let publishedPositionFitFrame: number | null = null;
   let communityTerminal = false;
   let pendingReveal: { id: string; signal: AbortSignal; isCurrent: () => boolean; identityKey: string; onFinished?: () => void } | null = null;
   let revealFrame: number | null = null;
@@ -333,9 +328,9 @@ export function createWorkspaceCosmosAdapter(
   // an upload in its own frame instead of waiting for that read.
   let uploadedRows: Float32Array | null = null;
   let initialCamera: InitialWorkspaceCamera | null = null;
-  let cpuLayout: WorkspaceForceAtlas2WorkerLayout | null = null;
-  let cpuLayoutEpoch = 0;
-  let cpuLayoutTicks = 0;
+  let positionLayout: WorkspacePositionLayout | null = null;
+  let positionLayoutEpoch = 0;
+  let positionLayoutTicks = 0;
   let publishedLayoutStatus: { status: WorkspaceMapLayoutStatus | null; identity: GraphVisibleIdentity } | null = null;
 
   function baseLinkDistanceRange(): [number, number] {
@@ -351,18 +346,23 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function keepOverviewContext(): boolean {
-    return columns.nodeIds.length > 1_000 && readableScene;
+    return admitted().nodeCount > 1_000 && readableScene;
   }
 
-  function shouldRunRelationPhysics(): boolean {
+  function canInitializeRelationPhysics(): boolean {
     return !destroyed && !contextLost && !simulationFailed && firstFitCompleted && collisionBasisApplied
       // Display the fallback without animating arbitrary ID-order geometry.
       // A restored session already owns its coordinates; a failed/timed-out
       // worker may explicitly release the fallback instead of waiting forever.
       && (preservesSessionCoordinates || appliedCommunity !== null || communityTerminal)
+      && canAnimateLayout();
+  }
+
+  function shouldRunRelationPhysics(): boolean {
+    return canInitializeRelationPhysics()
       // A Worker is not throttled with the hidden page's RAF. Stop its CPU
       // loop explicitly without changing the existing native PC lifecycle.
-      && (!usesCpuLayout() || document.visibilityState !== "hidden")
+      && solver.permitsVisibility(document.visibilityState === "hidden")
       && !paused && !reducedMotion && canAnimateLayout();
   }
 
@@ -375,7 +375,7 @@ export function createWorkspaceCosmosAdapter(
     // A settled PC map has no running forces to adopt a released body. Wake
     // that real edit once; pin restoration, no-op echoes and live alpha stay
     // untouched. The normal permission gate still owns pause/motion/lifecycle.
-    if (released && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents
+    if (released && admitted().nodeCount > WORKSPACE_MAP_DEFAULT_BUDGET.documents
       && !graph.isSimulationRunning) reheatRelationPhysics(.15);
   }
 
@@ -396,34 +396,14 @@ export function createWorkspaceCosmosAdapter(
         width, height);
     }
     if (!collisionBasis) return false;
-    if (usesCpuLayout() && !forceAtlas2Units) {
-      // Native draw/pick/selection use the same point-size shader. Resolve its
-      // diameter at canonical Fit, not the user's camera or DPR backing size.
-      const initial = buildWorkspaceForceAtlas2Units({ positions: collisionSeed,
-        diametersCss: buffers.pointSizes, pointShapes: buffers.pointShapes,
-        origin: [2048, 2048], width, height });
-      const zoomFactor = Math.min(5, Math.max(1, initial.referenceZoom * .01));
-      const maxDiameterCss = maxPointDiameterCss();
-      forceAtlas2Units = buildWorkspaceForceAtlas2Units({ positions: collisionSeed,
-        diametersCss: Float32Array.from(buffers.pointSizes, size => Math.min(size * zoomFactor, maxDiameterCss)),
-        pointShapes: buffers.pointShapes, origin: [2048, 2048], width, height });
-    }
     // Only the first commit owns forces. A worker seed can replace provisional
     // fallback collision clearance, never gravity/charge/spring/rest distance.
     const nativeCollision = nativeSpace.toNativeCollisionBasis(collisionBasis);
-    const defaultNativeLargeScene = !usesCpuLayout()
-      && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents;
-    if (defaultNativeLargeScene) {
-      const radii = buildWorkspaceNativeCollisionRadii(buffers.pointSizes, buffers.pointShapes, collisionBasis, maxPointDiameterCss());
-      graph.setPointCollisionRadii(Float32Array.from(radii, radius => radius * nativeSpace.scale));
-    }
-    const forceConfig = forceBasisApplied || usesCpuLayout() ? {}
-      : defaultNativeLargeScene ? buildWorkspaceNativeCanonicalForceConfig(nativeSpace.scale)
-        : buildWorkspaceRelationForceConfig(nativeSpace.toNativeCollisionBasis(forceBasis));
-    graph.setConfigPartial({ ...forceConfig,
-      simulationCollision: usesCpuLayout() ? 0 : 1,
-      simulationCollisionRadius: defaultNativeLargeScene ? 0 : nativeCollision.radius,
-      simulationCollisionPadding: nativeCollision.padding });
+    const radii = solver.collisionRadii(buffers.pointSizes, buffers.pointShapes, collisionBasis,
+      maxPointDiameterCss(), nativeSpace.scale, admitted().nodeCount);
+    if (radii) graph.setPointCollisionRadii(radii);
+    graph.setConfigPartial(solver.collisionConfig(forceBasisApplied,
+      nativeSpace.toNativeCollisionBasis(forceBasis), nativeCollision, nativeSpace.scale, admitted().nodeCount));
     forceBasisApplied = true;
     collisionBasisApplied = true;
     return true;
@@ -480,14 +460,14 @@ export function createWorkspaceCosmosAdapter(
       initialCamera?.tick(alpha);
       // Expanded default-native PC maps retain upstream natural cooling.
       // Explicit Resume and moved drag/pin gestures still wake their forces.
-      if (alpha < 0.02 && columns.nodeIds.length <= WORKSPACE_MAP_DEFAULT_BUDGET.documents) reheatRelationPhysics(0.04);
+      if (alpha < 0.02 && admitted().nodeCount <= WORKSPACE_MAP_DEFAULT_BUDGET.documents) reheatRelationPhysics(0.04);
     },
     onDragStart(event) {
       draggedPoint = nativeHoveredIndex !== null && columns.nodeKeys[nativeHoveredIndex] && !destroyed && !contextLost
         && Number.isFinite(event.x) && Number.isFinite(event.y)
         ? { index: nativeHoveredIndex, nodeKey: columns.nodeKeys[nativeHoveredIndex], identityKey: workspaceMapCommunityIdentityKey(columns),
           startX: event.x, startY: event.y, moved: false } : null;
-      if (draggedPoint) { dragGesture = true; stopCpuLayout(); }
+      if (draggedPoint) { dragGesture = true; stopPositionLayout(); }
     },
     onDrag(event) {
       const drag = draggedPoint;
@@ -600,25 +580,27 @@ export function createWorkspaceCosmosAdapter(
     if (!drag || destroyed || contextLost || drag.identityKey !== workspaceMapCommunityIdentityKey(columns)
       || columns.nodeKeys[drag.index] !== drag.nodeKey) return;
     if (typeof event.sourceEvent?.type === "string" && event.sourceEvent.type.endsWith("cancel")) {
-      if (usesCpuLayout()) { reseedCpuLayoutFromNative(); syncRelationPhysics(.15); }
+      solver.afterPositionEdit(() => { synchronizeDraggedPositions(); syncRelationPhysics(.15); });
       return;
     }
     const moved = drag.moved || (Number.isFinite(event.x) && Number.isFinite(event.y)
       && Math.hypot(event.x - drag.startX, event.y - drag.startY) >= 1);
     if (!moved) {
-      if (usesCpuLayout()) syncRelationPhysics(.15);
+      solver.afterPositionEdit(() => syncRelationPhysics(.15));
       return; // A stationary tap is selection, never a saved pin or native reheat.
     }
     // Native Drag clears its owner before the callback; its last texture
     // update happens in a later RAF. Commit the final event position rather
     // than allowing a stale CPU frame or earlier GPU drag position to win.
-    if (usesCpuLayout()) {
+    let validDragCoordinates = true;
+    solver.afterPositionEdit(() => {
       const positions = readPositions();
       if (Number.isFinite(event.x) && Number.isFinite(event.y)) {
         const nativePoint = graph.screenToSpacePosition([event.x, event.y]);
         if (!nativePoint.every(Number.isFinite)) {
-          cpuLayout?.setPositions(positions, [...pinned]);
+          positionLayout?.setPositions(positions, [...pinned]);
           syncRelationPhysics(.15);
+          validDragCoordinates = false;
           return;
         }
         const point = nativeSpace.fromNativePoint(nativePoint);
@@ -627,9 +609,10 @@ export function createWorkspaceCosmosAdapter(
       buffers.positions = positions;
       writePositions(positions);
       graph.render(undefined, 0);
-    }
+    });
+    if (!validDragCoordinates) return;
     if (!options.callbacks.onPin) {
-      if (usesCpuLayout()) cpuLayout?.setPositions(buffers.positions, [...pinned]);
+      solver.synchronizePositionRows(positionLayout, buffers.positions, [...pinned]);
       reheatRelationPhysics(.15);
       return;
     }
@@ -637,21 +620,21 @@ export function createWorkspaceCosmosAdapter(
     // callback. Use the public pick captured at start, fenced to this scene.
     const index = drag.index;
     // One explicit readback per completed drag; never per frame or hover.
-    const positions = usesCpuLayout() ? buffers.positions : readPositions();
+    const positions = solver.positions(buffers.positions, readPositions);
     const position = { x: positions[index * 2], y: positions[index * 2 + 1] };
     if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return;
     pinned.add(index);
     pinOwners.set(index, columns.nodeIds[index]);
     for (const [id, owner] of retiredPinIds) if (owner === index) retiredPinIds.delete(id);
     graph.setPinnedPoints([...pinned]);
-    if (usesCpuLayout()) { cpuLayout?.setPositions(buffers.positions, [...pinned]); syncRelationPhysics(.15); }
-    else reheatRelationPhysics(0.15);
+    solver.afterPositionEdit(() => { positionLayout?.setPositions(buffers.positions, [...pinned]); syncRelationPhysics(.15); },
+      () => reheatRelationPhysics(.15));
     options.callbacks.onPin(columns.nodeIds[index], position);
   }
 
   function finishLabelDrag(last: typeof dragLabelPoint, event: Parameters<NonNullable<GraphConfig["onDragEnd"]>>[0]) {
     if (!ready || destroyed || contextLost) return;
-    if (last && !usesCpuLayout()) {
+    if (last) solver.afterNativePositionEdit(() => {
       // Reads issued during the drag predate the release, and Native Drag
       // writes its last row in the next frame. Keep the released pointer
       // position, then read after that write; CPU rows are committed above.
@@ -661,7 +644,7 @@ export function createWorkspaceCosmosAdapter(
       cacheLabelPoint(last.index, released?.every(Number.isFinite) ? nativeSpace.fromNativePoint(released) : last.point);
       forgetTrackedMotion(last.index);
       if (trackedPositions) requestAnimationFrame(() => queueTrackedRead(true));
-    }
+    });
     labelPublicationStale = true;
     updateLabels(undefined, true);
   }
@@ -681,7 +664,7 @@ export function createWorkspaceCosmosAdapter(
     deliveredTrackedRows = null;
     trackedVelocity = new Map();
     cachedLabelPositions = null;
-    uploadedRows = usesCpuLayout() ? null : positions.slice();
+    uploadedRows = solver.uploadedRows(positions);
     graph.setPointPositions(nativeSpace.toNativePositions(positions));
     queueTrackedRead(true);
   }
@@ -765,22 +748,12 @@ export function createWorkspaceCosmosAdapter(
     return frameNativePoint(frame, [(minX + maxX) / 2, (minY + maxY) / 2], nativeZoom, 0, simulate);
   }
 
-  function usesCpuLayout() {
-    // Default 2K uses the official CPU Worker; admitted PC maps use native GPU physics.
-    return budget.documents <= WORKSPACE_MAP_DEFAULT_BUDGET.documents
-      && columns.nodeIds.length > 0 && columns.nodeIds.length <= WORKSPACE_MAP_DEFAULT_BUDGET.documents;
-  }
-
   function publishLayoutStatus() {
     if (destroyed) return;
     let status: WorkspaceMapLayoutStatus | null = null;
-    if (ready && !contextLost && !simulationFailed && usesCpuLayout()
-      && document.visibilityState !== "hidden") {
-      status = reducedMotion ? "motion-off" : paused ? "paused"
-        : cpuProgress?.phase !== "contact" ? "arranging"
-        // The first contact checkpoint still contains structural rows. Only a
-        // later published iteration has passed the collision Worker and upload.
-        : cpuContactUnits && cpuProgress.iterations > cpuProgress.structureIterations ? "live" : "spacing";
+    if (ready && !contextLost && !simulationFailed && document.visibilityState !== "hidden") {
+      status = solver.layoutStatus(reducedMotion ? "motion-off" : paused ? "paused"
+        : layoutPhase === "arranging" ? "arranging" : "live");
     }
     if (publishedLayoutStatus?.status === status
       && sameGraphVisibleIdentity(publishedLayoutStatus.identity, columns.identity)) return;
@@ -789,171 +762,122 @@ export function createWorkspaceCosmosAdapter(
     options.callbacks.onLayoutStatusChange?.(status, identity);
   }
 
-  function retireCpuLayout() {
-    cpuLayoutEpoch++;
-    cpuLayout?.destroy();
-    cpuLayout = null;
-    if (usesCpuLayout()) container.dataset.mapLayoutRunning = "false";
+  function retirePositionLayout() {
+    positionLayoutEpoch++;
+    positionLayout?.destroy();
+    positionLayout = null;
+    container.dataset.mapLayoutRunning = "false";
     publishLayoutStatus();
   }
 
-  function stopCpuLayout() {
-    cpuLayout?.stop();
-    if (usesCpuLayout()) {
-      if (cpuLayout) {
-        publishCpuProgress(cpuLayout.getProgress());
-        const contactUnits = cpuLayout.getContactUnits();
-        if (contactUnits) publishCpuContactUnits(contactUnits);
-      }
-      container.dataset.mapLayoutRunning = "false";
-    }
-    publishLayoutStatus();
-  }
-
-  function publishCpuProgress(progress: WorkspaceForceAtlas2Progress) {
-    cpuProgress = progress;
-    container.dataset.mapLayoutPhase = progress.phase;
-    // These are accepted upstream iterations associated with published rows,
-    // not the RAF publication counter and not a promise of convergence.
-    container.dataset.mapLayoutIterations = String(progress.iterations);
-    container.dataset.mapLayoutStructureIterations = String(progress.structureIterations);
-    container.dataset.mapLayoutTransition = progress.transitionReason ?? "pending";
-    publishLayoutStatus();
-  }
-
-  function publishCpuContactUnits(units: WorkspaceForceAtlas2Units) {
-    if (!forceAtlas2Units || !isReusableWorkspaceForceAtlas2ContactUnits(units, forceAtlas2Units)) {
-      failRelationSimulation(new Error("Invalid scene-owned contact reference"));
-      return;
-    }
-    cpuContactUnits = units;
-    container.dataset.mapContactReferenceZoom = String(units.referenceZoom);
+  function stopPositionLayout() {
+    positionLayout?.stop();
+    container.dataset.mapLayoutRunning = "false";
     publishLayoutStatus();
   }
 
   function failRelationSimulation(error: unknown) {
     if (destroyed || simulationFailed) return;
     simulationFailed = true;
-    retireCpuLayout();
+    retirePositionLayout();
     initialCamera?.cancel(false); cancelReveal(); communityJob.cancel();
     pendingCommunity = null;
     container.dataset.mapPhysics = "failed";
     options.callbacks.onRuntimeError?.(error);
   }
 
-  function ensureCpuLayout() {
-    if (cpuLayout || !forceAtlas2Units) return;
-    const epoch = ++cpuLayoutEpoch;
+  function ensurePositionLayout() {
+    if (positionLayout || !columns.nodeIds.length || simulationFailed) return;
+    const epoch = ++positionLayoutEpoch;
     const identityKey = workspaceMapCommunityIdentityKey(columns);
     try {
-      cpuLayout = createWorkspaceForceAtlas2WorkerLayout({ positions: buffers.positions,
-        radii: Float32Array.from(forceAtlas2Units.collisionRadiusModel,
-          radius => radius * forceAtlas2Units!.rendererUnitsPerModelUnit),
-        sources: columns.edgeSources, targets: columns.edgeTargets, weights: columns.edgeWeights,
-        pins: [...pinned], origin: forceAtlas2Units.origin, progress: cpuProgress,
-        units: forceAtlas2Units, contactUnits: cpuContactUnits }, {
-        onContactUnits(units) {
-          if (epoch !== cpuLayoutEpoch || identityKey !== workspaceMapCommunityIdentityKey(columns)
-            || !ready || !shouldRunRelationPhysics() || draggedPoint || !usesCpuLayout()) return;
-          publishCpuContactUnits(units);
+      const canvas = container.querySelector<HTMLCanvasElement>("canvas");
+      if (!canvas || canvas.clientWidth <= 0 || canvas.clientHeight <= 0) return;
+      let acceptedFrame = false;
+      const availableFrame = uncoveredFrame();
+      const layoutViewport = availableFrame ? {
+        width: availableFrame.width - availableFrame.left - availableFrame.right,
+        height: availableFrame.height - availableFrame.top - availableFrame.bottom,
+      } : { width: canvas.clientWidth, height: canvas.clientHeight };
+      positionLayout = solver.createPositionLayout({ columns, positions: buffers.positions,
+        diameters: buffers.pointSizes, shapes: buffers.pointShapes,
+        pins: [...pinned], reducedMotion, restoredSolved: positionLayoutReady,
+        unitBasis: positionUnitBasis, viewport: layoutViewport,
+        maxDiameterCss: maxPointDiameterCss() }, {
+        onUnitBasis(basis) {
+          if (epoch === positionLayoutEpoch && identityKey === workspaceMapCommunityIdentityKey(columns)
+            && !destroyed && !contextLost && !simulationFailed) positionUnitBasis = basis;
         },
         onPositions(positions) {
-          if (epoch !== cpuLayoutEpoch || identityKey !== workspaceMapCommunityIdentityKey(columns)
-            || !ready || !shouldRunRelationPhysics() || draggedPoint || !usesCpuLayout()) return;
+          if (epoch !== positionLayoutEpoch || identityKey !== workspaceMapCommunityIdentityKey(columns)
+            || !ready || destroyed || contextLost || simulationFailed || paused || draggedPoint
+            || document.visibilityState === "hidden" || positionLayoutReady && reducedMotion) return;
+          acceptedFrame = true;
+          const changed = positions.length !== buffers.positions.length
+            || positions.some((value, index) => value !== buffers.positions[index]);
           buffers.positions = positions;
-          container.dataset.mapLayoutTicks = String(++cpuLayoutTicks);
-          writePositions(positions);
-          graph.render(undefined, 0);
-          // Titles, ring and chip publish in the frame that draws these rows.
+          container.dataset.mapLayoutTicks = String(++positionLayoutTicks);
+          if (changed) { writePositions(positions); graph.render(undefined, 0); }
           updateLabels(undefined, true);
-          // Official FA2 has no cooling alpha. Camera ownership remains the
-          // existing bounded wall-time gate, independent of the solver.
-          initialCamera?.tick(1);
           scheduleReveal();
         },
-        onProgress(progress) {
-          if (epoch !== cpuLayoutEpoch || identityKey !== workspaceMapCommunityIdentityKey(columns)
-            || !ready || !shouldRunRelationPhysics() || draggedPoint || !usesCpuLayout()) return;
-          const finishedStructure = progress.phase === "contact" && cpuProgress?.phase !== "contact";
-          publishCpuProgress(progress);
-          // A host may synchronously pause/retire while receiving the semantic
-          // status callback. Such a callback cannot retain camera ownership.
-          if (epoch !== cpuLayoutEpoch || identityKey !== workspaceMapCommunityIdentityKey(columns)
-            || !ready || !shouldRunRelationPhysics() || draggedPoint || !usesCpuLayout()) return;
-          if (finishedStructure) initialCamera?.finishLayout();
+        onState(state) {
+          if (epoch !== positionLayoutEpoch || identityKey !== workspaceMapCommunityIdentityKey(columns)
+            || destroyed || contextLost || simulationFailed) return;
+          if (state.ready && acceptedFrame) positionLayoutReady = true;
+          layoutPhase = !state.ready ? "arranging" : state.phase === "cooled" ? "cooled" : "live";
+          container.dataset.mapLayoutPhase = layoutPhase;
+          container.dataset.mapLayoutRunning = String(state.running);
+          publishLayoutStatus();
+          schedulePublishedPositionFit();
+          scheduleReveal();
         },
         onError(error) {
-          if (epoch === cpuLayoutEpoch && identityKey === workspaceMapCommunityIdentityKey(columns)) {
+          if (epoch === positionLayoutEpoch && identityKey === workspaceMapCommunityIdentityKey(columns)) {
             failRelationSimulation(error);
           }
         },
       });
-      publishCpuProgress(cpuLayout.getProgress());
     } catch (error) { failRelationSimulation(error); }
   }
 
-  function reseedCpuLayoutFromNative() {
-    if (!usesCpuLayout() || !ready || destroyed || contextLost) return;
+  function synchronizeDraggedPositions() {
+    if (!ready || destroyed || contextLost) return;
     buffers.positions = readPositions(); // explicit drag/pin handoff only
-    cpuLayout?.setPositions(buffers.positions, [...pinned]);
+    solver.synchronizePositionRows(positionLayout, buffers.positions, [...pinned]);
   }
 
-  function syncRelationPhysics(alpha: number) {
-    if (!ready || destroyed || contextLost) { stopCpuLayout(); return; }
-    const permitted = shouldRunRelationPhysics();
-    graph.setConfigPartial({ enableSimulation: permitted && !usesCpuLayout() });
-    if (!usesCpuLayout()) {
-      if (permitted) graph.start(alpha);
-      else graph.pause();
-      publishLayoutStatus();
-      return;
-    }
-    graph.pause(); // GPU drawing/picking/drag remain enabled; GPU forces do not.
-    if (!permitted || draggedPoint) { stopCpuLayout(); return; }
-    ensureCpuLayout();
-    if (!simulationFailed && shouldRunRelationPhysics() && !draggedPoint
-      && cpuLayout && !cpuLayout.isRunning()) cpuLayout.start();
-    container.dataset.mapLayoutRunning = String(cpuLayout?.isRunning() ?? false);
+  function syncRelationPhysics(alpha: number, reheat = false) {
+    if (!ready || destroyed || contextLost || simulationFailed) { stopPositionLayout(); return; }
+    const running = solver.syncPhysics({ permitted: shouldRunRelationPhysics(), paused, reducedMotion,
+      hidden: document.visibilityState === "hidden", dragging: draggedPoint !== null, alpha,
+      canInitialize: canInitializeRelationPhysics(), reheat }, {
+      enableNative: enabled => graph.setConfigPartial({ enableSimulation: enabled }),
+      startNative: amount => graph.start(amount), pauseNative: () => graph.pause(),
+      ensureLayout: () => { ensurePositionLayout(); return positionLayout; }, stopLayout: stopPositionLayout,
+    });
+    container.dataset.mapLayoutRunning = String(running);
     publishLayoutStatus();
   }
 
   function attachRelationSimulation() {
-    retireCpuLayout();
-    container.dataset.mapPhysics = usesCpuLayout() ? "force-atlas2-worker" : "cosmos-native";
-    if (usesCpuLayout()) {
-      cpuLayoutTicks = 0;
-      container.dataset.mapLayoutRunning = "false";
-      container.dataset.mapLayoutTicks = "0";
-      if (cpuContactUnits) publishCpuContactUnits(cpuContactUnits);
-      else delete container.dataset.mapContactReferenceZoom;
-      if (cpuProgress) publishCpuProgress(cpuProgress);
-      else {
-        container.dataset.mapLayoutPhase = "structure";
-        container.dataset.mapLayoutIterations = "0";
-        container.dataset.mapLayoutStructureIterations = "0";
-        container.dataset.mapLayoutTransition = "pending";
-      }
-    } else {
-      delete container.dataset.mapLayoutRunning;
-      delete container.dataset.mapLayoutTicks;
-      delete container.dataset.mapLayoutPhase;
-      delete container.dataset.mapLayoutIterations;
-      delete container.dataset.mapLayoutStructureIterations;
-      delete container.dataset.mapLayoutTransition;
-      delete container.dataset.mapContactReferenceZoom;
-    }
+    retirePositionLayout();
+    layoutPhase = "arranging";
+    positionLayoutTicks = 0;
+    for (const key of ["mapPhysics", "mapLayoutRunning", "mapLayoutTicks", "mapLayoutPhase"]) delete container.dataset[key];
+    Object.assign(container.dataset, solver.initialDiagnostics());
   }
   attachRelationSimulation();
 
   // One camera per visible scene. `restored` is a camera or coordinates that the
   // caller already owns; scale and layout owner are read when the camera is armed.
   function createSceneCamera(restored: boolean): InitialWorkspaceCamera {
-    const policy = workspaceInitialCameraPolicy(columns.nodeIds.length, budget, usesCpuLayout());
+    const policy = solver.cameraPolicy(admitted().nodeCount);
     return createInitialWorkspaceCamera({
       framingPolicy: policy.framingPolicy,
       terminalFit: policy.terminalFit,
       eligible: !restored && !paused && !reducedMotion && canAnimateLayout()
-        && (!usesCpuLayout() || document.visibilityState !== "hidden")
+        && solver.permitsVisibility(document.visibilityState === "hidden")
         && policy.enabled,
       canFrame: () => {
         const canvas = container.querySelector<HTMLCanvasElement>("canvas");
@@ -963,7 +887,7 @@ export function createWorkspaceCosmosAdapter(
           && scheduledCommunityFit === null && !fitReferencePending
           && document.visibilityState !== "hidden" && Boolean(canvas && canvas.clientWidth > 0 && canvas.clientHeight > 0);
       },
-      readPositions: () => usesCpuLayout() ? buffers.positions.slice() : readPositions(),
+      readPositions: () => solver.positions(buffers.positions, readPositions).slice(),
       applyFit: (positions, enableSimulation) => {
         fitReferencePending = true;
         if (fitUncovered(positions, enableSimulation)) return;
@@ -983,7 +907,7 @@ export function createWorkspaceCosmosAdapter(
   // Only a PC native map above 2K contracts for ~8 s after it is shown and frames
   // itself while it does; 2K and the diagnostic physics keep their own camera.
   function framesNativePcScene(): boolean {
-    return workspaceInitialCameraPolicy(columns.nodeIds.length, budget, usesCpuLayout()).terminalFit !== undefined;
+    return solver.cameraPolicy(admitted().nodeCount).terminalFit !== undefined;
   }
 
   // Every new visible scene of such a map, not only the mount, gets a fresh camera
@@ -993,6 +917,9 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function retireInitialFitIntent() {
+    publishedPositionFitPending = false;
+    if (publishedPositionFitFrame !== null) cancelAnimationFrame(publishedPositionFitFrame);
+    publishedPositionFitFrame = null;
     initialCamera?.cancel();
     fitAfterCommunity = false;
     scheduledCommunityFit = null;
@@ -1002,7 +929,7 @@ export function createWorkspaceCosmosAdapter(
   // renderer before the first fit. That restores state; it is not the user taking
   // the camera, so it must not end the framing of a PC scene. Later changes do.
   function retireForPresentation() {
-    if (!firstFitCompleted && framesNativePcScene()) return;
+    if (!firstFitCompleted && (framesNativePcScene() || !solver.hasUsablePositionRows(positionLayoutReady))) return;
     retireInitialFitIntent();
   }
 
@@ -1024,16 +951,19 @@ export function createWorkspaceCosmosAdapter(
   const onVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
       trackedPositions?.invalidate();
-      retireInitialFitIntent();
-      if (usesCpuLayout()) stopCpuLayout();
+      // A hidden initial scene still owns its first solved Fit when shown.
+      if (publishedPositionFitPending) initialCamera?.cancel(); else retireInitialFitIntent();
+      solver.afterPositionEdit(stopPositionLayout);
     } else if (trackedPositions) {
       // A read the hidden page invalidated is never re-requested otherwise.
       queueTrackedRead(true);
-    } else if (usesCpuLayout()) {
+    } else {
       // Start from the last published coordinates and fixed pins. Visibility
       // restores permission only; it never re-arms automatic camera framing.
-      syncRelationPhysics(.15);
+      solver.afterPositionEdit(() => syncRelationPhysics(.15));
     }
+    schedulePublishedPositionFit();
+    scheduleReveal();
   };
   document.addEventListener("visibilitychange", onVisibilityChange);
 
@@ -1045,15 +975,34 @@ export function createWorkspaceCosmosAdapter(
     previous?.onFinished?.();
   }
 
+  function schedulePublishedPositionFit() {
+    const eligible = () => publishedPositionFitPending && positionLayoutReady && ready && firstFitCompleted
+      && !destroyed && !contextLost && !simulationFailed && !paused && !draggedPoint && !pendingReveal
+      && document.visibilityState !== "hidden";
+    if (!eligible() || publishedPositionFitFrame !== null) return;
+    const canvas = container.querySelector<HTMLCanvasElement>("canvas");
+    if (!canvas || canvas.clientWidth <= 0 || canvas.clientHeight <= 0) return;
+    publishedPositionFitFrame = requestAnimationFrame(() => {
+      publishedPositionFitFrame = null;
+      if (!eligible()) return;
+      publishedPositionFitPending = false;
+      fitAfterCommunity = false;
+      fitReferencePending = true;
+      initialCamera?.fitInitial(buffers.positions.slice());
+      captureFitZoom();
+    });
+  }
+
   function scheduleReveal() {
     const pending = pendingReveal;
-    if (!pending || pending.signal.aborted || destroyed || contextLost) { cancelReveal(); return; }
-    if (!ready || !firstFitCompleted || paused || (!appliedCommunity && !communityTerminal)
+    if (!pending || pending.signal.aborted || destroyed || contextLost || simulationFailed) { cancelReveal(); return; }
+    if (!ready || !firstFitCompleted || paused || document.visibilityState === "hidden"
+      || !solver.hasUsablePositionRows(positionLayoutReady) || (!appliedCommunity && !communityTerminal)
       || revealFrame !== null) return;
     revealFrame = requestAnimationFrame(() => {
       revealFrame = null;
       if (pendingReveal !== pending) return;
-      if (paused) return;
+      if (paused || document.visibilityState === "hidden" || !solver.hasUsablePositionRows(positionLayoutReady)) return;
       if (pending.signal.aborted || destroyed || contextLost
         || pending.identityKey !== workspaceMapCommunityIdentityKey(columns) || !pending.isCurrent()) {
         cancelReveal(); return;
@@ -1066,6 +1015,7 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function scheduleCommunityFit(outcome: Extract<WorkspaceMapCommunityOutcome, { kind: "complete" }>, positions: Float32Array) {
+    if (!solver.acceptsCommunityPositions()) return;
     if (firstFitCompleted && fitAfterCommunity && scheduledCommunityFit !== outcome) {
       scheduledCommunityFit = outcome;
       requestAnimationFrame(() => {
@@ -1087,7 +1037,7 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function applyCommunity(outcome: Extract<WorkspaceMapCommunityOutcome, { kind: "complete" }>) {
-    if (!ready || !dataCommitted || destroyed || contextLost
+    if (!ready || !dataCommitted || destroyed || contextLost || simulationFailed
       || outcome.identityKey !== workspaceMapCommunityIdentityKey(columns)) return;
     // Initial pre-ready static layout may initialize; an explicit post-ready
     // pause freezes coordinates and camera, not just the native force flag.
@@ -1098,13 +1048,14 @@ export function createWorkspaceCosmosAdapter(
       scheduleCommunityFit(outcome, buffers.positions);
       return;
     }
-    if (preservesSessionCoordinates) {
+    if (preservesSessionCoordinates || !solver.acceptsCommunityPositions()) {
       // A palette/context renderer replacement is not a new layout request.
       // Deterministic starting positions must not replace the user's scene.
       appliedCommunity = outcome;
       container.dataset.mapCommunityLayoutStatus = "applied";
       applyHighlight();
       graph.render(undefined, 0);
+      solver.afterPositionEdit(() => syncRelationPhysics(.35));
       scheduleReveal();
       return;
     }
@@ -1114,11 +1065,7 @@ export function createWorkspaceCosmosAdapter(
     collisionSeed = outcome.initialPositions.slice();
     collisionBasis = null;
     collisionBasisApplied = false;
-    forceAtlas2Units = null;
-    cpuProgress = undefined;
-    cpuContactUnits = undefined;
-    delete container.dataset.mapContactReferenceZoom;
-    retireCpuLayout();
+    retirePositionLayout();
     initializeRelationCollision();
     const nextPositions = outcome.initialPositions.slice();
     if (pinned.size) {
@@ -1149,7 +1096,7 @@ export function createWorkspaceCosmosAdapter(
     communityJob.cancel();
     delete container.dataset.mapCommunityCount;
     container.dataset.mapCommunityLayoutStatus = "pending";
-    void communityJob.compute(nextColumns).then((outcome) => {
+    void communityJob.compute(nextColumns, { generation: solver.communityGeneration() }).then((outcome) => {
       if (destroyed || contextLost || outcome.identityKey !== workspaceMapCommunityIdentityKey(columns)) return;
       if (outcome.kind !== "complete") {
         if (outcome.kind === "error" || outcome.kind === "timeout") {
@@ -1269,21 +1216,21 @@ export function createWorkspaceCosmosAdapter(
       graph.setPointImageIndices(next.pointImageIndices);
       graph.setPointImageSizes(next.pointImageSizes);
     }
-    // Draw and pick the emphasised sizes; layout, FA2 units and collision keep reading pointSizes.
+    // Draw and pick the emphasised sizes; layout and collision keep reading pointSizes.
     graph.setPointSizes(next.drawPointSizes);
     graph.setLinks(next.links);
     graph.setLinkStrength(next.linkStrength);
     graph.setLinkColors(next.linkColors);
     graph.setLinkStyles(next.linkStyles);
     graph.render(undefined, 0);
-    if (!usesCpuLayout() && columns.nodeIds.length > WORKSPACE_MAP_DEFAULT_BUDGET.documents) {
+    solver.attachLargePointPicker(admitted().nodeCount, () => {
       graph.attachPointPicker(createWorkspaceNativePointPicker(next.drawPointSizes, next.pointShapes, failRelationSimulation));
       nativePointPickerAttached = true;
-    }
+    });
     // Titles track their GPU rows in every GPU-laid-out scene, whatever its
     // size: at most 42 rows are read, and never synchronously. CPU rows are
     // already in JS.
-    if (!usesCpuLayout()) {
+    solver.attachPositionTracking(() => {
       const getFrame = graph.getTrackedPointPositionsFrame.bind(graph);
       const owner = workspaceMapCommunityIdentityKey(columns);
       trackedPositions = createWorkspaceTrackedPositions({
@@ -1302,7 +1249,7 @@ export function createWorkspaceCosmosAdapter(
         },
         onError: failRelationSimulation,
       });
-    }
+    });
   }
 
   function detachNativePointPicker() {
@@ -1311,11 +1258,19 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function resetLabelCandidates() {
-    rankedLabelIndices = Array.from({ length: columns.nodeIds.length }, (_, index) => index)
-      .filter((index) => columns.nodeKinds[index] !== 3)
-      .sort((left, right) => columns.nodeSizes[right] - columns.nodeSizes[left]
-        || (columns.nodeKeys[left] < columns.nodeKeys[right] ? -1 : columns.nodeKeys[left] > columns.nodeKeys[right] ? 1 : 0))
-      .slice(0, 40);
+    const byKey = (left: number, right: number) =>
+      columns.nodeKeys[left] < columns.nodeKeys[right] ? -1 : columns.nodeKeys[left] > columns.nodeKeys[right] ? 1 : 0;
+    const rows = Array.from({ length: columns.nodeIds.length }, (_, index) => index);
+    // Major folders name the map's regions first: the TreeRail hubs holding
+    // the most documents, except one that holds every document.
+    const contained = workspaceMapContainedDocumentCounts(columns), documents = admitted().nodeCount;
+    const folders = rows.filter((index) => columns.nodeKinds[index] === WORKSPACE_MAP_NODE_KIND.folder
+      && contained[index] > 0 && contained[index] < documents)
+      .sort((left, right) => contained[right] - contained[left] || byKey(left, right))
+      .slice(0, MAJOR_FOLDER_LABELS);
+    rankedLabelIndices = [...folders, ...rows.filter((index) => columns.nodeKinds[index] !== WORKSPACE_MAP_NODE_KIND.folder)
+      .sort((left, right) => columns.nodeSizes[right] - columns.nodeSizes[left] || byKey(left, right))
+      .slice(0, 40 - folders.length)];
     syncLabelCandidates(true);
   }
 
@@ -1463,6 +1418,9 @@ export function createWorkspaceCosmosAdapter(
       label.textContent = text;
       label.dataset.fullTitle = String(full);
       label.dataset.labelPriority = priorityKind;
+      const folder = node !== undefined && columns.nodeKinds[node] === WORKSPACE_MAP_NODE_KIND.folder;
+      label.dataset.labelKind = folder ? "folder" : "document";
+      label.style.fontWeight = folder ? "600" : "";
       const nodeId = node === undefined ? "" : columns.nodeIds[node];
       // A reused slot must not publish the previous node's GPU coordinates
       // while its new identity waits for the bounded tracking refresh. A slot
@@ -1487,7 +1445,7 @@ export function createWorkspaceCosmosAdapter(
       || (!showLabels && hoveredIndex === null && hoveredEdge === null && activeIndex() === null)) return;
     // Rows already in JS cost no read: the CPU layout's published frame, or
     // the scene an initial camera Fit has just read. Every call publishes them.
-    const knownPositions = positions ?? (usesCpuLayout() ? buffers.positions : undefined);
+    const knownPositions = positions ?? solver.knownPositions(buffers.positions);
     // GPU rows are never read synchronously: a caller asking for fresh rows
     // gets one asynchronous read after this task; the last rows publish now.
     if (!reprojectOnly && !knownPositions) queueTrackedRead(true);
@@ -1495,13 +1453,13 @@ export function createWorkspaceCosmosAdapter(
       [index, [knownPositions[index * 2], knownPositions[index * 2 + 1]] as [number, number]])) : null;
     const tracked = known ?? cachedLabelPositions;
     if (!tracked && !uploadedRows) return;
-    if (known && !usesCpuLayout()) {
+    if (known) solver.afterNativePositionEdit(() => {
       // An initial camera Fit read these rows at the step on screen; camera
       // motion reprojects them without another GPU read.
       cachedLabelPositions = known;
       uploadedRows = null; // a read newer than the last upload
       cachedRowsStep = simulationStep;
-    }
+    });
     updateHoverChip();
     if (!showLabels) return;
     const drag = dragLabelPoint;
@@ -1767,7 +1725,7 @@ export function createWorkspaceCosmosAdapter(
   function trackedPoint(index: number): [number, number] | undefined {
     const drag = dragLabelPoint;
     const position: [number, number] | undefined = drag !== null && drag.index === index ? drag.point
-      : usesCpuLayout() ? [buffers.positions[index * 2], buffers.positions[index * 2 + 1]]
+      : solver.knownPositions(buffers.positions) ? [buffers.positions[index * 2], buffers.positions[index * 2 + 1]]
         : gpuLabelRow(index, cachedLabelPositions);
     return position && Number.isFinite(position[0]) && Number.isFinite(position[1]) ? position : undefined;
   }
@@ -1907,7 +1865,7 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function getViewport(): GraphViewport | null {
-    if (!ready || destroyed || contextLost) return null;
+    if (!ready || destroyed || contextLost || simulationFailed) return null;
     const canvas = container.querySelector<HTMLCanvasElement>("canvas");
     if (!canvas || canvas.clientWidth <= 0 || canvas.clientHeight <= 0) return null;
     // Cosmos stores integer native client dimensions. A fractional CSS rect
@@ -1919,7 +1877,7 @@ export function createWorkspaceCosmosAdapter(
   }
 
   function setViewport(viewport: GraphViewport) {
-    if (!validViewport(viewport) || destroyed) return;
+    if (!validViewport(viewport) || destroyed || simulationFailed) return;
     // An explicit/saved camera owns its intent even before native ready. A
     // later community hint may initialize coordinates, never refit this view.
     retireInitialFitIntent();
@@ -1939,7 +1897,7 @@ export function createWorkspaceCosmosAdapter(
     clearHover();
     detachNativePointPicker();
     trackedPositions?.destroy(); trackedPositions = null;
-    retireCpuLayout();
+    retirePositionLayout();
     cachedLabelPositions = null;
     initialCamera?.cancel(false);
     cancelReveal();
@@ -2013,15 +1971,16 @@ export function createWorkspaceCosmosAdapter(
     syncRelationPhysics(.35);
     applyHighlight();
     updateLabels();
+    schedulePublishedPositionFit();
     scheduleReveal();
   });
 
   function centerOn(id: string) {
-    if (!ready || destroyed || contextLost) return;
+    if (!ready || destroyed || contextLost || simulationFailed) return;
     const nodeIndex = nodeById.get(id);
     const edgeIndex = edgeById.get(id);
     if (nodeIndex === undefined && edgeIndex === undefined) return;
-    const positions = readPositions();
+    const positions = solver.positions(buffers.positions, readPositions);
     const source = nodeIndex ?? columns.edgeSources[edgeIndex!];
     const target = nodeIndex ?? columns.edgeTargets[edgeIndex!];
     const x = (positions[source * 2] + positions[target * 2]) / 2;
@@ -2042,10 +2001,10 @@ export function createWorkspaceCosmosAdapter(
 
   return {
     captureCoordinates() {
-      if (!ready || destroyed || contextLost
-        || !isWorkspaceMapWithinBudget({ nodeCount: columns.nodeIds.length, edgeCount: columns.edgeIds.length }, budget)) return null;
+      if (!ready || destroyed || contextLost || simulationFailed
+        || !isWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(columns), budget)) return null;
       try {
-        const positions = readPositions();
+        const positions = solver.positions(buffers.positions, readPositions).slice();
         if (positions.length !== columns.nodeIds.length * 2 || !positions.every(Number.isFinite)) return null;
         // The host owns one short-lived remount snapshot, never browser/server
         // storage. Copy identity and indexed columns so later caller mutation
@@ -2053,9 +2012,7 @@ export function createWorkspaceCosmosAdapter(
         return { budget: { ...budget }, positions,
           collisionBasis: collisionBasis ? { ...collisionBasis } : undefined,
           forceBasis: forceBasis ? { ...forceBasis } : undefined,
-          forceAtlas2Units: forceAtlas2Units ?? undefined,
-          forceAtlas2Progress: usesCpuLayout() ? cpuLayout?.getProgress() ?? cpuProgress : undefined,
-          forceAtlas2ContactUnits: usesCpuLayout() ? cpuLayout?.getContactUnits() ?? cpuContactUnits : undefined,
+          layoutReady: positionLayoutReady, unitBasis: positionUnitBasis,
           columns: { ...columns,
           identity: { ...columns.identity }, nodeIds: [...columns.nodeIds], nodeKeys: [...columns.nodeKeys],
           nodeLabels: [...columns.nodeLabels], nodeFolderKeys: [...columns.nodeFolderKeys],
@@ -2072,7 +2029,7 @@ export function createWorkspaceCosmosAdapter(
     centerOn,
     revealAfterLayout(id, signal, isCurrent, onFinished) {
       cancelReveal();
-      if (signal.aborted || destroyed || contextLost || !nodeById.has(id)) { onFinished?.(); return; }
+      if (signal.aborted || destroyed || contextLost || simulationFailed || !nodeById.has(id)) { onFinished?.(); return; }
       pendingReveal = { id, signal, isCurrent, identityKey: workspaceMapCommunityIdentityKey(columns), onFinished };
       scheduleReveal();
     },
@@ -2084,8 +2041,8 @@ export function createWorkspaceCosmosAdapter(
       container.removeEventListener("pointermove", onPointerMove);
       container.removeEventListener("pointerleave", onPointerLeave);
       container.removeEventListener("touchstart", onPointerLeave);
-      retireCpuLayout();
-      initialCamera?.cancel(false);
+      retirePositionLayout();
+      retireInitialFitIntent();
       cancelReveal();
       communityJob.destroy();
       draggedPoint = null; dragLabelPoint = null; dragGesture = false;
@@ -2113,6 +2070,7 @@ export function createWorkspaceCosmosAdapter(
       edgeById.clear();
     },
     fit() {
+      if (destroyed || simulationFailed) return;
       markCameraInteraction();
       if (ready && !destroyed && !contextLost) {
         fitReferencePending = true;
@@ -2121,30 +2079,36 @@ export function createWorkspaceCosmosAdapter(
       }
     },
     focus(id) {
+      if (destroyed || simulationFailed) return;
       if (id !== null && id !== focusedId) retireForPresentation();
       focusedId = id;
       applyHighlight();
     },
     getViewport,
-    pin(id, shouldPin, position) {
+    pin(id, shouldPin, position, intent) {
       const index = shouldPin ? nodeById.get(id) : retiredPinIds.get(id) ?? nodeById.get(id);
-      if (index === undefined || destroyed) return null;
-      if (shouldPin) retireInitialFitIntent();
+      if (index === undefined || destroyed || simulationFailed) return null;
+      const synchronizePins = () => {
+        if (intent?.reconcile) positionLayout?.setPositions(buffers.positions, [...pinned], { reheat: false });
+        else positionLayout?.setPositions(buffers.positions, [...pinned]);
+        syncRelationPhysics(.15);
+      };
+      if (shouldPin && !intent?.reconcile) retireInitialFitIntent();
       if (!shouldPin) {
         const released = pinned.delete(index);
         pinOwners.delete(index);
         for (const [ownerId, owner] of retiredPinIds) if (owner === index) retiredPinIds.delete(ownerId);
         if (ready && !contextLost) graph.setPinnedPoints([...pinned]);
-        if (usesCpuLayout()) { cpuLayout?.setPositions(buffers.positions, [...pinned]); syncRelationPhysics(.15); }
-        // Retired projection IDs are host reconciliation, not a new user edit.
-        else wakeReleasedNativePins(released && nodeById.get(id) === index);
+        solver.afterPositionEdit(synchronizePins,
+          // Retired projection IDs are host reconciliation, not a new user edit.
+          () => wakeReleasedNativePins(released && nodeById.get(id) === index));
         return null;
       }
       pinned.add(index);
       pinOwners.set(index, id);
       for (const [ownerId, owner] of retiredPinIds) if (owner === index) retiredPinIds.delete(ownerId);
       if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
-        const positions = ready && !contextLost ? readPositions() : buffers.positions.slice();
+        const positions = ready && !contextLost ? solver.positions(buffers.positions, readPositions).slice() : buffers.positions.slice();
         positions[index * 2] = position.x;
         positions[index * 2 + 1] = position.y;
         buffers.positions = positions;
@@ -2154,16 +2118,17 @@ export function createWorkspaceCosmosAdapter(
         }
       }
       if (ready && !contextLost) graph.setPinnedPoints([...pinned]);
-      if (usesCpuLayout()) { cpuLayout?.setPositions(buffers.positions, [...pinned]); syncRelationPhysics(.15); }
-      const positions = ready && !contextLost ? readPositions() : buffers.positions;
+      solver.afterPositionEdit(synchronizePins);
+      const positions = ready && !contextLost ? solver.positions(buffers.positions, readPositions) : buffers.positions;
       return { x: positions[index * 2], y: positions[index * 2 + 1] };
     },
     replaceColumns(nextColumns) {
-      if (destroyed) return;
-      assertWorkspaceMapWithinBudget({ nodeCount: nextColumns.nodeIds.length, edgeCount: nextColumns.edgeIds.length }, budget);
+      if (destroyed || simulationFailed) return;
+      assertWorkspaceMapWithinBudget(workspaceMapAdmissionCounts(nextColumns), budget);
       initialCamera?.cancel();
       const sameIdentity = sameGraphVisibleIdentity(columns.identity, nextColumns.identity);
       const next = buildCosmosSceneBuffers(nextColumns, tokens, budget, { forcedColors: options.forcedColors });
+      next.positions = solver.initialPositions(nextColumns, next.positions);
       const sameScope = columns.identity.actorId === nextColumns.identity.actorId
         && columns.identity.workspaceId === nextColumns.identity.workspaceId;
       if (sameIdentity && sameWorkspaceMapIndexedGeometry(columns, nextColumns)) {
@@ -2191,12 +2156,12 @@ export function createWorkspaceCosmosAdapter(
       forceBasisApplied = false;
       collisionBasis = null;
       collisionBasisApplied = false;
-      forceAtlas2Units = null;
-      cpuProgress = undefined;
-      cpuContactUnits = undefined;
+      positionLayoutReady = false;
+      positionUnitBasis = undefined;
+      publishedPositionFitPending = solver.shouldFitPublishedRows(sameIdentity);
       calibrationViewport = null;
       if (sameScope && ready && !contextLost && sameIdentity) {
-        const current = readPositions(); // one update-time readback only
+        const current = solver.positions(buffers.positions, readPositions); // native reads only at this update
         const oldIndex = new Map(columns.nodeKeys.map((key, index) => [key, index]));
         nextColumns.nodeKeys.forEach((key, index) => {
           const previous = oldIndex.get(key);
@@ -2211,8 +2176,8 @@ export function createWorkspaceCosmosAdapter(
       appliedCommunity = null;
       communityTerminal = false;
       columns = nextColumns;
-      sparseScene = columns.edgeIds.length <= 1_000;
-      readableScene = isReadableWorkspaceMapScene(columns.nodeIds.length, columns.edgeIds.length, budget);
+      sparseScene = admitted().edgeCount <= 1_000;
+      readableScene = isReadableWorkspaceMapScene(admitted().nodeCount, admitted().edgeCount, budget);
       buffers = next;
       nodeById = new Map(columns.nodeIds.map((id, index) => [id, index]));
       edgeById = new Map(columns.edgeIds.map((id, index) => [id, index]));
@@ -2256,7 +2221,7 @@ export function createWorkspaceCosmosAdapter(
       startCommunity(nextColumns);
     },
     reset() {
-      if (destroyed) return;
+      if (destroyed || simulationFailed) return;
       draggedPoint = null; dragLabelPoint = null; dragGesture = false;
       // Reset does not replace indexed geometry or SDK native hover. A later
       // same-index pick emits no MouseOver, so retain that public pick owner.
@@ -2270,14 +2235,15 @@ export function createWorkspaceCosmosAdapter(
       if (!ready || contextLost) return;
       markCameraInteraction();
       graph.setPinnedPoints([]);
-      if (usesCpuLayout()) { cpuLayout?.setPositions(buffers.positions, []); syncRelationPhysics(.15); }
-      else wakeReleasedNativePins(releasedPins);
+      solver.afterPositionEdit(() => { positionLayout?.setPositions(buffers.positions, []); syncRelationPhysics(.15); },
+        () => wakeReleasedNativePins(releasedPins));
       applyHighlight();
       fitReferencePending = true;
       if (!fitUncovered(null, false)) graph.fitView(0, FIT_PADDING, false);
       captureFitZoom();
     },
     resize() {
+      if (destroyed || simulationFailed) return;
       labelViewport = null;
       labelPublicationStale = true;
       if (ready && !destroyed && !contextLost) {
@@ -2286,9 +2252,11 @@ export function createWorkspaceCosmosAdapter(
           syncRelationPhysics(.35);
         }
         updateLabels(undefined, true);
+        schedulePublishedPositionFit();
       }
     },
-    resumeLayout() {
+    resumeLayout(reheat = true) {
+      if (destroyed || simulationFailed) return;
       paused = false;
       if (ready && !destroyed && !contextLost) {
         // Unpause alone cannot restart alpha=0 after stop/natural cooling.
@@ -2298,21 +2266,25 @@ export function createWorkspaceCosmosAdapter(
         // replaced by the deliberate reheat before any GPU frame can run.
         if (pendingCommunity) applyCommunity(pendingCommunity);
         scheduleReveal();
-        syncRelationPhysics(.15);
+        syncRelationPhysics(.15, reheat);
+        schedulePublishedPositionFit();
       }
     },
-    select(id) { if (id !== null && id !== selectedId) retireForPresentation(); selectedId = id; applyHighlight(); },
+    select(id) { if (destroyed || simulationFailed) return; if (id !== null && id !== selectedId) retireForPresentation(); selectedId = id; applyHighlight(); },
     setSearchMatches(ids) {
+      if (destroyed || simulationFailed) return;
       if (ids !== null) retireForPresentation();
       searchMatchedIds = ids === null ? null : new Set(ids);
       applyHighlight();
     },
     setEdgesVisible(enabled) {
+      if (destroyed || simulationFailed) return;
       showEdges = enabled;
       if (!enabled && hoveredEdge !== null) clearHover();
       if (ready && !destroyed && !contextLost) graph.setConfigPartial({ renderLinks: enabled });
     },
     setLabelsVisible(enabled) {
+      if (destroyed || simulationFailed) return;
       showLabels = enabled;
       labelPublicationStale = true;
       if (!enabled) trackedPositions?.invalidate();
@@ -2320,6 +2292,7 @@ export function createWorkspaceCosmosAdapter(
       if (enabled) updateLabels();
     },
     setReducedMotion(enabled) {
+      if (destroyed || simulationFailed) return;
       if (enabled) initialCamera?.cancel();
       reducedMotion = enabled;
       if (!ready || destroyed || contextLost) return;
@@ -2329,10 +2302,17 @@ export function createWorkspaceCosmosAdapter(
       syncRelationPhysics(.15);
     },
     setViewport,
-    stopLayout() { paused = true; initialCamera?.cancel(); stopCpuLayout(); if (ready && !destroyed && !contextLost) graph.pause(); },
+    stopLayout(preserveInitialFit = true) {
+      if (destroyed || simulationFailed) return;
+      paused = true;
+      initialCamera?.cancel();
+      if (!preserveInitialFit) solver.afterPositionEdit(retireInitialFitIntent);
+      stopPositionLayout();
+      if (ready && !destroyed && !contextLost) graph.pause();
+    },
     whenSettled() { return settle; },
     zoomBy(factor) {
-      if (!ready || destroyed || contextLost || !Number.isFinite(factor) || factor <= 0) return;
+      if (!ready || destroyed || contextLost || simulationFailed || !Number.isFinite(factor) || factor <= 0) return;
       markCameraInteraction();
       const current = canonicalZoom();
       const lower = Math.min(0.2, (initialFadeZoom || current) / 4, current);

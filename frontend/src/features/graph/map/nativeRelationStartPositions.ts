@@ -1,3 +1,5 @@
+import { boundedRelationWeight } from "../shared/physics/relationWeight";
+
 import {
   forceCenter,
   forceCollide,
@@ -120,7 +122,8 @@ function fitPositions(nodes: readonly LayoutNode[]): Float32Array {
 }
 
 /**
- * Worker-only, bounded full-document initial layout; never a live renderer.
+ * Native solver only: preserved bounded full-document warm start.
+ * The default D3 solver never requests this generation option.
  * Input endpoints index the caller's already actor-visible node catalog.
  * The caller retains the scalable fallback for >2K and all-isolate scenes.
  *
@@ -154,7 +157,7 @@ export function buildWorkspaceRelationStartPositions(
     .id((node) => node.id)
     .distance(LINK_DISTANCE)
     .strength((edge) => {
-      const gain = Math.min(16, 1 + Math.log2(edge.weight));
+      const gain = boundedRelationWeight(edge.weight);
       const minimumDegree = Math.min(degrees[edge.sourceIndex], degrees[edge.targetIndex]);
       return Math.min(1, gain / minimumDegree);
     });

@@ -9,7 +9,7 @@ SECURITY_HEADERS = {
     "content-security-policy": (
         "default-src 'self'; "
         "script-src 'self'; "
-        "worker-src 'self' blob:; "
+        "worker-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https:; "
         "font-src 'self' data:; "

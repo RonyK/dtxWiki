@@ -72,6 +72,7 @@ from backend.services.graph_rank import (
     round_robin_take,
 )
 from backend.services.graph_reference_projection import (
+    DOCUMENT_TREE_TARGET_KINDS,
     document_citation_identities,
     document_projection_for_workspace,
     select_document_edges_in_workspace,
@@ -966,7 +967,17 @@ class GraphQueryService:
                 for candidate in induced
                 if candidate.edge.edge_kind == "tree"
             }
-            for folder in folders:
+            folder_ids = {node.id for node in folders}
+            # Selected folders first, then selected parent documents.
+            containers = [
+                *folders,
+                *(
+                    known[container_id]
+                    for container_id in sorted(folder_frequency)
+                    if container_id in known and container_id not in folder_ids
+                ),
+            ]
+            for folder in containers:
                 for document_id in sorted(folder_frequency[folder.id]):
                     if (folder.id, document_id) in seen_memberships:
                         continue
@@ -1159,7 +1170,7 @@ class GraphQueryService:
                 or candidate.edge.target not in placed
             ]
             for folder_id, document_ids in sorted(memberships.items()):
-                folder = folders[folder_id]
+                folder = folders.get(folder_id) or seeds[folder_id]
                 for document_id in sorted(document_ids):
                     document = seeds[document_id]
                     direct.append(
@@ -1222,7 +1233,14 @@ class GraphQueryService:
         nodes: dict[str, GraphNode],
         hydration_context: GraphHydrationContext,
     ) -> tuple[dict[str, GraphNode], dict[str, set[str]], set[str]]:
-        """Resolve only selected documents' visible primary folder ancestors."""
+        """Resolve each selected document's TreeRail container.
+
+        The container is the immediate visible parent placement: a folder
+        becomes a structural node, a document is that document's own node.
+        A parent document outside the selection is left to the projected
+        tree relation, which reads it as the document (never the folder above
+        it). ``memberships`` may therefore be keyed by a selected document.
+        """
 
         document_refs = {
             (node.entity_kind, node.entity_id): node
@@ -1279,6 +1297,17 @@ class GraphQueryService:
                     folders[folder.id] = folder
                     memberships[folder.id].add(document.id)
                     placed_documents.add(document.id)
+                    break
+                if (
+                    parent.target_id is not None
+                    and parent.target_kind in DOCUMENT_TREE_TARGET_KINDS
+                ):
+                    container = document_refs.get(
+                        (parent.target_kind, parent.target_id)
+                    )
+                    if container is not None and container.id != document.id:
+                        memberships[container.id].add(document.id)
+                        placed_documents.add(document.id)
                     break
                 parent_id = parent.parent_id
         return folders, memberships, placed_documents

@@ -1,6 +1,7 @@
+import { workspaceBaseBodyDiameterCss } from "../shared/workspaceGlyphGeometry";
 import type { GraphVisualTokens } from "../shared/graphTokens";
 import { FORCED_OUTLINE_INSETS, RING_BAND_FACTOR } from "../shared/nodeShapes";
-import { WORKSPACE_MAP_NODE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
+import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, type WorkspaceMapColumns } from "../map/sceneColumns";
 import { isWorkspaceMapWithinBudget, WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
 import { buildWorkspaceRelationLinkStrength } from "./relationPhysics";
 
@@ -9,7 +10,7 @@ export type CosmosSceneBuffers = {
   positions: Float32Array;
   pointColors: Float32Array;
   pointShapes: Float32Array;
-  /** Relation-based sizes: the only sizes that layout, FA2 units and collision may read. */
+  /** Relation-based sizes: the only sizes that layout and collision may read. */
   pointSizes: Float32Array;
   /**
    * What is drawn and picked, including minimum visible diameters and cluster
@@ -44,8 +45,9 @@ export function isDenseWorkspaceMapOverview(
   columns: WorkspaceMapColumns,
   budget: WorkspaceMapBudget = WORKSPACE_MAP_DEFAULT_BUDGET,
 ): boolean {
-  return columns.nodeIds.length > 1_000
-    && isReadableWorkspaceMapScene(columns.nodeIds.length, columns.edgeIds.length, budget);
+  const admitted = workspaceMapAdmissionCounts(columns);
+  return admitted.nodeCount > 1_000
+    && isReadableWorkspaceMapScene(admitted.nodeCount, admitted.edgeCount, budget);
 }
 
 /** Presentation-only colors: no edge is removed and folder metadata is unused. */
@@ -187,7 +189,7 @@ function initialPositions(columns: WorkspaceMapColumns): Float32Array {
  * documents its glyph grows with log10(members), bounded, and never below its
  * relation-based size. The ceiling stays inside the native picker's 12 px
  * accessible target. Render emphasis only: it lives in `drawPointSizes`, so
- * columns, fingerprint, layout, FA2 units, collision and every cluster-free
+ * columns, fingerprint, layout, collision and every cluster-free
  * scene are untouched.
  */
 const CLUSTER_EMPHASIS = { fromDocuments: 10, fullAtDocuments: 10_000, minCss: 7, maxCss: 22 } as const;
@@ -208,6 +210,7 @@ export function buildCosmosSceneBuffers(
 ): CosmosSceneBuffers {
   const count = columns.nodeIds.length;
   const edges = columns.edgeIds.length;
+  const admitted = workspaceMapAdmissionCounts(columns);
   const documentCounts = columns.nodeDocumentCounts;
   if (count > 25_000 || edges > 100_000 ||
       columns.nodeKinds.length !== count || columns.nodeSizes.length !== count ||
@@ -223,28 +226,31 @@ export function buildCosmosSceneBuffers(
   const context = rgb(tokens.node.context);
   const library = rgb(tokens.node.library);
   const agent = rgb(tokens.node.agent);
+  const folder = rgb(tokens.node.folder);
   const surface = rgb(tokens.surface);
-  const overviewScale = count > 1_000 ? 0.8 : 2;
+  const overviewScale = admitted.nodeCount > 1_000 ? 0.8 : 2;
   for (let node = 0; node < count; node += 1) {
     const kind = columns.nodeKinds[node];
-    if (kind > 2 && kind !== 4) throw new Error("Unknown Workspace Map node kind");
+    if (kind > 4) throw new Error("Unknown Workspace Map node kind");
     // A cluster disc takes the surface colour; its grey ring is an image on top.
-    writeColor(pointColors, node, kind === 0 ? context : kind === 1 ? library : kind === 4 ? agent : surface, 1);
-    pointShapes[node] = kind === 1 ? 1 : 0; // Native Library square; documents and cluster discs are circles
+    writeColor(pointColors, node, kind === 0 ? context : kind === 1 ? library : kind === 4 ? agent
+      : kind === WORKSPACE_MAP_NODE_KIND.folder ? folder : surface, 1);
+    // Native Library square, TreeRail folder diamond; documents and cluster discs are circles.
+    pointShapes[node] = kind === WORKSPACE_MAP_NODE_KIND.library ? 1 : kind === WORKSPACE_MAP_NODE_KIND.folder ? 3 : 0;
     // At a 2k-node fit, full-size points cover their short intra-community
     // links. Retain the degree ordering but reserve enough pixel space for
     // relationships in the overview; focused zoom can show the full scene.
-    pointSizes[node] = count > 1_000
+    pointSizes[node] = admitted.nodeCount > 1_000
       ? Math.max(2, Math.min(12, columns.nodeSizes[node] * overviewScale))
       : Math.max(3, Math.min(17, columns.nodeSizes[node] * overviewScale));
   }
   // Improve visible bodies without changing force, collision or degree inputs.
   let drawPointSizes = pointSizes;
-  const minimumDiameter = count > 1_000 ? 3 : 5;
   for (let node = 0; node < count; node += 1) {
-    if (pointSizes[node] >= minimumDiameter) continue;
+    const diameter = workspaceBaseBodyDiameterCss(pointSizes[node], count);
+    if (pointSizes[node] >= diameter) continue;
     if (drawPointSizes === pointSizes) drawPointSizes = pointSizes.slice();
-    drawPointSizes[node] = minimumDiameter;
+    drawPointSizes[node] = diameter;
   }
   if (documentCounts) {
     for (let node = 0; node < count; node += 1) {
@@ -271,22 +277,24 @@ export function buildCosmosSceneBuffers(
   const offsets = new Uint32Array(count + 1);
   const solid = rgb(tokens.edge.link);
   const citation = rgb(tokens.edge.citation);
-  const readableScene = isReadableWorkspaceMapScene(count, edges, budget);
+  const membership = rgb(tokens.edge.membership);
+  const readableScene = isReadableWorkspaceMapScene(admitted.nodeCount, admitted.edgeCount, budget);
   const denseOverview = isDenseWorkspaceMapOverview(columns, budget);
   for (let edge = 0; edge < edges; edge += 1) {
     const source = columns.edgeSources[edge];
     const target = columns.edgeTargets[edge];
     const kind = columns.edgeKinds[edge];
-    if (source >= count || target >= count || kind > 1) throw new Error("Invalid Workspace Map edge");
+    if (source >= count || target >= count || kind > 2) throw new Error("Invalid Workspace Map edge");
     links[edge * 2] = source;
     links[edge * 2 + 1] = target;
+    // Solid link, dashed citation, dotted TreeRail containment.
     linkStyles[edge] = kind;
     const alpha = denseOverview ? (kind === 1 ? .38 : .35)
       : kind === 1 ? (readableScene ? 0.4 : 0.35) : (readableScene ? 0.45 : 0.5);
     writeColor(
       linkColors,
       edge,
-      kind === 1 ? citation : solid,
+      kind === 1 ? citation : kind === 2 ? membership : solid,
       alpha,
     );
     offsets[source + 1] += 1;

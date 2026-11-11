@@ -108,7 +108,8 @@ describe("Workspace Map community worker lifecycle", () => {
     const job = createWorkspaceMapCommunityJob({ workerFactory: () => worker });
     const input = columns();
     input.edgeWeights = Float64Array.from([0x1_0000_0001, 19]);
-    const pending = job.compute(input);
+    const pending = job.compute(input, { generation: "native-relation" });
+    expect(worker.request?.input.generation).toBe("native-relation");
     expect(worker.request?.input.edgeWeights).toEqual(input.edgeWeights);
     expect(worker.request?.input.edgeWeights).not.toBe(input.edgeWeights);
     expect(worker.request?.input).not.toHaveProperty("edgeCounts");

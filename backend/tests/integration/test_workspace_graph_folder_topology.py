@@ -236,6 +236,48 @@ def test_exact_topology_has_primary_nested_closure_unplaced_and_no_secondary_isl
         key in scene.model_dump_json()
         for key in ['"x":', '"y":', '"community":', '"coordinates":']
     )
+    assert {node.parent_document_id for node in scene.nodes} == {None}
+
+    # TreeRail: a page placed under Beta's page is contained by Beta itself,
+    # while Beta's folder stays the folder container of both.
+    unplaced = fixture["pages"]["Unplaced"]
+    with session_factory.begin() as session:
+        beta_placement = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == corpus.workspace_id,
+                WorkspaceTreeNode.target_id == fixture["pages"]["Beta"],
+                WorkspaceTreeNode.primary_placement.is_(True),
+            )
+        )
+        session.add(
+            WorkspaceTreeNode(
+                id=uuid4(),
+                workspace_id=corpus.workspace_id,
+                section="context",
+                node_kind="page_ref",
+                parent_id=beta_placement,
+                sort_key="000099",
+                title="Unplaced",
+                slug="unplaced",
+                target_kind="context_page",
+                target_id=unplaced,
+                is_system_node=False,
+                can_have_children=True,
+                primary_placement=True,
+                visibility_status="visible",
+            )
+        )
+        session.flush()
+        nested = _query(session, corpus)
+    parents = {node.entity_id: node.parent_document_id for node in nested.nodes}
+    assert parents[unplaced] == f"document:context:{fixture['pages']['Beta']}"
+    assert parents[fixture["pages"]["Beta"]] is None
+    assert (
+        _membership_counts(nested)[
+            (f"document:context:{unplaced}", folders["Other"], "context")
+        ]
+        == 1
+    )
 
 
 def test_one_mixed_aggregate_retains_correlated_folder_kind_self_edge_slices(

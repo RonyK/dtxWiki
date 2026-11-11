@@ -146,21 +146,52 @@ def test_production_shaped_page_shows_links_tree_and_citations(
         # The publish write-through seam for a page's citations.
         refresh_page_edge_projection(session, workspace_id, seed_page.id)
         seed_id = seed_page.id
-
-    with session_factory() as session:
-        payload = GraphQueryService().query(
-            session,
-            workspace_id,
-            request=GraphQueryRequest(
-                seeds=[GraphSeed(kind="context_page", id=seed_id)],
-                preset="all",
-                direction="both",
-                time=GraphTimeQuery(mode="appearance"),
-                budget=GraphBudget(nodes=50, edges=150),
-            ),
-            actor=_viewer(workspace_id),
-            usage_signals_enabled=True,
+        seed_placement_id = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == workspace_id,
+                WorkspaceTreeNode.target_id == seed_id,
+                WorkspaceTreeNode.primary_placement.is_(True),
+            )
         )
+
+    # A sub-document of the seed hangs from the seed, not from the folder.
+    child = _write(
+        page_service,
+        slug="mixed-child",
+        title="Mixed Child",
+        body="# Mixed Child\n\nPart of [[mixed-seed]], and [[mixed-seed]] again.",
+        parent_id=seed_placement_id,
+    )
+
+    def query(mode):
+        with session_factory() as session:
+            return GraphQueryService().query(
+                session,
+                workspace_id,
+                request=GraphQueryRequest(
+                    seeds=[GraphSeed(kind="context_page", id=seed_id)],
+                    preset="all",
+                    direction="both",
+                    time=GraphTimeQuery(mode=mode),
+                    budget=GraphBudget(nodes=50, edges=150),
+                ),
+                actor=_viewer(workspace_id),
+                usage_signals_enabled=True,
+            )
+
+    # TreeRail containment in both screen (appearance) and current scenes:
+    # the seed's placement is the seed itself, never a second same-title node.
+    for mode in ("appearance", "current"):
+        scene = query(mode)
+        node_by_entity = {node.entity_id: node.id for node in scene.nodes}
+        child_containers = [
+            edge.source
+            for edge in scene.edges
+            if edge.edge_kind == "tree" and edge.target == node_by_entity[child.id]
+        ]
+        assert child_containers == [node_by_entity[seed_id]], mode
+        assert seed_placement_id not in node_by_entity, mode
+    payload = query("appearance")
 
     kinds = {edge.edge_kind for edge in payload.edges}
     assert {"wikilink", "tree", "citation_source"} <= kinds, sorted(kinds)

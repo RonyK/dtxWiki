@@ -41,7 +41,7 @@ type ActiveJob = {
 };
 
 export type WorkspaceMapCommunityJob = {
-  compute(columns: WorkspaceMapColumns): Promise<WorkspaceMapCommunityOutcome>;
+  compute(columns: WorkspaceMapColumns, options?: { generation: "none" | "native-relation" }): Promise<WorkspaceMapCommunityOutcome>;
   cancel(): void;
   destroy(): void;
 };
@@ -95,7 +95,7 @@ export function createWorkspaceMapCommunityJob(
     }
   }
 
-  async function compute(columns: WorkspaceMapColumns): Promise<WorkspaceMapCommunityOutcome> {
+  async function compute(columns: WorkspaceMapColumns, generation: { generation: "none" | "native-relation" } = { generation: "none" }): Promise<WorkspaceMapCommunityOutcome> {
     cancel();
     const identityKey = workspaceMapCommunityIdentityKey(columns);
     if (destroyed) return { kind: "cancelled", identityKey };
@@ -162,6 +162,7 @@ export function createWorkspaceMapCommunityJob(
         identityKey,
         input: {
           workspaceId: columns.identity.workspaceId,
+          generation: generation.generation,
           nodeKeys: [...columns.nodeKeys],
           // Transfer copies: the Map's live GPU columns must stay attached.
           edgeSources: columns.edgeSources.slice(),

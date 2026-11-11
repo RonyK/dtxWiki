@@ -12,8 +12,8 @@ const WORKSPACE = "workspace-one";
 const ACTOR = "actor-one";
 const REVISION = "revision-0000000000000001";
 
-// Real Cosmos fits: the 2K CPU layout spans ~10^5 units (zoom far below the old
-// 0.05 floor) while the native 10K layout spans ~10^3 units around (2048, 2048).
+// Include an extreme authored 2K view below the old 0.05 floor, alongside
+// native 10K coordinates around (2048, 2048). Their frames remain independent.
 const CAMERA_2K = { zoom: 0.004117, pan: { x: -1526.33, y: 5778.56 } };
 const CAMERA_10K = { zoom: 0.55379, pan: { x: 2078.7, y: 2206.5 } };
 
@@ -64,21 +64,45 @@ describe("scale-keyed Workspace Map camera and pins", () => {
     expect(viewOf(load("10k"))).toEqual(VIEW_10K);
   });
 
-  it("loads a record written before scale keying as 2K, never as 10K, and parks it when 10K saves over it", () => {
-    // Exactly what the previous saveWorkspaceGraphState wrote: no scale anywhere.
+  it("discards pre-version 2K coordinates without parking them when 10K saves over them", () => {
+    // The FA2 writer had no coordinate version, even for the same graph revision.
     const serialized = JSON.stringify({ revision: REVISION, state: stateWith(VIEW_2K) });
     window.sessionStorage.setItem(key, serialized);
     window.sessionStorage.setItem(`${workspaceGraphStorageScope(WORKSPACE, ACTOR)}latest`, serialized);
-    expect(viewOf(load("2k"))).toEqual(VIEW_2K);
+    expect(viewOf(load("2k"))).toEqual(NO_VIEW);
+    expect(load("2k").selectedId).toBe("context:one");
     expect(viewOf(load("10k"))).toEqual(NO_VIEW);
     save(VIEW_10K, "10k");
+    expect(viewOf(load("2k"))).toEqual(NO_VIEW);
+    expect(viewOf(load("10k"))).toEqual(VIEW_10K);
+  });
+
+  it("rejects own and parked FA2 views while preserving shared settings, legacy 10K, and new D3 views", () => {
+    const legacy = { ...stateWith(VIEW_2K), lens: "links" as const,
+      dataFilters: { ...freshWorkspaceGraphState().dataFilters, search: "saved search" },
+      display: { show_edges: false, show_labels: false, show_orphans: true } };
+    window.sessionStorage.setItem(key, JSON.stringify({ revision: REVISION,
+      mapScale: "2k", state: legacy, scaleViews: { "10k": VIEW_10K } }));
+    const restored = load("2k");
+    expect(viewOf(restored)).toEqual(NO_VIEW);
+    expect({ ...restored, ...VIEW_2K }).toEqual(legacy);
+    expect(viewOf(load("10k"))).toEqual(VIEW_10K);
+    saveWorkspaceGraphState(WORKSPACE, ACTOR, REVISION, load("10k"), "10k");
+    expect(viewOf(load("2k"))).toEqual(NO_VIEW);
+    const record = JSON.parse(window.sessionStorage.getItem(key)!);
+    record.scaleViews = { ...record.scaleViews, "2k": VIEW_2K };
+    window.sessionStorage.setItem(key, JSON.stringify(record));
+    expect(viewOf(load("2k"))).toEqual(NO_VIEW);
+    expect(viewOf(loadWorkspaceGraphState(WORKSPACE, ACTOR, REVISION))).toEqual(VIEW_10K);
+    save(VIEW_2K, "2k");
     expect(viewOf(load("2k"))).toEqual(VIEW_2K);
     expect(viewOf(load("10k"))).toEqual(VIEW_10K);
   });
 
   it("ignores damaged or unknown parked scale data without losing the scale that wrote the record", () => {
+    save(VIEW_2K, "2k");
     window.sessionStorage.setItem(key, JSON.stringify({
-      revision: REVISION, mapScale: "2k", state: stateWith(VIEW_2K),
+      ...JSON.parse(window.sessionStorage.getItem(key)!),
       scaleViews: {
         "10k": { viewport: { zoom: "bad", pan: { x: 1, y: 2 } }, pinnedIds: ["library:two", 7], pinnedPositions: { "library:two": { x: "bad", y: 1 } } },
         "50k": { viewport: CAMERA_10K, pinnedIds: ["x"], pinnedPositions: {} },

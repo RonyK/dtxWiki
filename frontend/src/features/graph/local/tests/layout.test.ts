@@ -59,6 +59,20 @@ describe("Local d3-force layout", () => {
     }, { autoStart: false }).getPositions();
 
     expect(reordered).toEqual(original);
+
+    // Reciprocal authored rows contribute all occurrences, while unweighted
+    // Context duplicates above retain their existing deduplication behavior.
+    const keys = ["a", "b", "c", "d"];
+    const weighted: LocalLayoutInput = {
+      nodes: keys.map(key => ({ key, radiusPx: 3, isSeed: false })),
+      edges: keys.flatMap((sourceKey, index) => keys.slice(index + 1).map(targetKey => ({
+        sourceKey, targetKey, kind: "link" as const, count: 1, occurrences: 1,
+      }))),
+    };
+    const duplicate = { ...weighted, edges: [...weighted.edges, weighted.edges[0]] };
+    const combined = { ...weighted, edges: weighted.edges.map((edge, index) => ({ ...edge, occurrences: index === 0 ? 2 : 1 })) };
+    expect(create(duplicate, { autoStart: false }).getPositions())
+      .toEqual(create(combined, { autoStart: false }).getPositions());
   });
 
   it("does not synthesize or lay out a hidden endpoint from a dangling relation", () => {

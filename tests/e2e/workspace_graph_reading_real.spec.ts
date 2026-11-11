@@ -42,9 +42,14 @@ test.describe("real API 2K Knowledge Map reading", () => {
     expect(connected.size).toBe(CONNECTED_DOCUMENTS);
     const canvas = page.getByTestId("graph-canvas");
     await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready", { timeout: 60_000 });
-    await expect(canvas).toHaveAttribute("data-map-physics", "force-atlas2-worker");
-    // Initial worker seed is scene preparation, not a user action under test.
+    await expect(canvas).toHaveAttribute("data-map-physics", "d3-worker");
+    // Worker preparation is asynchronous: community metadata and renderer
+    // readiness precede the initial D3 coordinates under reduced motion.
     await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied");
+    await expect(canvas).toHaveAttribute("data-map-layout-phase", /^(live|cooled)$/,
+      { timeout: 30_000 });
+    await expect.poll(async () => Number(await canvas.getAttribute("data-map-layout-ticks")),
+      { timeout: 30_000 }).toBeGreaterThan(0);
     await expect(canvas.locator("canvas")).toHaveCount(1);
     await canvas.locator("canvas").scrollIntoViewIfNeeded();
     await page.mouse.move(0, 0);
@@ -140,7 +145,7 @@ test.describe("real API 2K Knowledge Map reading", () => {
     }, null, 2) });
   });
 
-  test("runs the official CPU Worker on the original API corpus and preserves Pause/Resume", async ({ page, browserName }, testInfo) => {
+  test("runs the shared D3 Worker on the original API corpus and preserves Pause/Resume", async ({ page, browserName }, testInfo) => {
     test.skip(browserName !== "chromium", "Native WebGL reading acceptance targets Chromium");
     test.setTimeout(240_000);
     await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -152,7 +157,7 @@ test.describe("real API 2K Knowledge Map reading", () => {
     const canvas = page.getByTestId("graph-canvas");
     const contractPath = testInfo.outputPath("cpu-worker-real-api-contract.json");
     const diagnostics: Record<string, unknown> = {
-      scope: "Original API 2K structural Pause/Resume movement and corrected contact/status preservation; not convergence, density or real-device performance acceptance",
+      scope: "Original API 2K D3 Pause/Resume movement and idle cooling preservation; not convergence, density or real-device performance acceptance",
       errors,
     };
     const saveCheckpoint = async (name: string, details: unknown) => {
@@ -173,10 +178,15 @@ test.describe("real API 2K Knowledge Map reading", () => {
       expect(scene.edges).toHaveLength(RELATIONS);
       expect(connected.size).toBe(CONNECTED_DOCUMENTS);
       await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready", { timeout: 60_000 });
-      await expect(canvas).toHaveAttribute("data-map-physics", "force-atlas2-worker");
+      await expect(canvas).toHaveAttribute("data-map-physics", "d3-worker");
       const initialState = await readState(page);
-      // Preserve the original moving-structure oracle. A settled contact frame
-      // is not required to move 0.25px merely because its Worker was resumed.
+      // The bounded cold solve may already be cooled when first published.
+      // Explicit Resume requests motion; automatic host activation does not.
+      await expect.poll(async () => (await readLayoutDiagnostic(canvas)).ticks ?? 0,
+        { timeout: 30_000 }).toBeGreaterThan(0);
+      await saveCheckpoint("initialSolvedStatus", await readLayoutDiagnostic(canvas));
+      await page.getByRole("button", { name: "Pause layout", exact: true }).click();
+      await page.getByRole("button", { name: "Resume layout", exact: true }).click();
       await expect.poll(async () => {
         const status = await readLayoutDiagnostic(canvas);
         diagnostics.waitingForStructure = status;
@@ -188,7 +198,7 @@ test.describe("real API 2K Knowledge Map reading", () => {
       await expect(page.getByTestId("workspace-map-layout-status")).toHaveAttribute("data-layout-state", "paused");
       const structuralPausedStatus = await readLayoutDiagnostic(canvas);
       await saveCheckpoint("structuralPausedStatus", structuralPausedStatus);
-      expect(structuralPausedStatus.phase).toBe("structure");
+      expect(structuralPausedStatus.phase).toBe("live");
       const ticks = Number(await canvas.getAttribute("data-map-layout-ticks"));
       const paused = await readFrame(page, canvas);
       const held = await readFrame(page, canvas);
@@ -209,60 +219,35 @@ test.describe("real API 2K Knowledge Map reading", () => {
       const resumed = await readFrame(page, canvas);
       const resumedState = await readState(page);
       await saveCheckpoint("structuralResume", { resumedStatus, resumed, resumedState });
-      expect(resumedStatus.phase).toBe("structure");
+      expect(resumedStatus.phase).toBe("live");
       expectCounts(resumed);
       expectCameraUnchanged(paused, resumed);
       expect(resumed.candidates.some(candidate => {
         const previous = paused.candidates.find(item => item.id === candidate.id);
         return previous && Math.hypot(candidate.x - previous.x, candidate.y - previous.y) > 0.25;
-      }), "The real Worker must publish moved positions after structural Resume").toBe(true);
+      }), "The real Worker must publish moved positions after Resume").toBe(true);
       expect(resumedState.pinnedIds).toEqual(pausedState.pinnedIds);
       expect(resumedState.pinnedPositions).toEqual(pausedState.pinnedPositions);
 
       await page.getByRole("button", { name: "Resume layout", exact: true }).click();
-      // Structure can require 256 complete all-pairs updates on the 2K corpus.
-      // Budget that work separately from starting the contact/collision Workers;
-      // this functional journey does not require a particular CPU throughput.
       await expect.poll(async () => {
         const status = await readLayoutDiagnostic(canvas);
-        diagnostics.waitingForContactHandoff = status;
+        diagnostics.waitingForCooling = status;
         return status.phase;
-      }, { timeout: 150_000, message: "The real Worker must finish its bounded structural phase" }).toBe("contact");
-      await saveCheckpoint("contactHandoffStatus", await readLayoutDiagnostic(canvas));
-      // Handoff still contains structural rows. Require the first corrected
-      // contact publication, without imposing another movement/settling SLA.
-      await expect.poll(async () => {
-        const status = await readLayoutDiagnostic(canvas);
-        diagnostics.waitingForContact = status;
-        return status.phase === "contact" && status.structureIterations !== null
-          && status.structureIterations > 0 && status.iterations !== null
-          && status.iterations > status.structureIterations && status.contactReferenceZoom !== null
-          && status.contactReferenceZoom > 0;
-      }, { timeout: 30_000, message: "The contact Worker must publish collision-corrected positions" }).toBe(true);
+      }, { timeout: 45_000, message: "The D3 Worker must cool while idle" }).toBe("cooled");
       await expect(page.getByTestId("workspace-map-layout-status")).toHaveCount(0);
-      await expect(canvas).toHaveAttribute("data-map-layout-running", "true");
-      const contactStatus = await readLayoutDiagnostic(canvas);
-      await saveCheckpoint("correctedContactStatus", contactStatus);
-      expect(contactStatus.hintState).toBeNull();
-      await page.getByRole("button", { name: "Pause layout", exact: true }).click();
       await expect(canvas).toHaveAttribute("data-map-layout-running", "false");
-      await expect(page.getByTestId("workspace-map-layout-status")).toHaveAttribute("data-layout-state", "paused");
-      const contactPausedStatus = await readLayoutDiagnostic(canvas);
-      const contactPaused = await readFrame(page, canvas);
-      const contactHeld = await readFrame(page, canvas);
-      const contactHeldStatus = await readLayoutDiagnostic(canvas);
-      const contactState = await readState(page);
-      await saveCheckpoint("contactPause", { contactPausedStatus, contactHeldStatus,
-        contactPaused, contactHeld, contactState });
-      expectCounts(contactPaused);
-      expectCounts(contactHeld);
-      expectCameraUnchanged(contactPaused, contactHeld);
-      for (const candidate of contactPaused.candidates) expectPointUnchanged(contactPaused, contactHeld, candidate.id);
-      expect(contactHeldStatus).toEqual(contactPausedStatus);
-      expect(contactPausedStatus.structureIterations).toBe(contactStatus.structureIterations);
-      expect(contactPausedStatus.contactReferenceZoom).toBe(contactStatus.contactReferenceZoom);
-      expect(contactState.pinnedIds).toEqual(resumedState.pinnedIds);
-      expect(contactState.pinnedPositions).toEqual(resumedState.pinnedPositions);
+      const cooledStatus = await readLayoutDiagnostic(canvas);
+      const cooled = await readFrame(page, canvas);
+      const heldCooled = await readFrame(page, canvas);
+      const cooledState = await readState(page);
+      await saveCheckpoint("cooled", { cooledStatus, cooled, heldCooled, cooledState });
+      expectCounts(cooled);
+      expectCameraUnchanged(cooled, heldCooled);
+      for (const candidate of cooled.candidates) expectPointUnchanged(cooled, heldCooled, candidate.id);
+      expect(await readLayoutDiagnostic(canvas)).toEqual(cooledStatus);
+      expect(cooledState.pinnedIds).toEqual(resumedState.pinnedIds);
+      expect(cooledState.pinnedPositions).toEqual(resumedState.pinnedPositions);
       const screenshotPath = testInfo.outputPath("original-api-cpu-layout-paused.png");
       await canvas.screenshot({ path: screenshotPath });
       await testInfo.attach("original-api-cpu-layout-paused.png", { path: screenshotPath, contentType: "image/png" });
@@ -287,12 +272,9 @@ async function readLayoutDiagnostic(canvas: Locator) {
       const result = Number(value);
       return Number.isSafeInteger(result) && result >= 0 ? result : null;
     };
-    const contactReferenceZoom = Number(dataset.mapContactReferenceZoom);
     const hint = element.parentElement?.querySelector<HTMLElement>("[data-testid='workspace-map-layout-status']");
-    return { phase: dataset.mapLayoutPhase ?? null, iterations: counter(dataset.mapLayoutIterations),
-      structureIterations: counter(dataset.mapLayoutStructureIterations), ticks: counter(dataset.mapLayoutTicks),
+    return { phase: dataset.mapLayoutPhase ?? null, ticks: counter(dataset.mapLayoutTicks),
       running: dataset.mapLayoutRunning ?? null, transition: dataset.mapLayoutTransition ?? null,
-      contactReferenceZoom: Number.isFinite(contactReferenceZoom) && contactReferenceZoom > 0 ? contactReferenceZoom : null,
       hintState: hint?.dataset.layoutState ?? null, hintText: hint?.textContent?.trim() ?? null };
   });
 }

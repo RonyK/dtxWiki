@@ -58,9 +58,9 @@ def test_details_are_admitted_after_grouping_filtering_expansion_and_focus(
         captured.clear()
         captured.update(documents)
 
-    def detail(document):
+    def detail(document, *scene):
         detailed.append(document.key)
-        return real_detail(document)
+        return real_detail(document, *scene)
 
     def path(placement):
         expanded_routes.append(placement.tree_node_id)
@@ -144,9 +144,9 @@ def test_clustered_metadata_and_beyond_cap_placement_still_invalidate_revision(
     detailed = []
     real_detail = service._materialize_document_detail
 
-    def detail(document):
+    def detail(document, *scene):
         detailed.append(document.key)
-        return real_detail(document)
+        return real_detail(document, *scene)
 
     monkeypatch.setattr(service, "_materialize_document_detail", detail)
 

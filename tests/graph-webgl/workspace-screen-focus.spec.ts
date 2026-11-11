@@ -13,8 +13,7 @@ let origin: string;
 
 declare global {
   interface Window {
-    __mapLayoutGate: { structure: boolean; contact: boolean; blockedStructureFrames: number;
-      pending: Array<() => void>; collisions: number };
+    __mapLayoutGate: { hold: boolean; blockedFrames: number; pending: Array<() => void> };
     __screenFocusGate: {
       hold: boolean;
       release(): Promise<{ frames: number; timers: number }>;
@@ -68,14 +67,25 @@ test.beforeAll(async () => {
 
 for (const mobile of [false, true]) {
   const language = mobile ? "ko" : "en";
-  test(`native 2k layout notice distinguishes first spacing from renderer readiness in ${language} ${mobile ? "mobile" : "desktop"}`, async ({ page }, testInfo) => {
+  test(`native 2k layout notice distinguishes Worker readiness from renderer readiness in ${language} ${mobile ? "mobile" : "desktop"}`, async ({ page }, testInfo) => {
     test.setTimeout(75_000);
     await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.addInitScript(() => {
-      window.__mapLayoutGate = { structure: true, contact: true, blockedStructureFrames: 0, pending: [], collisions: 0 };
+      // A reloaded pre-D3 tab has the same actor, revision, renderer and scale.
+      // Only the persisted coordinate version distinguishes its old FA2 view.
+      const revision = "screen-focus-0000000000000001";
+      const prefix = "dtxwiki:workspace-graph:v2:focus-actor:focus-workspace:";
+      const legacy = JSON.stringify({ revision, mapScale: "2k", state: {
+        viewerId: "focus-actor", viewportEngine: "cosmos",
+        viewport: { zoom: .004117, pan: { x: 2048, y: 2048 } },
+        pinnedIds: ["context:0000"], pinnedPositions: { "context:0000": { x: 2100, y: 2300 } },
+      } });
+      sessionStorage.setItem(`${prefix}latest`, legacy);
+      sessionStorage.setItem(`${prefix}${revision}`, legacy);
+      window.__mapLayoutGate = { hold: true, blockedFrames: 0, pending: [] };
       const NativeWorker = window.Worker;
       window.Worker = class LayoutGateWorker extends NativeWorker {
         private wrapped = new Map<EventListenerOrEventListenerObject, EventListener>();
@@ -85,18 +95,12 @@ for (const mobile of [false, true]) {
           const wrapped: EventListener = event => {
             const data = (event as MessageEvent).data;
             const deliver = () => typeof listener === "function" ? listener.call(this, event) : listener.handleEvent(event);
-            // Gate delivery only, not calculations or response contents. The
-            // paused structure Worker is killed before unblocking a fresh run.
-            if (data?.nodes instanceof ArrayBuffer && window.__mapLayoutGate.structure) {
-              window.__mapLayoutGate.blockedStructureFrames++;
+            // Gate coordinate delivery only. The actual shared D3 Worker
+            // still computes its transferable positions under the real CSP.
+            if (data?.positions instanceof Float32Array && window.__mapLayoutGate.hold) {
+              window.__mapLayoutGate.blockedFrames++;
+              window.__mapLayoutGate.pending.push(deliver);
               return;
-            }
-            if (data?.type === "projected") {
-              window.__mapLayoutGate.collisions++;
-              if (window.__mapLayoutGate.contact) {
-                window.__mapLayoutGate.pending.push(deliver);
-                return;
-              }
             }
             deliver();
           };
@@ -131,33 +135,21 @@ for (const mobile of [false, true]) {
     expect(passThrough.x).toBeGreaterThanOrEqual(0);
     expect(passThrough.right).toBeLessThanOrEqual(passThrough.viewportWidth);
     expect(passThrough.bottom).toBeLessThanOrEqual(passThrough.viewportHeight);
-    // Renderer readiness can precede the initial community upload. Pause only
-    // after that scene owns an actual blocked official structure frame, so
-    // Resume cannot race a queued replacement seed into the phase boundary.
-    // This is an explicit loading allowance, not a layout-speed gate.
     await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied", { timeout: 15_000 });
-    await expect.poll(() => page.evaluate(() => window.__mapLayoutGate.blockedStructureFrames)).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() => window.__mapLayoutGate.blockedFrames)).toBeGreaterThan(0);
     await page.getByRole("button", { name: mobile ? "레이아웃 일시 중지" : "Pause layout", exact: true }).click();
     await expect(notice).toHaveAttribute("data-layout-state", "paused");
     await expect(canvas).toHaveAttribute("data-map-layout-running", "false");
     const paused = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-    await page.evaluate(() => { window.__mapLayoutGate.structure = false; });
-    await page.getByRole("button", { name: mobile ? "레이아웃 다시 시작" : "Resume layout", exact: true }).click();
-    await expect(notice).toHaveAttribute("data-layout-state", "spacing", { timeout: 45_000 });
-    await page.waitForFunction(() => window.__mapLayoutGate.pending.length > 0);
-    const boundary = await canvas.evaluate(element => ({ phase: (element as HTMLElement).dataset.mapLayoutPhase,
-      iterations: Number((element as HTMLElement).dataset.mapLayoutIterations),
-      structure: Number((element as HTMLElement).dataset.mapLayoutStructureIterations) }));
-    expect(boundary.phase).toBe("contact");
-    expect(boundary.iterations).toBe(boundary.structure);
-    await evidenceScreenshot(page, testInfo, `2k-spacing-pending-${language}.png`);
+    expect(paused.pinned).toEqual([]);
+    expect(paused.zoom).not.toBeCloseTo(.004117, 5);
     await page.evaluate(() => {
-      window.__mapLayoutGate.contact = false;
+      window.__mapLayoutGate.hold = false;
       for (const deliver of window.__mapLayoutGate.pending.splice(0)) deliver();
     });
+    await page.getByRole("button", { name: mobile ? "레이아웃 다시 시작" : "Resume layout", exact: true }).click();
     await expect(notice).toHaveCount(0);
-    await expect.poll(() => canvas.evaluate(element => Number((element as HTMLElement).dataset.mapLayoutIterations)
-      > Number((element as HTMLElement).dataset.mapLayoutStructureIterations))).toBe(true);
+    await expect.poll(() => canvas.evaluate(element => Number((element as HTMLElement).dataset.mapLayoutTicks))).toBeGreaterThan(0);
     const live = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
     expect(live.positions).not.toEqual(paused.positions);
     expect(live.topologyUploads).toBe(paused.topologyUploads);
@@ -165,8 +157,7 @@ for (const mobile of [false, true]) {
     expect(live.layoutRunning).toBe(true);
     expect(live.glError).toBe(0);
     if (!mobile) {
-      // A healthy published contact checkpoint must also survive a real
-      // renderer remount; legacy/partial snapshot unit checks are not enough.
+      // Published D3 coordinates and authored pins survive a renderer remount.
       await page.getByRole("button", { name: "Pause layout", exact: true }).click();
       // Earlier user Pause deliberately consumed initial camera ownership;
       // Resume must not rearm it. This explicit Fit is the user's next action.
@@ -180,7 +171,7 @@ for (const mobile of [false, true]) {
           if (x > bounds.left + 60 && x < bounds.right - 60
             && y > bounds.top + 80 && y < bounds.bottom - 60) return { index, x, y };
         }
-        throw new Error("No interior point for the authored contact pin");
+        throw new Error("No interior point for the authored D3 pin");
       });
       await page.mouse.move(target.x, target.y);
       await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().hoveredIndex)).toBe(target.index);
@@ -190,8 +181,7 @@ for (const mobile of [false, true]) {
       await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().pinned)).toContain(target.index);
       await page.mouse.move(0, 0);
       const beforeRemount = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-      const contactZoom = await canvas.getAttribute("data-map-contact-reference-zoom");
-      const progress = await canvas.getAttribute("data-map-layout-iterations");
+      const progress = await canvas.getAttribute("data-map-layout-ticks");
       const instances = await page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle());
       await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
       await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle().length)).toBe(instances.length + 1);
@@ -201,9 +191,7 @@ for (const mobile of [false, true]) {
       // fresh-scene helper's requirement that a new seed be applied.
       await expect(page.locator(".graph-canvas-frame")).toHaveAttribute("data-renderer-status", "ready");
       await expect(notice).toHaveAttribute("data-layout-state", "paused");
-      await expect(canvas).toHaveAttribute("data-map-layout-phase", "contact");
-      await expect(canvas).toHaveAttribute("data-map-contact-reference-zoom", contactZoom!);
-      await expect(canvas).toHaveAttribute("data-map-layout-iterations", progress!);
+
       const restored = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
       expect(restored.positions).toEqual(beforeRemount.positions);
       expect(restored.pinned).toEqual(beforeRemount.pinned);
@@ -213,11 +201,10 @@ for (const mobile of [false, true]) {
       expect(restored.layoutRunning).toBe(false);
       const retired = await page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle());
       expect(retired.slice(0, instances.length).every(graph => graph.destroys === 1 && graph.callsAfterDestroy === 0)).toBe(true);
+      const restoredTicks = await canvas.getAttribute("data-map-layout-ticks");
       await page.getByRole("button", { name: "Resume layout", exact: true }).click();
       await expect(notice).toHaveCount(0);
-      await expect.poll(() => canvas.getAttribute("data-map-layout-iterations")).not.toBe(progress);
-      await expect(canvas).toHaveAttribute("data-map-layout-phase", "contact");
-      await expect(canvas).toHaveAttribute("data-map-contact-reference-zoom", contactZoom!);
+      await expect.poll(() => canvas.getAttribute("data-map-layout-ticks")).not.toBe(restoredTicks);
       await page.getByRole("button", { name: "Pause layout", exact: true }).click();
       const resumed = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
       expect(resumed.positions.slice(target.index * 2, target.index * 2 + 2))
@@ -225,17 +212,16 @@ for (const mobile of [false, true]) {
       expect(resumed.center).toEqual(restored.center);
       expect(resumed.zoom).toBe(restored.zoom);
       expect(resumed.glError).toBe(0);
-      await testInfo.attach("healthy-contact-theme-remount", { contentType: "application/json",
-        body: JSON.stringify({ target, contactZoom, progress, beforeRemount, restored, resumed, retired,
-          scope: "Real pointer pin and paused contact theme remount, then live Resume; not target-device performance" }, null, 2) });
+      await testInfo.attach("healthy-d3-theme-remount", { contentType: "application/json",
+        body: JSON.stringify({ target, progress, beforeRemount, restored, resumed, retired,
+          scope: "Real pointer pin and paused D3 theme remount, then live Resume; not target-device performance" }, null, 2) });
     }
     expect(errors).toEqual([]);
     await testInfo.attach("layout-notice-boundary", { contentType: "application/json",
-      body: JSON.stringify({ boundary, passThrough,
-        blockedStructureFrames: await page.evaluate(() => window.__mapLayoutGate.blockedStructureFrames),
-        collisions: await page.evaluate(() => window.__mapLayoutGate.collisions),
+      body: JSON.stringify({ passThrough,
+        blockedFrames: await page.evaluate(() => window.__mapLayoutGate.blockedFrames),
         scope: "Actual Screen/native Workers with controlled message delivery, not timing or physical-device performance" }, null, 2) });
-    await evidenceScreenshot(page, testInfo, `2k-spacing-live-${language}.png`);
+    await evidenceScreenshot(page, testInfo, `2k-d3-live-${language}.png`);
   });
 }
 
@@ -485,10 +471,17 @@ test("observed owner downgrade disposes live CPU layout and Cosmos 2k graph befo
     return Date.now() - readinessStarted;
   }
   const rendererReadinessMs = await settleAuthorityScene("owner");
-  await expect(page.locator(".graph-canvas")).toHaveAttribute("data-map-physics", "force-atlas2-worker");
+  await expect(page.locator(".graph-canvas")).toHaveAttribute("data-map-physics", "d3-worker");
   // Require applied official Worker frames, actual non-pin coordinate movement,
   // native GPU forces off and unchanged original topology. CPU uploads are not
   // GPU simulation ticks, and readiness alone does not prove live layout.
+  // The initial 300 D3 ticks run in the Worker after community metadata is
+  // ready. Allow initialization before measuring live authority-owned motion.
+  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().layoutTicks ?? 0),
+    { timeout: 30_000 }).toBeGreaterThan(0);
+  // Teardown must retire a live layout even when D3 cooled during setup.
+  await page.getByRole("button", { name: "Pause layout", exact: true }).click();
+  await page.getByRole("button", { name: "Resume layout", exact: true }).click();
   const ownerStart = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
   await expect.poll(() => page.evaluate((before) => {
     const current = window.__workspaceScreenFocus.snapshot();
@@ -545,7 +538,11 @@ test("observed owner downgrade disposes live CPU layout and Cosmos 2k graph befo
   await page.evaluate(() => window.__workspaceScreenFocus.releaseQueries());
   await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "1999");
   const viewerReadinessMs = await settleAuthorityScene("viewer");
-  await expect(page.locator(".graph-canvas")).toHaveAttribute("data-map-physics", "force-atlas2-worker");
+  await expect(page.locator(".graph-canvas")).toHaveAttribute("data-map-physics", "d3-worker");
+  await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().layoutTicks ?? 0),
+    { timeout: 30_000 }).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Pause layout", exact: true }).click();
+  await page.getByRole("button", { name: "Resume layout", exact: true }).click();
   const viewerStart = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
   await expect.poll(() => page.evaluate((before) => {
     const current = window.__workspaceScreenFocus.snapshot();
@@ -594,12 +591,32 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await page.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    window.Worker = class ObservedWorker extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        this.addEventListener("message", event => {
+          if (event.data?.type === "error") console.error(`Worker ${String(url)}: ${event.data.message}`);
+        });
+        this.addEventListener("error", event => console.error(`Worker ${String(url)}: ${event.message}`));
+      }
+    };
+  });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(`${origin}/?pc10k=1&folderMembers=10000`);
   const list = page.getByTestId("workspace-graph-node-list");
   await expect(list).toHaveAttribute("data-total-count", "2000");
-  await expectSettledNativeScene(page);
+  try { await expectSettledNativeScene(page); }
+  catch (error) {
+    await testInfo.attach("pc10k-initial-readiness-errors", { contentType: "application/json",
+      body: JSON.stringify({ errors, url: page.url(),
+        snapshot: await page.evaluate(() => window.__workspaceScreenFocus.snapshot()),
+        graphs: await page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle()),
+      }, null, 2) });
+    throw error;
+  }
   const view = page.locator(".workspace-graph-view-options");
   await view.locator("summary").click();
   const scale = view.getByRole("combobox", { name: "Map node limit" });
@@ -607,8 +624,10 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   await expect(list).toHaveAttribute("data-total-count", "10000");
   await expectSettledNativeScene(page);
   const expanded = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-  expect(expanded.positions).toHaveLength(20000);
-  expect(expanded.linkAlphas).toHaveLength(30000);
+  // 10,000 documents and 30,000 relations, plus the one TreeRail folder that
+  // holds every document and its 10,000 containment lines.
+  expect(expanded.positions).toHaveLength((10000 + 1) * 2);
+  expect(expanded.linkAlphas).toHaveLength(30000 + 10000);
   expect(expanded.positions.every(Number.isFinite)).toBe(true);
   expect(expanded.glError).toBe(0);
   const requests = await page.evaluate(() => window.__workspaceScreenFocus.requests);
@@ -654,7 +673,8 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   await scale.selectOption("2k");
   await expect(list).toHaveAttribute("data-total-count", "2000");
   await expectSettledNativeScene(page);
-  expect((await page.evaluate(() => window.__workspaceScreenFocus.snapshot())).positions).toHaveLength(4000);
+  // 2,000 documents plus their one TreeRail folder.
+  expect((await page.evaluate(() => window.__workspaceScreenFocus.snapshot())).positions).toHaveLength((2000 + 1) * 2);
   expect(errors).toEqual([]);
 });
 
@@ -1365,7 +1385,8 @@ for (const { language, mobile } of [
         ? "Open canvas fullscreen" : "캔버스 전체 화면으로 열기", exact: true }).click();
       await expectSettledNativeScene(page);
       const native = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-      expect(native.positions).toHaveLength(4000);
+      // 2,000 documents plus one TreeRail hub for each of the 300 placed folders.
+      expect(native.positions).toHaveLength((2000 + 300) * 2);
       expect(native.glError).toBe(0);
       expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
       await evidenceScreenshot(page, testInfo, `refine-${language}-mobile-2k-fullscreen.png`);

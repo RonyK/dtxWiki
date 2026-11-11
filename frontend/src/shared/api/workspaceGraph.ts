@@ -111,6 +111,8 @@ export type WorkspaceGraphDocumentNode = {
   path: string;
   primary_folder_id: string | null;
   primary_folder_label: string;
+  /** Nearest TreeRail ancestor document rendered in this scene, below the primary folder. */
+  parent_document_id?: string | null;
   reference_count: number;
   evidence_count: number;
   also_appears_in: Array<{
@@ -284,6 +286,7 @@ export function isWorkspaceGraphResponse(value: unknown): value is { data: Works
     ].includes(String(reason)))
     && Array.isArray(scene.nodes)
     && scene.nodes.every(isGraphNode)
+    && hasAcyclicDocumentParents(scene.nodes as WorkspaceGraphNode[])
     && Array.isArray(scene.edges)
     && scene.edges.every(isGraphEdge)
     && isFacetCounts(scene.facet_counts)
@@ -331,6 +334,20 @@ function isGraphCounts(value: unknown): value is WorkspaceGraphCounts {
     ].every((key) => isNonnegativeCount(value[key]));
 }
 
+/** Every parent is another rendered document and no TreeRail chain loops. */
+function hasAcyclicDocumentParents(nodes: WorkspaceGraphNode[]): boolean {
+  const parents = new Map<string, string | null>();
+  for (const node of nodes) if (node.grain === "document") parents.set(node.id, node.parent_document_id ?? null);
+  for (const start of parents.keys()) {
+    const seen = new Set<string>([start]);
+    for (let current = parents.get(start) ?? null; current !== null; current = parents.get(current) ?? null) {
+      if (!parents.has(current) || seen.has(current)) return false;
+      seen.add(current);
+    }
+  }
+  return true;
+}
+
 function isGraphNode(value: unknown): value is WorkspaceGraphNode {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string") {
     return false;
@@ -347,6 +364,8 @@ function isGraphNode(value: unknown): value is WorkspaceGraphNode {
     && typeof value.entity_id === "string"
     && typeof value.path === "string"
     && (value.primary_folder_id === null || typeof value.primary_folder_id === "string")
+    && (value.parent_document_id === undefined || value.parent_document_id === null
+      || typeof value.parent_document_id === "string")
     && typeof value.primary_folder_label === "string"
     && isNonnegativeCount(value.reference_count)
     && isNonnegativeCount(value.evidence_count)

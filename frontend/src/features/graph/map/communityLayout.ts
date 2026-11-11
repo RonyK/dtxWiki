@@ -1,11 +1,13 @@
+import { buildWorkspaceRelationStartPositions, type WorkspaceRelationStartEdge } from "./nativeRelationStartPositions";
 import { UndirectedGraph } from "graphology";
 import louvain from "graphology-communities-louvain";
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation } from "d3-force";
-import { buildWorkspaceRelationStartPositions, type WorkspaceRelationStartEdge } from "./relationStartPositions";
 
 /** The worker receives only columns already filtered for the current actor. */
 export type WorkspaceMapCommunityInput = {
   workspaceId: string;
+  /** A native solver retains its legacy <=2K relation warm start. */
+  generation?: "none" | "native-relation";
   nodeKeys: string[];
   edgeSources: Uint32Array;
   edgeTargets: Uint32Array;
@@ -311,14 +313,12 @@ export function computeWorkspaceMapCommunities(
   return {
     communityIds,
     communityCount: normalized.size,
-    // At the current 2K gate, start original documents from their actual
-    // relations, not index-order spirals inside fixed community circles.
-    // Louvain remains a colour/summary annotation. Cosmos owns all subsequent
-    // live GPU motion; this worker never supplies persistent force anchors.
-    initialPositions: buildWorkspaceRelationStartPositions({
-      nodeCount: nodeKeys.length,
-      workspaceSeed: workspaceCommunitySeed(input.workspaceId),
-      edges: relationEdges,
-    }) ?? communityStartPositions(nodeKeys, communityIds, normalized.size, input.workspaceId, weights),
+    // The budget-selected solver explicitly owns initial-position generation.
+    // Default D3 uses only its own phyllotaxis and shared Worker; native keeps
+    // the preceding relation warm start for admitted scenes of at most 2K.
+    initialPositions: (input.generation === "native-relation"
+      ? buildWorkspaceRelationStartPositions({ nodeCount: nodeKeys.length,
+        workspaceSeed: workspaceCommunitySeed(input.workspaceId), edges: relationEdges }) : null)
+      ?? communityStartPositions(nodeKeys, communityIds, normalized.size, input.workspaceId, weights),
   };
 }

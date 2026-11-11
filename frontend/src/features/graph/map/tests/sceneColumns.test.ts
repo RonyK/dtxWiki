@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import type { WorkspaceGraphScene } from "../../../../shared/api/workspaceGraph";
 import {
   buildWorkspaceMapColumns,
+  type WorkspaceMapColumns,
+  workspaceMapContainedDocumentCounts,
   sha256Hex,
   WORKSPACE_MAP_EDGE_KIND,
   WORKSPACE_MAP_NODE_KIND,
@@ -123,21 +125,43 @@ function visibleScene(): WorkspaceGraphScene {
   };
 }
 
+/** Authored documents and relations, re-indexed without TreeRail hubs and containment lines. */
+function relationRows(columns: WorkspaceMapColumns) {
+  const nodes = [...columns.nodeKinds.keys()].filter((index) => columns.nodeKinds[index] !== WORKSPACE_MAP_NODE_KIND.folder);
+  const edges = [...columns.edgeKinds.keys()].filter((index) => columns.edgeKinds[index] !== WORKSPACE_MAP_EDGE_KIND.membership);
+  const row = new Map(nodes.map((node, index) => [node, index]));
+  return {
+    nodeIds: nodes.map((index) => columns.nodeIds[index]),
+    nodeKeys: nodes.map((index) => columns.nodeKeys[index]),
+    nodeKinds: Uint8Array.from(nodes, (index) => columns.nodeKinds[index]),
+    nodeFolderKeys: nodes.map((index) => columns.nodeFolderKeys[index]),
+    nodeSizes: Float32Array.from(nodes, (index) => columns.nodeSizes[index]),
+    nodeDocumentCounts: Uint32Array.from(nodes, (index) => columns.nodeDocumentCounts?.[index] ?? 1),
+    edgeIds: edges.map((index) => columns.edgeIds[index]),
+    edgeSources: Uint32Array.from(edges, (index) => row.get(columns.edgeSources[index])!),
+    edgeTargets: Uint32Array.from(edges, (index) => row.get(columns.edgeTargets[index])!),
+    edgeKinds: Uint8Array.from(edges, (index) => columns.edgeKinds[index]),
+    edgeCounts: Uint32Array.from(edges, (index) => columns.edgeCounts[index]),
+    edgeWeights: Float64Array.from(edges, (index) => columns.edgeWeights[index]),
+    edgeCrossFolder: Uint8Array.from(edges, (index) => columns.edgeCrossFolder[index]),
+  };
+}
+
 describe("Workspace Map visible columns", () => {
   it("keeps authored relation counts separate from occurrence weights and their layout identity", () => {
     const scene = visibleScene();
     scene.edges[0].occurrence_weight = 17;
     scene.edges[1].occurrence_weight = 0x1_0000_0001;
     const columns = buildWorkspaceMapColumns(scene, options);
-    expect(columns.edgeCounts).toEqual(Uint32Array.from([1, 2]));
-    expect(columns.edgeWeights).toEqual(Float64Array.from([0x1_0000_0001, 17]));
+    expect(relationRows(columns).edgeCounts).toEqual(Uint32Array.from([1, 2]));
+    expect(relationRows(columns).edgeWeights).toEqual(Float64Array.from([0x1_0000_0001, 17]));
     const changed = structuredClone(scene);
     changed.edges[0].occurrence_weight = 18;
     const after = buildWorkspaceMapColumns(changed, options);
     expect(after.edgeCounts).toEqual(columns.edgeCounts);
     expect(after.nodeSizes).toEqual(columns.nodeSizes);
     expect(after.identity.visibleFingerprint).not.toBe(columns.identity.visibleFingerprint);
-    expect(buildWorkspaceMapColumns(visibleScene(), options).edgeWeights)
+    expect(relationRows(buildWorkspaceMapColumns(visibleScene(), options)).edgeWeights)
       .toEqual(Float64Array.from([1, 2]));
   });
 
@@ -154,11 +178,11 @@ describe("Workspace Map visible columns", () => {
     const scene = visibleScene();
     const original = buildWorkspaceMapColumns(scene, options);
     const without = buildWorkspaceMapColumns(scene, { ...options, excludedNodeIds: new Set(["row-b"]) });
-    expect(without.nodeIds).toEqual(["row-z", "row-a"]);
-    expect(without.edgeIds).toEqual(["projection-edge-z"]);
+    expect(relationRows(without).nodeIds).toEqual(["row-z", "row-a"]);
+    expect(relationRows(without).edgeIds).toEqual(["projection-edge-z"]);
     expect(without.identity.visibleFingerprint).not.toBe(original.identity.visibleFingerprint);
-    expect(without.edgeSources[0]).toBe(0);
-    expect(without.edgeTargets[0]).toBe(1);
+    expect(relationRows(without).edgeSources[0]).toBe(0);
+    expect(relationRows(without).edgeTargets[0]).toBe(1);
     expect(buildWorkspaceMapColumns(scene, options)).toEqual(original);
   });
   it("hashes UTF-8 and multi-block sources as SHA-256", () => {
@@ -168,7 +192,12 @@ describe("Workspace Map visible columns", () => {
   });
 
   it("indexes stable visible nodes and relation columns for WebGL", () => {
-    const columns = buildWorkspaceMapColumns(visibleScene(), options);
+    const tree = buildWorkspaceMapColumns(visibleScene(), options);
+    const columns = relationRows(tree);
+    // The shared primary folder becomes one TreeRail hub holding both pages.
+    expect(tree.nodeKeys).toContain("folder:folder-visible");
+    expect(tree.edgeIds.filter((id) => id.startsWith("contains:"))).toEqual([
+      "contains:folder:folder-visible|context:page-b", "contains:folder:folder-visible|context:page-z"]);
 
     expect(columns.nodeKeys).toEqual(["context:page-b", "context:page-z", "library:item-a"]);
     expect(columns.nodeIds).toEqual(["row-b", "row-z", "row-a"]);
@@ -188,12 +217,12 @@ describe("Workspace Map visible columns", () => {
     ]));
     expect(columns.edgeCounts).toEqual(Uint32Array.from([1, 2]));
     expect(columns.edgeCrossFolder).toEqual(Uint8Array.from([0, 1]));
-    expect(columns.identity).toMatchObject({
+    expect(tree.identity).toMatchObject({
       workspaceId: "workspace-a",
       actorId: "actor-a",
       surface: "workspace",
     });
-    expect(columns.identity.visibleFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(tree.identity.visibleFingerprint).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("retains an Agent document and its citation as authored map geometry", () => {
@@ -206,8 +235,8 @@ describe("Workspace Map visible columns", () => {
     expect(columns.nodeKeys).toContain("agent:item-a");
     const row = columns.nodeKeys.indexOf("agent:item-a");
     expect(columns.nodeKinds[row]).toBe(WORKSPACE_MAP_NODE_KIND.agent);
-    expect(columns.edgeIds).toHaveLength(2);
-    expect([...columns.edgeKinds]).toEqual([WORKSPACE_MAP_EDGE_KIND.citation, WORKSPACE_MAP_EDGE_KIND.citation]);
+    expect(relationRows(columns).edgeIds).toHaveLength(2);
+    expect([...relationRows(columns).edgeKinds]).toEqual([WORKSPACE_MAP_EDGE_KIND.citation, WORKSPACE_MAP_EDGE_KIND.citation]);
   });
 
   it("ignores response order, projection IDs and non-layout metadata in the fingerprint", () => {
@@ -291,18 +320,22 @@ describe("Workspace Map visible columns", () => {
       .toBe(buildWorkspaceMapColumns(first, options).identity.visibleFingerprint);
   });
 
-  it("changes fingerprint for visible relation counts, not folder metadata or actor identity", () => {
+  it("changes fingerprint for visible relation counts and folder placement, not folder labels or actor identity", () => {
     const base = buildWorkspaceMapColumns(visibleScene(), options);
     const changedEdge = visibleScene();
     changedEdge.edges[0].relation_count += 1;
     const changedFolder = visibleScene();
-    if (changedFolder.nodes[0].grain === "document") {
+    const relabeledFolder = visibleScene();
+    if (changedFolder.nodes[0].grain === "document" && relabeledFolder.nodes[0].grain === "document") {
       changedFolder.nodes[0].primary_folder_id = "another-visible-folder";
+      relabeledFolder.nodes[0].primary_folder_label = "Renamed";
     }
 
     expect(buildWorkspaceMapColumns(changedEdge, options).identity.visibleFingerprint)
       .not.toBe(base.identity.visibleFingerprint);
     expect(buildWorkspaceMapColumns(changedFolder, options).identity.visibleFingerprint)
+      .not.toBe(base.identity.visibleFingerprint);
+    expect(buildWorkspaceMapColumns(relabeledFolder, options).identity.visibleFingerprint)
       .toBe(base.identity.visibleFingerprint);
     const otherActor = buildWorkspaceMapColumns(visibleScene(), { ...options, actorId: "actor-b" });
     expect(otherActor.identity.visibleFingerprint).toBe(base.identity.visibleFingerprint);
@@ -319,16 +352,30 @@ describe("Workspace Map visible columns", () => {
       ? { ...node, primary_folder_id: "different-directory", primary_folder_label: "Changed" }
       : node);
     reassigned.edges = reassigned.edges.map((edge) => ({ ...edge, cross_folder: !edge.cross_folder }));
+    reassigned.folder_topology = { schema_version: "workspace-graph-folders.v1", memberships: [], edge_slices: [],
+      folders: [{ id: "parent-directory", label: "Parent", parent_folder_id: null, direct_member_count: 0 },
+        { id: "different-directory", label: "Changed", parent_folder_id: "parent-directory", direct_member_count: 2 }] };
 
-    const after = buildWorkspaceMapColumns(reassigned, options);
-    expect(after.identity).toEqual(baseline.identity);
-    expect(after.nodeFolderKeys).not.toEqual(baseline.nodeFolderKeys);
-    expect(after.edgeCrossFolder).not.toEqual(baseline.edgeCrossFolder);
-    expect(after.edgeIds).toEqual(baseline.edgeIds);
-    expect(after.edgeSources).toEqual(baseline.edgeSources);
-    expect(after.edgeTargets).toEqual(baseline.edgeTargets);
-    expect(after.edgeWeights).toEqual(baseline.edgeWeights);
-    expect(after.nodeSizes).toEqual(baseline.nodeSizes);
+    // A sub-document hangs from its parent document, one TreeRail level further out.
+    reassigned.nodes = reassigned.nodes.map((node) => node.id === "row-z" ? { ...node, parent_document_id: "row-b" } : node);
+    const tree = buildWorkspaceMapColumns(reassigned, options);
+    const containerKey = (id: string) => tree.nodeKeys[tree.nodeContainerIndices![tree.nodeIds.indexOf(id)]];
+    expect(containerKey("row-z")).toBe("context:page-b");
+    expect(containerKey("row-b")).toBe("folder:different-directory");
+    expect(containerKey("folder:different-directory")).toBe("folder:parent-directory");
+    const beneath = workspaceMapContainedDocumentCounts(tree);
+    expect(beneath[tree.nodeIds.indexOf("folder:parent-directory")]).toBe(3);
+    expect(beneath[tree.nodeIds.indexOf("row-b")]).toBe(1);
+    expect(tree.edgeIds).toContain("contains:context:page-b|context:page-z");
+    expect(tree.edgeIds).not.toContain("contains:folder:different-directory|context:page-z");
+    const after = relationRows(tree), before = relationRows(baseline);
+    expect(after.nodeFolderKeys).not.toEqual(before.nodeFolderKeys);
+    expect(after.edgeCrossFolder).not.toEqual(before.edgeCrossFolder);
+    expect(after.edgeIds).toEqual(before.edgeIds);
+    expect(after.edgeSources).toEqual(before.edgeSources);
+    expect(after.edgeTargets).toEqual(before.edgeTargets);
+    expect(after.edgeWeights).toEqual(before.edgeWeights);
+    expect(after.nodeSizes).toEqual(before.nodeSizes);
   });
 
   it("keeps presentation search out of authoritative columns and scopes server filters and actor identity", () => {
@@ -369,7 +416,8 @@ describe("Workspace Map visible columns", () => {
       const columns = buildWorkspaceMapColumns(clusteredScene(9_244), options);
       expect(columns.nodeDocumentCounts).toBeInstanceOf(Uint32Array);
       expect(columns.nodeDocumentCounts).toHaveLength(columns.nodeIds.length);
-      const counts = Object.fromEntries(columns.nodeKeys.map((key, index) => [key, columns.nodeDocumentCounts?.[index]]));
+      const rows = relationRows(columns);
+      const counts = Object.fromEntries(rows.nodeKeys.map((key, index) => [key, rows.nodeDocumentCounts[index]]));
       expect(counts).toEqual({
         "cluster-big": 9_244, "cluster-pair": 2, "context:page-b": 1, "context:page-z": 1, "library:item-a": 1,
       });

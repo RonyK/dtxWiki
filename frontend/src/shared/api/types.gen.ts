@@ -12599,6 +12599,8 @@ export interface components {
             id: string;
             /** Label */
             label: string;
+            /** Parent Document Id */
+            parent_document_id?: string | null;
             /** Path */
             path: string;
             /** Primary Folder Id */

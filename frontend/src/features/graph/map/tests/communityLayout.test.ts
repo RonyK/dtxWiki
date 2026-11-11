@@ -102,6 +102,22 @@ describe("Workspace Map visible-only Louvain", () => {
     expect(a.communityIds).toEqual(Uint32Array.from([0, 0, 0, 1, 1, 1]));
     expect(a.communityCount).toBe(2);
     expect(a.initialPositions).toHaveLength(12);
+    // A PC10K budget may admit a small scene. Preserve its published legacy
+    // relation warm start; default D3 still uses the separate phyllotaxis path.
+    const native = computeWorkspaceMapCommunities({
+      workspaceId: first.identity.workspaceId, generation: "native-relation",
+      nodeKeys: first.nodeKeys, edgeSources: first.edgeSources,
+      edgeTargets: first.edgeTargets, edgeWeights: first.edgeWeights,
+    });
+    expect(native.communityIds).toEqual(a.communityIds);
+    // Float32 rows captured from the preceding native implementation, not
+    // recomputed through the helper under test.
+    expect(native.initialPositions).toEqual(Float32Array.from([
+      1895.705810546875, 2110.8408203125, 1876.7418212890625, 1996.973876953125,
+      1990.4495849609375, 2039.44482421875, 2129.443603515625, 2099.440185546875,
+      2153.224365234375, 1984.601318359375, 2242.434814453125, 2056.69921875,
+    ]));
+    expect(native.initialPositions).not.toEqual(a.initialPositions);
     const center = (indices: number[]) => ({
       x: indices.reduce((sum, index) => sum + a.initialPositions[index * 2], 0) / indices.length,
       y: indices.reduce((sum, index) => sum + a.initialPositions[index * 2 + 1], 0) / indices.length,

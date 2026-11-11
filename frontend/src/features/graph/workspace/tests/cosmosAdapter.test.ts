@@ -7,14 +7,13 @@ import type { GraphConfig } from "../cosmosNative";
 
 import type { WorkspaceMapColumns } from "../../map/sceneColumns";
 import { createWorkspaceCosmosAdapter as createProductWorkspaceCosmosAdapter, type WorkspaceCosmosAdapter, type WorkspaceCosmosOptions } from "../cosmosAdapter";
-import type { WorkspaceForceAtlas2WorkerInput, WorkspaceForceAtlas2WorkerOptions } from "../forceAtlas2WorkerLayout";
-import type { WorkspaceForceAtlas2Progress } from "../forceAtlas2Phases";
+import type { WorkspaceD3LayoutInput, WorkspaceD3LayoutOptions } from "../d3MapLayout";
 import type { WorkspaceMapCommunityOutcome } from "../../map/communityJob";
 import { buildCosmosSceneBuffers } from "../cosmosScene";
 import { buildWorkspaceRelationCollisionBasis, buildWorkspaceRelationForceConfig } from "../relationPhysics";
-import { buildWorkspaceForceAtlas2ContactUnits, type WorkspaceForceAtlas2Units } from "../forceAtlas2Units";
 import { readGraphTokens } from "../../shared/graphTokens";
 import { WORKSPACE_MAP_DEFAULT_BUDGET, WORKSPACE_MAP_PC_10K_BUDGET, type WorkspaceMapBudget } from "../../shared/workspaceMapBudget";
+import { workspaceContainerIndices, workspaceDirectoryStartPositions } from "../directoryStartPositions";
 import * as nativeTracking from "../gpuTrackedPositions";
 
 const { graph, community, createGraph, createNativeGraph } = vi.hoisted(() => {
@@ -78,15 +77,14 @@ const { graph, community, createGraph, createNativeGraph } = vi.hoisted(() => {
 
 const cpu = vi.hoisted(() => ({
   instances: [] as Array<{
-    input: WorkspaceForceAtlas2WorkerInput; options: WorkspaceForceAtlas2WorkerOptions;
+    input: WorkspaceD3LayoutInput; options: WorkspaceD3LayoutOptions;
     start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn>;
     setPositions: ReturnType<typeof vi.fn>; destroy: ReturnType<typeof vi.fn>; isRunning: () => boolean;
-    getProgress: ReturnType<typeof vi.fn<() => WorkspaceForceAtlas2Progress>>;
-    getContactUnits: ReturnType<typeof vi.fn<() => WorkspaceForceAtlas2Units | undefined>>;
+    setReducedMotion: ReturnType<typeof vi.fn>;
   }>,
   create: vi.fn(),
 }));
-vi.mock("../forceAtlas2WorkerLayout", () => ({ createWorkspaceForceAtlas2WorkerLayout: cpu.create }));
+vi.mock("../d3MapLayout", () => ({ createWorkspaceD3Layout: cpu.create }));
 
 // Keep the pre-existing SDK force/lifecycle regressions on the explicitly
 // admitted PC native branch. Default 2K is tested separately below; a native
@@ -421,18 +419,12 @@ beforeEach(() => {
   trackedRows.clear(); installAsyncTrackedRows();
   adapters = [];
   cpu.instances = [];
-  cpu.create.mockImplementation((input: WorkspaceForceAtlas2WorkerInput, options: WorkspaceForceAtlas2WorkerOptions) => {
-    if (input.units && input.progress?.phase === "contact" && !input.contactUnits) {
-      throw new Error("Published contact progress requires its one-time contact units");
-    }
-    let running = false;
+  cpu.create.mockImplementation((input: WorkspaceD3LayoutInput, options: WorkspaceD3LayoutOptions) => {
+    let running = false, reducedMotion = input.reducedMotion;
     const instance = { input, options,
-      start: vi.fn(() => { running = true; }), stop: vi.fn(() => { running = false; }),
+      start: vi.fn(() => { running = !reducedMotion; }), stop: vi.fn(() => { running = false; }),
       setPositions: vi.fn(), destroy: vi.fn(() => { running = false; }), isRunning: () => running,
-      getProgress: vi.fn<() => WorkspaceForceAtlas2Progress>(() => input.progress ?? Object.freeze({
-        profile: "gephi-lite-2k-v1", phase: "structure", iterations: 0, structureIterations: 0, transitionReason: null,
-      })),
-      getContactUnits: vi.fn<() => WorkspaceForceAtlas2Units | undefined>(() => input.contactUnits) };
+      setReducedMotion: vi.fn((enabled: boolean) => { reducedMotion = enabled; if (enabled) running = false; }) };
     cpu.instances.push(instance);
     return instance;
   });
@@ -525,7 +517,7 @@ function freshCollisionBasis(input = columns(), width = 734, height = 608) {
   return buildWorkspaceRelationCollisionBasis(buffers.positions, buffers.pointSizes, width, height)!;
 }
 
-describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
+describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
   async function mountCpu(input = columns(), overrides: Partial<WorkspaceCosmosOptions> = {}) {
     const container = document.createElement("div"); document.body.appendChild(container);
     const onPin = vi.fn(), onError = vi.fn();
@@ -538,19 +530,81 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
   it("uses the original 2K weighted rows and canonical glyph radii without enabling GPU forces", async () => {
     const sdk = installedSdkLifecycle(), input = sizedColumns(2000, 6000);
     input.edgeWeights[0] = 8;
+    let complete!: (outcome: WorkspaceMapCommunityOutcome) => void;
+    community.compute.mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
     const { adapter, container } = await mountCpu(input);
-    const worker = cpu.instances[0], units = adapter.captureCoordinates()!.forceAtlas2Units!;
+    // Community metadata may arrive after renderer readiness. Its old layout
+    // hints must neither replace D3 coordinates nor leave the solver waiting.
+    expect(cpu.instances).toHaveLength(0);
+    const firstRows = graph.getPointPositions();
+    complete({ ...communityResult(input), initialPositions: new Float32Array(4000).fill(9999),
+      communityIds: new Uint32Array(2000) });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(graph.getPointPositions()).toEqual(firstRows);
+    const worker = cpu.instances[0];
     expect(worker.isRunning()).toBe(true); expect(sdk.running()).toBe(false);
     expect(graph.start).not.toHaveBeenCalled();
     expect(graph.setConfigPartial.mock.calls.every(([config]) => config.enableSimulation !== true)).toBe(true);
-    expect(worker.input.sources).toBe(input.edgeSources); expect(worker.input.targets).toBe(input.edgeTargets);
-    expect(worker.input.weights).toBe(input.edgeWeights); expect(worker.input.weights[0]).toBe(8);
-    expect(worker.input.radii).toEqual(Float32Array.from(units.collisionRadiusModel));
-    expect(worker.input.units).toBe(units);
-    expect(worker.input.contactUnits).toBeUndefined();
-    expect(worker.input.origin).toEqual([2048, 2048]);
-    expect(container.dataset.mapPhysics).toBe("force-atlas2-worker");
+    expect(worker.input.columns).toBe(input);
+    expect(worker.input.diameters).toHaveLength(2000);
+    expect(worker.input.shapes).toHaveLength(2000);
+    expect(worker.input.pins).toEqual([]);
+    expect(container.dataset.mapPhysics).toBe("d3-worker");
     expect(container.dataset.mapLayoutRunning).toBe("true"); expect(container.dataset.mapLayoutTicks).toBe("0");
+    graph.setZoomTransformByPointPositions.mockClear();
+    adapter.resumeLayout(false);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
+  });
+
+  it.each(["reduced-motion", "inactive", "paused-before-first-frame"] as const)("fits the first solved %s frame once and preserves solved snapshot ownership", async startup => {
+    const { adapter } = await mountCpu(columns(), { reducedMotion: startup === "reduced-motion", initialPaused: startup === "inactive" });
+    if (startup === "inactive") {
+      expect(cpu.instances).toHaveLength(0);
+      adapter.resumeLayout();
+    } else if (startup === "paused-before-first-frame") {
+      adapter.stopLayout(); adapter.resumeLayout(false);
+    }
+    const worker = cpu.instances[0], solved = Float32Array.from([100, 200, 300, 400, 500, 600]);
+    // Saved-pin reconciliation is not a camera gesture and cannot spend the
+    // first solved Fit or wake a completed remount.
+    adapter.pin("a", true, { x: 100, y: 200 }, { reconcile: true });
+    expect(worker.setPositions).toHaveBeenLastCalledWith(expect.any(Float32Array), [0], { reheat: false });
+    graph.setZoomTransformByPointPositions.mockClear(); graph.fitView.mockClear();
+    worker.options.onPositions(solved);
+    worker.options.onState({ ready: true, running: false, phase: "cooled" });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(graph.setZoomTransformByPointPositions).toHaveBeenCalledExactlyOnceWith(solved, 0, undefined, .08, false);
+    expect(graph.fitView).not.toHaveBeenCalled();
+    const snapshot = adapter.captureCoordinates()!;
+    expect(snapshot.positions).toEqual(solved); expect(snapshot.layoutReady).toBe(true);
+    worker.options.onState({ ready: true, running: false, phase: "cooled" });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(graph.setZoomTransformByPointPositions).toHaveBeenCalledTimes(1);
+    adapter.destroy();
+    const restored = await mountCpu(columns(), { initialCoordinates: snapshot, initialPaused: true });
+    expect(restored.adapter.captureCoordinates()!.positions).toEqual(solved);
+    restored.adapter.pin("a", true, { x: 100, y: 200 }, { reconcile: true });
+    restored.adapter.resumeLayout();
+    expect(cpu.instances.at(-1)!.input.restoredSolved).toBe(true);
+    expect(cpu.instances.at(-1)!.input.pins).toEqual([0]);
+    expect(cpu.instances.at(-1)!.start).toHaveBeenLastCalledWith(true);
+  });
+
+  it("waits for solved D3 rows before a pending navigation can take the camera", async () => {
+    const { adapter } = await mountCpu(); const worker = cpu.instances[0], onFinished = vi.fn();
+    const controller = new AbortController();
+    graph.setZoomTransformByPointPositions.mockClear(); graph.fitView.mockClear();
+    adapter.revealAfterLayout("b", controller.signal, () => true, onFinished);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
+    expect(onFinished).not.toHaveBeenCalled();
+    const solved = Float32Array.from([100, 200, 300, 400, 500, 600]);
+    worker.options.onPositions(solved);
+    worker.options.onState({ ready: true, running: false, phase: "cooled" });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(graph.setZoomTransformByPointPositions.mock.lastCall?.[0]).toEqual(Float32Array.from([300, 400]));
+    expect(onFinished).toHaveBeenCalledOnce();
   });
 
   it("uploads CPU frames without GPU readback, topology replacement or user-camera movement", async () => {
@@ -636,294 +690,26 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
     } finally { delete (HTMLElement.prototype as { animate?: unknown }).animate; }
   });
 
-  const contactProgress: WorkspaceForceAtlas2Progress = Object.freeze({ profile: "gephi-lite-2k-v1",
-    phase: "contact", iterations: 72, structureIterations: 64, transitionReason: "stable" });
-
-  it("publishes semantic arranging/spacing/live status only after the corresponding accepted checkpoint", async () => {
-    const input = columns(), onStatus = vi.fn();
-    const { adapter } = await mountCpu(input, { callbacks: { onSelect: vi.fn(), onHover: vi.fn(), onLayoutStatusChange: onStatus } });
-    const worker = cpu.instances[0], seed = adapter.captureCoordinates()!.forceAtlas2Units!;
-    const contact = buildWorkspaceForceAtlas2ContactUnits(seed, adapter.captureCoordinates()!.positions);
-    const handoff = Object.freeze({ ...contactProgress, iterations: contactProgress.structureIterations });
-    expect(onStatus).toHaveBeenLastCalledWith("arranging", input.identity);
-    expect(onStatus.mock.calls.at(-1)![1]).not.toBe(input.identity);
-    onStatus.mockClear();
-    worker.getContactUnits.mockReturnValue(contact); worker.options.onContactUnits?.(contact);
-    expect(onStatus).not.toHaveBeenCalled();
-    worker.getProgress.mockReturnValue(handoff); worker.options.onProgress?.(handoff);
-    expect(onStatus).toHaveBeenCalledExactlyOnceWith("spacing", input.identity);
-    worker.options.onProgress?.(handoff);
-    worker.options.onPositions(adapter.captureCoordinates()!.positions.slice());
-    expect(onStatus).toHaveBeenCalledTimes(1);
-    worker.getProgress.mockReturnValue(contactProgress); worker.options.onProgress?.(contactProgress);
-    expect(onStatus).toHaveBeenLastCalledWith("live", input.identity);
-    expect(onStatus).toHaveBeenCalledTimes(2);
-    worker.options.onProgress?.(Object.freeze({ ...contactProgress, iterations: 80 }));
-    expect(onStatus).toHaveBeenCalledTimes(2);
-    expect(onStatus.mock.calls[0][1]).not.toBe(onStatus.mock.calls[1][1]);
-  });
-
-  it("reports pause and reduced motion without claiming a contact handoff is already live", async () => {
+  it("reports arranging, live, pause and reduced-motion from current worker ownership", async () => {
     const onStatus = vi.fn();
-    const { adapter } = await mountCpu(columns(), { callbacks: { onSelect: vi.fn(), onHover: vi.fn(), onLayoutStatusChange: onStatus } });
-    const worker = cpu.instances[0], seed = adapter.captureCoordinates()!.forceAtlas2Units!;
-    const contact = buildWorkspaceForceAtlas2ContactUnits(seed, adapter.captureCoordinates()!.positions);
-    const handoff = Object.freeze({ ...contactProgress, iterations: contactProgress.structureIterations });
-    worker.getContactUnits.mockReturnValue(contact); worker.options.onContactUnits?.(contact);
-    worker.getProgress.mockReturnValue(handoff); worker.options.onProgress?.(handoff); onStatus.mockClear();
-    adapter.stopLayout(); expect(onStatus).toHaveBeenCalledTimes(1);
-    expect(onStatus).toHaveBeenLastCalledWith("paused", columns().identity);
-    adapter.stopLayout(); expect(onStatus).toHaveBeenCalledTimes(1);
-    adapter.resumeLayout(); expect(onStatus).toHaveBeenLastCalledWith("spacing", columns().identity);
-    adapter.setReducedMotion(true); expect(onStatus).toHaveBeenLastCalledWith("motion-off", columns().identity);
-    adapter.setReducedMotion(true); expect(onStatus).toHaveBeenCalledTimes(3);
-    adapter.setReducedMotion(false); expect(onStatus).toHaveBeenLastCalledWith("spacing", columns().identity);
-    expect(onStatus.mock.calls.map(([status]) => status)).toEqual(["paused", "spacing", "motion-off", "spacing"]);
-  });
-
-  it("fences status notifications from retired scene workers across an actor change and destroy", async () => {
-    const input = columns(), onStatus = vi.fn();
-    const { adapter } = await mountCpu(input, { callbacks: { onSelect: vi.fn(), onHover: vi.fn(), onLayoutStatusChange: onStatus } });
-    const retired = cpu.instances[0], seed = adapter.captureCoordinates()!.forceAtlas2Units!;
-    const contact = buildWorkspaceForceAtlas2ContactUnits(seed, adapter.captureCoordinates()!.positions);
-    const other = { ...input, identity: { ...input.identity, actorId: "other-actor" } };
-    adapter.replaceColumns(other); expect(onStatus).toHaveBeenLastCalledWith("arranging", other.identity);
-    expect(onStatus.mock.calls.at(-1)![1]).not.toBe(other.identity); onStatus.mockClear();
-    retired.options.onContactUnits?.(contact); retired.options.onProgress?.(contactProgress);
-    retired.options.onPositions(Float32Array.from([1, 2, 3, 4, 5, 6]));
-    expect(onStatus).not.toHaveBeenCalled();
+    const { adapter, container } = await mountCpu(columns(), { callbacks: { onHover: vi.fn(), onSelect: vi.fn(),
+      onLayoutStatusChange: onStatus } });
+    const worker = cpu.instances[0];
+    expect(container.dataset.mapLayoutPhase).toBe("arranging");
+    worker.options.onState({ ready: true, running: true, phase: "running" });
+    expect(container.dataset.mapLayoutPhase).toBe("live");
+    expect(onStatus.mock.lastCall?.[0]).toBe("live");
+    adapter.stopLayout(); expect(onStatus.mock.lastCall?.[0]).toBe("paused");
+    adapter.setReducedMotion(true); expect(onStatus.mock.lastCall?.[0]).toBe("motion-off");
     adapter.destroy(); onStatus.mockClear();
-    cpu.instances.at(-1)!.options.onProgress?.(contactProgress);
+    worker.options.onState({ ready: true, running: false, phase: "cooled" });
     expect(onStatus).not.toHaveBeenCalled();
-  });
-
-  it("clears semantic status when the renderer is hidden and does not accept hidden late progress", async () => {
-    const input = columns(), onStatus = vi.fn();
-    const { adapter } = await mountCpu(input, { callbacks: { onSelect: vi.fn(), onHover: vi.fn(), onLayoutStatusChange: onStatus } });
-    const worker = cpu.instances[0]; onStatus.mockClear();
-    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    document.dispatchEvent(new Event("visibilitychange"));
-    expect(onStatus).toHaveBeenLastCalledWith(null, input.identity); onStatus.mockClear();
-    worker.options.onProgress?.(contactProgress); expect(onStatus).not.toHaveBeenCalled();
-    visibility.mockReturnValue("visible"); document.dispatchEvent(new Event("visibilitychange"));
-    expect(onStatus).toHaveBeenLastCalledWith("arranging", input.identity);
-    expect(adapter.captureCoordinates()!.forceAtlas2Progress!.phase).toBe("structure");
-  });
-
-  it("does not retain final camera ownership when a semantic status callback synchronously pauses", async () => {
-    const onStatus = vi.fn((status: string | null) => { if (status === "spacing") adapter.stopLayout(); });
-    const { adapter } = await mountCpu(columns(), { callbacks: { onSelect: vi.fn(), onHover: vi.fn(), onLayoutStatusChange: onStatus } });
-    const worker = cpu.instances[0], handoff = Object.freeze({ ...contactProgress, iterations: contactProgress.structureIterations });
-    worker.getProgress.mockReturnValue(handoff); graph.setZoomTransformByPointPositions.mockClear();
-    worker.options.onProgress?.(handoff);
-    expect(onStatus.mock.calls.map(([status]) => status).slice(-2)).toEqual(["spacing", "paused"]);
-    expect(worker.isRunning()).toBe(false); expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
-  });
-
-  it("keeps seed units distinct from the once-published structural contact reference", async () => {
-    const { adapter, container } = await mountCpu(); const worker = cpu.instances[0];
-    const seed = adapter.captureCoordinates()!.forceAtlas2Units!;
-    const expanded = Float32Array.from([0, 0, 100_000, 0, 0, 100_000]);
-    const contact = buildWorkspaceForceAtlas2ContactUnits(seed, expanded);
-    worker.getContactUnits.mockReturnValue(contact);
-    worker.options.onContactUnits?.(contact);
-    worker.options.onPositions(expanded);
-    worker.getProgress.mockReturnValue(contactProgress); worker.options.onProgress?.(contactProgress);
-    const snapshot = adapter.captureCoordinates()!;
-    expect(snapshot.forceAtlas2Units).toBe(seed);
-    expect(snapshot.forceAtlas2ContactUnits).toBe(contact);
-    expect(contact.referenceViewport).toEqual(seed.referenceViewport);
-    expect(contact.nominalRadiusCss).toEqual(seed.nominalRadiusCss);
-    expect(contact.referenceZoom).toBeLessThan(seed.referenceZoom);
-    expect(container.dataset.mapContactReferenceZoom).toBe(String(contact.referenceZoom));
-    adapter.stopLayout(); adapter.fit(); adapter.setSearchMatches(new Set(["a"])); adapter.resumeLayout();
-    expect(adapter.captureCoordinates()!.forceAtlas2ContactUnits).toBe(contact);
-    const restored = await mountCpu(columns(), { initialCoordinates: snapshot });
-    expect(cpu.instances.at(-1)!.input.contactUnits).toBe(contact);
-    expect(restored.adapter.captureCoordinates()!.forceAtlas2Units).toBe(seed);
-    expect(restored.adapter.captureCoordinates()!.forceAtlas2ContactUnits).toBe(contact);
-  });
-
-  it.each(["pause", "reduced", "destroy"] as const)("rejects a late contact reference after %s", async mode => {
-    const { adapter, container } = await mountCpu(); const worker = cpu.instances[0];
-    const seed = adapter.captureCoordinates()!.forceAtlas2Units!;
-    const contact = buildWorkspaceForceAtlas2ContactUnits(seed, Float32Array.from([0, 0, 100_000, 0, 0, 100_000]));
-    if (mode === "pause") adapter.stopLayout();
-    else if (mode === "reduced") adapter.setReducedMotion(true);
-    else adapter.destroy();
-    worker.options.onContactUnits?.(contact);
-    expect(container.dataset.mapContactReferenceZoom).toBeUndefined();
-  });
-
-  it("does not restore contact units across authority or changed geometry", async () => {
-    const input = columns(), { adapter, container } = await mountCpu(input); const worker = cpu.instances[0];
-    const seed = adapter.captureCoordinates()!.forceAtlas2Units!;
-    const contact = buildWorkspaceForceAtlas2ContactUnits(seed, Float32Array.from([0, 0, 100_000, 0, 0, 100_000]));
-    worker.getContactUnits.mockReturnValue(contact); worker.options.onContactUnits?.(contact);
-    worker.getProgress.mockReturnValue(contactProgress); worker.options.onProgress?.(contactProgress);
-    const snapshot = adapter.captureCoordinates()!;
-    const other = { ...input, identity: { ...input.identity, actorId: "new-actor" } };
-    adapter.replaceColumns(other);
-    expect(cpu.instances.at(-1)!.input.contactUnits).toBeUndefined();
-    expect(container.dataset.mapContactReferenceZoom).toBeUndefined();
-    worker.options.onContactUnits?.(contact);
-    expect(container.dataset.mapContactReferenceZoom).toBeUndefined();
-    const restored = await mountCpu(other, { initialCoordinates: snapshot });
-    expect(cpu.instances.at(-1)!.input.contactUnits).toBeUndefined();
-    expect(restored.adapter.captureCoordinates()!.forceAtlas2ContactUnits).toBeUndefined();
-    const changed = { ...input, edgeWeights: Float64Array.from([2, 1]) };
-    const rebuilt = await mountCpu(changed, { initialCoordinates: snapshot });
-    expect(cpu.instances.at(-1)!.input.contactUnits).toBeUndefined();
-    expect(rebuilt.adapter.captureCoordinates()!.forceAtlas2ContactUnits).toBeUndefined();
-  });
-
-  it("reports published official iterations separately from RAF frames without touching graph geometry", async () => {
-    const { adapter, container } = await mountCpu(columns(), { initialViewport: { zoom: 2, pan: { x: 50, y: 60 } } });
-    expect(container.dataset.mapLayoutPhase).toBe("structure");
-    expect(container.dataset.mapLayoutIterations).toBe("0");
-    expect(container.dataset.mapLayoutTransition).toBe("pending");
-    graph.setPointPositions.mockClear(); graph.setLinks.mockClear(); graph.fitView.mockClear();
-    graph.setZoomTransformByPointPositions.mockClear();
-    const worker = cpu.instances[0]; worker.getProgress.mockReturnValue(contactProgress);
-    worker.options.onProgress?.(contactProgress);
-    expect(container.dataset.mapLayoutPhase).toBe("contact");
-    expect(container.dataset.mapLayoutIterations).toBe("72");
-    expect(container.dataset.mapLayoutTransition).toBe("stable");
-    expect(container.dataset.mapLayoutTicks).toBe("0");
-    expect(adapter.captureCoordinates()!.forceAtlas2Progress).toBe(contactProgress);
-    expect(graph.setPointPositions).not.toHaveBeenCalled(); expect(graph.setLinks).not.toHaveBeenCalled();
-    expect(graph.fitView).not.toHaveBeenCalled(); expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
-  });
-
-  it("frames the first published contact once without recalibrating physics or uploading topology", async () => {
-    const { adapter } = await mountCpu(); const worker = cpu.instances[0];
-    const before = adapter.captureCoordinates()!;
-    graph.setZoomTransformByPointPositions.mockClear(); graph.setLinks.mockClear(); graph.setConfigPartial.mockClear();
-    worker.getProgress.mockReturnValue(contactProgress);
-    worker.options.onProgress?.(contactProgress);
-    expect(graph.setZoomTransformByPointPositions).toHaveBeenCalledExactlyOnceWith(before.positions, 0, undefined, .08, false);
-    worker.options.onProgress?.(Object.freeze({ ...contactProgress, iterations: 73 }));
-    expect(graph.setZoomTransformByPointPositions).toHaveBeenCalledTimes(1);
-    expect(graph.setLinks).not.toHaveBeenCalled();
-    expect(graph.setConfigPartial).not.toHaveBeenCalled();
-    expect(adapter.captureCoordinates()!.forceAtlas2Units).toBe(before.forceAtlas2Units);
-  });
-
-  it("gives a new visible 2K scene no fresh camera: the cancel at replaceColumns stays permanent", async () => {
-    const input = columns(); const { adapter } = await mountCpu(input);
-    const config = createGraph.mock.calls.at(-1)![1];
-    adapter.replaceColumns({ ...input, identity: { ...input.identity, visibleFingerprint: "visible-2" } });
-    await new Promise(done => setTimeout(done, 5));
-    config.onZoom?.({ transform: { k: .4 } } as never, false); config.onZoomEnd?.({ transform: { k: .4 } } as never, false);
-    await new Promise(done => setTimeout(done, 5));
-    graph.setZoomTransformByPointPositions.mockClear(); graph.fitView.mockClear();
-    const worker = cpu.instances.at(-1)!;
-    worker.options.onPositions(adapter.captureCoordinates()!.positions.slice());
-    worker.getProgress.mockReturnValue(contactProgress); worker.options.onProgress?.(contactProgress);
-    await new Promise(done => setTimeout(done, 5));
-    worker.options.onPositions(adapter.captureCoordinates()!.positions.slice());
-    await new Promise(done => setTimeout(done, 5));
-    expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
-    expect(graph.fitView).not.toHaveBeenCalled();
-  });
-
-  it("keeps the 2K ownership rule for a selection the host carries into the renderer before its first fit", async () => {
-    const container = document.createElement("div"); document.body.appendChild(container);
-    const adapter = createProductWorkspaceCosmosAdapter(container, columns(), { forcedColors: false, reducedMotion: false,
-      callbacks: { onHover: vi.fn(), onSelect: vi.fn() } });
-    adapters.push(adapter);
-    adapter.select("a"); // bound right after creation, as the canvas does
-    await adapter.whenSettled();
-    const worker = cpu.instances.at(-1)!;
-    graph.setZoomTransformByPointPositions.mockClear(); graph.fitView.mockClear();
-    worker.getProgress.mockReturnValue(contactProgress); worker.options.onProgress?.(contactProgress);
-    expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
-    expect(graph.fitView).not.toHaveBeenCalled();
-  });
-
-  it.each(["pointer", "pause-resume", "reduced-resume"] as const)("never submits the final contact Fit after %s cancels camera ownership", async intent => {
-    const { adapter, container } = await mountCpu(); const worker = cpu.instances[0];
-    if (intent === "pointer") container.dispatchEvent(new Event("pointerdown"));
-    else if (intent === "pause-resume") { adapter.stopLayout(); adapter.resumeLayout(); }
-    else { adapter.setReducedMotion(true); adapter.setReducedMotion(false); }
-    graph.setZoomTransformByPointPositions.mockClear(); graph.fitView.mockClear();
-    worker.getProgress.mockReturnValue(contactProgress); worker.options.onProgress?.(contactProgress);
-    expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled(); expect(graph.fitView).not.toHaveBeenCalled();
-  });
-
-  it.each(["pause", "reduced", "destroy"] as const)("rejects a late phase notification after %s", async mode => {
-    const { adapter, container } = await mountCpu(); const worker = cpu.instances[0];
-    if (mode === "pause") adapter.stopLayout();
-    else if (mode === "reduced") adapter.setReducedMotion(true);
-    else adapter.destroy();
-    worker.options.onProgress?.(contactProgress);
-    expect(container.dataset.mapLayoutPhase).toBe("structure");
-    expect(container.dataset.mapLayoutIterations).toBe("0");
-  });
-
-  it("retains the contact phase in a healthy same-owner palette remount", async () => {
-    const input = columns(), { adapter } = await mountCpu(input);
-    const worker = cpu.instances[0], seed = adapter.captureCoordinates()!.forceAtlas2Units!;
-    const contact = buildWorkspaceForceAtlas2ContactUnits(seed, adapter.captureCoordinates()!.positions);
-    worker.getContactUnits.mockReturnValue(contact); worker.options.onContactUnits?.(contact);
-    worker.getProgress.mockReturnValue(contactProgress);
-    worker.options.onProgress?.(contactProgress);
-    adapter.stopLayout();
-    const snapshot = adapter.captureCoordinates()!;
-    const restored = await mountCpu(input, { initialCoordinates: snapshot });
-    expect(cpu.instances.at(-1)!.input.progress).toBe(contactProgress);
-    expect(restored.container.dataset.mapLayoutPhase).toBe("contact");
-    expect(restored.adapter.captureCoordinates()!.forceAtlas2Units).toBe(snapshot.forceAtlas2Units);
-    expect(restored.adapter.captureCoordinates()!.forceAtlas2ContactUnits).toBe(contact);
-  });
-
-  it.each(["missing", "invalid"] as const)("restores a legacy %s contact checkpoint atomically without a runtime failure", async kind => {
-    const input = columns(), { adapter } = await mountCpu(input);
-    const worker = cpu.instances[0], seed = adapter.captureCoordinates()!.forceAtlas2Units!;
-    const contact = buildWorkspaceForceAtlas2ContactUnits(seed, adapter.captureCoordinates()!.positions);
-    worker.getContactUnits.mockReturnValue(contact); worker.options.onContactUnits?.(contact);
-    worker.getProgress.mockReturnValue(contactProgress); worker.options.onProgress?.(contactProgress);
-    const saved = adapter.captureCoordinates()!;
-    const partial = { ...saved, forceAtlas2ContactUnits: kind === "missing" ? undefined
-      : Object.freeze({ ...contact, referenceViewport: Object.freeze({ width: 1, height: 1 }) }) };
-    const restored = await mountCpu(input, { initialCoordinates: partial });
-    const fresh = cpu.instances.at(-1)!;
-    expect(fresh.input.progress).toBeUndefined(); expect(fresh.input.contactUnits).toBeUndefined();
-    expect(fresh.input.units).toBe(seed);
-    expect(fresh.input.positions).toEqual(saved.positions);
-    expect(restored.onError).not.toHaveBeenCalled(); expect(fresh.isRunning()).toBe(true);
-    expect(restored.container.dataset.mapLayoutPhase).toBe("structure");
-    expect(restored.adapter.captureCoordinates()!.forceAtlas2ContactUnits).toBeUndefined();
-  });
-
-  it("does not replay contact progress across an actor change or a stale old-worker callback", async () => {
-    const input = columns(), { adapter, container } = await mountCpu(input);
-    const worker = cpu.instances[0]; worker.getProgress.mockReturnValue(contactProgress);
-    worker.options.onProgress?.(contactProgress);
-    const snapshot = adapter.captureCoordinates()!;
-    const other = { ...input, identity: { ...input.identity, actorId: "new-actor" } };
-    adapter.replaceColumns(other);
-    expect(cpu.instances.at(-1)!.input.progress).toBeUndefined();
-    worker.options.onProgress?.(contactProgress);
-    expect(container.dataset.mapLayoutPhase).toBe("structure");
-    expect(container.dataset.mapLayoutIterations).toBe("0");
-    const restored = await mountCpu(other, { initialCoordinates: snapshot });
-    expect(cpu.instances.at(-1)!.input.progress).toBeUndefined();
-    expect(restored.container.dataset.mapLayoutPhase).toBe("structure");
-  });
-
-  it("keeps the contact checkpoint through metadata-only rebinding, Fit, search, Pause and Resume", async () => {
-    const input = columns(), { adapter } = await mountCpu(input);
-    const worker = cpu.instances[0]; worker.getProgress.mockReturnValue(contactProgress);
-    worker.options.onProgress?.(contactProgress);
-    adapter.replaceColumns({ ...input, nodeLabels: input.nodeLabels.map(label => `${label} updated`) });
-    adapter.stopLayout(); adapter.fit(); adapter.setSearchMatches(new Set([input.nodeIds[0]])); adapter.resumeLayout();
-    expect(cpu.instances).toHaveLength(1);
-    expect(adapter.captureCoordinates()!.forceAtlas2Progress).toBe(contactProgress);
   });
 
   it.each(["pause", "reduced"] as const)("rejects CPU output during %s and resumes without losing pins", async mode => {
     const { adapter, container } = await mountCpu(); const worker = cpu.instances[0];
+    worker.options.onPositions(adapter.captureCoordinates()!.positions);
+    worker.options.onState({ ready: true, running: true, phase: "running" });
     adapter.pin("a", true, { x: 77, y: 88 });
     expect(worker.setPositions).toHaveBeenLastCalledWith(expect.any(Float32Array), [0]);
     if (mode === "pause") adapter.stopLayout(); else adapter.setReducedMotion(true);
@@ -957,6 +743,7 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
     const config = createGraph.mock.calls.at(-1)![1]; config.onPointMouseOver?.(1, [0, 0], undefined, false, false);
     const drag = installedSdkDrag(config, 1); drag.start("touchstart"); drag.end("touchend");
     expect(onPin).not.toHaveBeenCalled(); expect(worker.isRunning()).toBe(true);
+    expect(worker.start).toHaveBeenLastCalledWith(false);
     expect(worker.setPositions).not.toHaveBeenCalled();
   });
 
@@ -981,8 +768,21 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
   });
 
   it("reports Worker failure once and stops rather than running native GPU forces", async () => {
-    const { container, onError } = await mountCpu(), worker = cpu.instances[0]; const error = new Error("Worker unavailable");
+    const { adapter, container, onError } = await mountCpu(), worker = cpu.instances[0]; const error = new Error("Worker unavailable");
     worker.options.onError(error); worker.options.onError(error);
+    const rendererCalls = [graph.create, graph.setPointPositions, graph.setPinnedPoints, graph.fitView,
+      graph.setZoomTransformByPointPositions, graph.setZoomLevel, graph.setConfigPartial, graph.start, graph.pause,
+      graph.setLinkColors];
+    rendererCalls.forEach(method => method.mockClear());
+    adapter.setReducedMotion(true); adapter.resumeLayout(); adapter.stopLayout();
+    adapter.reset(); adapter.fit(); adapter.resize(); adapter.zoomBy(2);
+    adapter.focus("a"); adapter.select("a"); adapter.setSearchMatches(new Set(["a"]));
+    adapter.setEdgesVisible(false); adapter.setLabelsVisible(false);
+    adapter.setViewport({ zoom: 2, pan: { x: 5, y: 6 } }); adapter.replaceColumns(columns());
+    expect(adapter.pin("a", true, { x: 5, y: 6 })).toBeNull();
+    expect(adapter.getViewport()).toBeNull(); expect(adapter.captureCoordinates()).toBeNull();
+    for (const method of rendererCalls) expect(method).not.toHaveBeenCalled();
+    expect(cpu.instances).toHaveLength(1);
     expect(onError).toHaveBeenCalledExactlyOnceWith(error); expect(worker.destroy).toHaveBeenCalledOnce();
     expect(container.dataset.mapPhysics).toBe("failed"); expect(container.dataset.mapLayoutRunning).toBe("false");
     expect(graph.start).not.toHaveBeenCalled();
@@ -1014,13 +814,14 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
     worker.setPositions.mockClear(); visibility.mockReturnValue("visible");
     document.dispatchEvent(new Event("visibilitychange"));
     expect(worker.isRunning()).toBe(true); expect(worker.start).toHaveBeenCalledTimes(starts + 1);
+    expect(worker.start).toHaveBeenLastCalledWith(false);
     expect(container.dataset.mapLayoutRunning).toBe("true"); expect(cpu.instances).toHaveLength(1);
     expect(worker.setPositions).not.toHaveBeenCalled(); expect(graph.getPointPositions).not.toHaveBeenCalled();
     expect(graph.setPointPositions).not.toHaveBeenCalled(); expect(graph.start).not.toHaveBeenCalled();
     expect(graph.fitView).not.toHaveBeenCalled(); expect(graph.setZoomTransformByPointPositions).not.toHaveBeenCalled();
     expect(graph.setZoomLevel).not.toHaveBeenCalled();
     const restored = adapter.captureCoordinates()!;
-    expect(restored.positions).toEqual(saved.positions); expect(restored.forceAtlas2Units).toBe(saved.forceAtlas2Units);
+    expect(restored.positions).toEqual(saved.positions);
     expect(graph.setPinnedPoints).toHaveBeenLastCalledWith([0]);
   });
 
@@ -1029,26 +830,40 @@ describe("default 2K official CPU Worker with Cosmos GPU drawing", () => {
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     document.dispatchEvent(new Event("visibilitychange"));
     if (mode === "pause") adapter.stopLayout(); else adapter.setReducedMotion(true);
-    worker.start.mockClear(); visibility.mockReturnValue("visible");
+    const before = adapter.captureCoordinates()!.positions;
+    graph.setPointPositions.mockClear(); worker.start.mockClear(); visibility.mockReturnValue("visible");
     document.dispatchEvent(new Event("visibilitychange"));
-    expect(worker.isRunning()).toBe(false); expect(worker.start).not.toHaveBeenCalled();
+    expect(worker.isRunning()).toBe(false);
+    // Reduced motion may release a pending static first frame, never animation.
+    if (mode === "pause") expect(worker.start).not.toHaveBeenCalled();
+    else expect(worker.start.mock.calls.every(([reheat]) => reheat === false)).toBe(true);
+    expect(adapter.captureCoordinates()!.positions).toEqual(before);
+    expect(graph.setPointPositions).not.toHaveBeenCalled();
     expect(container.dataset.mapLayoutRunning).toBe("false"); expect(graph.start).not.toHaveBeenCalled();
   });
 
-  it("never starts CPU work when the initial page is already hidden", async () => {
-    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  it("waits through an initially hidden page then fits its first solved frame once", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     const { adapter, container } = await mountCpu();
     expect(cpu.create).not.toHaveBeenCalled(); expect(container.dataset.mapLayoutRunning).toBe("false");
     adapter.resumeLayout(); expect(cpu.create).not.toHaveBeenCalled(); expect(graph.start).not.toHaveBeenCalled();
+    visibility.mockReturnValue("visible"); document.dispatchEvent(new Event("visibilitychange"));
+    const worker = cpu.instances[0], solved = Float32Array.from([100, 200, 300, 400, 500, 600]);
+    graph.setZoomTransformByPointPositions.mockClear(); graph.fitView.mockClear();
+    worker.options.onPositions(solved);
+    worker.options.onState({ ready: true, running: false, phase: "cooled" });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(graph.setZoomTransformByPointPositions).toHaveBeenCalledExactlyOnceWith(solved, 0, undefined, .08, false);
+    expect(graph.fitView).not.toHaveBeenCalled();
   });
 });
 
 describe("explicit PC complete upstream GPU simulation", () => {
   it.each([3, 2_000])("uses native Cosmos without a custom driver for the default %i-node scene", async count => {
-    const adapter = await mount(sizedColumns(count), false);
+    await mount(sizedColumns(count), false);
     expect(createNativeGraph).toHaveBeenCalledOnce();
-    expect(adapter.captureCoordinates()!.forceAtlas2Units).toBeUndefined();
     expect(createNativeGraph.mock.calls[0][0].dataset.mapPhysics).toBe("cosmos-native");
+    expect(createGraph.mock.calls[0][0].dataset.mapLayoutPhase).toBeUndefined();
     expect(createGraph.mock.calls[0][1].simulationCluster).toBe(0);
     expect(graph.setPointClusters).not.toHaveBeenCalled();
     expect(graph.setClusterPositions).not.toHaveBeenCalled();
@@ -2320,8 +2135,12 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
       callbacks: { onHover: vi.fn(), onSelect: vi.fn() } });
     adapters.push(adapter); await adapter.whenSettled();
     expect(graph.getPointPositions()).not.toEqual(positions);
-    expect(adapter.captureCoordinates()!.collisionBasis).toEqual(freshCollisionBasis(input));
-    expect(adapter.captureCoordinates()!.forceBasis).toEqual(freshCollisionBasis(input));
+    const glyphs = buildCosmosSceneBuffers(input, readGraphTokens(document.body, "light"));
+    const freshBasis = budget === WORKSPACE_MAP_DEFAULT_BUDGET
+      ? buildWorkspaceRelationCollisionBasis(workspaceDirectoryStartPositions(workspaceContainerIndices(input), input.nodeKeys), glyphs.pointSizes, 734, 608)
+      : freshCollisionBasis(input);
+    expect(adapter.captureCoordinates()!.collisionBasis).toEqual(freshBasis);
+    expect(adapter.captureCoordinates()!.forceBasis).toEqual(freshBasis);
   });
 
   it("captures copied actual GPU coordinates and immutable visible ownership, not the initial worker seed", async () => {

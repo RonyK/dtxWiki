@@ -25132,6 +25132,19 @@
             "title": "Label",
             "type": "string"
           },
+          "parent_document_id": {
+            "anyOf": [
+              {
+                "maxLength": 220,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Document Id"
+          },
           "path": {
             "maxLength": 1024,
             "minLength": 1,

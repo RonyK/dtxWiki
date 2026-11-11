@@ -1,3 +1,4 @@
+import { workspaceNominalGlyphRadiusCss } from "../../shared/workspaceGlyphGeometry";
 import { describe, expect, it } from "vitest";
 import { buildWorkspaceNativeCollisionRadii } from "../nativeCollisionRadii";
 import { buildWorkspaceRelationCollisionBasis, buildWorkspaceRelationForceConfig } from "../relationPhysics";
@@ -34,4 +35,12 @@ describe("native per-point glyph collision units", () => {
     expect(buildWorkspaceNativeCollisionRadii(Float32Array.from([4]), Float32Array.from([0]), basis, 8)[0])
       .toBeCloseTo(.004, 6);
   });
+});
+
+// Retained from the removed FA2-unit suite: this geometry is renderer-owned.
+it("encloses native circle, square and diamond glyphs with their nominal envelopes", () => {
+  expect(workspaceNominalGlyphRadiusCss(10, 0)).toBe(5);
+  expect(workspaceNominalGlyphRadiusCss(10, 1)).toBeCloseTo(4 * Math.SQRT2, 14);
+  expect(workspaceNominalGlyphRadiusCss(10, 3)).toBe(4.8);
+  expect(() => workspaceNominalGlyphRadiusCss(10, 2)).toThrow();
 });

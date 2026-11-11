@@ -217,6 +217,12 @@ def _invalid_scene(case):
     elif case == "edge_weight_below_count":
         values["edges"][0]["relation_count"] = 2
         values["edges"][0]["occurrence_weight"] = 1
+    elif case == "parent_document_cycle":
+        first, second = values["nodes"]
+        first["parent_document_id"], second["parent_document_id"] = (
+            second["id"],
+            first["id"],
+        )
     else:
         raise AssertionError(case)
     return values
@@ -250,6 +256,7 @@ def _invalid_scene(case):
         "legacy_weight_with_topology",
         "slice_weight_below_count",
         "edge_weight_below_count",
+        "parent_document_cycle",
     ],
 )
 def test_topology_rejects_invalid_cross_references_and_nonconserving_sums(case):

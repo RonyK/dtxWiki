@@ -1,25 +1,31 @@
-"""Read legacy Library citation endpoints as document identities.
+"""Read legacy Library citation endpoints and document containers as documents.
 
 The selectable is read-only and does not rewrite stored projections. Collapse
 references to several versions/artifacts before graph visibility, counts and
-budgets. A separate mapper avoids polluting a stored EdgeProjection object's
-identity-map state with the normalized endpoints.
+budgets. A tree row whose parent placement is a document reads as that
+document's relation, so TreeRail containment and links share one node. A
+separate mapper avoids polluting a stored EdgeProjection object's identity-map
+state with the normalized endpoints.
 """
 
 from functools import lru_cache
 from uuid import UUID
 
-from sqlalchemy import and_, func, literal, or_, select, union_all
+from sqlalchemy import and_, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import aliased, registry
 
 from backend.models.context import EdgeProjection
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
+from backend.models.tree import WorkspaceTreeNode
 from backend.repositories.workspace_scoped import (
     join_correlated_workspace_projection,
     join_in_workspace,
     select_in_workspace,
 )
 from backend.services.library_canonical import LEGACY_READY_PROCESSING_STATUSES
+
+# Tree placements that are documents. Their children belong to the document.
+DOCUMENT_TREE_TARGET_KINDS = ("context_page", "library_item", "agent_page")
 
 
 def _document_edges(workspace_id, source_ids=None, source_kinds=None):
@@ -136,8 +142,25 @@ def _document_edges(workspace_id, source_ids=None, source_kinds=None):
             for column in raw.c
         ]
     ).where(ranked.c.document_ordinal == 1)
-    ordinary = select(*raw.c).where(
-        raw.c.workspace_id == workspace_id, ~library_citation
+    container = aliased(WorkspaceTreeNode)
+    document_container = and_(
+        raw.c.edge_kind == "tree",
+        raw.c.source_kind == "workspace_tree_node",
+        container.id == raw.c.source_id,
+        container.node_kind != "folder",
+        container.target_kind.in_(DOCUMENT_TREE_TARGET_KINDS),
+        container.target_id.is_not(None),
+    )
+    has_document_container = container.id.is_not(None)
+    ordinary = join_correlated_workspace_projection(
+        select(*raw.c).select_from(raw),
+        raw.c.workspace_id,
+        container,
+        on=document_container,
+    ).where(
+        raw.c.workspace_id == workspace_id,
+        ~library_citation,
+        ~has_document_container,
     )
     if source_ids is not None:
         ordinary = ordinary.where(raw.c.source_id.in_(source_ids))
@@ -146,7 +169,48 @@ def _document_edges(workspace_id, source_ids=None, source_kinds=None):
         if source_kinds is not None
         else [ordinary]
     )
-    return union_all(*branches, deduplicated).subquery("document_edge_projection")
+    # The document reads as the source. Several placements of one document
+    # may hold the same child; like citations, they collapse to one relation.
+    container_kind = cast(container.target_kind, raw.c.source_kind.type)
+    container_id = container.target_id
+    contained_identity = [
+        raw.c.workspace_id,
+        container_kind,
+        container_id,
+        raw.c.target_kind,
+        raw.c.target_id,
+        raw.c.edge_kind,
+    ]
+    contained_columns = [
+        container_kind.label(column.name)
+        if column.name == "source_kind"
+        else container_id.label(column.name)
+        if column.name == "source_id"
+        else column
+        for column in raw.c
+    ]
+    contained_ordinal = (
+        func.row_number()
+        .over(partition_by=contained_identity, order_by=raw.c.id)
+        .label("document_ordinal")
+    )
+    contained = join_correlated_workspace_projection(
+        select(*contained_columns, contained_ordinal).select_from(raw),
+        raw.c.workspace_id,
+        container,
+        on=document_container,
+    ).where(raw.c.workspace_id == workspace_id, has_document_container)
+    if source_ids is not None:
+        contained = contained.where(container_id.in_(source_ids))
+    if source_kinds is not None:
+        contained = contained.where(container_kind.in_(source_kinds))
+    contained = contained.subquery("document_container_trees")
+    unique_contained = select(
+        *[contained.c[column.name] for column in raw.c]
+    ).where(contained.c.document_ordinal == 1)
+    return union_all(*branches, deduplicated, unique_contained).subquery(
+        "document_edge_projection"
+    )
 
 
 class DocumentEdgeProjection:

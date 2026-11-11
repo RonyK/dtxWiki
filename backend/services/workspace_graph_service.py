@@ -224,6 +224,8 @@ class _Document:
     secondary_capped: bool = False
     reference_count: int = 0
     evidence_count: int = 0
+    # TreeRail document ancestors below the primary folder, nearest first.
+    container_keys: tuple[_DocumentKey, ...] = ()
 
     @property
     def node_id(self) -> str:
@@ -841,6 +843,20 @@ class WorkspaceGraphService:
                 ]
         index = _TreeIndex(nodes_by_id)
 
+        def document_key(node: _TreeNode) -> _DocumentKey | None:
+            if node.target_id is None:
+                return None
+            if node.target_kind == "context_page":
+                return ("context", node.target_id)
+            if node.target_kind == "agent_page":
+                return ("agent", node.target_id)
+            if node.target_kind == "library_item":
+                return ("library", node.target_id)
+            if node.target_kind == "library_artifact":
+                item_id = artifact_items.get(node.target_id)
+                return ("library", item_id) if item_id is not None else None
+            return None
+
         initially_visible: set[UUID] = set()
         for node in nodes_by_id.values():
             if node.target_id is None:
@@ -898,27 +914,12 @@ class WorkspaceGraphService:
             defaultdict(list)
         )
         for node in nodes_by_id.values():
-            if node.id not in visible_ids or node.target_id is None:
+            if node.id not in visible_ids:
                 continue
-            if node.target_kind == "context_page":
-                key = ("context", node.target_id)
-                priority = 0
-            elif node.target_kind == "agent_page":
-                key = ("agent", node.target_id)
-                priority = 0
-            elif node.target_kind == "library_item":
-                key = ("library", node.target_id)
-                priority = 0
-            elif node.target_kind == "library_artifact":
-                item_id = artifact_items.get(node.target_id)
-                if item_id is None:
-                    continue
-                key = ("library", item_id)
-                priority = 1
-            else:
+            key = document_key(node)
+            if key is None or key not in documents:
                 continue
-            if key not in documents:
-                continue
+            priority = 1 if node.target_kind == "library_artifact" else 0
             folder = next(
                 (
                     ancestor
@@ -953,6 +954,19 @@ class WorkspaceGraphService:
             document.secondary_capped = len(secondary) > 32
             document.secondary = secondary[:32]
             document.secondary_revision = tuple(secondary)
+            # A filtered-out parent document yields to the next one up; the
+            # primary folder ends the walk because it is the folder container.
+            if isinstance(document.primary, _CapturedPlacement):
+                containers: list[_DocumentKey] = []
+                for ancestor in reversed(
+                    index.ancestors(document.primary.tree_node_id)
+                ):
+                    if ancestor.node_kind == "folder":
+                        break
+                    ancestor_key = document_key(ancestor)
+                    if ancestor_key not in (None, key) and ancestor_key in documents:
+                        containers.append(ancestor_key)
+                document.container_keys = tuple(containers)
 
     @staticmethod
     def _apply_document_filters(
@@ -2513,12 +2527,17 @@ class WorkspaceGraphService:
                 incident_by_group[target_group] += 1
 
         nodes: list[WorkspaceGraphDocumentNode | WorkspaceGraphClusterNode] = []
+        rendered_documents = {group.members[0] for group in groups if group.is_document}
         for group in sorted(
             groups, key=lambda value: _group_sort_key(value, documents)
         ):
             if group.is_document:
                 document = documents[group.members[0]]
-                nodes.append(self._materialize_document_detail(document))
+                nodes.append(
+                    self._materialize_document_detail(
+                        document, documents, rendered_documents
+                    )
+                )
             else:
                 nodes.append(
                     WorkspaceGraphClusterNode(
@@ -2568,9 +2587,17 @@ class WorkspaceGraphService:
         )
 
     @staticmethod
-    def _materialize_document_detail(document: _Document) -> WorkspaceGraphDocumentNode:
+    def _materialize_document_detail(
+        document: _Document,
+        documents: dict[_DocumentKey, _Document],
+        rendered_documents: set[_DocumentKey],
+    ) -> WorkspaceGraphDocumentNode:
         """Expand presentation only for final, admitted singleton documents."""
 
+        parent_key = next(
+            (key for key in document.container_keys if key in rendered_documents),
+            None,
+        )
         return WorkspaceGraphDocumentNode(
             id=document.node_id,
             entity_kind=document.entity_kind,
@@ -2579,6 +2606,9 @@ class WorkspaceGraphService:
             path=document.path[:1024],
             primary_folder_id=document.folder_id,
             primary_folder_label=document.folder_label[:200],
+            parent_document_id=(
+                documents[parent_key].node_id if parent_key is not None else None
+            ),
             reference_count=document.reference_count,
             evidence_count=document.evidence_count,
             also_appears_in=[

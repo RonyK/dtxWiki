@@ -623,7 +623,6 @@
     "mapRendererFailed": "The interactive map could not start. The document list below remains available.",
     "mapLayout": {
       "arranging": "Arranging the map… You can explore while it settles.",
-      "spacing": "Separating nodes… You can keep exploring.",
       "paused": "Layout paused. Resume to continue.",
       "motion-off": "Layout motion is off for reduced motion."
     },

@@ -1,4 +1,4 @@
-import { workspaceNominalGlyphRadiusCss } from "./forceAtlas2Units";
+import { workspaceNominalGlyphRadiusCss } from "../shared/workspaceGlyphGeometry";
 import type { WorkspaceRelationCollisionBasis } from "./relationPhysics";
 
 /** Convert each actual glyph to the existing immutable seed-Fit world units. */

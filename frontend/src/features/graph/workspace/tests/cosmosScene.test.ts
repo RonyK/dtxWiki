@@ -79,10 +79,10 @@ describe("Workspace Cosmos typed scene", () => {
       .toEqual(buildCosmosRelationColors(input, colors, communities, [0]));
   });
 
-  it("rejects retired synthetic folder native points even with old presentation metadata", () => {
+  it("rejects unknown native point kinds even with old presentation metadata", () => {
     const input = {
       ...columns(),
-      nodeKinds: new Uint8Array([0, 1, 3]),
+      nodeKinds: new Uint8Array([0, 1, 5]),
       preparedScene: { supported: true, points: [{}, {}], folders: [{}], physicsRelations: [] },
       nodeRoles: ["document", "document", "folder"],
       sourceNodeIds: ["a", "b", null],
