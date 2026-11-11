@@ -547,15 +547,15 @@ class PageService:
         read-only projection onto the same page/version without re-running
         this exact version-selection/visibility logic a second time.
         """
-        page = self._resolve_page(session, page_id, workspace_slug, slug)
-        visible_version_id, _is_draft = visible_context_version_id(page, actor)
-        version = self._require_page_version(
+        page, version = self.resolve_page_version_for_read(
             session,
-            page,
-            version_id or visible_version_id,
+            page_id=page_id,
+            workspace_slug=workspace_slug,
+            slug=slug,
+            version_id=version_id,
+            actor=actor,
         )
-        if not context_version_is_visible(version, actor):
-            raise PageNotFoundError("page version not found")
+        visible_version_id, _is_draft = visible_context_version_id(page, actor)
         payload = self._payload_from_page(
             session,
             page,
@@ -565,6 +565,26 @@ class PageService:
             parent_visibility_actor=actor,
         )
         return page, version, payload
+
+    def resolve_page_version_for_read(
+        self,
+        session: Session,
+        page_id: UUID | None = None,
+        workspace_slug: str | None = None,
+        slug: str | None = None,
+        version_id: UUID | None = None,
+        *,
+        actor: ActorContext | None = None,
+    ) -> tuple[ContextPage, ContextPageVersion]:
+        """Resolve an actor-visible version without constructing its payload."""
+        page = self._resolve_page(session, page_id, workspace_slug, slug)
+        visible_version_id, _is_draft = visible_context_version_id(page, actor)
+        version = self._require_page_version(
+            session, page, version_id or visible_version_id
+        )
+        if not context_version_is_visible(version, actor):
+            raise PageNotFoundError("page version not found")
+        return page, version
 
     def read_public_page(
         self,

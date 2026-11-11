@@ -912,6 +912,8 @@ class DomainReadService:
         actor: ActorContext | None,
         *,
         include_warnings: bool = True,
+        include_pending_review: bool | None = None,
+        include_inspector_counts: bool = True,
     ) -> dict[str, Any]:
         """Read-only projection fields for a Context page's canonical detail
         response: tree placement, backlinks/wikilinks, lint warnings, the
@@ -949,26 +951,9 @@ class DomainReadService:
         )
         parent_node_id = tree_node.parent_id if tree_node is not None else None
         backlink_count = (
-            session.scalar(
-                join_in_workspace(
-                    select_in_workspace(
-                        PageLink,
-                        workspace_id=workspace_id,
-                        conditions=(
-                            page_link_target_condition(page),
-                            PageLink.source_page_id != page.id,
-                            ContextPage.lifecycle_status != "archived",
-                            PageLink.source_version_id
-                            == visible_context_version_expression(actor),
-                        ),
-                    ),
-                    PageLink,
-                    ContextPage,
-                    workspace_id=workspace_id,
-                    on=ContextPage.id == PageLink.source_page_id,
-                ).with_only_columns(func.count(func.distinct(PageLink.source_page_id)))
-            )
-            or 0
+            self._context_page_backlink_count(session, workspace_id, page, actor)
+            if include_inspector_counts
+            else None
         )
         wikilink_targets = (
             legacy_wikilink_targets(session, page=page, version=version, actor=actor)
@@ -1038,6 +1023,11 @@ class DomainReadService:
                 version=version,
                 self_origins=self.context_link_origins,
             )
+        # Preserve the historical existence-check skip by default, while REST
+        # readers can request review metadata independently of inspector lint.
+        if include_pending_review is None:
+            include_pending_review = include_warnings
+        if include_pending_review:
             # F1: surface the open review for this page's CURRENT pending draft so
             # it can be acted on inline. Scoped to latest_draft_version_id via the
             # operation's diff_ref so a superseded/already-published older draft's
@@ -1075,11 +1065,15 @@ class DomainReadService:
                 # Lint the DRAFT body (not the displayed/published one) so the
                 # reviewer sees the draft's format issues before approving even
                 # when the published head is clean (Sweep-2).
-                draft_version = get_in_workspace(
-                    session,
-                    ContextPageVersion,
-                    workspace_id=workspace_id,
-                    resource_id=page.latest_draft_version_id,
+                draft_version = (
+                    get_in_workspace(
+                        session,
+                        ContextPageVersion,
+                        workspace_id=workspace_id,
+                        resource_id=page.latest_draft_version_id,
+                    )
+                    if include_warnings
+                    else None
                 )
                 if draft_version is not None:
                     pending_draft_warnings = page_format_warnings_for_body(
@@ -1127,8 +1121,8 @@ class DomainReadService:
                     workspace_id=workspace_id,
                     parent_id=tree_node.id,
                 )
-                if tree_node is not None
-                else 0
+                if include_inspector_counts and tree_node is not None
+                else (0 if include_inspector_counts else None)
             ),
             "backlink_count": backlink_count,
             "wikilink_targets": wikilink_targets,
@@ -1156,6 +1150,84 @@ class DomainReadService:
             ),
             "reconciliation_available": bool(reconciliation_versions),
         }
+
+    def context_page_inspector(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        page: ContextPage,
+        version: ContextPageVersion,
+        actor: ActorContext,
+        *,
+        section: Literal["summary", "backlinks"],
+    ) -> dict[str, Any]:
+        """Compute only the requested section for an already-authorized version."""
+        result: dict[str, Any] = {
+            "page_id": page.id,
+            "version_id": version.id,
+            "section": section,
+            "warnings": [],
+            "backlink_count": None,
+            "children_count": None,
+        }
+        if section == "summary":
+            workspace = session.get(Workspace, workspace_id)
+            result["warnings"] = page_format_warnings_for_body(
+                session,
+                workspace_id,
+                page,
+                version.body_md,
+                registry=self.lint_registry,
+                policy=workspace.lint_policy if workspace else None,
+                actor=actor,
+                version=version,
+                self_origins=self.context_link_origins,
+            )
+        else:
+            result["backlink_count"] = self._context_page_backlink_count(
+                session, workspace_id, page, actor
+            )
+            tree_node = self.tree_read_service.primary_node_for_target(
+                session=session,
+                workspace_id=workspace_id,
+                target_kind="context_page",
+                target_id=page.id,
+            )
+            result["children_count"] = (
+                self.tree_read_service.children_count(
+                    session=session,
+                    workspace_id=workspace_id,
+                    parent_id=tree_node.id,
+                )
+                if tree_node is not None
+                else 0
+            )
+        return result
+
+    @staticmethod
+    def _context_page_backlink_count(session, workspace_id, page, actor) -> int:
+        return (
+            session.scalar(
+                join_in_workspace(
+                    select_in_workspace(
+                        PageLink,
+                        workspace_id=workspace_id,
+                        conditions=(
+                            page_link_target_condition(page),
+                            PageLink.source_page_id != page.id,
+                            ContextPage.lifecycle_status != "archived",
+                            PageLink.source_version_id
+                            == visible_context_version_expression(actor),
+                        ),
+                    ),
+                    PageLink,
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    on=ContextPage.id == PageLink.source_page_id,
+                ).with_only_columns(func.count(func.distinct(PageLink.source_page_id)))
+            )
+            or 0
+        )
 
     def read_target(
         self,

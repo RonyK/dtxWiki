@@ -275,6 +275,8 @@
     "emptyTitle": "Context detail",
     "emptyDescription": "Select a Context page to inspect its details and citations.",
     "summary": "Summary",
+    "loadingSummary": "Checking citation health…",
+    "loadError": "Citation health could not be loaded. Try again.",
     "properties": "Properties",
     "backlinks": "Backlinks",
     "history": "History",

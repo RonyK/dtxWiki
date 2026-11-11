@@ -589,6 +589,7 @@ describe("WorkspaceLayout", () => {
         inspector={<div>Inspector content</div>}
         inspectorLabel="Details"
         layoutKey="mobile-inspector"
+        lazyInspector
         left={() => <aside aria-label="Explorer">Explorer content</aside>}
         leftLabel="Explorer"
         main={<main>Main content</main>}
@@ -601,6 +602,10 @@ describe("WorkspaceLayout", () => {
     expect(layout).toHaveStyle({ "--workspace-right-w": "300px" });
     expect(inspectorPanel).toHaveAttribute("data-mobile-open", "false");
 
+    // A saved desktop-open preference must not mount data loaders inside the
+    // closed mobile sheet; hiding it with aria-hidden alone still runs effects.
+    expect(screen.queryByText("Inspector content")).not.toBeInTheDocument();
+
     const sheetTrigger = screen.getByRole("button", { name: "Open Details sheet" });
     expect(
       [...sheetTrigger.querySelectorAll("path")].map((path) => path.getAttribute("d")),
@@ -611,6 +616,7 @@ describe("WorkspaceLayout", () => {
     expect(layout).toHaveAttribute("data-mobile-inspector-open", "true");
     expect(layout).toHaveStyle({ "--workspace-right-w": "300px" });
     expect(inspectorPanel).toHaveAttribute("data-mobile-open", "true");
+    expect(screen.getByText("Inspector content")).toBeInTheDocument();
     const hideDetails = within(screen.getByRole("dialog", { name: "Details sheet" }))
       .getByRole("button", { name: "Hide Details" });
     expect(
@@ -622,6 +628,7 @@ describe("WorkspaceLayout", () => {
     expect(layout).toHaveAttribute("data-mobile-inspector-open", "false");
     expect(layout).toHaveAttribute("data-inspector-collapsed", "false");
     expect(inspectorPanel).toHaveAttribute("data-mobile-open", "false");
+    expect(screen.queryByText("Inspector content")).not.toBeInTheDocument();
   });
 
   it("closes the mobile inspector sheet on Escape and restores the trigger", async () => {

@@ -704,13 +704,28 @@ class ContextPageDetail(PagePayload):
     published_version_info: PublishedVersionInfo | None = None
     tree_path: list[TreePathEntry] = Field(default_factory=list)
     parent_node_id: UUID | None = None
-    children_count: int = 0
-    backlink_count: int = 0
+    children_count: int | None = Field(
+        default=None,
+        description="Direct child count; null until requested by the inspector.",
+    )
+    backlink_count: int | None = Field(
+        default=None,
+        description="Visible backlink count; null until requested by the inspector.",
+    )
     wikilink_targets: list[WikilinkTarget] = Field(default_factory=list)
     link_targets: list[ContextLinkTarget] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Legacy field, not computed by the canonical detail read. Request "
+            "inspector section=summary for the displayed version's warnings."
+        ),
+    )
     pending_draft_version_id: UUID | None = None
-    pending_draft_warnings: list[str] = Field(default_factory=list)
+    pending_draft_warnings: list[str] = Field(
+        default_factory=list,
+        description="Legacy field, not computed by the canonical detail read.",
+    )
     pending_review: PendingReviewInfo | None = None
     reconciliation_pending_count: int = Field(default=0, ge=0)
     reconciliation_pending_count_truncated: bool = False
@@ -720,6 +735,21 @@ class ContextPageDetail(PagePayload):
 
 class ContextPageDetailResponse(RESTResponseBase):
     data: ContextPageDetail
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextPageInspector(BaseModel):
+    page_id: UUID
+    version_id: UUID
+    section: Literal["summary", "backlinks"]
+    warnings: list[str] = Field(default_factory=list)
+    backlink_count: int | None = None
+    children_count: int | None = None
+
+
+class ContextPageInspectorResponse(RESTResponseBase):
+    data: ContextPageInspector
 
     model_config = ConfigDict(extra="forbid")
 

@@ -686,10 +686,12 @@ export async function getContextPageNeighbors(
   workspaceId: string,
   pageId: string,
   format: "json" | "mermaid" = "json",
+  signal?: AbortSignal,
 ) {
   const suffix = format === "mermaid" ? "?format=mermaid" : "";
   const response = await apiRequest<{ data: GraphNeighborsPayload }>(
     `/api/v1/workspaces/${workspaceId}/context/pages/${pageId}/neighbors${suffix}`,
+    { signal },
   );
   return response.data;
 }

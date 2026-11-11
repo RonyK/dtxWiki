@@ -70,6 +70,8 @@ import {
   listContextChanges,
   listContextPages,
   readContextPage,
+  readContextPageInspector,
+  type ContextPageInspector,
 } from "../../shared/api/context";
 import {
   favoriteTargetKind,
@@ -1243,6 +1245,7 @@ function ScopedContextScreen() {
     <>
       <WorkspaceLayout
         defaultInspectorOpen={false}
+        lazyInspector
         inspectorLabel={t("layout.details", { defaultValue: "Details" })}
         layoutKey="context"
         leftLabel={t("layout.explorer", { defaultValue: "Explorer" })}
@@ -1725,7 +1728,6 @@ function ContextPageList({
 
 function PendingDraftReview({
   review,
-  draftWarnings,
   reconciliationPendingCount,
   canReview,
   workspaceId,
@@ -1734,7 +1736,6 @@ function PendingDraftReview({
   onDecided,
 }: {
   review: NonNullable<ContextPageDetail["pending_review"]>;
-  draftWarnings: string[];
   reconciliationPendingCount: number;
   canReview: boolean;
   workspaceId: string;
@@ -1873,12 +1874,6 @@ function PendingDraftReview({
                   })}
           {" · "}
           <StatusPill status={review.risk_level} compact />
-          {draftWarnings.length > 0
-            ? ` · ${t("pendingReview.warnings", {
-                defaultValue: "{{count}} lint warnings",
-                count: draftWarnings.length,
-              })}`
-            : ""}
         </span>
         {review.status === "pending" &&
         earlierReviewCount != null &&
@@ -3101,7 +3096,6 @@ function ContextReader({
       {detail.pending_review ? (
         <PendingDraftReview
           review={detail.pending_review}
-          draftWarnings={detail.pending_draft_warnings}
           reconciliationPendingCount={detail.reconciliation_pending_count}
           canReview={canEdit}
           workspaceId={workspaceId ?? detail.workspace_id}
@@ -4707,17 +4701,8 @@ function ContextInspector({
   workspaceId: string | null;
 }) {
   const { t } = useTranslation("context");
-  const {
-    data: neighbors,
-    error: neighborsError,
-    loading: neighborsLoading,
-  } = useAsyncLoad<GraphNeighborsPayload | null>(
-    () => workspaceId && detail
-      ? getContextPageNeighbors(workspaceId, detail.id)
-      : Promise.resolve(null),
-    [workspaceId, detail],
-    { errorMessage: t("neighbors.loadError"), fallbackData: null },
-  );
+  const [loadedSummary, setLoadedSummary] = useState<ContextInspectorSnapshot | null>(null);
+  const [loadedBacklinks, setLoadedBacklinks] = useState<ContextInspectorSnapshot | null>(null);
   // Inspector tab state lives here (not in WorkspaceLayout) so it survives the
   // panel re-render and resets when a different page is selected.
   const [tab, setTab] = useState<ContextInspectorTab>("summary");
@@ -4739,8 +4724,8 @@ function ContextInspector({
     );
   }
 
-  const backlinkCount =
-    detail.backlink_count ?? neighbors?.backlinks?.length ?? 0;
+  const summary = loadedSummary?.detail === detail ? loadedSummary.data : null;
+  const backlinks = loadedBacklinks?.detail === detail ? loadedBacklinks.data : null;
   return (
     <TabbedInspector
       activeKey={tab}
@@ -4751,9 +4736,14 @@ function ContextInspector({
         {
           key: "summary",
           label: t("inspector.summary", { defaultValue: "Summary" }),
-          badge:
-            detail.warnings.length > 0 ? detail.warnings.length : undefined,
-          content: <ContextSummaryPanel detail={detail} />,
+          badge: summary?.warnings.length || undefined,
+          content: (
+            <LazyContextSummaryPanel
+              detail={detail}
+              workspaceId={workspaceId ?? detail.workspace_id}
+              onLoaded={(data) => setLoadedSummary({ detail, data })}
+            />
+          ),
         },
         {
           key: "properties",
@@ -4763,14 +4753,12 @@ function ContextInspector({
         {
           key: "backlinks",
           label: t("inspector.backlinks", { defaultValue: "Backlinks" }),
-          badge: backlinkCount > 0 ? backlinkCount : undefined,
+          badge: backlinks?.backlink_count || undefined,
           content: (
-            <ContextBacklinksPanel
+            <LazyContextBacklinksPanel
               detail={detail}
-              neighbors={neighbors}
-              neighborsFailed={Boolean(neighborsError)}
-              neighborsLoading={neighborsLoading}
-              workspaceId={workspaceId}
+              workspaceId={workspaceId ?? detail.workspace_id}
+              onLoaded={(data) => setLoadedBacklinks({ detail, data })}
             />
           ),
         },
@@ -4781,19 +4769,118 @@ function ContextInspector({
 
 type ContextInspectorTab = "summary" | "properties" | "backlinks";
 
-function ContextSummaryPanel({ detail }: { detail: ContextPageDetail }) {
+type ContextInspectorSnapshot = {
+  detail: ContextPageDetail;
+  data: ContextPageInspector;
+};
+
+type ContextInspectorPanelProps = {
+  detail: ContextPageDetail;
+  workspaceId: string;
+  onLoaded: (data: ContextPageInspector) => void;
+};
+
+// TabbedInspector mounts only its active panel. Each activation reads a fresh
+// snapshot; its page/version-scoped parent unmounts it when authority changes.
+function useContextInspectorSection(
+  { detail, workspaceId, onLoaded }: ContextInspectorPanelProps,
+  section: ContextPageInspector["section"],
+) {
   const { t } = useTranslation("context");
-  const hasWarnings = detail.warnings.length > 0;
+  const result = useAsyncLoad<ContextInspectorSnapshot>(
+    async (signal) => {
+      const versionId = detail.version_info?.version_id;
+      if (!versionId) throw new Error("Context page version unavailable.");
+      const data = await readContextPageInspector(workspaceId, detail.id, versionId, section, signal);
+      return { detail, data };
+    },
+    [workspaceId, detail, section],
+    {
+      errorMessage: t(section === "summary" ? "inspector.loadError" : "neighbors.loadError"),
+      signalAware: true,
+      onSuccess: (snapshot) => onLoaded(snapshot.data),
+    },
+  );
+  return {
+    ...result,
+    data: result.data?.detail === detail ? result.data.data : null,
+  };
+}
+
+function ContextInspectorLoadState({ error, onRetry, summary = false }: {
+  error: string | null;
+  onRetry: () => void;
+  summary?: boolean;
+}) {
+  const { t } = useTranslation("context");
+  return error ? (
+    <StatusBanner
+      tone="warning"
+      action={
+        <button className="text-button" onClick={onRetry} type="button">
+          {t("shell:actions.retry")}
+        </button>
+      }
+    >
+      {error}
+    </StatusBanner>
+  ) : (
+    <p role="status">{t(summary ? "inspector.loadingSummary" : "neighbors.graphLoading")}</p>
+  );
+}
+
+function LazyContextSummaryPanel(props: ContextInspectorPanelProps) {
+  const { data, error, loading, reload } = useContextInspectorSection(props, "summary");
+  if (loading || !data || error) {
+    return <ContextInspectorLoadState error={loading ? null : error} onRetry={reload} summary />;
+  }
+  return <ContextSummaryPanel warnings={data.warnings} />;
+}
+
+function LazyContextBacklinksPanel(props: ContextInspectorPanelProps) {
+  const { t } = useTranslation("context");
+  const counts = useContextInspectorSection(props, "backlinks");
+  const neighbors = useAsyncLoad<{ detail: ContextPageDetail; data: GraphNeighborsPayload }>(
+    async (signal) => ({
+      detail: props.detail,
+      data: await getContextPageNeighbors(props.workspaceId, props.detail.id, "json", signal),
+    }),
+    [props.workspaceId, props.detail],
+    { errorMessage: t("neighbors.loadError"), signalAware: true },
+  );
+  const retry = () => {
+    counts.reload();
+    neighbors.reload();
+  };
+  if (counts.loading || !counts.data || counts.error) {
+    return <ContextInspectorLoadState error={counts.loading ? null : counts.error} onRetry={retry} />;
+  }
+  return (
+    <ContextBacklinksPanel
+      detail={props.detail}
+      inspector={counts.data}
+      neighbors={neighbors.data?.detail === props.detail ? neighbors.data.data : null}
+      neighborsFailed={Boolean(neighbors.error)}
+      neighborsLoading={neighbors.loading}
+      onRetry={retry}
+      workspaceId={props.workspaceId}
+    />
+  );
+}
+
+function ContextSummaryPanel({ warnings }: { warnings: string[] }) {
+  const { t } = useTranslation("context");
+  const hasWarnings = warnings.length > 0;
   return (
     <ContentSummaryPanel
       badge={
         hasWarnings
-          ? detail.warnings.length
+          ? warnings.length
           : t("inspector.ok", { defaultValue: "OK" })
       }
       badgeTone={hasWarnings ? "warning" : "ok"}
       description={t("inspector.warningCount", {
-        count: detail.warnings.length,
+        count: warnings.length,
         defaultValue: "{{count}} warnings",
       })}
       heading={t("inspector.citationHealth", {
@@ -4804,7 +4891,7 @@ function ContextSummaryPanel({ detail }: { detail: ContextPageDetail }) {
           ? t("inspector.warnings", { defaultValue: "Warnings" })
           : t("inspector.noWarnings", { defaultValue: "No warnings" })
       }
-      warnings={detail.warnings}
+      warnings={warnings}
     />
   );
 }
@@ -4849,16 +4936,20 @@ function ContextPropertiesPanel({ detail }: { detail: ContextPageDetail }) {
 
 function ContextBacklinksPanel({
   detail,
+  inspector,
   neighbors,
   neighborsFailed,
   neighborsLoading,
   workspaceId,
+  onRetry,
 }: {
   detail: ContextPageDetail;
+  inspector: ContextPageInspector;
   neighbors: GraphNeighborsPayload | null;
   neighborsFailed: boolean;
   neighborsLoading: boolean;
   workspaceId: string | null;
+  onRetry: () => void;
 }) {
   const { t } = useTranslation("context");
   if (neighborsLoading) {
@@ -4877,7 +4968,11 @@ function ContextBacklinksPanel({
   return (
     <div className="context-backlinks-sections inspector-stack">
       {neighborsFailed ? (
-        <StatusBanner tone="warning">
+        <StatusBanner tone="warning" action={
+          <button className="text-button" onClick={onRetry} type="button">
+            {t("shell:actions.retry")}
+          </button>
+        }>
           {t("neighbors.loadError", {
             defaultValue:
               "Neighbor details could not be loaded. Try again later.",
@@ -4897,7 +4992,7 @@ function ContextBacklinksPanel({
           defaultValue: "Backlinks",
         })}
         backlinks={backlinks.map((entry) => graphNeighborItem(entry, workspaceId ?? detail.workspace_id))}
-        count={detail.backlink_count ?? backlinks.length}
+        count={inspector.backlink_count ?? undefined}
         emptyLabel={
           neighborsFailed
             ? t("neighbors.unavailable", {
@@ -4915,7 +5010,7 @@ function ContextBacklinksPanel({
           },
           {
             label: t("inspector.childPages", { defaultValue: "Child pages" }),
-            value: detail.children_count,
+            value: inspector.children_count ?? "—",
           },
         ]}
       />

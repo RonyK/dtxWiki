@@ -50,8 +50,8 @@ export type ContextPageDetail = ContextPageSummary & {
   version_info: VersionInfo | null;
   tree_path: Array<{ id: string; title: string; section: string }>;
   parent_node_id: string | null;
-  children_count: number;
-  backlink_count: number;
+  children_count: number | null;
+  backlink_count: number | null;
   wikilink_targets: Array<{
     target_slug: string;
     target_page_id: string | null;
@@ -59,9 +59,8 @@ export type ContextPageDetail = ContextPageSummary & {
   }>;
   link_targets: ContextLinkTarget[];
   warnings: string[];
-  // F1: an open review awaiting a decision for this page's draft, surfaced for
-  // inline approval on the Context page. pending_draft_warnings lints the draft
-  // body so reviewers see its format issues before approving (Sweep-2).
+  // Sidebar findings/counts are read through readContextPageInspector. Keep the
+  // legacy fields for other callers, without treating their defaults as loaded.
   pending_draft_version_id: string | null;
   pending_draft_warnings: string[];
   pending_review: PendingReviewInfo | null;
@@ -227,8 +226,8 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
       section: entry.section,
     })),
     parent_node_id: raw.parent_node_id ?? null,
-    children_count: raw.children_count,
-    backlink_count: raw.backlink_count,
+    children_count: raw.children_count ?? null,
+    backlink_count: raw.backlink_count ?? null,
     wikilink_targets: (raw.wikilink_targets ?? []).map((target) => ({
       target_slug: target.target_slug,
       target_page_id: target.target_page_id ?? null,
@@ -253,4 +252,30 @@ export async function readContextPage(workspaceId: string, pageId: string) {
     `/api/v1/workspaces/${workspaceId}/context/pages/${pageId}`,
   );
   return toContextPageDetail(response.data);
+}
+
+export type ContextPageInspector = Required<components["schemas"]["ContextPageInspector"]>;
+export type ContextInspectorSection = ContextPageInspector["section"];
+
+export async function readContextPageInspector(
+  workspaceId: string,
+  pageId: string,
+  versionId: string,
+  section: ContextInspectorSection,
+  signal?: AbortSignal,
+) {
+  const query = new URLSearchParams({ section, version_id: versionId });
+  const response = await apiRequest<components["schemas"]["ContextPageInspectorResponse"]>(
+    `/api/v1/workspaces/${workspaceId}/context/pages/${pageId}/inspector?${query}`,
+    { signal },
+  );
+  if (response.data.page_id !== pageId || response.data.version_id !== versionId || response.data.section !== section) {
+    throw new Error("Context inspector response does not match the requested version.");
+  }
+  return {
+    ...response.data,
+    warnings: response.data.warnings ?? [],
+    backlink_count: response.data.backlink_count ?? null,
+    children_count: response.data.children_count ?? null,
+  };
 }

@@ -1839,6 +1839,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/inspector": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Context Page Inspector */
+        get: operations["get_context_page_inspector_api_v1_workspaces__workspace_id__context_pages__page_id__inspector_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/media": {
         parameters: {
             query?: never;
@@ -5672,9 +5689,9 @@ export interface components {
             alternative_draft_id?: string | null;
             /**
              * Backlink Count
-             * @default 0
+             * @description Visible backlink count; null until requested by the inspector.
              */
-            backlink_count: number;
+            backlink_count?: number | null;
             /**
              * Block Map Stale
              * @description Whether the stored block map is missing or differs from the body; a whole-body save rebuilds it.
@@ -5693,9 +5710,9 @@ export interface components {
             change_set_id?: string | null;
             /**
              * Children Count
-             * @default 0
+             * @description Direct child count; null until requested by the inspector.
              */
-            children_count: number;
+            children_count?: number | null;
             /** Content Hash */
             content_hash: string;
             /**
@@ -5780,7 +5797,10 @@ export interface components {
             parent_version_id?: string | null;
             /** Pending Draft Version Id */
             pending_draft_version_id?: string | null;
-            /** Pending Draft Warnings */
+            /**
+             * Pending Draft Warnings
+             * @description Legacy field, not computed by the canonical detail read.
+             */
             pending_draft_warnings?: string[];
             pending_review?: components["schemas"]["PendingReviewInfo"] | null;
             /**
@@ -5844,7 +5864,10 @@ export interface components {
             version_status?: string | null;
             /** Visible Version Id */
             visible_version_id?: string | null;
-            /** Warnings */
+            /**
+             * Warnings
+             * @description Legacy field, not computed by the canonical detail read. Request inspector section=summary for the displayed version's warnings.
+             */
             warnings?: string[];
             /** Wikilink Targets */
             wikilink_targets?: components["schemas"]["WikilinkTarget"][];
@@ -5857,6 +5880,35 @@ export interface components {
         /** ContextPageDetailResponse */
         ContextPageDetailResponse: {
             data: components["schemas"]["ContextPageDetail"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** ContextPageInspector */
+        ContextPageInspector: {
+            /** Backlink Count */
+            backlink_count?: number | null;
+            /** Children Count */
+            children_count?: number | null;
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            /**
+             * Section
+             * @enum {string}
+             */
+            section: "summary" | "backlinks";
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** ContextPageInspectorResponse */
+        ContextPageInspectorResponse: {
+            data: components["schemas"]["ContextPageInspector"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** ContextPageListResponse */
@@ -20668,6 +20720,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTConflictErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    get_context_page_inspector_api_v1_workspaces__workspace_id__context_pages__page_id__inspector_get: {
+        parameters: {
+            query: {
+                section: "summary" | "backlinks";
+                version_id?: string | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                page_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextPageInspectorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
                 };
             };
             /** @description Unprocessable Entity */

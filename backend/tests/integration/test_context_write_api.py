@@ -11,6 +11,8 @@ from backend.models.user import User
 from backend.policy.rbac import grant_workspace_membership
 from backend.schemas.context_write import WriteDraftRequest
 from backend.services.context_write_service import ContextWriteService
+from backend.services.domain_read import DomainReadService
+from backend.services.tree_read import TreeReadService
 from backend.tests.conftest import authenticate_test_client
 
 
@@ -29,9 +31,7 @@ def make_client(page_service) -> TestClient:
 
 
 def _workspace_id(client: TestClient) -> str:
-    return client.get("/api/v1/workspaces").json()["data"][
-        "current_workspace_id"
-    ]
+    return client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]
 
 
 def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypatch):
@@ -107,6 +107,146 @@ def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypat
     assert data["current_published_version_id"] == updated_id
     assert data["latest_draft_version_id"] is None
     assert "## Added" in data["body_md"]
+
+
+def test_context_inspector_defers_work_and_checks_the_displayed_version(
+    page_service, monkeypatch
+):
+    from backend.services import domain_read as read_module
+
+    owner = make_client(page_service)
+    workspace_id = _workspace_id(owner)
+    pages_url = f"/api/v1/workspaces/{workspace_id}/context/pages"
+    created = owner.post(
+        pages_url,
+        json={"title": "Lazy inspector", "body_md": "# Title\n\nClean published body."},
+    ).json()["data"]
+    published_response = owner.post(
+        f"{pages_url}/{created['id']}/versions/{created['version_id']}/publish",
+        json={
+            "reason": "publish inspector baseline",
+            "expected_content_hash": created["content_hash"],
+            "expected_references_hash": created["references_hash"],
+        },
+    )
+    assert published_response.status_code == 200, published_response.text
+    published = published_response.json()["data"]
+    saved = owner.post(
+        f"{pages_url}/{created['id']}/autosave",
+        json={
+            "idempotency_key": "lazy-inspector-save",
+            "body_md": "# Title\n\n### Draft heading skips a level\n\nDraft body.",
+            "base_version_id": published["version_id"],
+            "base_content_hash": published["content_hash"],
+            "expected_editing_revision": published["editing_revision"],
+        },
+    ).json()["data"]
+    submitted_response = owner.post(
+        f"{pages_url}/{created['id']}/submit-for-review",
+        json={
+            "idempotency_key": "lazy-inspector-submit",
+            "version_id": saved["version_id"],
+            "expected_editing_revision": saved["editing_revision"],
+        },
+    )
+    assert submitted_response.status_code == 200, submitted_response.text
+    submitted = submitted_response.json()["data"]
+
+    real_lint = read_module.page_format_warnings_for_body
+    linted_versions = []
+    counts = []
+    allow_lint = False
+
+    def track_lint(*args, **kwargs):
+        assert allow_lint, "default detail must not run inspector lint"
+        linted_versions.append(kwargs["version"].id)
+        return real_lint(*args, **kwargs)
+
+    def count_backlinks(self, *args):
+        counts.append("backlinks")
+        return 3
+
+    def count_children(self, **kwargs):
+        counts.append("children")
+        return 2
+
+    monkeypatch.setattr(read_module, "page_format_warnings_for_body", track_lint)
+    monkeypatch.setattr(
+        DomainReadService, "_context_page_backlink_count", count_backlinks
+    )
+    monkeypatch.setattr(TreeReadService, "children_count", count_children)
+    detail_url = f"{pages_url}/{created['id']}"
+    detail_response = owner.get(
+        detail_url, params={"version_id": published["version_id"]}
+    )
+    assert detail_response.status_code == 200, detail_response.text
+    detail = detail_response.json()["data"]
+    assert detail["warnings"] == detail["pending_draft_warnings"] == []
+    assert detail["pending_review"]["review_item_id"] == submitted["review_item_id"]
+    assert detail["pending_draft_version_id"] == submitted["version_id"]
+    assert detail["backlink_count"] is detail["children_count"] is None
+    assert counts == linted_versions == []
+
+    allow_lint = True
+    clean = owner.get(
+        f"{detail_url}/inspector",
+        params={"section": "summary", "version_id": published["version_id"]},
+    )
+    assert clean.status_code == 200, clean.text
+    assert clean.json()["data"]["warnings"] == []
+    draft = owner.get(
+        f"{detail_url}/inspector",
+        params={"section": "summary", "version_id": submitted["version_id"]},
+    )
+    assert draft.status_code == 200, draft.text
+    assert any(
+        "heading" in warning.lower() for warning in draft.json()["data"]["warnings"]
+    )
+    assert linted_versions == [
+        UUID(published["version_id"]),
+        UUID(submitted["version_id"]),
+    ]
+    assert draft.json()["data"]["backlink_count"] is None
+    assert draft.json()["data"]["children_count"] is None
+    assert counts == []
+
+    allow_lint = False
+    backlinks = owner.get(
+        f"{detail_url}/inspector",
+        params={"section": "backlinks", "version_id": published["version_id"]},
+    )
+    assert backlinks.status_code == 200, backlinks.text
+    assert backlinks.json()["data"] == {
+        "page_id": created["id"],
+        "version_id": published["version_id"],
+        "section": "backlinks",
+        "warnings": [],
+        "backlink_count": 3,
+        "children_count": 2,
+    }
+    assert counts == ["backlinks", "children"]
+
+    viewer = TestClient(owner.app)
+    authenticate_test_client(viewer, email="lazy-inspector-viewer@example.com")
+    with page_service.session_factory.begin() as session:
+        user = session.scalar(
+            select(User).where(User.email == "lazy-inspector-viewer@example.com")
+        )
+        grant_workspace_membership(
+            session, user_id=user.id, workspace_id=UUID(workspace_id), role="viewer"
+        )
+        other_workspace_id = user.default_workspace_id
+    hidden = viewer.get(
+        f"{detail_url}/inspector",
+        params={"section": "summary", "version_id": submitted["version_id"]},
+    )
+    assert hidden.status_code == 404, hidden.text
+    wrong_workspace = viewer.get(
+        f"/api/v1/workspaces/{other_workspace_id}/context/pages/{created['id']}/inspector",
+        params={"section": "backlinks", "version_id": published["version_id"]},
+    )
+    assert wrong_workspace.status_code == 404, wrong_workspace.text
+    assert counts == ["backlinks", "children"]
 
 
 def test_workspace_publish_route_requires_expected_content_hash(page_service):
@@ -310,9 +450,7 @@ def test_context_api_refuses_a_viewer_before_it_resolves_the_name(page_service):
         ]
         hidden_ids = {page.id for page in hidden_pages}
         hidden_slugs = {page.slug for page in hidden_pages}
-        before_count = session.scalar(
-            select(func.count()).select_from(ContextPage)
-        )
+        before_count = session.scalar(select(func.count()).select_from(ContextPage))
 
     response = viewer.post(
         f"/api/v1/workspaces/{workspace_id}/context/pages",
@@ -477,9 +615,7 @@ def test_write_draft_savepoint_rolls_back_partial_writes_on_error(page_service):
                 ContextPage.workspace_id == workspace_id,
             )
         )
-        assert page_row is None, (
-            "context_page row leaked despite savepoint rollback"
-        )
+        assert page_row is None, "context_page row leaked despite savepoint rollback"
         orphan_version = session.scalar(
             select(ContextPageVersion).where(
                 ContextPageVersion.body_md.contains("orphan body")

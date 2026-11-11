@@ -1610,11 +1610,13 @@ describe("ContextScreen", () => {
   });
 
   it("keeps the inspector to one row of Summary, Properties, and Backlinks", async () => {
-    await renderDecisionLog();
+    const fetchMock = await renderDecisionLog();
     await userEvent.click(
       screen.getByRole("treeitem", { name: "Decision Log" }),
     );
     expect(await screen.findByText("Needle body")).toBeInTheDocument();
+    const sidebarReads = () => fetchMock.mock.calls.filter(([input]) => /\/(inspector|neighbors)(\?|$)/.test(String(input)));
+    expect(sidebarReads()).toHaveLength(0);
     await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
     // The Details inspector is now a TabbedInspector (item 25): Summary is the
     // default tab and still shows the citation-health summary. Scope queries to
@@ -1626,9 +1628,11 @@ describe("ContextScreen", () => {
       "aria-selected",
       "true",
     );
-    expect(inspector.getByText("CITATION HEALTH")).toBeInTheDocument();
+    expect(await inspector.findByText("CITATION HEALTH")).toBeInTheDocument();
     expect(inspector.getByText("No warnings")).toBeInTheDocument();
     expect(inspector.getByText("0 warnings")).toBeInTheDocument();
+    expect(sidebarReads().map(([input]) => new URL(String(input)).searchParams.get("section")))
+      .toEqual(["summary"]);
     // Edit draft action removed from the Details inspector (item 26); the
     // central Edit button covers it.
     expect(screen.queryByRole("link", { name: "Edit draft" })).toBeNull();
@@ -1641,9 +1645,12 @@ describe("ContextScreen", () => {
       inspector.getByText("Current published snapshot"),
     ).toBeInTheDocument();
     expect(inspector.queryByText(/^Graph$/)).toBeNull();
+    expect(sidebarReads()).toHaveLength(1);
     // Sprint-5 G2: the graph projection supplies navigable backlink and
     // citation lists while preserving the shared inspector panel.
     await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
+    await inspector.findByRole("link", { name: /Deployment Runbook/ });
+    expect(sidebarReads()).toHaveLength(3);
     expect(inspector.getByRole("tab", { name: /Backlinks/ })).toHaveTextContent(
       "12",
     );
@@ -1678,8 +1685,69 @@ describe("ContextScreen", () => {
     expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/graph/query")))
       .toHaveLength(0);
     await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) =>
-      String(input).endsWith(`/pages/${PAGE_ID}/neighbors`))).toHaveLength(1));
+    await screen.findByText("CITATION HEALTH");
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith(`/pages/${PAGE_ID}/neighbors`)))
+      .toHaveLength(0);
+  });
+
+  it("keeps summary findings unknown while loading or failed and retries independently of the reader", async () => {
+    const fetchMock = await renderDecisionLog();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const pending = deferredValue<Response>();
+    let summaryReads = 0;
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input).includes("/inspector?section=summary")) {
+        summaryReads += 1;
+        if (summaryReads === 1) return pending.promise;
+      }
+      return originalFetch(input, init);
+    });
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await screen.findByText("Needle body");
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    const inspector = within(screen.getByRole("region", { name: "Context detail" }));
+    expect(inspector.getByRole("status")).toHaveTextContent("Checking citation health");
+    expect(inspector.queryByText("No warnings")).not.toBeInTheDocument();
+    expect(inspector.queryByText("0 warnings")).not.toBeInTheDocument();
+    await act(async () => pending.resolve(jsonResponse({
+      error_code: "unavailable", message: "Summary unavailable", request_id: "summary-error", warnings: [],
+    }, 503)));
+    expect(await inspector.findByRole("alert")).toBeInTheDocument();
+    expect(inspector.queryByText("No warnings")).not.toBeInTheDocument();
+    expect(screen.getByText("Needle body")).toBeVisible();
+    await userEvent.click(inspector.getByRole("button", { name: "Retry" }));
+    expect(await inspector.findByText("No warnings")).toBeInTheDocument();
+    expect(summaryReads).toBe(2);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/neighbors"))).toHaveLength(0);
+  });
+
+  it("aborts a previous page's summary read and ignores its late findings after navigation", async () => {
+    const fetchMock = await renderDecisionLog();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const pending = deferredValue<Response>();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input).includes(`/pages/${PAGE_ID}/inspector?section=summary`)) {
+        signal = init?.signal;
+        return pending.promise;
+      }
+      return originalFetch(input, init);
+    });
+    await userEvent.click(screen.getByRole("treeitem", { name: "Decision Log" }));
+    await screen.findByText("Needle body");
+    await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    await waitFor(() => expect(signal?.aborted).toBe(false));
+    await userEvent.click(screen.getByRole("treeitem", { name: "Architecture Notes" }));
+    await screen.findByText("Selected second page");
+    expect(signal?.aborted).toBe(true);
+    const inspector = within(screen.getByRole("region", { name: "Context detail" }));
+    expect(await inspector.findByText("No warnings")).toBeInTheDocument();
+    await act(async () => pending.resolve(jsonResponse({ data: {
+      page_id: PAGE_ID, version_id: "version-1", section: "summary",
+      warnings: ["Previous page finding"], backlink_count: null, children_count: null,
+    } })));
+    expect(inspector.queryByText("Previous page finding")).not.toBeInTheDocument();
+    expect(inspector.getByText("No warnings")).toBeInTheDocument();
   });
 
   it("renders body and authoritative Inspector links while a first graph request remains pending", async () => {
@@ -2789,7 +2857,7 @@ describe("ContextScreen", () => {
     );
 
     expect(await screen.findByText("Selected second page")).toBeInTheDocument();
-    expect(screen.getAllByText("CITATION HEALTH").length).toBeGreaterThan(0);
+    expect(await screen.findByText("CITATION HEALTH")).toBeInTheDocument();
     expect(
       screen.getByRole("treeitem", { name: "Architecture Notes" }),
     ).toHaveAttribute("aria-selected", "true");
@@ -2973,12 +3041,13 @@ describe("ContextScreen", () => {
       screen.getByRole("region", { name: "Context detail" }),
     );
     const backlinksTab = inspector.getByRole("tab", { name: /Backlinks/ });
-    expect(backlinksTab).toHaveTextContent("7");
+    expect(backlinksTab).not.toHaveTextContent("7");
     await userEvent.click(backlinksTab);
 
-    expect(inspector.getByRole("alert")).toHaveTextContent(
+    expect(await inspector.findByRole("alert")).toHaveTextContent(
       "Neighbor details could not be loaded",
     );
+    expect(backlinksTab).toHaveTextContent("7");
     expect(
       inspector.getAllByText("Neighbor list unavailable.").length,
     ).toBeGreaterThan(0);
@@ -4970,6 +5039,9 @@ describe("ContextScreen", () => {
     render(<MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}><ContextScreen /></MemoryRouter>);
     await screen.findByText("Body");
     await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
+    const inspector = within(screen.getByRole("region", { name: "Context detail" }));
+    await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
+    await inspector.findByText("No visible pages link here yet.");
     const readerTabs = within(await screen.findByRole("tablist", { name: "Context reader views" }));
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
     await screen.findByTestId("graph-view");
@@ -5671,8 +5743,7 @@ describe("ContextScreen", () => {
     expect(
       await screen.findByText(/1 pending review for this page/),
     ).toBeInTheDocument();
-    // Sweep-2: the draft's lint warnings are surfaced at the approval point.
-    expect(screen.getByText(/1 lint warning/)).toBeInTheDocument();
+    expect(screen.queryByText(/lint warning/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Request changes" }),
@@ -6158,6 +6229,23 @@ function mockFetch(responses: Record<string, MockFetchResponse>) {
     // (?limit=…&cursor=…); fall back to the query-stripped path so existing
     // mocks keyed on the bare endpoint still match.
     let response = responses[url] ?? responses[url.split("?")[0]];
+    const inspectorUrl = new URL(url);
+    if (response === undefined && inspectorUrl.pathname.endsWith("/inspector")) {
+      const pageUrl = `${inspectorUrl.origin}${inspectorUrl.pathname.slice(0, -"/inspector".length)}`;
+      const pageResponse = responses[pageUrl] as { data?: Record<string, unknown> } | undefined;
+      const page = pageResponse?.data;
+      if (page) {
+        const section = inspectorUrl.searchParams.get("section");
+        response = { data: {
+          page_id: page.id,
+          version_id: inspectorUrl.searchParams.get("version_id"),
+          section,
+          warnings: section === "summary" ? page.warnings ?? [] : [],
+          backlink_count: section === "backlinks" ? page.backlink_count ?? 0 : null,
+          children_count: section === "backlinks" ? page.children_count ?? 0 : null,
+        } };
+      }
+    }
     if (
       response === undefined &&
       url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/graph/query`
