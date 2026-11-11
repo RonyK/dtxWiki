@@ -375,6 +375,16 @@ for (const [language, width] of LAYOUTS) {
           page.locator('.settings-content input[type="checkbox"]').first(),
         ).toBeVisible();
       }
+      if (section === "lint") {
+        // The save-time options render before the rule catalog, whose checks
+        // start collapsed. Inventory the controls after opening their section.
+        const checks = page.locator(".lint-checks");
+        await checks.locator("summary").first().click();
+        await expect(checks).toHaveJSProperty("open", true);
+        await expect(
+          checks.locator('.lint-rule-list input[type="checkbox"]').first(),
+        ).toBeVisible();
+      }
       total += await checkBoxes(page, testInfo, `settings-${section}`);
       if (section === "library") {
         await page.locator(".library-family-add").click();
