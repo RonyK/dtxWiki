@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -4005,6 +4006,15 @@ def test_pages_api_restores_historical_version_as_new_draft(page_service):
         },
     ).json()["data"]
 
+    # Extend this restore traversal with legacy map drift: the historical
+    # source stays untouched, and an explicit same-body save repairs its copy.
+    with page_service.session_factory.begin() as session:
+        historical = session.get(ContextPageVersion, UUID(created["version_id"]))
+        stale_map = deepcopy(historical.block_map)
+        stale_map[-1]["hash"] = "0" * 64
+        historical.block_map = stale_map
+        historical_oid = historical.commit_oid
+
     response = client.post(
         f"{pages_url(page_service)}/{created['id']}/restore",
         json={"version_id": created["version_id"]},
@@ -4022,9 +4032,11 @@ def test_pages_api_restores_historical_version_as_new_draft(page_service):
     assert restored["tags"] == ["restore"]
     assert restored["change_set_id"]
     assert restored["review_item_id"]
+    assert restored["block_map_stale"] is True
 
     read_response = client.get(f"{pages_url(page_service)}/{created['id']}")
     assert read_response.json()["data"]["version_id"] == restored["version_id"]
+    assert read_response.json()["data"]["block_map_stale"] is True
 
     versions_response = client.get(
         f"{pages_url(page_service)}/{created['id']}/versions"
@@ -4066,6 +4078,30 @@ def test_pages_api_restores_historical_version_as_new_draft(page_service):
     assert len(links) == 1
     assert links[0].source_version_id == UUID(restored["version_id"])
     assert links[0].target_slug == "restore-target"
+
+    saved_response = client.post(
+        f"{pages_url(page_service)}/{created['id']}/autosave",
+        json={
+            "body_md": restored["body_md"],
+            "base_version_id": restored["version_id"],
+            "base_content_hash": restored["content_hash"],
+            "expected_editing_revision": restored["editing_revision"],
+            "session_version_id": restored["version_id"],
+            "idempotency_key": "repair-restored-map",
+            "title": restored["title"],
+        },
+    )
+    assert saved_response.status_code == 200, saved_response.text
+    saved = saved_response.json()["data"]
+    assert saved["body_md"] == restored["body_md"]
+    assert saved["block_map_stale"] is False
+    with page_service.session_factory() as session:
+        repaired = session.get(ContextPageVersion, UUID(saved["version_id"]))
+        historical = session.get(ContextPageVersion, UUID(created["version_id"]))
+        assert repaired.block_map[0]["id"] == stale_map[0]["id"]
+        assert repaired.block_map[-1]["id"] != stale_map[-1]["id"]
+        assert historical.block_map == stale_map
+        assert historical.commit_oid == historical_oid
 
 
 def test_pages_api_restore_rejects_cross_page_version_id(page_service):

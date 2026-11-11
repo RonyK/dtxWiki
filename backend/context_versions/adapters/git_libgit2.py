@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import filecmp
+import json
 import os
 import re
 import shutil
@@ -120,6 +121,11 @@ class GitSnapshotStore:
     ) -> str:
         codec = codec_for(payload.descriptor)
         codec.decode(payload.data)
+        metadata = (
+            _encode_metadata(payload.block_map)
+            if payload.block_map is not None
+            else None
+        )
         with self._repository(workspace_id, create=True) as repository:
             parent_oids = []
             for oid in parents:
@@ -129,6 +135,12 @@ class GitSnapshotStore:
             blob_oid = repository.create_blob(payload.data)
             content = repository.TreeBuilder()
             content.insert(codec.filename, blob_oid, pygit2.GIT_FILEMODE_BLOB)
+            if metadata is not None:
+                content.insert(
+                    "metadata.json",
+                    repository.create_blob(metadata),
+                    pygit2.GIT_FILEMODE_BLOB,
+                )
             page = repository.TreeBuilder()
             page.insert(
                 str(UUID(str(page_id))), content.write(), pygit2.GIT_FILEMODE_TREE
@@ -189,6 +201,23 @@ class GitSnapshotStore:
             descriptor=descriptor,
             version_id=version_id,
         )
+
+    def read_block_map(
+        self,
+        *,
+        workspace_id: UUID,
+        page_id: UUID,
+        commit_oid: str,
+        descriptor: ContentDescriptor,
+    ) -> list[dict] | None:
+        """Read archived identities; None identifies a legacy content-only commit."""
+        codec = codec_for(descriptor)
+        with self._repository(workspace_id) as repository:
+            commit = _commit(repository, commit_oid)
+            _blob, block_map = _page_snapshot(
+                repository, commit, page_id, codec.filename
+            )
+            return block_map
 
     def _read_snapshot(
         self,
@@ -379,24 +408,64 @@ def _only_entry(tree: pygit2.Tree, name: str, mode: int):
 
 
 def _page_blob(repository, commit, page_id: UUID, filename: str | None = None):
+    return _page_snapshot(repository, commit, page_id, filename)[0]
+
+
+def _page_snapshot(repository, commit, page_id: UUID, filename: str | None = None):
     context = _only_entry(commit.tree, "context", pygit2.GIT_FILEMODE_TREE)
     page = _only_entry(
         repository[context.id], str(UUID(str(page_id))), pygit2.GIT_FILEMODE_TREE
     )
     contents = repository[page.id]
-    if len(contents) != 1:
+    content_entries = [entry for entry in contents if entry.name.startswith("content.")]
+    if len(content_entries) != 1:
         raise ContextVersionStorageError("context_snapshot_invalid")
-    entry = next(iter(contents))
-    if (
-        entry.filemode != pygit2.GIT_FILEMODE_BLOB
-        or (filename is not None and entry.name != filename)
-        or not entry.name.startswith("content.")
+    entry = content_entries[0]
+    if {item.name for item in contents} - {entry.name, "metadata.json"}:
+        raise ContextVersionStorageError("context_snapshot_invalid")
+    if entry.filemode != pygit2.GIT_FILEMODE_BLOB or (
+        filename is not None and entry.name != filename
     ):
         raise ContextVersionStorageError("context_snapshot_invalid")
     blob = repository[entry.id]
     if not isinstance(blob, pygit2.Blob):
         raise ContextVersionStorageError("context_snapshot_invalid")
-    return blob
+    block_map = None
+    if "metadata.json" in contents:
+        metadata_entry = contents["metadata.json"]
+        metadata = repository[metadata_entry.id]
+        if metadata_entry.filemode != pygit2.GIT_FILEMODE_BLOB or not isinstance(
+            metadata, pygit2.Blob
+        ):
+            raise ContextVersionStorageError("context_snapshot_invalid")
+        block_map = _metadata_block_map(json.loads(metadata.data.decode("utf-8")))
+    return blob, block_map
+
+
+def _metadata_block_map(metadata) -> list[dict]:
+    if (
+        not isinstance(metadata, dict)
+        or set(metadata) != {"schema_version", "block_map"}
+        or type(metadata["schema_version"]) is not int
+        or metadata["schema_version"] != 1
+        or not isinstance(metadata["block_map"], list)
+        or any(not isinstance(entry, dict) for entry in metadata["block_map"])
+    ):
+        raise ContextVersionStorageError("context_snapshot_invalid")
+    return metadata["block_map"]
+
+
+def _encode_metadata(block_map: list[dict]) -> bytes:
+    metadata = {"schema_version": 1, "block_map": block_map}
+    _metadata_block_map(metadata)
+    with _storage_errors():
+        return json.dumps(
+            metadata,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
 
 
 def _reachable_objects(repository, roots: Iterable[str]) -> frozenset[str]:

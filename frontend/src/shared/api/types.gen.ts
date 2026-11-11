@@ -5675,6 +5675,12 @@ export interface components {
              * @default 0
              */
             backlink_count: number;
+            /**
+             * Block Map Stale
+             * @description Whether the stored block map is missing or differs from the body; a whole-body save rebuilds it.
+             * @default false
+             */
+            block_map_stale: boolean;
             /** Body Md */
             body_md: string;
             /**

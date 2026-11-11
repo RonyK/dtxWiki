@@ -104,6 +104,13 @@ class PagePayload(PageSummary):
     workspace_id: UUID
     body_md: str
     version_id: UUID
+    block_map_stale: bool = Field(
+        default=False,
+        description=(
+            "Whether the stored block map is missing or differs from the body; "
+            "a whole-body save rebuilds it."
+        ),
+    )
     # P2.4 conflict-check value: bumped on every save to this version row
     # (autosave/update, editing or draft alike), covering body + title + slug
     # + tags + aliases + private metadata + usage as one monotonic counter.

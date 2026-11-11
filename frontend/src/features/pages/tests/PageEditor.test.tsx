@@ -59,6 +59,7 @@ const page = {
   content_hash: "a".repeat(64),
   body_md: "# Hello",
   version_id: "v1",
+  block_map_stale: false,
   parent_version_id: null,
   created_at: "2026-05-08T00:00:00Z",
   backlink_count: 0,
@@ -222,6 +223,7 @@ function mockPublicationFlow({
       message: "Not published. Unclosed code fence opened at line 9.",
     },
   ],
+  initialPage = {},
 }: {
   publishWarnings?: { code: string; message: string }[];
   rejectAutosave?: boolean;
@@ -229,6 +231,7 @@ function mockPublicationFlow({
   publishResponse?: Promise<Response>;
   reviewDecisionResponse?: Promise<Response>;
   rejectWarnings?: { code: string; message: string }[];
+  initialPage?: Partial<typeof page>;
 } = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
@@ -310,7 +313,7 @@ function mockPublicationFlow({
     ) {
       return reviewDecisionResponse;
     }
-    return jsonResponse({ data: page });
+    return jsonResponse({ data: { ...page, ...initialPage } });
   });
 }
 
@@ -1140,17 +1143,21 @@ describe("PageEditor", () => {
   });
 
   it("separates Save draft from exact-version Publish", async () => {
-    const fetchMock = mockPublicationFlow();
+    const fetchMock = mockPublicationFlow({ initialPage: { block_map_stale: true } });
     const router = renderWithRouter(
       "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
       <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
-    await setEditorTitle(await findTitleEditor(), "Published title");
+    await findTitleEditor();
+    const staleWarning = "The editing information for this version is out of date. Save it again before editing or approving it.";
+    expect(await screen.findByText(staleWarning)).toBeInTheDocument();
+    expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeEnabled();
     await typist().click(publicationActions().getByRole("button", { name: "Save draft" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/autosave"))).toBe(true);
     });
+    await waitFor(() => expect(screen.queryByText(staleWarning)).not.toBeInTheDocument());
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish"))).toBe(false);
     expect(router.state.location).toMatchObject({
       pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",

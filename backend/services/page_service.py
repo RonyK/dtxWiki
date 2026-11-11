@@ -144,6 +144,7 @@ from backend.utils.actor_display import (
     resolve_actor_display_names,
 )
 from backend.utils.block_identity import (
+    block_map_is_stale,
     compute_block_map_with_ids,
     heal_block_map,
 )
@@ -3228,15 +3229,19 @@ class PageService:
                     placement_parent_node_id
                 )
             # Preserve NFC/newline no-ops without ignoring Markdown hard breaks.
-            if same_authored_markdown(body_md, current.body_md) and (
-                (
-                    current.version_status not in ("editing", "draft")
-                    and not requires_human_review
-                )
-                or (
-                    current.created_by_actor_kind == actor_kind
-                    and current.created_by_actor_id == actor_id
-                    and current.version_status in ("editing", "draft")
+            if (
+                not _block_map_needs_save(current)
+                and same_authored_markdown(body_md, current.body_md)
+                and (
+                    (
+                        current.version_status not in ("editing", "draft")
+                        and not requires_human_review
+                    )
+                    or (
+                        current.created_by_actor_kind == actor_kind
+                        and current.created_by_actor_id == actor_id
+                        and current.version_status in ("editing", "draft")
+                    )
                 )
             ):
                 if title_changed or metadata_changed:
@@ -3522,15 +3527,19 @@ class PageService:
                 metadata_patch["placement_parent_node_id"] = str(destination_node_id)
 
             # Preserve NFC/newline no-ops without ignoring Markdown hard breaks.
-            if same_authored_markdown(body_md, current.body_md) and (
-                (
-                    current.version_status not in ("editing", "draft")
-                    and not requires_human_review
-                )
-                or (
-                    current.created_by_actor_kind == actor_kind
-                    and current.created_by_actor_id == actor_id
-                    and current.version_status in ("editing", "draft")
+            if (
+                not _block_map_needs_save(current)
+                and same_authored_markdown(body_md, current.body_md)
+                and (
+                    (
+                        current.version_status not in ("editing", "draft")
+                        and not requires_human_review
+                    )
+                    or (
+                        current.created_by_actor_kind == actor_kind
+                        and current.created_by_actor_id == actor_id
+                        and current.version_status in ("editing", "draft")
+                    )
                 )
             ):
                 current.editing_revision += 1
@@ -3747,22 +3756,32 @@ class PageService:
             else None
         )
         try:
+            parent_id = kwargs.get("parent_version_id")
+            source = (
+                context_page_repo.get_version(session, parent_id) if parent_id else None
+            )
+            # A whole-body save may fork a reviewed/restored version. Repair
+            # the input map here as part of saving authored bytes, preserving
+            # matching identities without modifying the historical source.
+            if (
+                source is not None
+                and kwargs.get("prepared_block_map") is None
+                and _block_map_needs_save(source)
+            ):
+                previous_map, _ = heal_block_map(
+                    source.body_md, source.block_map, identity_seed=str(source.id)
+                )
+                kwargs["prepared_block_map"] = compute_block_map_with_ids(
+                    body.body,
+                    previous_body_md=source.body_md,
+                    previous_block_map=previous_map,
+                    identity_seed=kwargs.get("identity_seed"),
+                )
             version = context_page_repo.insert_version(
                 session,
                 body=body,
                 context_media_repository=repository,
                 **kwargs,
-            )
-            parent_id = kwargs.get("parent_version_id")
-            source = (
-                get_in_workspace(
-                    session,
-                    ContextPageVersion,
-                    workspace_id=version.workspace_id,
-                    resource_id=parent_id,
-                )
-                if parent_id
-                else None
             )
             if source is not None:
                 from backend.services.context_version_copy import (
@@ -4098,6 +4117,7 @@ class PageService:
                 # private edit is already mutable and stays private.
                 if (
                     prepared.body == current.body_md
+                    and not _block_map_needs_save(current)
                     and not metadata_patch
                     and resume_parent is None
                     and not (
@@ -6000,6 +6020,7 @@ class PageService:
             content_hash=version.content_hash,
             is_public=page.is_public,
             body_md=version.body_md,
+            block_map_stale=_block_map_needs_save(version),
             references=read_document_references(
                 session,
                 version=version,
@@ -6032,6 +6053,13 @@ class PageService:
             session, page, version, parent_visibility_actor or self.actor_context
         )
         return payload
+
+
+def _block_map_needs_save(version: ContextPageVersion) -> bool:
+    # A SQL FULL row can report its missing map without opening Git. Historical
+    # rows read the map archived with their body; neither path repairs it.
+    stored = version._block_map if version._body_md is not None else version.block_map
+    return block_map_is_stale(stored, version.body_md)
 
 
 def _publish_blocked_reasons(

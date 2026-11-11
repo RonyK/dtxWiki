@@ -50,6 +50,16 @@ class ContextVersionWriter:
             )
             if stored != payload.data:
                 raise ContextVersionStorageError("context_snapshot_invalid")
+            if payload.block_map is not None:
+                stored_map = self.reader.read_block_map(
+                    workspace_id=workspace_id,
+                    page_id=page_id,
+                    commit_oid=oid,
+                    descriptor=payload.descriptor,
+                )
+                # Legacy commits remain immutable and keep their SQL map.
+                if stored_map is not None and stored_map != payload.block_map:
+                    raise ContextVersionStorageError("context_snapshot_invalid")
         return SnapshotRecord(oid, len(payload.data), payload.descriptor)
 
     def align_head(

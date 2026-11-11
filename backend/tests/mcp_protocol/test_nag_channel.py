@@ -298,8 +298,24 @@ def test_stale_read_warning_is_bounded_scoped_and_clears_after_reread(
     assert "changed by" in warning["message"]
     assert "(human)" in warning["message"]
     assert f"conversation {changed_in_chat_id}" in warning["message"]
-    assert "changed block IDs: none" in warning["message"]
-    assert "omitted" not in warning["message"]
+    # The superseded read version keeps its archived map, so the warning names
+    # real changed blocks. Every paragraph was rewritten; only the heading's ID
+    # is shared, and the message lists a bounded slice of the rest.
+    read_ids = {block["id"] for block in initial["blocks"]}
+    with page_service.session_factory() as session:
+        head_ids = {
+            entry["id"]
+            for entry in session.get(ContextPageVersion, advanced.version_id).block_map
+        }
+    changed = read_ids ^ head_ids
+    listed = (
+        warning["message"]
+        .split("changed block IDs: ", 1)[1]
+        .split(" (+", 1)[0]
+        .split(", ")
+    )
+    assert listed and set(listed) <= changed
+    assert f"(+{len(changed) - len(listed)} omitted)" in warning["message"]
     assert len(warning["message"]) < 2_000
     assert wrong_owner_pages == []
     assert wrong_workspace_pages == []

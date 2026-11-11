@@ -656,6 +656,19 @@ def insert_version_copy(
         source_version, ContextPageVersion
     ):
         raise TypeError("insert_version_copy requires a stored ContextPageVersion")
+    if prepared_block_map is None and source_version is not None:
+        from copy import deepcopy
+
+        from backend.utils.block_identity import heal_block_map
+
+        # A restore copies the selected snapshot's identities, even when its
+        # new lineage parent is a different, newer version.
+        source_map = source_version.block_map
+        if source_map is None:
+            source_map, _ = heal_block_map(
+                source_version.body_md, None, identity_seed=str(source_version.id)
+            )
+        prepared_block_map = deepcopy(source_map)
     version = _insert_version_raw(
         session,
         page_id=page_id,

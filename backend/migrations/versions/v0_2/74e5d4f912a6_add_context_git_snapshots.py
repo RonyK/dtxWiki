@@ -8,6 +8,9 @@ import sqlalchemy as sa
 from alembic import op
 
 from backend.migrations.revision_modules.v0_2._74e5d4f912a6_context_git import (
+    active_block_maps,
+)
+from backend.migrations.revision_modules.v0_2._74e5d4f912a6_context_git import (
     context_content_to_git as conversion,
 )
 
@@ -21,6 +24,7 @@ def upgrade() -> None:
     root = conversion.repository_root(op.get_context().config.attributes)
     connection = op.get_bind()
     conversion.preflight(connection)
+    active_block_maps.upgrade(connection)
     for column in (
         sa.Column("commit_oid", sa.Text(), nullable=True),
         sa.Column(

@@ -17,6 +17,20 @@ Python commands. See DEVELOPMENT.md for setup and validation commands.
 - Implementation requests, local commits, and PR text drafting do not authorize
   remote publication. Authorization to push does not authorize PR changes.
 
+## Policy Changes
+
+- Solve the requested problem within existing behavior and the user's agreed
+  scope. First seek a solution that adds no policy, exception, restriction, or
+  user/operator procedure.
+- Do not turn an implementation side effect into a new product policy or an
+  operational workaround. Remove the side effect or reconsider the approach.
+- If a new policy is unavoidable, explain the concrete need and the smallest
+  alternatives, then ask for the user's decision before implementing it or
+  recording it as settled. Implementation authorization alone does not approve
+  new policies or limitations on existing features.
+- Routine technical choices within the agreed behavior remain autonomous;
+  these rules do not require confirmation for ordinary implementation work.
+
 ## Test Scope and Migration Budget
 
 - Per ordinary PR, default to 0–2 new backend cases (DB/transport: at most 1)

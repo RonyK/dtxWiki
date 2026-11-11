@@ -31,7 +31,7 @@ def upgrade() -> None:
             "context_page_version_body_stored_check",
             "body_md IS NOT NULL OR commit_oid IS NOT NULL",
         )
-    bodies.release_historical_bodies(connection)
+    bodies.release_historical_bodies(connection, root)
 
 
 def downgrade() -> None:

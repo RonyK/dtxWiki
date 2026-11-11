@@ -98,6 +98,7 @@
     }
   },
   "editor": {
+    "blockMapStaleWarning": "이 버전의 편집 정보가 오래되었습니다. 편집하거나 승인하기 전에 다시 저장해 주세요.",
     "overflow": {
       "label": "페이지 작업",
       "open": "페이지 작업 더 보기",

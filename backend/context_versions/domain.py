@@ -24,6 +24,8 @@ class ContentDescriptor:
 class ContentPayload:
     data: bytes
     descriptor: ContentDescriptor = ContentDescriptor()
+    # None preserves the content-only format; an empty list is archived metadata.
+    block_map: list[dict] | None = None
 
 
 @dataclass(frozen=True)

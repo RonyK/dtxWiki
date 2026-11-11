@@ -20,7 +20,8 @@
 # Prereqs: DNS A record for the domain -> this host, ports 80/443 reachable.
 #
 # Backup: stop the writers, then archive the data volume OUTSIDE this checkout,
-# readable by root only (the archive holds the database and both secrets):
+# readable by root only (the archive holds the database, the Context Git
+# repositories and both secrets; restore them together):
 #   docker compose stop app worker
 #   sudo install -d -m 0700 /var/backups/dtxwiki
 #   docker run --rm --volumes-from "$(docker compose ps --all --quiet app)" \

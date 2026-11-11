@@ -6,6 +6,7 @@ from backend.utils.block_identity import (
     BlockOperationProvenance,
     block_map_delta,
     block_map_for_version,
+    block_map_is_stale,
     compute_block_map_with_ids,
     validated_block_map_for_version,
 )
@@ -29,6 +30,9 @@ def test_strict_block_map_loader_rejects_stale_position_cache_fields():
     stale[1]["gap"] += 1
 
     assert validated_block_map_for_version(block_map, body) is block_map
+    assert not block_map_is_stale(block_map, body)
+    assert block_map_is_stale(stale, body)
+    assert block_map_is_stale(None, body)
     with pytest.raises(BlockMapTransitionError):
         validated_block_map_for_version(stale, body)
 

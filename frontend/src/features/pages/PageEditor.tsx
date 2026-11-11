@@ -3047,7 +3047,8 @@ export function PageEditor({
       frontmatterExtraLinesRef.current,
     );
     const contentUnchanged =
-      dispatchedFingerprint === lastSavedFingerprintRef.current;
+      dispatchedFingerprint === lastSavedFingerprintRef.current &&
+      !(source === "manual" && page?.block_map_stale);
     if (
       contentUnchanged &&
       (source === "auto" || !page || publicationState === "published")
@@ -5210,7 +5211,9 @@ export function PageEditor({
     />
   );
   const draftSaving = saveState === "saving" || saveState === "saving_with_newer_edits";
-  const canSaveDraft = !saveBlockedReason && saveState === "dirty";
+  const canSaveDraft = !saveBlockedReason && (
+    saveState === "dirty" || (saveState === "clean" && Boolean(page?.block_map_stale))
+  );
   const renderSyncPill = (compact: boolean) => (
     <SyncPill
       state={saveState}
@@ -5515,6 +5518,9 @@ export function PageEditor({
         </header>
         )}
         {status ? <StatusBanner tone="warning">{status}</StatusBanner> : null}
+        {page?.block_map_stale ? (
+          <StatusBanner tone="warning">{t("editor.blockMapStaleWarning")}</StatusBanner>
+        ) : null}
         {stalePublishState !== "idle" ? (
           <StatusBanner
             tone="warning"

@@ -654,8 +654,11 @@ sudo sha256sum "$BACKUP/dtxwiki.sqlite"
 
 Context 게시 시 `<data_dir>/repositories/<workspace UUID>.git`에 snapshot을 함께 기록합니다.
 Git 실행 파일은 필요 없으며 Python 의존성 pygit2/libgit2를 사용합니다. 저장소를 DB와
-따로 이동·삭제하지 마세요. 현재 승인본과 작성 중 본문은 DB에 유지하고, 과거 게시본은 Git에서
-읽습니다. `repositories/` 유실은 과거 본문의 유실이므로 DB만으로 복구할 수 없습니다.
+따로 이동·삭제하지 마세요. 현재 승인본과 작성 중 본문·block map은 DB에 유지하고, 새 게시
+snapshot은 본문과 `metadata.json`의 block map을 같은 commit에 보관합니다. 과거 버전을
+읽거나 복원할 때 해당 commit의 본문과 ID를 함께 사용합니다. 기존 본문 전용 commit의
+map은 DB에 보존합니다. `repositories/` 유실은 과거 본문·ID의 유실이므로 DB만으로 복구할
+수 없습니다.
 
 자동 백업의 manifest schema 3은 DB·Library·Git을 함께 검증하고 복원합니다. 구 schema
 1·2 백업도 지원하며, 구 DB 전체 복원 시 새 Git 저장소를 함께 정리합니다. secrets-only

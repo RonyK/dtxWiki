@@ -2,13 +2,14 @@
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from datetime import UTC, datetime
 from threading import Event
 from uuid import uuid4
 
 import pygit2
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
@@ -107,7 +108,6 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
                 created_by_actor_id=str(uuid4()),
                 version_status="draft",
                 created_at=datetime(2026, 11, 9, tzinfo=UTC),
-                block_map=[{"id": "preserved-first-map"}],
             )
             session.add(first)
             session.flush()
@@ -134,7 +134,6 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
                 created_by_actor_id=str(uuid4()),
                 version_status="draft",
                 created_at=datetime(2026, 11, 9, 1, tzinfo=UTC),
-                block_map=[{"id": "preserved-second-map"}],
             )
             session.add(second)
             session.flush()
@@ -175,11 +174,9 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
             assert first.version_status == "superseded_snapshot"
             assert first.body_md == original_body
             assert first._body_md is None
-            assert first.block_map is None
             assert second.version_status == "published_snapshot"
             assert second.body_md == second_body
             assert second.content_byte_size == len(second_body.encode("utf-8"))
-            assert second.block_map == [{"id": "preserved-second-map"}]
             assert (
                 session.get(ContextPage, page_id).current_published_version_id
                 == second_id
@@ -229,8 +226,10 @@ def test_same_context_publication_failure_rolls_back_before_waiting_retry(
         engine.dispose()
 
 
-def test_git_bodies_follow_publication_undo_and_storage_failure(session_factory):
-    """One DB traversal covers the shared read/head rule and its rollback."""
+def test_git_bodies_follow_publication_undo_and_storage_failure(
+    session_factory, page_service
+):
+    """One DB traversal covers the body/map pair through undo and restore."""
     with session_factory.begin() as session:
         workspace, published, draft = _published_page_with_draft(session, "Git bodies")
         workspace_id, page_id = workspace.id, published.page_id
@@ -238,11 +237,13 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(session_factory)
         old = session.get(ContextPageVersion, old_id)
         current = session.get(ContextPageVersion, current_id)
         old_body, current_body = old.body_md, current.body_md
+        old_map = deepcopy(old.block_map)
         original_saved_at = old.last_saved_at
         approved = _approve(session, workspace_id, draft.review_item_id)
         store = session.info["context_snapshot_store"]
         current_oid = current.commit_oid
-        assert old._body_md is None and old.block_map is None
+        assert old._body_md is None and old._block_map is None
+        assert old.block_map == old_map and old._block_map is None
         assert old.body_md == old_body and old._body_md is None
         assert old.last_saved_at == original_saved_at
         # The synonym preserves raw SQL expressions and never materializes a
@@ -267,9 +268,14 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(session_factory)
             actor_provenance="browser_session",
         )
         assert old._body_md == old_body
+        assert old._block_map == old_map
         assert old.last_saved_at == original_saved_at
         assert current._body_md == current_body and current.commit_oid is None
         assert store.list_heads(workspace_id)[page_id] == old.commit_oid
+
+    with session_factory.begin() as session:
+        old = session.get(ContextPageVersion, old_id)
+        current = session.get(ContextPageVersion, current_id)
         _approve(session, workspace_id, draft.review_item_id)
         assert old._body_md is None and current.commit_oid == current_oid
         assert current._body_md == current_body
@@ -291,6 +297,20 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(session_factory)
             align_publication(session, page, None)
         assert store.list_heads(workspace_id)[page_id] == current_oid
 
+    # Restore the historical snapshot as a new draft, whose lineage parent is
+    # the current head. Its block addresses must come from the selected source.
+    restored = page_service.restore_version(
+        page_id=page_id,
+        version_id=old_id,
+        actor_kind="human",
+        actor_id=str(ACTOR_UUID),
+        actor_provenance="browser_session",
+    )
+    with session_factory() as session:
+        restored_version = session.get(ContextPageVersion, restored.version_id)
+        assert restored_version.body_md == old_body
+        assert restored_version.block_map == old_map
+
     with session_factory() as session:
         historical = session.get(ContextPageVersion, old_id)
         session.expire(historical, ["_body_md"])
@@ -311,7 +331,12 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(session_factory)
             candidate = ContextPageVersion(
                 workspace_id=workspace_id,
                 page_id=page_id,
-                version_no=3,
+                version_no=session.scalar(
+                    select(func.max(ContextPageVersion.version_no)).where(
+                        ContextPageVersion.page_id == page_id
+                    )
+                )
+                + 1,
                 parent_version_id=current_id,
                 body_md="# Next\n",
                 content_hash=content_hash("# Next\n"),

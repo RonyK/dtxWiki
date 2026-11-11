@@ -98,6 +98,7 @@
     }
   },
   "editor": {
+    "blockMapStaleWarning": "The editing information for this version is out of date. Save it again before editing or approving it.",
     "overflow": {
       "label": "Page actions",
       "open": "More page actions",
