@@ -27,7 +27,7 @@ from backend.services.read_errors import ReadNotFoundError, ReadValidationError
 def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
     session_factory,
 ):
-    """One scenario through the policy-free core with test-only kinds."""
+    """Core lifecycle and distinct pagination regressions with test-only kinds."""
 
     workspace_id, alice, bob = uuid4(), uuid4(), uuid4()
     scope = WorkspaceInbox(workspace_id)
@@ -214,6 +214,10 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
     # The twenty-item budget merges both types chronologically. Tied event
     # times across kinds have a stable boundary, and a recent stored message
     # appears among statuses instead of waiting for every status to finish.
+    # Budget exception: the earlier lifecycle never spans a full mixed
+    # twenty-item page or a tied boundary between computed kinds.
+    # Keep real stored-row selection/hydration alongside computed candidates;
+    # a pure merge test cannot catch their repository/service boundary errors.
     status.clear()
     status.update(
         {
@@ -261,6 +265,8 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
         i.item_key for i in first_twenty.status_items if i.kind == "test.secondary"
     ] == [f"s{n:02}" for n in range(1, 10)]
     assert first_twenty.next_cursor is not None
+    # State, recipient and type each bind independently to the actual cursor
+    # issued for this mixed page, without recreating its envelope in a test.
     with pytest.raises(ReadValidationError):
         page(state="unread", cursor=first_twenty.next_cursor)
     with pytest.raises(ReadValidationError):
@@ -280,6 +286,8 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
         chronological_keys(second_twenty)
     )
     assert second_twenty.next_cursor is None
+    # Both type inputs reuse populated sources; an empty fixture would let a
+    # missing filter pass. Archived filtering below uses a different SQL path.
     statuses_only = page(item_type="status")
     assert len(statuses_only.status_items) == 20 and statuses_only.items == []
     messages_only = page(item_type="message")
@@ -290,6 +298,9 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
 
     # Bounded scanning may leave an unread page short, but its cursor must
     # continue beyond read candidates rather than permanently hiding q6.
+    # The existing read-mark scenario stopped at page one. Retaining its
+    # continuation checks persisted marks together with source advancement,
+    # which a cursor codec or an isolated source scan cannot validate.
     status.clear()
     status.update(
         {
@@ -355,6 +366,9 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
     assert len(lookups) == 1
     assert any("ix_workspace_inbox_entry_archived" in step for step in plan)
     assert not any("TEMP B-TREE" in step for step in plan)
+    # Archived statuses are persisted marks, so these two type inputs must
+    # exercise the repository's SQL filter as well as current-source lookup.
+    # The active-page type checks above do not take this query path.
     archived_statuses = page(state="archived", item_type="status")
     assert archived_statuses.status_items == []
     assert [i.item_key for i in archived_statuses.items] == ["q6", "q3", "q2", "q1"]
@@ -393,6 +407,10 @@ def test_inbox_core_marks_only_the_seen_revision_for_its_own_recipient(
 
     # One same-time traversal exercises both kind and item-key collation.
     # Locale ordering of either text column can otherwise hide a successor.
+    # Budget exception: the ASCII-only lifecycle cannot expose a mismatch
+    # between database and Python tuple ordering. Real ORDER BY and keyset
+    # predicates are needed; a Python sort would assume the desired order.
+    # This fixture runs on SQLite; it does not prove PostgreSQL locale behavior.
     unicode_producer = InboxService(
         InboxRegistry(
             (

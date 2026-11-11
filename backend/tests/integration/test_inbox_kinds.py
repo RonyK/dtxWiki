@@ -37,7 +37,9 @@ EDITOR = UUID("00000000-0000-0000-0000-0000000000a2")
 
 
 def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_factory):
-    """One traversal of the built-in kinds. Reviews: who sees one to act on,
+    """Built-in policy traversal with separate SQL pagination regressions.
+
+    Reviews: who sees one to act on,
     who hears a decision, and how undo and a colleague's claim change that
     without new messages. Account: join requests and Access Key expiry."""
 
@@ -114,6 +116,9 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
     one, two = first.review_item_id, second.review_item_id
     # Displayed event times, not mutable update times, define the shared
     # order. A live claim removing a previous row must not skip its successor.
+    # Budget exception: the existing visibility/decision checks never page
+    # tied events. This must execute the source's SQL event expression,
+    # tie-break and claim predicate; an in-memory scan bypasses all three.
     with session_factory.begin() as session:
         pending = session.scalars(
             select(ReviewItem).where(ReviewItem.workspace_id == workspace_id)
@@ -239,6 +244,9 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
         )
         # The full join key starts with workspace UUID; its descending order
         # deliberately opposes request-ID order across two workspaces.
+        # Budget exception: the original single-workspace lifecycle cannot
+        # expose a missing workspace prefix in SQL ordering or continuation.
+        # A Python ordering test would not execute those source predicates.
         another_workspace = Workspace(
             id=UUID("ffffffff-ffff-ffff-ffff-fffffffffffe"),
             slug=f"join-{uuid4().hex}",
@@ -323,6 +331,9 @@ def test_builtin_kinds_follow_their_sources_without_announcing_undo(session_fact
 
     # Expiring warnings use expires_at-warn_before as their event time;
     # expired keys use expires_at. Sorting expiry alone reverses this page.
+    # Budget exception: the original one-key lifecycle cannot merge warning
+    # and expired candidates in one page. Both bounded SQL queries must run;
+    # mocking their results would hide a wrong threshold or cursor predicate.
     keys = inbox.registry.kind("account", "access_key_expiry").source
     with session_factory() as session:
         keys_first = keys.status(
