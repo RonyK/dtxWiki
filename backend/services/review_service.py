@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, exists, false, func, or_, select
+from sqlalchemy import ColumnElement, and_, case, exists, false, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -29,8 +29,10 @@ from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories.review_receipts import decision_id_conflict
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
+    join_in_workspace,
     select_in_workspace,
     select_in_workspace_by_ids,
+    where_in_workspace,
 )
 from backend.schemas.context_write import (
     PublishContextPageRequest,
@@ -844,25 +846,44 @@ class ReviewService:
         principal: UUID,
         principal_role: str | None,
         limit: int,
-    ) -> tuple[list[tuple[ReviewItem, ReviewDecision | None]], int]:
-        """Reviews the principal can decide now, most recently active first,
-        and how many there are. A changes_requested review comes with its
-        current request for changes."""
+        event_condition: Callable[[ColumnElement[datetime]], ColumnElement[bool]],
+    ) -> list[tuple[ReviewItem, ReviewDecision | None]]:
+        """Actionable reviews, newest event first.
+
+        A claim changes updated_at, but not the event: pending items use the
+        review's creation time and changes_requested items use the current
+        request's creation time. ``event_condition`` narrows by that time, so
+        the caller keeps its own paging position.
+        """
 
         statement = self._actionable_statement(
             workspace_id, principal=principal, principal_role=principal_role
         )
         if statement is None:
-            return [], 0
-        total = session.scalar(select(func.count()).select_from(statement.subquery()))
-        reviews = session.scalars(
-            statement.order_by(
-                ReviewItem.updated_at.desc(), ReviewItem.id.desc()
-            ).limit(limit)
-        ).all()
-        return self._with_current_requests(session, workspace_id, reviews), int(
-            total or 0
+            return []
+        inbox_request = aliased(ReviewDecision)
+        statement = join_in_workspace(
+            statement,
+            ReviewItem,
+            inbox_request,
+            workspace_id=workspace_id,
+            on=inbox_request.id == self._latest_request_changes_subquery(),
+            isouter=True,
         )
+        event_at = case(
+            (ReviewItem.status == CHANGES_REQUESTED_STATUS, inbox_request.created_at),
+            else_=ReviewItem.created_at,
+        )
+        statement = where_in_workspace(
+            statement,
+            ReviewItem,
+            workspace_id=workspace_id,
+            conditions=(event_condition(event_at),),
+        )
+        reviews = session.scalars(
+            statement.order_by(event_at.desc(), ReviewItem.id.desc()).limit(limit)
+        ).all()
+        return self._with_current_requests(session, workspace_id, reviews)
 
     def actionable_reviews_by_id(
         self,

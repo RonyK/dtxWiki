@@ -3,7 +3,7 @@
 A kind that should appear in the message stream materializes its items with a
 ``StoredSource``. A kind whose items are current state (a pending queue, a key
 about to expire) derives them on read with a ``ComputedSource`` and shows in
-the status group. A new source type implements ``WritableSource`` or
+the same chronological feed. A new source type implements ``WritableSource`` or
 ``StatusSource``; the registry routes kinds by that capability.
 """
 
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from backend.services.inbox import entries
 from backend.services.inbox.base import (
     ComputedScan,
+    InboxPosition,
     InboxScope,
     InboxSnapshot,
     InboxViewer,
@@ -61,19 +62,24 @@ STORED = StoredSource()
 class ComputedSource(StatusSource):
     """Items derived on read from data the kind already owns.
 
-    ``scan`` returns at most ``limit`` items plus the full total; a source with
-    more items aggregates them or lets the overflow show. ``lookup`` returns
-    the items that still exist for this viewer among the given keys, in one
-    query batch, keyed by their own ``item_key``.
+    ``scan`` returns at most ``limit`` items after a shared chronological
+    position and whether more candidates remain. ``lookup`` returns the items
+    that still exist for this viewer among the given keys, in one query batch,
+    keyed by their own ``item_key``.
     """
 
-    scan: Callable[[Session, InboxViewer, int], ComputedScan]
+    scan: Callable[[Session, InboxViewer, int, InboxPosition | None], ComputedScan]
     lookup: Callable[[Session, InboxViewer, Sequence[str]], Mapping[str, InboxSnapshot]]
 
     def status(
-        self, session: Session, viewer: InboxViewer, kind: str, limit: int
+        self,
+        session: Session,
+        viewer: InboxViewer,
+        kind: str,
+        limit: int,
+        after: InboxPosition | None = None,
     ) -> ComputedScan:
-        return self.scan(session, viewer, limit)
+        return self.scan(session, viewer, limit, after)
 
     def current(
         self,

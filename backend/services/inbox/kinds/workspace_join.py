@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.base import utc_now
@@ -23,6 +23,7 @@ from backend.services.inbox.base import (
     ComputedScan,
     InboxDisplay,
     InboxKind,
+    InboxPosition,
     InboxSnapshot,
     InboxViewer,
 )
@@ -30,6 +31,8 @@ from backend.services.inbox.config import WorkspaceJoinConfig
 from backend.services.inbox.links import workspace_path
 from backend.services.inbox.scopes import AccountInbox
 from backend.services.inbox.sources import ComputedSource
+from backend.services.inbox.status_pagination import chronological_after, uuid_key
+from backend.services.read_errors import ReadValidationError
 from backend.utils.uuid import parse_uuid_or_none
 
 WORKSPACE_JOIN = "workspace_join"
@@ -56,8 +59,9 @@ def _membership(user_id: UUID, *roles: str):
 
 
 def _event_at():
-    return func.coalesce(
-        WorkspaceJoinRequest.decided_at, WorkspaceJoinRequest.requested_at
+    return case(
+        (WorkspaceJoinRequest.status == PENDING, WorkspaceJoinRequest.requested_at),
+        else_=WorkspaceJoinRequest.decided_at,
     )
 
 
@@ -108,18 +112,45 @@ class _JoinRequests:
         )
         return or_(owned_pending, own_result)
 
-    def scan(self, session: Session, viewer: InboxViewer, limit: int) -> ComputedScan:
+    def scan(
+        self,
+        session: Session,
+        viewer: InboxViewer,
+        limit: int,
+        after: InboxPosition | None = None,
+    ) -> ComputedScan:
         visible = self._visible(viewer)
-        total = session.scalar(
-            select(func.count()).select_from(WorkspaceJoinRequest).where(visible)
-        )
+
+        def key_before(item_key: str):
+            workspace_key, separator, request_key = item_key.partition(":")
+            if not separator:
+                raise ReadValidationError("invalid inbox cursor item key")
+            workspace_id, request_id = uuid_key(workspace_key), uuid_key(request_key)
+            return or_(
+                WorkspaceJoinRequest.workspace_id < workspace_id,
+                and_(
+                    WorkspaceJoinRequest.workspace_id == workspace_id,
+                    WorkspaceJoinRequest.id < request_id,
+                ),
+            )
+
         requests = session.scalars(
             select(WorkspaceJoinRequest)
-            .where(visible)
-            .order_by(_event_at().desc(), WorkspaceJoinRequest.id.desc())
-            .limit(limit)
+            .where(
+                visible,
+                chronological_after(_event_at(), WORKSPACE_JOIN, after, key_before),
+            )
+            .order_by(
+                _event_at().desc(),
+                WorkspaceJoinRequest.workspace_id.desc(),
+                WorkspaceJoinRequest.id.desc(),
+            )
+            .limit(limit + 1)
         ).all()
-        return ComputedScan([_snapshot(request) for request in requests], total or 0)
+        return ComputedScan(
+            [_snapshot(request) for request in requests[:limit]],
+            len(requests) > limit,
+        )
 
     def lookup(
         self, session: Session, viewer: InboxViewer, item_keys: Sequence[str]

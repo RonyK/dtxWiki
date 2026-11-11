@@ -58,7 +58,7 @@ class InboxRegistry:
         return self._by_scope.get(scope, MappingProxyType({}))
 
     def status_kinds(self, scope: str) -> tuple[InboxKind, ...]:
-        """Kinds whose items list as current state on the first page."""
+        """Kinds whose items are derived from current source state."""
 
         return self._status.get(scope, ())
 

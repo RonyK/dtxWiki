@@ -63,7 +63,8 @@
 }
 
 .review-filter-toggle,
-.activity-filter-toggle {
+.activity-filter-toggle,
+.inbox-filter-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -84,18 +85,22 @@
 .review-filter-toggle:hover,
 .review-filter-toggle:focus-visible,
 .activity-filter-toggle:hover,
-.activity-filter-toggle:focus-visible {
+.activity-filter-toggle:focus-visible,
+.inbox-filter-toggle:hover,
+.inbox-filter-toggle:focus-visible {
   border-color: var(--border-strong);
   color: var(--ink);
 }
 
 .review-filter-toggle svg,
-.activity-filter-toggle svg {
+.activity-filter-toggle svg,
+.inbox-filter-toggle svg {
   transition: transform 140ms ease;
 }
 
 .review-filter-toggle svg[data-open="true"],
-.activity-filter-toggle svg[data-open="true"] {
+.activity-filter-toggle svg[data-open="true"],
+.inbox-filter-toggle svg[data-open="true"] {
   transform: rotate(180deg);
 }
 
@@ -462,6 +467,7 @@
    separators, which otherwise leave a stray divider at the start of a line. */
 @media (max-width: 1024px), (any-pointer: coarse) {
   .activity-filter-toggle,
+  .inbox-filter-toggle,
   .activity-subtype-row .reader-tab,
   .settings-policy-tabs .reader-tab,
   .activity-subtype-row .segmented-control button {

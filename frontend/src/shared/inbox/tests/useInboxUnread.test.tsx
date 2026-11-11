@@ -11,7 +11,7 @@ function UnreadProbe() {
 }
 
 function page(nextCursor: string | null): InboxPage {
-  return { items: [], status_items: [], status_overflow: [], next_cursor: nextCursor };
+  return { items: [], status_items: [], next_cursor: nextCursor };
 }
 
 describe("useInboxUnread", () => {
@@ -37,10 +37,10 @@ describe("useInboxUnread", () => {
 
     expect(await screen.findByText("Unread messages")).toBeInTheDocument();
     expect(list).toHaveBeenNthCalledWith(2, inboxApi.ACCOUNT_INBOX_SCOPE, {
-      state: "unread", limit: 1, cursor: "hidden-page",
+      state: "unread", limit: 20, cursor: "hidden-page",
     });
     expect(list).toHaveBeenNthCalledWith(3, inboxApi.ACCOUNT_INBOX_SCOPE, {
-      state: "unread", limit: 1, cursor: "visible-page",
+      state: "unread", limit: 20, cursor: "visible-page",
     });
   });
 });

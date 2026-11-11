@@ -1,15 +1,17 @@
-import { Archive, ArchiveRestore, Hourglass, Info, Mail, MailOpen } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Archive, ArchiveRestore, ChevronDown, Hourglass, Info, Mail, MailOpen } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { apiErrorMessage } from "../../shared/api/client";
 import {
   ACCOUNT_INBOX_SCOPE,
+  INBOX_PAGE_SIZE,
   listInbox,
   markInboxItem,
   workspaceInboxScope,
   type InboxItem,
+  type InboxItemTypeFilter,
   type InboxPage,
   type InboxState,
 } from "../../shared/api/inbox";
@@ -18,6 +20,7 @@ import { CountChip } from "../../shared/components/CountChip";
 import { RouteLoading } from "../../shared/components/RouteLoading";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
+import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import { formatRelativeTimestamp } from "../../shared/lib/datetime";
 import { parseWorkspaceRoute, workspacePath } from "../../shared/lib/workspaceRoutes";
@@ -27,7 +30,7 @@ import { inboxScopeOptions } from "../../shared/inbox/inboxScopes";
 import { notifyInboxChanged } from "../../shared/inbox/useInboxUnread";
 
 function itemKey(item: InboxItem) {
-  return `${item.kind}:${item.item_key}`;
+  return JSON.stringify([item.kind, item.item_key]);
 }
 
 function inView(item: InboxItem, state: InboxState) {
@@ -39,6 +42,50 @@ function withItem(page: InboxPage, next: InboxItem, state: InboxState): InboxPag
   const replace = (items: InboxItem[]) =>
     items.map((item) => (itemKey(item) === itemKey(next) ? next : item)).filter((item) => inView(item, state));
   return { ...page, status_items: replace(page.status_items), items: replace(page.items) };
+}
+
+function appendItems(current: InboxItem[], next: InboxItem[]) {
+  const seen = new Set(current.map(itemKey));
+  return [...current, ...next.filter((item) => {
+    const key = itemKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  })];
+}
+
+function appendPage(current: InboxPage, next: InboxPage): InboxPage {
+  return {
+    ...current,
+    status_items: appendItems(current.status_items, next.status_items),
+    items: appendItems(current.items, next.items),
+    next_cursor: next.next_cursor,
+  };
+}
+
+function descendingText(left: string, right: string) {
+  const leftPoints = Array.from(left);
+  const rightPoints = Array.from(right);
+  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index++) {
+    const difference = rightPoints[index].codePointAt(0)! - leftPoints[index].codePointAt(0)!;
+    if (difference) return difference;
+  }
+  return rightPoints.length - leftPoints.length;
+}
+
+function eventMicroseconds(value: string) {
+  const fraction = (value.match(/\.(\d+)/)?.[1] ?? "").padEnd(6, "0");
+  return BigInt(Date.parse(value)) * 1_000n + BigInt(fraction.slice(3, 6));
+}
+
+function newestFirst(left: InboxItem, right: InboxItem) {
+  if (left.event_at && right.event_at) {
+    const difference = eventMicroseconds(right.event_at) - eventMicroseconds(left.event_at);
+    if (difference) return difference > 0n ? 1 : -1;
+  } else if (left.event_at || right.event_at) {
+    return left.event_at ? -1 : 1;
+  }
+  return descendingText(left.kind, right.kind) || descendingText(left.item_key, right.item_key);
 }
 
 // A stated deadline is checked when it passes, then again after these delays
@@ -99,6 +146,17 @@ function InboxRemovalToggle({
         <Info size={14} aria-hidden="true" />
       )}
     </button>
+  );
+}
+
+// One labelled box per filter, so the choices of one never read as part of
+// the next. The control already carries the name for assistive technology.
+function InboxFilter<T extends string>(props: ComponentProps<typeof SegmentedControl<T>>) {
+  return (
+    <div className="inbox-filter-group">
+      <span aria-hidden="true" className="eyebrow">{props.label}</span>
+      <SegmentedControl {...props} />
+    </div>
   );
 }
 
@@ -212,11 +270,20 @@ export function InboxScreen() {
     ? workspaceInboxScope(routeWorkspaceId)
     : ACCOUNT_INBOX_SCOPE;
   const [state, setState] = useState<InboxState>("all");
+  const [itemType, setItemType] = useState<InboxItemTypeFilter>("all");
+  // On a phone or tablet the filters fold behind one line naming their values.
+  const compactFilters = useMediaQuery("(max-width: 1024px)");
+  const [compactFiltersOpen, setCompactFiltersOpen] = useState(false);
+  const filtersOpen = !compactFilters || compactFiltersOpen;
+  const filtersId = useId();
   const [page, setPage] = useState<InboxPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(() => new Set());
+  const busyKeysRef = useRef(new Set<string>());
+  const loadingMoreRef = useRef(false);
+  const refreshingRef = useRef(false);
   const requestRef = useRef(0);
   const refreshRef = useRef(0);
   const loadedPagesRef = useRef(1);
@@ -230,17 +297,20 @@ export function InboxScreen() {
     expiryAttemptsRef.current = new Map();
     setLoadingMore(false);
     setRefreshing(false);
-    setBusyKey(null);
+    loadingMoreRef.current = false;
+    refreshingRef.current = false;
+    busyKeysRef.current = new Set();
+    setBusyKeys(new Set());
     setError(null);
     try {
-      const next = await listInbox(activeScope, { state });
+      const next = await listInbox(activeScope, { state, itemType, limit: INBOX_PAGE_SIZE });
       if (request === requestRef.current) setPage(next);
     } catch (caught) {
       if (request === requestRef.current) setError(apiErrorMessage(caught));
     }
     // scope.key identifies the scope; the object itself is rebuilt each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeScope.key, state]);
+  }, [activeScope.key, state, itemType]);
 
   useEffect(() => {
     setPage(null);
@@ -251,22 +321,24 @@ export function InboxScreen() {
     };
   }, [load]);
 
-  // Refresh the live group and every already-loaded message page together.
-  // This refills capped lists without sending the reader back to page one.
+  // Refresh every already-loaded page without sending the reader back to
+  // the first twenty items after a mark or a stated expiry.
   const refresh = useCallback(async () => {
     const request = requestRef.current;
     const revision = ++refreshRef.current;
     const pageCount = loadedPagesRef.current;
     const current = () => request === requestRef.current && revision === refreshRef.current;
+    refreshingRef.current = true;
+    loadingMoreRef.current = false;
     setRefreshing(true);
     setLoadingMore(false);
     setError(null);
     try {
-      let next = await listInbox(activeScope, { state });
+      let next = await listInbox(activeScope, { state, itemType, limit: INBOX_PAGE_SIZE });
       let loaded = 1;
       while (current() && loaded < pageCount && next.next_cursor) {
-        const more = await listInbox(activeScope, { state, cursor: next.next_cursor });
-        next = { ...next, items: [...next.items, ...more.items], next_cursor: more.next_cursor };
+        const more = await listInbox(activeScope, { state, itemType, cursor: next.next_cursor, limit: INBOX_PAGE_SIZE });
+        next = appendPage(next, more);
         loaded++;
       }
       if (!current()) return false;
@@ -277,13 +349,16 @@ export function InboxScreen() {
       if (current()) setError(apiErrorMessage(caught));
       return false;
     } finally {
-      if (current()) setRefreshing(false);
+      if (current()) {
+        refreshingRef.current = false;
+        setRefreshing(false);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeScope.key, state]);
+  }, [activeScope.key, state, itemType]);
 
   useEffect(() => {
-    if (!page || refreshing) return;
+    if (!page || refreshing || loadingMore || busyKeys.size > 0) return;
     const attempts = expiryAttemptsRef.current;
     const pending = [...new Set(
       [...page.status_items, ...page.items]
@@ -316,31 +391,45 @@ export function InboxScreen() {
     }
     schedule();
     return () => window.clearTimeout(timer);
-  }, [page, refresh, refreshing]);
+  }, [page, refresh, refreshing, loadingMore, busyKeys]);
 
   async function loadMore() {
-    if (!page?.next_cursor || refreshing || loadingMore) return;
+    if (!page?.next_cursor || refreshingRef.current || loadingMoreRef.current || busyKeysRef.current.size > 0) return;
     const request = requestRef.current;
     const revision = refreshRef.current;
+    const cursor = page.next_cursor;
     const current = () => request === requestRef.current && revision === refreshRef.current;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
+    setError(null);
     try {
-      const next = await listInbox(activeScope, { state, cursor: page.next_cursor });
+      const next = await listInbox(activeScope, { state, itemType, cursor, limit: INBOX_PAGE_SIZE });
       if (!current()) return;
       loadedPagesRef.current++;
-      setPage((loaded) => loaded && {
-        ...loaded, items: [...loaded.items, ...next.items], next_cursor: next.next_cursor,
-      });
+      setPage((loaded) => loaded?.next_cursor === cursor ? appendPage(loaded, next) : loaded);
     } catch (caught) {
       if (current()) setError(apiErrorMessage(caught));
     } finally {
-      if (current()) setLoadingMore(false);
+      if (current()) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
   }
 
   async function mark(item: InboxItem, marks: { read?: boolean; archived?: boolean }) {
     const request = requestRef.current;
-    setBusyKey(itemKey(item));
+    const key = itemKey(item);
+    if (busyKeysRef.current.has(key)) return;
+    // Opening a title still marks it read. Supersede any older list read
+    // before marking so its response cannot restore the item's former state.
+    refreshRef.current += 1;
+    loadingMoreRef.current = false;
+    refreshingRef.current = false;
+    setLoadingMore(false);
+    setRefreshing(false);
+    busyKeysRef.current.add(key);
+    setBusyKeys(new Set(busyKeysRef.current));
     try {
       // Apply the response immediately, then refill from the server. The
       // refresh keeps loaded pages and supersedes older in-flight list reads.
@@ -354,7 +443,8 @@ export function InboxScreen() {
       if (request === requestRef.current) setError(apiErrorMessage(caught));
     } finally {
       if (request === requestRef.current) {
-        setBusyKey((current) => current === itemKey(item) ? null : current);
+        busyKeysRef.current.delete(key);
+        setBusyKeys(new Set(busyKeysRef.current));
       }
     }
   }
@@ -363,7 +453,7 @@ export function InboxScreen() {
     <ul className="inbox-list">
       {items.map((item) => (
         <InboxItemRow
-          busy={busyKey === itemKey(item)}
+          busy={loadingMore || refreshing || busyKeys.has(itemKey(item))}
           item={item}
           key={itemKey(item)}
           onMark={(target, marks) => void mark(target, marks)}
@@ -371,17 +461,23 @@ export function InboxScreen() {
       ))}
     </ul>
   );
+  const visibleItems = useMemo(() => {
+    if (!page) return [];
+    // Archived already contains every kind in the server's archive order.
+    if (state === "archived") return page.items;
+    return [...page.status_items, ...page.items].sort(newestFirst);
+  }, [page, state]);
   const nothingLoaded = page !== null && page.items.length === 0 && page.status_items.length === 0;
   // A bounded scan can find nothing to show yet still leave older entries.
-  const nothingShown = nothingLoaded && page.status_overflow.length === 0 && !page.next_cursor;
+  const nothingShown = nothingLoaded && !page.next_cursor;
   const scanEmpty = nothingLoaded && Boolean(page.next_cursor);
-  const groupTitle = (label: string, count: number, more: boolean, hint?: string) => (
-    <h2 className="inbox-group-title">
-      {label}
-      <CountChip approxMore={more} compact value={count} />
-      {hint ? <span className="inbox-group-hint">{hint}</span> : null}
-    </h2>
-  );
+  // The list is named after the type it shows, as chosen in the Type filter.
+  const listLabel = t(`itemType.${itemType}`);
+  const filterSummary = [
+    scopes.find((option) => option.scope.key === activeScope.key)?.label,
+    t(`state.${state}`),
+    listLabel,
+  ].filter(Boolean).join(" · ");
 
   return (
     <div className="workspace-screen single-column">
@@ -393,42 +489,67 @@ export function InboxScreen() {
             <p className="feature-subtitle">{t("description")}</p>
           </div>
         </div>
-        <div className="inbox-controls">
-          <SegmentedControl
-            label={t("scope.label")}
-            onChange={(key) => {
-              if (key === "account") {
-                navigate("/inbox");
-              } else if (workspaceChoice) {
-                navigate(workspacePath(workspaceChoice.id, "inbox"));
-              }
-            }}
-            options={scopes.map((option) => ({
-              key: option.scope.key,
-              // The space keeps the accessible name "Workspace <title>".
-              label: option.detail ? (
-                <>
-                  {option.label}{" "}
-                  <span className="inbox-scope-detail">{option.detail}</span>
-                </>
-              ) : (
-                option.label
-              ),
-              title: option.detail,
-            }))}
-            value={activeScope.key}
-          />
-          <SegmentedControl
-            compact
-            label={t("state.label")}
-            onChange={setState}
-            options={[
-              { key: "all", label: t("state.all") },
-              { key: "unread", label: t("state.unread") },
-              { key: "archived", label: t("state.archived") },
-            ]}
-            value={state}
-          />
+        <div className={`inbox-filters${compactFilters ? " is-compact" : ""}`}>
+          {compactFilters ? (
+            <button
+              aria-controls={filtersId}
+              aria-expanded={filtersOpen}
+              className="inbox-filter-toggle"
+              onClick={() => setCompactFiltersOpen((open) => !open)}
+              type="button"
+            >
+              {/* The space keeps the accessible name "Filters <summary>". */}
+              <span>{t("filters.title")}</span>{" "}
+              {filtersOpen ? null : <span className="inbox-filter-summary">{filterSummary}</span>}
+              <ChevronDown aria-hidden="true" data-open={filtersOpen} size={14} />
+            </button>
+          ) : null}
+          <div className="inbox-controls" hidden={!filtersOpen} id={filtersId}>
+            <InboxFilter
+              label={t("scope.label")}
+              onChange={(key) => {
+                if (key === "account") {
+                  navigate("/inbox");
+                } else if (workspaceChoice) {
+                  navigate(workspacePath(workspaceChoice.id, "inbox"));
+                }
+              }}
+              options={scopes.map((option) => ({
+                key: option.scope.key,
+                // The space keeps the accessible name "Workspace <title>".
+                label: option.detail ? (
+                  <>
+                    {option.label}{" "}
+                    <span className="inbox-scope-detail">{option.detail}</span>
+                  </>
+                ) : (
+                  option.label
+                ),
+                title: option.detail,
+              }))}
+              value={activeScope.key}
+            />
+            <InboxFilter
+              label={t("state.label")}
+              onChange={setState}
+              options={[
+                { key: "all", label: t("state.all") },
+                { key: "unread", label: t("state.unread") },
+                { key: "archived", label: t("state.archived") },
+              ]}
+              value={state}
+            />
+            <InboxFilter
+              label={t("itemType.label")}
+              onChange={setItemType}
+              options={[
+                { key: "all", label: t("itemType.all") },
+                { key: "status", label: t("itemType.status") },
+                { key: "message", label: t("itemType.message") },
+              ]}
+              value={itemType}
+            />
+          </div>
         </div>
         {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
         {!page ? (
@@ -441,28 +562,20 @@ export function InboxScreen() {
                 {t("archivedNote")}
               </p>
             ) : null}
-            {nothingShown ? <p className="empty-state">{t(`empty.${state}`)}</p> : null}
-            {page.status_items.length > 0 || page.status_overflow.length > 0 ? (
-              <section className="feature-section inbox-group" aria-label={t("status.label")}>
-                {groupTitle(
-                  t("status.label"),
-                  page.status_items.length,
-                  page.status_overflow.length > 0,
-                  t("status.hint"),
-                )}
-                {page.status_items.length > 0 ? rows(page.status_items) : null}
-                {page.status_overflow.map((overflow) => (
-                  <p className="inbox-overflow" key={overflow.kind}>
-                    {t("status.overflow", { total: overflow.total })}
-                  </p>
-                ))}
-              </section>
+            {itemType === "status" && state !== "archived" ? (
+              <p className="inbox-note">
+                <Info size={14} aria-hidden="true" />
+                {t("status.hint")}
+              </p>
             ) : null}
-            {page.items.length > 0 ? (
-              <section className="feature-section inbox-group" aria-label={t("items.label")}>
-                {/* Archived lists every kind together, newest archive first. */}
-                {state === "archived" ? null : groupTitle(t("items.label"), page.items.length, Boolean(page.next_cursor))}
-                {rows(page.items)}
+            {nothingShown ? <p className="empty-state">{t(`empty.${state}`)}</p> : null}
+            {visibleItems.length > 0 ? (
+              <section className="feature-section inbox-group" aria-label={listLabel}>
+                <h2 className="inbox-group-title">
+                  {listLabel}
+                  <CountChip compact value={visibleItems.length} />
+                </h2>
+                {rows(visibleItems)}
               </section>
             ) : null}
             {scanEmpty ? <p className="inbox-scan-empty">{t("scanEmpty")}</p> : null}
@@ -470,7 +583,7 @@ export function InboxScreen() {
               <div className="load-more-row">
                 <button
                   className="icon-button text-button"
-                  disabled={loadingMore || refreshing}
+                  disabled={loadingMore || refreshing || busyKeys.size > 0}
                   onClick={() => void loadMore()}
                   type="button"
                 >

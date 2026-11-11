@@ -42,7 +42,7 @@ describe("InboxItemRow", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ data: { items: [], status_items: [], status_overflow: [], next_cursor: null } }),
+      json: async () => ({ data: { items: [], status_items: [], next_cursor: null } }),
     } as Response);
     render(
       <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000004/inbox"]}>
@@ -52,7 +52,7 @@ describe("InboxItemRow", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock).toHaveBeenCalledWith(
-      `${BASE}/api/v1/workspaces/00000000-0000-4000-8000-000000000004/inbox?state=all`,
+      `${BASE}/api/v1/workspaces/00000000-0000-4000-8000-000000000004/inbox?state=all&item_type=all&limit=20`,
       expect.objectContaining({ credentials: "include" }),
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -137,13 +137,13 @@ describe("InboxItemRow", () => {
       const archived = query.get("state") === "archived";
       // The first archive scan finds only entries whose source is gone.
       if (archived && !query.has("cursor")) {
-        return respond({ status_items: [], items: [], status_overflow: [], next_cursor: "archive-next" });
+        return respond({ status_items: [], items: [], next_cursor: "archive-next" });
       }
       const visible = messages.filter((item) => item.archived === archived);
       return respond({
         status_items: archived ? [] : visible.filter((item) => item.kind !== "review_result"),
         items: archived ? visible : visible.filter((item) => item.kind === "review_result"),
-        status_overflow: [], next_cursor: null,
+        next_cursor: null,
       });
     });
     const changed = vi.fn();
@@ -187,15 +187,19 @@ describe("InboxItemRow", () => {
     }
   });
 
-  it("refills the capped live list after archiving while keeping loaded message pages", async () => {
+  it("refills the loaded chronological pages after archiving and ignores a stale refill", async () => {
     let keys: InboxItem[] = Array.from({ length: 21 }, (_, index) => ({
       ...base, kind: "access_key_expiry", item_key: String(index + 1),
+      event_at: `2026-10-29T00:${String(20 - index).padStart(2, "0")}:00Z`,
       display: { title: `Key ${index + 1}`, params: {} },
     }));
-    const messages: InboxItem[] = [
-      { ...base, item_key: "message-1", unread: false, display: { title: "Message 1", params: {} } },
-      { ...base, item_key: "message-2", display: { title: "Message 2", params: {} } },
-    ];
+    const messages: InboxItem[] = Array.from({ length: 20 }, (_, index) => ({
+      ...base,
+      item_key: `message-${index + 1}`,
+      event_at: `2026-10-28T00:00:${String(19 - index).padStart(2, "0")}Z`,
+      unread: index !== 0,
+      display: { title: `Message ${index + 1}`, params: {} },
+    }));
     let pauseRefresh = false;
     let releaseRefresh: (() => void) | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
@@ -209,11 +213,13 @@ describe("InboxItemRow", () => {
         const more = query.has("cursor");
         const live = keys.filter((item) => !item.archived);
         const visibleMessages = messages.filter((item) => query.get("state") !== "unread" || item.unread);
+        const all = [...live, ...visibleMessages];
+        const offset = Number(query.get("cursor") ?? 0);
+        const shown = all.slice(offset, offset + 20);
         data = {
-          status_items: more ? [] : live.slice(0, 20),
-          status_overflow: !more && live.length > 20 ? [{ kind: "access_key_expiry", total: live.length }] : [],
-          items: [visibleMessages[more ? 1 : 0]],
-          next_cursor: !more && visibleMessages.length > 1 ? "message-next" : null,
+          status_items: shown.filter((item) => item.kind === "access_key_expiry"),
+          items: shown.filter((item) => item.kind !== "access_key_expiry"),
+          next_cursor: offset + 20 < all.length ? String(offset + 20) : null,
         };
         if (pauseRefresh && !more && query.get("state") === "all") {
           pauseRefresh = false;
@@ -227,16 +233,14 @@ describe("InboxItemRow", () => {
     render(<MemoryRouter initialEntries={["/inbox"]}><InboxScreen /></MemoryRouter>);
     await screen.findByText("Key 1");
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-    await screen.findByText("Message 2");
+    await screen.findByText("Message 19");
+    expect(screen.queryByText("Message 20")).not.toBeInTheDocument();
 
-    // The 21st source item must stay reachable after removing the initial 20.
-    for (let index = 1; index <= 20; index++) {
-      const row = screen.getByText(`Key ${index}`).closest("li")!;
-      fireEvent.click(within(row).getByRole("button", { name: "Archive" }));
-      await waitFor(() => expect(row).not.toBeInTheDocument());
-      await waitFor(() => expect(screen.getAllByRole("button", { name: "Archive" }))
-        .toHaveLength(Math.min(20, 21 - index) + 2));
-    }
+    // One removal refills the same two pages, including the next older item.
+    const row = screen.getByText("Key 1").closest("li")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Archive" }));
+    await screen.findByText("Message 20");
+    expect(row).not.toBeInTheDocument();
     expect(screen.getByText("Key 21")).toBeVisible();
     expect(screen.getByText("Message 1")).toBeVisible();
     expect(screen.getByText("Message 2")).toBeVisible();
@@ -283,7 +287,7 @@ describe("InboxItemRow", () => {
       return {
         ok: true, status: 200,
         json: async () => ({ data: {
-          status_items: [], status_overflow: [], items,
+          status_items: [], items,
           next_cursor: archived && !more ? "archive-next" : null,
         } }),
       } as Response;

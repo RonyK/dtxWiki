@@ -10578,25 +10578,6 @@
         "title": "InboxMarkResponse",
         "type": "object"
       },
-      "InboxOverflowPayload": {
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "kind",
-          "total"
-        ],
-        "title": "InboxOverflowPayload",
-        "type": "object"
-      },
       "InboxPagePayload": {
         "additionalProperties": false,
         "properties": {
@@ -10624,18 +10605,10 @@
             },
             "title": "Status Items",
             "type": "array"
-          },
-          "status_overflow": {
-            "items": {
-              "$ref": "#/components/schemas/InboxOverflowPayload"
-            },
-            "title": "Status Overflow",
-            "type": "array"
           }
         },
         "required": [
           "status_items",
-          "status_overflow",
           "items",
           "next_cursor"
         ],
@@ -32578,6 +32551,21 @@
           },
           {
             "in": "query",
+            "name": "item_type",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "status",
+                "message"
+              ],
+              "title": "Item Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "cursor",
             "required": false,
             "schema": {
@@ -32597,7 +32585,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 30,
+              "default": 20,
               "maximum": 100,
               "minimum": 1,
               "title": "Limit",
@@ -40729,6 +40717,21 @@
           },
           {
             "in": "query",
+            "name": "item_type",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "status",
+                "message"
+              ],
+              "title": "Item Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "cursor",
             "required": false,
             "schema": {
@@ -40748,7 +40751,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 30,
+              "default": 20,
               "maximum": 100,
               "minimum": 1,
               "title": "Limit",

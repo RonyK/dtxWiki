@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, func, inspect, not_, or_, select
+from sqlalchemy import and_, inspect, not_, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -125,38 +125,6 @@ def marks_for(
     }
 
 
-def count_hidden_marks(
-    session: Session,
-    scope: InboxScope,
-    user_id: UUID,
-    kind: str,
-    *,
-    state: InboxState,
-    cap: int,
-) -> int:
-    """Bound extra candidates for items hidden by archive or read marks.
-
-    Count a row once even when both marks hide it. Old revisions may make
-    this an overestimate, which is safe for the bounded source scan.
-    """
-
-    model = scope.model
-    hidden = model.archived_revision.is_not(None)
-    if state == "unread":
-        hidden = or_(hidden, model.read_revision.is_not(None))
-    marked = (
-        select(model.item_key)
-        .where(
-            *_equal(model, scope.owner(user_id)),
-            model.kind == kind,
-            hidden,
-        )
-        .limit(cap)
-        .subquery()
-    )
-    return session.scalar(select(func.count()).select_from(marked)) or 0
-
-
 def _order_at(model: Any, state: InboxState) -> Any:
     # The Archived list is newest archive first for every entry; the others
     # follow when each message happened. ``updated_at`` is set by a producer
@@ -179,6 +147,8 @@ def message_page(
     reopen_kinds: Sequence[str],
     after: tuple[datetime, str, str] | None,
     limit: int,
+    item_type: str = "all",
+    status_kinds: Sequence[str] = (),
 ) -> Sequence[InboxEntryRow]:
     """The entries a message page reads, in keyset order, newest first.
 
@@ -207,7 +177,16 @@ def message_page(
         conditions.append(
             or_(model.read_revision.is_(None), model.read_revision != model.revision)
         )
+    if item_type == "status":
+        conditions.append(model.kind.in_(status_kinds))
+    elif item_type == "message":
+        conditions.append(model.kind.not_in(status_kinds))
     order_at = _order_at(model, state)
+    # The service merges with Python's Unicode ordinal ordering. Locale
+    # collations can put a cursor before rows Python sorted after it.
+    collation = "C" if session.get_bind().dialect.name == "postgresql" else "BINARY"
+    order_kind = model.kind.collate(collation)
+    order_key = model.item_key.collate(collation)
     if after is not None:
         position_at, kind, item_key = after
         conditions.append(
@@ -216,8 +195,8 @@ def message_page(
                 and_(
                     order_at == position_at,
                     or_(
-                        model.kind < kind,
-                        and_(model.kind == kind, model.item_key < item_key),
+                        order_kind < kind,
+                        and_(order_kind == kind, order_key < item_key),
                     ),
                 ),
             )
@@ -225,7 +204,7 @@ def message_page(
     return session.scalars(
         select(model)
         .where(*conditions)
-        .order_by(order_at.desc(), model.kind.desc(), model.item_key.desc())
+        .order_by(order_at.desc(), order_kind.desc(), order_key.desc())
         .limit(limit)
     ).all()
 

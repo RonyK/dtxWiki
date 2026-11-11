@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { listInbox, type InboxScope } from "../api/inbox";
+import { INBOX_PAGE_SIZE, listInbox, type InboxScope } from "../api/inbox";
 import type { WorkspaceSummary } from "../api/workspace";
 import { inboxScopeOptions } from "./inboxScopes";
 
@@ -16,7 +16,7 @@ async function scopeHasUnread(scope: InboxScope, isCurrent: () => boolean) {
   const visited = new Set<string>();
   let cursor: string | undefined;
   while (isCurrent()) {
-    const page = await listInbox(scope, { state: "unread", limit: 1, cursor });
+    const page = await listInbox(scope, { state: "unread", limit: INBOX_PAGE_SIZE, cursor });
     if (!isCurrent()) return false;
     if (page.items.length > 0 || page.status_items.length > 0) return true;
     // Resolver-hidden rows can fill a scan without exhausting the stream.
@@ -30,7 +30,7 @@ async function scopeHasUnread(scope: InboxScope, isCurrent: () => boolean) {
 }
 
 // Whether any inbox open in this context has an unread item, as found by
-// asking each for one unread item, following continuation pages when needed.
+// asking each for an unread page, following continuation pages when needed.
 // It checks on mount, workspace changes, window focus and mark changes;
 // there is no polling.
 export function useInboxUnread(workspace: WorkspaceSummary | null, enabled: boolean) {

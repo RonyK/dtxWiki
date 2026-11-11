@@ -4,6 +4,9 @@
   "loading": "Loading Inbox",
   "loadMore": "Load more",
   "checkOlder": "Check older items",
+  "filters": {
+    "title": "Filters"
+  },
   "scope": {
     "label": "Inbox scope",
     "workspace": "Workspace",
@@ -15,13 +18,14 @@
     "unread": "Unread",
     "archived": "Archived"
   },
-  "status": {
-    "label": "Live",
-    "hint": "Leaves automatically when it is handled or expires at its source.",
-    "overflow": "{{total}} in total; open the source for the rest."
+  "itemType": {
+    "label": "Type",
+    "all": "All",
+    "status": "Current status",
+    "message": "Stored messages"
   },
-  "items": {
-    "label": "Messages"
+  "status": {
+    "hint": "Leaves automatically when it is handled or expires at its source."
   },
   "archivedNote": "Listed by when you archived them. Archived items still disappear automatically when their source is handled, expires, or becomes unavailable to you.",
   "scanEmpty": "None of the recent items can be shown now.",

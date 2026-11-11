@@ -1,11 +1,78 @@
 /* Inbox screen: scope/state controls, item groups and two-line item rows. */
 
+.inbox-filters {
+  margin-bottom: 16px;
+}
+
+/* Where the filters fold, one frame holds the toggle and everything it opens,
+   so the extent of the folding area is visible. */
+.inbox-filters.is-compact {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.inbox-filters.is-compact .inbox-controls {
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
 .inbox-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 16px;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.inbox-controls[hidden] {
+  display: none;
+}
+
+.inbox-filter-toggle {
+  border: 0;
+  background: transparent;
+}
+
+.inbox-filter-toggle > span:first-child {
+  flex: none;
+}
+
+/* A folded panel still names what it is set to. */
+.inbox-filter-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-weight: 500;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The same labelled box as the Lint and Activity filters. */
+.inbox-filter-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 0 1 auto;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+}
+
+.inbox-filter-group .eyebrow {
+  margin: 0;
+}
+
+.inbox-filter-group .segmented-control {
+  flex-wrap: wrap;
+}
+
+.inbox-filter-group .segmented-control button {
+  word-break: keep-all;
 }
 
 /* The workspace segment names its workspace beside the generic label; a long
@@ -251,6 +318,20 @@
 }
 
 @media (max-width: 640px) {
+  .inbox-filter-group {
+    flex-basis: 100%;
+  }
+
+  /* One row per filter: a long label wraps between words and the workspace
+     title shortens instead of squeezing its neighbours. */
+  .inbox-filter-group .segmented-control {
+    flex-wrap: nowrap;
+  }
+
+  .inbox-filter-group .segmented-control button {
+    flex: 1 1 auto;
+  }
+
   .inbox-scope-detail {
     max-width: 120px;
   }

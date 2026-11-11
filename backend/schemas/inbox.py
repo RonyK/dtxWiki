@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.schemas.common import RESTResponseBase
 
 InboxStateParam = Literal["all", "unread", "archived"]
+InboxTypeParam = Literal["all", "status", "message"]
 
 
 class InboxDisplayPayload(BaseModel):
@@ -29,16 +30,8 @@ class InboxItemPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class InboxOverflowPayload(BaseModel):
-    kind: str
-    total: int
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class InboxPagePayload(BaseModel):
     status_items: list[InboxItemPayload]
-    status_overflow: list[InboxOverflowPayload]
     items: list[InboxItemPayload]
     next_cursor: str | None
 
