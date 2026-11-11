@@ -4,6 +4,7 @@ import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 
 import { evidenceScreenshot } from "../e2e/evidence";
+import { GRAPH_LINE_OPACITY } from "../../frontend/src/features/graph/shared/graphTokens";
 import { fixtureServerConfig } from "./vite-fixture";
 
 import type {} from "./workspace-screen-focus-entry";
@@ -1050,7 +1051,7 @@ test("native 2k dark selection emphasizes original incident links without hiding
   expect(selected.linkGreyoutOpacity!).toBeGreaterThan(0);
   expect(selected.linkGreyoutOpacity!).toBeLessThanOrEqual(0.1);
   expect(selected.linkAlphas).toHaveLength(1999);
-  expect(selected.linkAlphas[0]).toBeGreaterThanOrEqual(0.85);
+  expect(selected.linkAlphas[0]).toBeCloseTo(GRAPH_LINE_OPACITY.overview.selected);
   expect(selected.linkAlphas.slice(1).every((alpha) => alpha > 0 && alpha < selected.linkAlphas[0])).toBe(true);
   await evidenceScreenshot(page, testInfo, "selection-contrast-dark.png");
   await page.getByRole("button", { name: "Clear selection", exact: true }).click();

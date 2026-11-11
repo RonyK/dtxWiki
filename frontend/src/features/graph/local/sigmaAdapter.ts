@@ -9,7 +9,7 @@ import { colorToArray, floatColor } from "sigma/utils";
 import type { GraphRenderScene, GraphPoint, GraphViewport } from "../shared/rendererTypes";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
 import {
-  GRAPH_LINE_INK, GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type GraphNodeShape,
+  GRAPH_LINE_OPACITY, GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type GraphNodeShape,
 } from "../shared/graphTokens";
 import { FORCED_OUTLINE_INSETS, GRAPH_RING_BAND_PX, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, TRIANGLE_RADIUS_FACTOR, drawShapeRing } from "../shared/nodeShapes";
 import { LOCAL_EDGE_PROGRAMS, setLocalFitRatio, type LocalLineState } from "./edgePrograms";
@@ -359,8 +359,8 @@ export function createSigmaGraphAdapter(
     type: edge.kind,
     size: 1,
     color: tokens.edge[edge.kind],
-    // The Map's dimmed line share (GRAPH_LINE_INK.dimmed).
-    quietColor: quietColor(tokens.edge[edge.kind], tokens.surface, GRAPH_LINE_INK.dimmed),
+    // The Map's dimmed line share.
+    quietColor: quietColor(tokens.edge[edge.kind], tokens.surface, GRAPH_LINE_OPACITY.dimmed),
     label,
   });
 

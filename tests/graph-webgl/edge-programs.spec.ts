@@ -3,7 +3,7 @@ import { build } from "esbuild";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { GRAPH_LINE_INK, graphLineFade } from "../../frontend/src/features/graph/shared/graphTokens";
+import { GRAPH_LINE_OPACITY, graphLineFade } from "../../frontend/src/features/graph/shared/graphTokens";
 import type { ProbeResult } from "./browser-entry";
 
 declare global {
@@ -135,7 +135,7 @@ test("all five Local edge shaders compile and keep dash periods in CSS pixels ac
           expect(phaseError).toBeLessThan(0.05);
           const link = result.edges[0];
           linkPeak = Math.max(linkPeak, ...link.alpha);
-          linkExpected = 255 * GRAPH_LINE_INK.line * graphLineFade(link.lengthCssPx * ratio, result.edges.length);
+          linkExpected = 255 * GRAPH_LINE_OPACITY.line * graphLineFade(link.lengthCssPx * ratio, result.edges.length);
           try {
             assertPatterns(result);
           } catch (error) {
@@ -145,7 +145,7 @@ test("all five Local edge shaders compile and keep dash periods in CSS pixels ac
             throw error;
           }
         }
-        // GRAPH_LINE_FADE: the solid line's opacity follows its fitted-view
+        // GRAPH_LINE_OPACITY: the solid line's ink and long-line fade follow its fitted-view
         // (ratio 1) length whatever the zoom. One of the two pixel phases fully
         // covers a row; below ratio 1 the line leaves the viewport.
         if (ratio >= 1) expect(Math.abs(linkPeak - linkExpected), `ratio ${ratio} DPR ${dpr}`).toBeLessThanOrEqual(3);

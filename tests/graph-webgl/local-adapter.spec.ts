@@ -347,11 +347,14 @@ async function renderedColors(page: Page): Promise<{
       if (red < 235 || green < 235 || blue < 235) nonwhite++;
       if (red > 75 && red < 190 && green < 125 && blue > 110 && blue > red) purple++;
       if (red < 90 && green > 100 && blue > 75 && blue < 200 && green > red) teal++;
-      // #e11d48 at GRAPH_EDGE_FADE's 1..0.8 over white; blue - green tells it from membership pink.
-      if (red > 150 && green < 110 && blue < 135 && blue - green < 55) link++;
-      if (red < 80 && green > 120 && blue < 130) citation++;
-      if (red < 90 && green < 150 && blue > 170) coAccess++;
-      if (red > 160 && green < 90 && blue > 90 && blue < 180) membership++;
+      // Lines are translucent over white, which keeps their hue: classify by hue.
+      const max = Math.max(red, green, blue), chroma = max - Math.min(red, green, blue);
+      const hue = chroma < 40 ? -1 : max === red ? (60 * (green - blue) / chroma + 360) % 360
+        : max === green ? 60 * (blue - red) / chroma + 120 : 60 * (red - green) / chroma + 240;
+      if (hue >= 340 && hue < 356) link++; // #e11d48, hue 347
+      if (hue >= 130 && hue < 155) citation++; // #16a34a, hue 142
+      if (hue >= 212 && hue < 230) coAccess++; // #2563eb, hue 221
+      if (hue >= 325 && hue < 339) membership++; // #db2777, hue 333
     }
     return { nonwhite, purple, teal, link, citation, coAccess, membership };
   }, screenshot.toString("base64"));

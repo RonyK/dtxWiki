@@ -81,24 +81,37 @@ export const GRAPH_EDGE_PATTERN = {
 export const GRAPH_EDGE_WIDTH_PX = 1.5;
 
 /**
- * Relationship-line opacity: one rule set for both graphs, from 1 down to 0.6.
- * Citation ink is lighter than other lines. Long lines fade by their length in
- * the fitted view: opaque at the near length, towards transparent at the far
- * one, never below the floor; scenes up to `maxRelations` fade less. While a
- * selection is shown its lines are opaque and other lines keep `dimmed` of
- * their ink; forced colours never fade. The
- * Map's overview of over 1,000 documents adds community ink (cosmosScene.ts).
+ * Relationship-line opacity: the Map's rules, shared with the Context graph,
+ * in one table so the range is tuned in one place (now 0.7 down to 0.4).
+ * - Ink by kind: `citation`, and `line` for every other kind.
+ * - Long lines fade by their length in the fitted view: full ink up to the near
+ *   length, towards transparent at the far one, never below the scene's floor;
+ *   scenes up to `small.maxRelations` relations fade less.
+ * - While a selection is shown no line fades, ink is multiplied by `emphasis`,
+ *   and lines outside it keep `dimmed` of theirs. Forced colours: ink, no fade.
+ * - Map only: its overview of over 1,000 documents inks by community
+ *   (`overview`); a scene beyond its budget keeps its own tier (`unadmitted`).
  */
-export const GRAPH_LINE_INK = { line: 1, citation: 0.97, dimmed: 0.1 } as const;
-export const GRAPH_LINE_FADE = {
-  small: { maxRelations: 1_000, rangePx: [40, 350], floor: 0.89 },
-  large: { rangePx: [30, 220], floor: 0.76 },
+export const GRAPH_LINE_OPACITY = {
+  line: 0.7,
+  citation: 0.68,
+  emphasis: 1.235,
+  dimmed: 0.1,
+  fade: {
+    small: { maxRelations: 1_000, rangePx: [40, 350], floor: 0.88 },
+    large: { rangePx: [30, 220], floor: 0.74 },
+  },
+  overview: {
+    line: 0.65, citation: 0.67, crossLine: 0.54, crossCitation: 0.56,
+    selected: 0.87, selectedFloor: 0.97, dimmed: 0.08,
+  },
+  unadmitted: { line: 0.72, citation: 0.65, rangePx: [10, 60], floor: 0.62 },
 } as const;
 
-/** GRAPH_LINE_FADE for a line of this fitted-view length in a scene of this many relations. */
+/** The long-line fade for a line of this fitted-view length in a scene of this many relations. */
 export function graphLineFade(fitLengthPx: number, relations: number): number {
-  const { rangePx: [near, far], floor } = relations <= GRAPH_LINE_FADE.small.maxRelations
-    ? GRAPH_LINE_FADE.small : GRAPH_LINE_FADE.large;
+  const { small, large } = GRAPH_LINE_OPACITY.fade;
+  const { rangePx: [near, far], floor } = relations <= small.maxRelations ? small : large;
   return Math.max(floor, Math.min(1, (far - fitLengthPx) / (far - near)));
 }
 

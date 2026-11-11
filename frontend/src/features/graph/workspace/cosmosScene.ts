@@ -1,5 +1,5 @@
 import { workspaceBaseBodyDiameterCss } from "../shared/workspaceGlyphGeometry";
-import { GRAPH_LINE_INK, type GraphVisualTokens } from "../shared/graphTokens";
+import { GRAPH_LINE_OPACITY, type GraphVisualTokens } from "../shared/graphTokens";
 import { rgb } from "./cosmosColor";
 import { estimateWorkspaceCountWidthCss, workspaceClusterCountText, workspaceClusterDiameterCss, type WorkspaceCountMeasure } from "./pointImages";
 import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, type WorkspaceMapColumns } from "../map/sceneColumns";
@@ -74,14 +74,15 @@ export function buildCosmosRelationColors(
   if (!isDenseWorkspaceMapOverview(columns, budget)) return baseColors;
   const colors = baseColors.slice();
   const emphasized = new Set(incidentLinks);
+  const { overview } = GRAPH_LINE_OPACITY;
   for (let edge = 0; edge < columns.edgeIds.length; edge++) {
     const crossCommunity = communityIds
       && communityIds[columns.edgeSources[edge]] !== communityIds[columns.edgeTargets[edge]];
     // Cross-community lines remain visible, but need less overview ink than
     // local structure. Direct incident stars win over both density bands.
-    colors[edge * 4 + 3] = emphasized.has(edge) ? 1
-      : columns.edgeKinds[edge] === 1 ? (crossCommunity ? .81 : .96)
-        : crossCommunity ? .79 : .94;
+    colors[edge * 4 + 3] = emphasized.has(edge) ? overview.selected
+      : columns.edgeKinds[edge] === 1 ? (crossCommunity ? overview.crossCitation : overview.citation)
+        : crossCommunity ? overview.crossLine : overview.line;
   }
   return colors;
 }
@@ -247,10 +248,9 @@ export function buildCosmosSceneBuffers(
     links[edge * 2 + 1] = target;
     // Legend strokes: solid link, dashed citation, short-dash containment (Cosmos style per kind).
     linkStyles[edge] = kind;
-    // GRAPH_LINE_INK, shared with the Context graph; the overview and an
-    // unadmitted budget keep their own ink on the same 1..0.6 scale.
-    const alpha = denseOverview ? (kind === 1 ? .96 : .94)
-      : kind === 1 ? (readableScene ? GRAPH_LINE_INK.citation : .94) : (readableScene ? GRAPH_LINE_INK.line : 1);
+    const ink = GRAPH_LINE_OPACITY, { overview, unadmitted } = ink;
+    const alpha = denseOverview ? (kind === 1 ? overview.citation : overview.line)
+      : kind === 1 ? (readableScene ? ink.citation : unadmitted.citation) : (readableScene ? ink.line : unadmitted.line);
     writeColor(
       linkColors,
       edge,

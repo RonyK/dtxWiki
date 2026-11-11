@@ -10,7 +10,7 @@ import type { EdgeDisplayData, NodeDisplayData, RenderParams } from "sigma/types
 import { parseColor, rgbaToFloat } from "sigma/utils";
 
 import {
-  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_INK, graphLineFade, type GraphEdgeVisualKind,
+  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, graphLineFade, type GraphEdgeVisualKind,
 } from "../shared/graphTokens";
 
 // Every line has the legend's one CSS-pixel width; half of it on each side.
@@ -18,7 +18,8 @@ export const LOCAL_EDGE_HALF_WIDTH_PX = GRAPH_EDGE_WIDTH_PX / 2;
 
 /**
  * The edge reducer's line state, as on the Map: "selected" while a selection
- * or history step is emphasised (opaque), "forced" in forced colours (ink, no fade).
+ * or history step is emphasised (ink x emphasis, no fade), "forced" in forced
+ * colours (ink, no fade).
  */
 export type LocalLineState = "rest" | "selected" | "forced";
 
@@ -27,16 +28,16 @@ export type LocalLineState = "rest" | "selected" | "forced";
 const HOME_CAMERA = { x: 0.5, y: 0.5, angle: 0, ratio: 1 };
 const fitCameras = new WeakMap<Sigma, typeof HOME_CAMERA>();
 
-/** Records the camera ratio a Fit used: GRAPH_LINE_FADE measures lines in that view. */
+/** Records the camera ratio a Fit used: the long-line fade measures lines in that view. */
 export function setLocalFitRatio(renderer: Sigma, ratio: number): void {
   fitCameras.set(renderer, { ...HOME_CAMERA, ratio });
 }
 
-/** The Map's line opacity rules (GRAPH_LINE_INK, GRAPH_LINE_FADE) for one Context line. */
+/** The Map's line opacity rules (GRAPH_LINE_OPACITY) for one Context line. */
 function lineOpacity(renderer: Sigma, source: NodeDisplayData, target: NodeDisplayData, data: EdgeDisplayData): number {
   const state = (data as EdgeDisplayData & { lineState?: LocalLineState }).lineState;
-  if (state === "selected") return 1;
-  const ink = data.type === "citation" ? GRAPH_LINE_INK.citation : GRAPH_LINE_INK.line;
+  const ink = data.type === "citation" ? GRAPH_LINE_OPACITY.citation : GRAPH_LINE_OPACITY.line;
+  if (state === "selected") return Math.min(1, ink * GRAPH_LINE_OPACITY.emphasis);
   if (state === "forced") return ink;
   const cameraState = fitCameras.get(renderer) ?? HOME_CAMERA;
   const start = renderer.framedGraphToViewport(source, { cameraState });
