@@ -843,6 +843,7 @@ describe("PageEditor", () => {
                 version_status: "draft",
                 parent_version_id: "v1",
                 content_hash: "b".repeat(64),
+                is_public: true,
               }
             : page,
       });
@@ -857,7 +858,10 @@ describe("PageEditor", () => {
     // PUB-09: publicationState is "staged" here (a published head plus a
     // staged draft), so the pill names that instead of a bare "Saved".
     expect(syncStatus()).toHaveTextContent("Unpublished draft saved");
-    expect(publicationActions().getByRole("button", { name: "Publish" })).toBeInTheDocument();
+    // The page is on the web, so publishing also replaces its public link.
+    expect(publicationActions().getByRole("button", { name: "Publish" })).toHaveAccessibleDescription(
+      "Publishing also updates the public web link.",
+    );
     expect(document.querySelector(".status-banner")).not.toBeInTheDocument();
   });
 

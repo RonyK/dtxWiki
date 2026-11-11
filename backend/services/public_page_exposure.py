@@ -69,12 +69,11 @@ def reconcile_public_exposure_after_publication(
     previous_published_version_id: UUID | None,
     published_version_id: UUID,
 ) -> None:
-    """Advance indexed grants and revoke version-pinned unlisted grants.
+    """Keep a valid web exposure grant aligned with the new published head.
 
     Replaying the already-published version is a topology no-op and preserves a
-    valid grant. Publishing any different version advances an indexed public
-    Workspace grant, while an unlisted non-public Workspace grant is revoked so
-    newly published bytes never become anonymous without a fresh acknowledgement.
+    valid grant. Both indexed and unlisted grants follow subsequent publications
+    until explicitly revoked. Draft saves never advance the exposed version.
     """
 
     if not page.is_public:
@@ -88,12 +87,7 @@ def reconcile_public_exposure_after_publication(
     if not complete_grant:
         clear_public_page_exposure(page)
         return
-    if published_version_id == previous_published_version_id:
-        return
-    if page.public_exposure_scope == INDEXED_WEB:
-        page.public_exposed_version_id = published_version_id
-        return
-    clear_public_page_exposure(page)
+    page.public_exposed_version_id = published_version_id
 
 
 __all__ = [

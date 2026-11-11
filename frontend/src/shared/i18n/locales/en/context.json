@@ -175,6 +175,8 @@
     "readersSeeVersionTip": "This is the published snapshot readers receive. Open it in History.",
     "tagTip": "TAG TIP",
     "readersSeeNone": "Not published yet",
+    "webPublished": "On the web",
+    "webPublishedAction": "On the web; open Share",
     "draftPending": "Draft pending",
     "noBody": "No body",
     "deletedSource": "{{title}} (deleted - {{detail}})",

@@ -627,7 +627,7 @@ def test_indexed_public_grant_advances_with_new_published_snapshot(page_service)
     assert "New indexed body." in response.json()["data"]["body_md"]
 
 
-def test_unlisted_grant_is_revoked_when_a_new_version_is_published(page_service):
+def test_unlisted_grant_advances_only_when_a_new_version_is_published(page_service):
     client = _authed_client(page_service)
     created = _make_page(page_service, "unlisted-pinned", published=True, public=False)
     with page_service.session_factory.begin() as session:
@@ -648,24 +648,53 @@ def test_unlisted_grant_is_revoked_when_a_new_version_is_published(page_service)
     path = "/api/v1/public/w/default/pages/unlisted-pinned"
     assert anonymous.get(path).status_code == 200
 
-    updated = page_service.update_page(
+    saved = page_service.autosave_page(
         page_id=created.id,
+        workspace_id=created.workspace_id,
         title="Unlisted Pinned",
         body_md="# Unlisted Pinned\n\nNewly published body.",
         actor_kind="human",
         actor_id="dev-local-user",
+        actor_provenance="browser_session",
         base_version_id=created.version_id,
         base_content_hash=created.content_hash,
+        session_version_id=created.version_id,
+        expected_editing_revision=created.editing_revision,
+        idempotency_key="unlisted-save",
+        share_draft=True,
+    )
+    # A draft version must neither revoke the link nor expose the draft body.
+    before_publish = anonymous.get(path)
+    assert before_publish.status_code == 200
+    assert (
+        "Published body for unlisted-pinned."
+        in before_publish.json()["data"]["body_md"]
+    )
+    assert "Newly published body." not in before_publish.text
+
+    updated = page_service.publish_draft(
+        page_id=created.id,
+        version_id=saved.version_id,
+        reason="Publish the next unlisted version",
+        publish_despite_findings=False,
+        actor_kind="human",
+        actor_id="dev-local-user",
         actor_provenance="browser_session",
+        expected_content_hash=saved.content_hash,
+        expected_references_hash=saved.references_hash,
     )
 
     with page_service.session_factory() as session:
         page = session.get(ContextPage, created.id)
-        assert page.current_published_version_id == updated.version_id
-        assert page.is_public is False
-        assert page.public_exposure_scope is None
-        assert page.public_exposed_version_id is None
-    assert anonymous.get(path).status_code == 404
+        assert page.current_published_version_id == updated.page.version_id
+        assert page.is_public is True
+        assert page.public_exposure_scope == "unlisted_web"
+        assert page.public_exposed_version_id == updated.page.version_id
+    after_publish = anonymous.get(path)
+    assert after_publish.status_code == 200
+    assert "Newly published body." in after_publish.json()["data"]["body_md"]
+    assert after_publish.headers["X-Robots-Tag"] == "noindex, nofollow"
+    assert after_publish.headers["Cache-Control"] == "no-store"
 
 
 def test_public_read_fails_closed_for_visibility_or_version_mismatch(page_service):

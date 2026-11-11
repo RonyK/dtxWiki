@@ -46,6 +46,7 @@ import {
   CheckCircle2,
   CircleDashed,
   Code,
+  Globe,
   Images,
   Italic,
   Keyboard,
@@ -5436,10 +5437,11 @@ export function PageEditor({
                 saving={draftSaving}
                 onPublish={() => void save({ publish: true })}
                 onSave={() => void save({ publish: false })}
+                webPublished={Boolean(page?.is_public)}
               />
             )}
             close={closeEditorButton}
-            fitKey={`${saveState}:${publicationState}:${isEditorReady}:${savedJustNow}:${i18n.language}:${titleInCompactBar}:${activeEditorMode}`}
+            fitKey={`${saveState}:${publicationState}:${isEditorReady}:${savedJustNow}:${i18n.language}:${titleInCompactBar}:${activeEditorMode}:${Boolean(page?.is_public)}`}
             lead={(
               <>
                 {compactActionBarViewport ? null : (
@@ -5503,6 +5505,7 @@ export function PageEditor({
                 saving={draftSaving}
                 onPublish={() => void save({ publish: true })}
                 onSave={() => void save({ publish: false })}
+                webPublished={Boolean(page?.is_public)}
               />
             ) : null}
             {!focusMode && page ? (
@@ -5889,6 +5892,7 @@ export function PageEditor({
               saving={draftSaving}
               onPublish={() => void save({ publish: true })}
               onSave={() => void save({ publish: false })}
+              webPublished={Boolean(page?.is_public)}
             />
             <span className="meta-line">
               {editorMeta(page, hasUnsavedChanges, t, savedJustNow)}
@@ -7030,6 +7034,7 @@ function EditorPublicationActions({
   saveDisabledReason,
   onPublish,
   onSave,
+  webPublished = false,
 }: {
   actions?: readonly EditorPublicationAction[];
   canRequestReview: boolean;
@@ -7040,18 +7045,25 @@ function EditorPublicationActions({
   saveDisabledReason?: string | null;
   onPublish: () => void;
   onSave: () => void;
+  /** The page's web link follows each published version. */
+  webPublished?: boolean;
 }) {
   const { t } = useTranslation("pages");
+  const webHintId = useId();
+  const webHint = t("editor.publishWebHint");
   const buttons: Record<EditorPublicationAction, ReactNode> = {
     publish: (
       <button
+        aria-describedby={webPublished ? webHintId : undefined}
         className={`icon-button text-button ${canPublish ? "primary" : ""}`}
         data-publication-action="publish"
         disabled={!canPublish || saving}
         key="publish"
         onClick={onPublish}
+        title={webPublished ? webHint : undefined}
         type="button"
       >
+        {webPublished ? <Globe aria-hidden="true" size={16} /> : null}
         {t("editor.publish", { defaultValue: "Publish" })}
       </button>
     ),
@@ -7093,6 +7105,11 @@ function EditorPublicationActions({
       role="group"
     >
       {actions.map((action) => buttons[action])}
+      {webPublished && actions.includes("publish") ? (
+        <span className="visually-hidden" id={webHintId}>
+          {webHint}
+        </span>
+      ) : null}
     </div>
   );
 }

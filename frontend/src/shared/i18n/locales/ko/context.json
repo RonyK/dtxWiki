@@ -175,6 +175,8 @@
     "readersSeeVersionTip": "독자에게 공개되는 게시 스냅샷입니다. 히스토리에서 바로 확인할 수 있습니다.",
     "tagTip": "태그 도움말",
     "readersSeeNone": "아직 게시되지 않음",
+    "webPublished": "웹 게시 중",
+    "webPublishedAction": "웹 게시 중; 공유 창 열기",
     "draftPending": "초안 대기 중",
     "noBody": "본문 없음",
     "deletedSource": "{{title}} (삭제됨 - {{detail}})",

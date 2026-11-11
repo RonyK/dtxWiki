@@ -88,6 +88,26 @@
   background: var(--context-soft);
 }
 
+/* The version pill's shape in the info tone: the page is on the anonymous web. */
+.context-web-published-chip {
+  min-height: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--info) 34%, var(--border));
+  background: color-mix(in srgb, var(--info-soft) 72%, var(--surface));
+  text-decoration: none;
+}
+
+.context-web-published-chip:hover,
+.context-web-published-chip:focus-visible {
+  border-color: var(--info);
+  background: var(--info-soft);
+}
+
+.context-web-published-chip svg {
+  color: var(--info);
+}
+
 .context-version-tag-tip-label {
   padding-left: 6px;
   border-left: 1px solid color-mix(in srgb, var(--context) 30%, var(--border));

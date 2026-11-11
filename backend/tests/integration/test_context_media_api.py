@@ -127,7 +127,7 @@ GIF_BYTES = _context_image_bytes("GIF")
 WEBP_BYTES = _context_image_bytes("WEBP")
 
 
-def test_public_media_scope_uses_pinned_grant_and_revokes_on_new_unlisted_publish(
+def test_public_media_scope_advances_with_new_unlisted_publication(
     page_service,
 ) -> None:
     created = page_service.write_page(
@@ -169,14 +169,14 @@ def test_public_media_scope_uses_pinned_grant_and_revokes_on_new_unlisted_publis
         actor_provenance="browser_session",
     )
     assert updated.version_id != created.version_id
-    assert (
-        resolve_public_context_media_scope(
-            db,
-            workspace_slug="default",
-            page_slug="unlisted-media-grant",
-        )
-        is None
+    scope = resolve_public_context_media_scope(
+        db,
+        workspace_slug="default",
+        page_slug="unlisted-media-grant",
     )
+    assert scope is not None
+    assert scope.page_version_id == updated.version_id
+    assert scope.exposure_scope == "unlisted_web"
 
 
 def _make_client(session_factory) -> TestClient:
