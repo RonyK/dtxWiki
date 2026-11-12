@@ -61,55 +61,46 @@ function sceneWithClusters(memberCounts: readonly number[], total = 2_000): Work
   });
 }
 
-describe("Workspace Map cluster glyph size", () => {
-  it.each([
-    ["clusters but no document-count column", () => columnsOf(2_000, { kinds: (i) => i < 5 ? CLUSTER : 0, sizes: () => 8.5 })],
-    ["clusters of nine documents or fewer", () => sceneWithClusters([2, 3, 9])],
-    ["documents that claim many members", () => columnsOf(2_000, { kinds: (i) => i % 3 === 0 ? 1 : 0, sizes: () => 2.5,
-      documentCounts: () => 50_000 })],
-  ])("draws a scene with %s at the visibility floor without cluster emphasis", (_name, build) => {
-    const buffers = buildCosmosSceneBuffers(build(), tokens);
-    expect(buffers.drawPointSizes).toEqual(Float32Array.from(buffers.pointSizes, size => Math.max(3, size)));
-    if (buffers.pointSizes.every(size => size >= 3)) expect(buffers.drawPointSizes).toBe(buffers.pointSizes);
+const en = (count: number) => new Intl.NumberFormat("en-US").format(count);
+
+describe("Workspace Map cluster count disc", () => {
+  it("leaves documents at the visibility floor, however many members they claim, and gives a count-less cluster the base disc", () => {
+    const documents = buildCosmosSceneBuffers(columnsOf(2_000, { kinds: (i) => i % 3 === 0 ? 1 : 0, sizes: () => 2.5,
+      documentCounts: () => 50_000 }), tokens);
+    expect(documents.drawPointSizes).toEqual(Float32Array.from(documents.pointSizes, size => Math.max(3, size)));
+    expect(documents.collisionPointSizes).toBe(documents.pointSizes);
+    expect(documents.countImages).toEqual([]);
+    const countless = buildCosmosSceneBuffers(columnsOf(40, { kinds: (i) => i < 2 ? CLUSTER : 0, sizes: () => 8.5 }), tokens);
+    expect([countless.drawPointSizes[0], countless.drawPointSizes[1]]).toEqual([18, 18]);
   });
 
-  // `pointSizes` is the one array layout and collision read. The emphasis must never reach it.
-  it("keeps pointSizes bit for bit what the same scene gets without document counts", () => {
+  // `pointSizes` is what forces read. The count disc reaches only drawing and collision.
+  it("keeps pointSizes bit for bit, and collision sizes equal to it except each cluster's drawn disc", () => {
     for (const [total, budget] of [[40, undefined], [2_500, WORKSPACE_MAP_PC_10K_BUDGET]] as const) {
       const input = sceneWithClusters([9_244, 747, 2], total);
-      const emphasised = buildCosmosSceneBuffers(input, tokens, budget);
-      const ordinary = buildCosmosSceneBuffers(withoutCounts(input), tokens, budget);
-      expect(bytes(emphasised.pointSizes), `${total} nodes`).toEqual(bytes(ordinary.pointSizes));
-      expect(emphasised.drawPointSizes, `${total} nodes`).not.toBe(emphasised.pointSizes);
+      const counted = buildCosmosSceneBuffers(input, tokens, budget, { countText: en });
+      const ordinary = buildCosmosSceneBuffers(withoutCounts(input), tokens, budget, { countText: en });
+      expect(bytes(counted.pointSizes), `${total} nodes`).toEqual(bytes(ordinary.pointSizes));
+      expect(Array.from(counted.collisionPointSizes.slice(0, 3)), `${total} nodes`).toEqual(Array.from(counted.drawPointSizes.slice(0, 3)));
+      expect(bytes(counted.collisionPointSizes.slice(3)), `${total} nodes`).toEqual(bytes(counted.pointSizes.slice(3)));
     }
   });
 
-  it("leaves clusters under ten documents ordinary and grows larger ones monotonically up to a bound", () => {
-    const counts = [2, 3, 9, 10, 11, 100, 1_000, 10_000, 17_499, 0xffffffff];
-    const { pointSizes, drawPointSizes } = buildCosmosSceneBuffers(sceneWithClusters(counts), tokens);
-    const drawn = counts.map((_, row) => drawPointSizes[row]);
-    for (const row of [0, 1, 2]) expect(drawn[row], `${counts[row]} members`).toBe(Math.max(3, pointSizes[row]));
-    expect(drawn[3]).toBeGreaterThan(pointSizes[3]);
-    for (let row = 1; row < drawn.length; row += 1) expect(drawn[row], `${counts[row]} members`).toBeGreaterThanOrEqual(drawn[row - 1]);
-    // Each order of magnitude is visibly larger than the one below.
-    for (const [larger, smaller] of [[5, 3], [6, 5], [7, 6]]) expect(drawn[larger]).toBeGreaterThan(drawn[smaller]);
-    // Bounded: finite for any count, and inside the native picker's 12 CSS-pixel accessible target (a 24 px body).
-    expect(Math.max(...drawn)).toBeLessThanOrEqual(24);
-    expect(Number.isFinite(drawn[drawn.length - 1])).toBe(true);
-    // The defect: a cluster of thousands drawn no larger than a well-linked note.
-    let largestDocument = 0;
-    for (let row = counts.length; row < drawPointSizes.length; row += 1) largestDocument = Math.max(largestDocument, drawPointSizes[row]);
-    expect(drawn[7]).toBeGreaterThan(largestDocument);
-  });
-
-  it("never draws a cluster smaller than its relation-based size", () => {
-    // Below 1,000 nodes a well-linked cluster is already 17 px, above the 10-member emphasis.
-    const input = columnsOf(40, { kinds: (index) => index < 3 ? CLUSTER : 0, sizes: () => 8.5,
-      documentCounts: (index) => [10, 10_000, 2][index] ?? 1 });
-    const { pointSizes, drawPointSizes } = buildCosmosSceneBuffers(input, tokens);
-    expect(pointSizes[0]).toBe(17);
-    expect([drawPointSizes[0], drawPointSizes[2]]).toEqual([17, 17]);
-    expect(drawPointSizes[1]).toBeGreaterThan(17);
+  it("sizes the disc by its count text: an 18 px base to two digits, wider from three, one image per distinct disc", () => {
+    const counts = [1, 9, 99, 100, 999, 2_048, 12_345, 100, 17_499];
+    const { drawPointSizes, pointImageIndices, pointImageSizes, countImages, pointShapes, pointColors } =
+      buildCosmosSceneBuffers(sceneWithClusters(counts), tokens, undefined, { countText: en });
+    // Fallback measure: 7 px a digit, 3 px a separator, plus 2 px padding each side.
+    expect(counts.map((_, row) => drawPointSizes[row])).toEqual([18, 18, 18, 25, 25, 35, 42, 25, 42]);
+    expect(countImages.map(({ text }) => text)).toEqual(["1", "9", "99", "100", "999", "2,048", "12,345", "17,499"]);
+    // Image 0 is the forced-colours Agent outline; the repeated "100" shares its image.
+    expect(pointImageIndices[7]).toBe(pointImageIndices[3]);
+    expect(Array.from(pointImageIndices.slice(0, 7))).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(Array.from(pointImageSizes.slice(0, 9))).toEqual(counts.map((_, row) => drawPointSizes[row]));
+    // A plain grey disc in the grouping ink under its count; documents get no image.
+    expect(pointShapes[0]).toBe(0);
+    [100, 116, 139].forEach((channel, index) => expect(pointColors[index]).toBeCloseTo(channel / 255));
+    expect(pointImageIndices[counts.length]).toBe(-1);
   });
 
   it("rejects a document-count column that does not describe the node rows", () => {

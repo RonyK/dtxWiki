@@ -11,6 +11,8 @@ from backend.schemas.workspace_graph import WorkspaceGraphOverviewRequest
 from backend.tests.utils.workspace_graph_corpora import (
     build_synthetic_workspace,
     corpus_actor,
+    relation_edges,
+    represented_nodes,
 )
 
 pytestmark = pytest.mark.integration
@@ -70,15 +72,15 @@ def test_combined_boundary_cursor_checks_do_not_build_expansion_pages(
         )
 
         assert overview.counts.candidate_documents == document_count
-        assert len(overview.nodes) <= 2_000
-        assert len(overview.edges) <= 6_000
-        assert sum(edge.relation_count for edge in overview.edges) == (
+        assert len(represented_nodes(overview)) <= 2_000
+        assert len(relation_edges(overview)) <= 6_000
+        assert sum(edge.relation_count for edge in relation_edges(overview)) == (
             overview.counts.candidate_relations
         )
         assert (
             sum(
                 1 if node.grain == "document" else node.member_count
-                for node in overview.nodes
+                for node in represented_nodes(overview)
             )
             == document_count
         )
@@ -117,15 +119,15 @@ def test_combined_boundary_cursor_checks_do_not_build_expansion_pages(
         )
         assert builds == 1
         assert full_scans <= 16
-        assert len(expanded.nodes) <= 2_000
-        assert len(expanded.edges) <= 6_000
-        assert sum(edge.relation_count for edge in expanded.edges) == (
+        assert len(represented_nodes(expanded)) <= 2_000
+        assert len(relation_edges(expanded)) <= 6_000
+        assert sum(edge.relation_count for edge in relation_edges(expanded)) == (
             overview.counts.candidate_relations
         )
         assert (
             sum(
                 1 if node.grain == "document" else node.member_count
-                for node in expanded.nodes
+                for node in represented_nodes(expanded)
             )
             == document_count
         )

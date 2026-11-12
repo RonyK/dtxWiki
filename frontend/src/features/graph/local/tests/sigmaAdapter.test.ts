@@ -37,7 +37,7 @@ vi.mock("@sigma/node-square", () => ({
   NodeSquareProgram: class { drawLabel = state.nativeSquareLabel; },
 }));
 vi.mock("sigma/rendering", () => ({ NodeCircleProgram: class {}, createNodeCompoundProgram: () => class {} }));
-vi.mock("../edgePrograms", () => ({ LOCAL_EDGE_PROGRAMS: {} }));
+vi.mock("../edgePrograms", () => ({ LOCAL_EDGE_PROGRAMS: {}, setLocalFitRatio: vi.fn() }));
 vi.mock("../layout", () => ({ createLocalLayout: vi.fn(() => state.layout) }));
 vi.mock("sigma", () => ({
   default: class {

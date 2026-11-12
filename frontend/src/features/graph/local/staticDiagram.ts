@@ -1,7 +1,7 @@
 import { stableEdges, stableNodes, type GraphScene } from "../graphModel";
 import { GRAPH_CUE_SIZE, GRAPH_SEED_CUE, graphNodeCueParts, type GraphCuePart } from "../shared/GraphCues";
 import {
-  GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH, GRAPH_NODE_VISUALS,
+  GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_NODE_VISUALS,
   type GraphEdgeVisualKind, type GraphNodeVisualKind, type GraphVisualTokens,
 } from "../shared/graphTokens";
 import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeVisualKind } from "./edgeKinds";
@@ -271,7 +271,7 @@ function lineStyle(kind: GraphEdgeVisualKind, visuals: StaticDiagramVisuals) {
   const color = hexColor(visuals.tokens.edge[kind]);
   const dash = GRAPH_EDGE_PATTERN[kind];
   return color
-    ? `stroke:${color},stroke-width:${GRAPH_EDGE_WIDTH[kind]}px${dash ? `,stroke-dasharray:${dash.join(" ")}` : ""}`
+    ? `stroke:${color},stroke-width:${GRAPH_EDGE_WIDTH_PX}px${dash ? `,stroke-dasharray:${dash.join(" ")}` : ""}`
     : null;
 }
 

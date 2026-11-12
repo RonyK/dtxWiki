@@ -620,7 +620,6 @@ def test_no_button_renders_without_a_visible_treatment():
             "graph-canvas-coverage": ".graph-canvas-coverage > button",
             "graph-status-actions": ".graph-status-actions button",
             "graph-item-history": ".graph-item-history li button",
-            "graph-details-more": ".graph-details-more :is(button, a)",
         },
         "features/graph/local/LocalGraphChrome.tsx": {
             "graph-type-options": ".graph-type-options button",

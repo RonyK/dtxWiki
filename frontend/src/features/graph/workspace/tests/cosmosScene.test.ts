@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkspaceMapColumns } from "../../map/sceneColumns";
-import type { GraphVisualTokens } from "../../shared/graphTokens";
+import { GRAPH_LINE_OPACITY, type GraphVisualTokens } from "../../shared/graphTokens";
 import { WORKSPACE_MAP_PC_10K_BUDGET } from "../../shared/workspaceMapBudget";
-import { WORKSPACE_CLUSTER_RING_IMAGE, buildCosmosRelationColors, buildCosmosSceneBuffers, incidentStar, isDenseWorkspaceMapOverview, isReadableWorkspaceMapScene } from "../cosmosScene";
+import { WORKSPACE_RING_POINT_SHAPE, buildCosmosRelationColors, buildCosmosSceneBuffers, incidentStar, isDenseWorkspaceMapOverview, isReadableWorkspaceMapScene } from "../cosmosScene";
 import { withActionEdgeColors } from "../../shared/graphTokens";
 
 const tokens: GraphVisualTokens = {
@@ -52,21 +52,28 @@ describe("Workspace Cosmos typed scene", () => {
     expect(isDenseWorkspaceMapOverview(sizedColumns(2_001, 2))).toBe(false);
   });
 
-  it("keeps every 10K/100K point and relation in typed buffers and selected-star ink", () => {
-    const input = sizedColumns(10_000, 100_000);
+  it("keeps every 10K/100K point and relation, with containment on top, in typed buffers and selected-star ink", () => {
+    // 100,000 relations plus one folder holding all 10,000 documents.
+    const input = sizedColumns(10_001, 110_000);
+    input.nodeKinds[10_000] = 3;
+    for (let edge = 100_000; edge < 110_000; edge += 1) {
+      input.edgeKinds[edge] = 2;
+      input.edgeSources[edge] = 10_000;
+      input.edgeTargets[edge] = edge - 100_000;
+    }
     const buffers = buildCosmosSceneBuffers(input, tokens, WORKSPACE_MAP_PC_10K_BUDGET);
-    expect(buffers.positions).toHaveLength(20_000);
-    expect(buffers.links).toHaveLength(200_000);
-    expect(buffers.adjacencyEdges).toHaveLength(200_000);
-    expect(buffers.linkColors[3]).toBeCloseTo(.35);
-    const communities = new Uint32Array(10_000); communities[1] = 1;
+    expect(buffers.positions).toHaveLength(20_002);
+    expect(buffers.links).toHaveLength(220_000);
+    expect(buffers.adjacencyEdges).toHaveLength(220_000);
+    expect(buffers.linkColors[3]).toBeCloseTo(GRAPH_LINE_OPACITY.overview.line);
+    const communities = new Uint32Array(10_001); communities[1] = 1;
     const normal = buildCosmosRelationColors(input, buffers.linkColors, communities, [], WORKSPACE_MAP_PC_10K_BUDGET);
-    expect(normal[3]).toBeCloseTo(.18);
+    expect(normal[3]).toBeCloseTo(GRAPH_LINE_OPACITY.overview.crossLine);
     const selected = buildCosmosRelationColors(input, buffers.linkColors, communities, [0], WORKSPACE_MAP_PC_10K_BUDGET);
-    expect(selected[3]).toBeCloseTo(.95);
+    expect(selected[3]).toBeCloseTo(GRAPH_LINE_OPACITY.overview.selected);
     expect(selected[7]).toBeGreaterThan(0);
-    expect(input.nodeIds).toHaveLength(10_000);
-    expect(input.edgeIds).toHaveLength(100_000);
+    expect(input.nodeIds).toHaveLength(10_001);
+    expect(input.edgeIds).toHaveLength(110_000);
   });
 
   it("does not alter any 2K ink or positions when the explicit PC budget is supplied", () => {
@@ -105,14 +112,16 @@ describe("Workspace Cosmos typed scene", () => {
     expect(input.edgeIds).toEqual(originalEdgeIds);
     expect(buffers.positions).toHaveLength(originalNodeIds.length * 2);
     expect(buffers.links).toHaveLength(originalEdgeIds.length * 2);
+    // The aggregate is a grouping-grey disc carrying its count image (image 0 is the Agent outline).
     expect(buffers.pointShapes).toEqual(Float32Array.from([0, 1, 0]));
     expect(buffers.pointColors.slice(0, 4)).not.toEqual(buffers.pointColors.slice(4, 8));
-    // Only the aggregate gets the grey grouping ring image, at its drawn size,
-    // over a surface-coloured disc that keeps its picking footprint.
-    expect(Array.from(buffers.pointImageIndices)).toEqual([-1, -1, WORKSPACE_CLUSTER_RING_IMAGE]);
-    expect(buffers.pointImageSizes[2]).toBe(buffers.drawPointSizes[2]);
-    [16, 24, 39].forEach((channel, index) => expect(buffers.pointColors[8 + index]).toBeCloseTo(channel / 255));
-    expect(buffers).not.toHaveProperty("linkWidths");
+    expect(Array.from(buffers.pointImageIndices)).toEqual([-1, -1, 1]);
+    [148, 163, 184].forEach((channel, index) => expect(buffers.pointColors[8 + index]).toBeCloseTo(channel / 255));
+    // A folder is the legend's ring: the native ring shape (a constant-pixel band) in the same ink, no image.
+    const folder = buildCosmosSceneBuffers({ ...input, nodeKinds: new Uint8Array([0, 1, 3]) }, tokens);
+    expect(Array.from(folder.pointShapes)).toEqual([0, 1, WORKSPACE_RING_POINT_SHAPE]);
+    expect(Array.from(folder.pointImageIndices)).toEqual([-1, -1, -1]);
+    expect(folder.pointColors.slice(8, 12)).toEqual(buffers.pointColors.slice(8, 12));
     input.edgeCrossFolder.forEach((crossFolder, index) => {
       if (crossFolder) expect(buffers.linkColors[index * 4 + 3]).toBeGreaterThan(0);
     });
@@ -140,7 +149,7 @@ describe("Workspace Cosmos typed scene", () => {
     input.edgeWeights = new Float64Array(5_057).fill(1);
     input.edgeCrossFolder = new Uint8Array(5_057);
     const buffers = buildCosmosSceneBuffers(input, tokens);
-    expect(buffers.linkColors[3]).toBeCloseTo(0.35);
+    expect(buffers.linkColors[3]).toBeCloseTo(GRAPH_LINE_OPACITY.overview.line);
   });
 
   it("separates 2K relation bands and the selected incident star without hiding or changing original relations", () => {
@@ -153,9 +162,9 @@ describe("Workspace Cosmos typed scene", () => {
     const saved = base.slice();
     const communities = new Uint32Array(count); communities[2] = 1;
     const normal = buildCosmosRelationColors(input, base, communities);
-    expect([normal[3], normal[7], normal[11]]).toEqual([expect.closeTo(.35), expect.closeTo(.2), expect.closeTo(.18)]);
+    expect([normal[3], normal[7], normal[11]]).toEqual([GRAPH_LINE_OPACITY.overview.line, GRAPH_LINE_OPACITY.overview.crossCitation, GRAPH_LINE_OPACITY.overview.crossLine].map((value) => expect.closeTo(value)));
     const selected = buildCosmosRelationColors(input, base, communities, [0, 2]);
-    expect([selected[3], selected[11]]).toEqual([expect.closeTo(.95), expect.closeTo(.95)]);
+    expect([selected[3], selected[11]]).toEqual([expect.closeTo(GRAPH_LINE_OPACITY.overview.selected), expect.closeTo(GRAPH_LINE_OPACITY.overview.selected)]);
     expect(selected[7]).toBeGreaterThan(0); expect(selected[7]).toBeLessThan(selected[3]);
     for (let edge = 0; edge < input.edgeIds.length; edge++) {
       expect(selected.slice(edge * 4, edge * 4 + 3)).toEqual(base.slice(edge * 4, edge * 4 + 3));
@@ -169,14 +178,15 @@ describe("Workspace Cosmos typed scene", () => {
   it("encodes native colors, shapes, widths and direct-incident hover stars", () => {
     const input = columns();
     input.nodeKinds[2] = 4; // Same scene, now with an Agent instead of an aggregate.
+    input.edgeKinds[2] = 2; // ... and containment, a short dash.
     const buffers = buildCosmosSceneBuffers(input, tokens);
     expect(Array.from(buffers.pointShapes)).toEqual([0, 1, 0]); // Agent documents are discs too.
     expect(Array.from(buffers.pointSizes)).toEqual([4, 6, 8]);
     expect(Array.from(buffers.drawPointSizes)).toEqual([5, 6, 8]);
-    expect(Array.from(buffers.linkStyles)).toEqual([0, 1, 0]);
+    expect(Array.from(buffers.linkStyles)).toEqual([0, 1, 2]);
     expect(Array.from(buffers.links)).toEqual([0, 1, 1, 2, 0, 2]);
-    expect(buffers.linkColors[3]).toBeCloseTo(0.45);
-    expect(buffers.linkColors[7]).toBeCloseTo(0.4);
+    expect(buffers.linkColors[3]).toBeCloseTo(GRAPH_LINE_OPACITY.line);
+    expect(buffers.linkColors[7]).toBeCloseTo(GRAPH_LINE_OPACITY.citation);
     expect(incidentStar(buffers, 1)).toEqual({ points: [1, 0, 2], links: [0, 1] });
     expect(incidentStar(buffers, -1)).toEqual({ points: [], links: [] });
   });

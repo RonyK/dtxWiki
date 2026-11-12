@@ -3,15 +3,15 @@
 The selectable is read-only and does not rewrite stored projections. Collapse
 references to several versions/artifacts before graph visibility, counts and
 budgets. A tree row whose parent placement is a document reads as that
-document's relation, so TreeRail containment and links share one node. A
-separate mapper avoids polluting a stored EdgeProjection object's identity-map
-state with the normalized endpoints.
+document's relation, so TreeRail containment and links share one node. Which
+placements may read that way is the reader's TreeRail visibility, supplied by
+the caller. A separate mapper avoids polluting a stored EdgeProjection object's
+identity-map state with the normalized endpoints.
 """
 
-from functools import lru_cache
 from uuid import UUID
 
-from sqlalchemy import and_, cast, func, literal, or_, select, union_all
+from sqlalchemy import and_, cast, func, literal, or_, select, true, union_all
 from sqlalchemy.orm import aliased, registry
 
 from backend.models.context import EdgeProjection
@@ -21,6 +21,7 @@ from backend.repositories.workspace_scoped import (
     join_correlated_workspace_projection,
     join_in_workspace,
     select_in_workspace,
+    select_projection_in_workspace,
 )
 from backend.services.library_canonical import LEGACY_READY_PROCESSING_STATUSES
 
@@ -28,7 +29,9 @@ from backend.services.library_canonical import LEGACY_READY_PROCESSING_STATUSES
 DOCUMENT_TREE_TARGET_KINDS = ("context_page", "library_item", "agent_page")
 
 
-def _document_edges(workspace_id, source_ids=None, source_kinds=None):
+def _document_edges(
+    workspace_id, visible_placement, source_ids=None, source_kinds=None
+):
     raw = EdgeProjection.__table__
     artifact = aliased(LibraryArtifact)
     version = aliased(LibraryItemVersion)
@@ -194,20 +197,39 @@ def _document_edges(workspace_id, source_ids=None, source_kinds=None):
         .over(partition_by=contained_identity, order_by=raw.c.id)
         .label("document_ordinal")
     )
+    placement_scope = [raw.c.workspace_id == workspace_id, has_document_container]
+    if source_ids is not None:
+        # Only these documents' placements, found through the source index,
+        # so the placement check below reads their rows alone.
+        placement_scope += [
+            raw.c.source_kind == "workspace_tree_node",
+            raw.c.source_id.in_(
+                select_projection_in_workspace(
+                    WorkspaceTreeNode,
+                    workspace_id=workspace_id,
+                    columns=(WorkspaceTreeNode.id,),
+                    predicates=(WorkspaceTreeNode.target_id.in_(source_ids),),
+                ).correlate(None)
+            ),
+        ]
     contained = join_correlated_workspace_projection(
         select(*contained_columns, contained_ordinal).select_from(raw),
         raw.c.workspace_id,
         container,
         on=document_container,
-    ).where(raw.c.workspace_id == workspace_id, has_document_container)
-    if source_ids is not None:
-        contained = contained.where(container_id.in_(source_ids))
+    ).where(
+        *placement_scope,
+        # The stored source is the placement; once it reads as the document,
+        # no later check can see it. A placement the reader cannot see in
+        # TreeRail must not contain anything, before placements collapse.
+        visible_placement(raw.c.source_id),
+    )
     if source_kinds is not None:
         contained = contained.where(container_kind.in_(source_kinds))
     contained = contained.subquery("document_container_trees")
-    unique_contained = select(
-        *[contained.c[column.name] for column in raw.c]
-    ).where(contained.c.document_ordinal == 1)
+    unique_contained = select(*[contained.c[column.name] for column in raw.c]).where(
+        contained.c.document_ordinal == 1
+    )
     return union_all(*branches, deduplicated, unique_contained).subquery(
         "document_edge_projection"
     )
@@ -218,26 +240,26 @@ class DocumentEdgeProjection:
 
 
 _mapper_registry = registry()
-_selectable = _document_edges(UUID(int=0))
+# Column shape only; every query reads a reader's own projection below.
+_selectable = _document_edges(UUID(int=0), lambda _placement_id: true())
 _mapper_registry.map_imperatively(
     DocumentEdgeProjection, _selectable, primary_key=[_selectable.c.id]
 )
 
 
-@lru_cache(maxsize=64)
-def document_projection_for_workspace(workspace_id, source_ids=None, source_kinds=None):
-    """Cache SQL structure only, with an explicit immutable workspace binding."""
+def document_edge_projection(
+    workspace_id, visible_placement, source_ids=None, source_kinds=None
+):
+    """Build the read model with an explicit immutable workspace binding.
+
+    ``visible_placement`` maps a placement id column to the reader's TreeRail
+    visibility for it. Graph visibility owns that rule and the caching.
+    """
     return aliased(
         DocumentEdgeProjection,
-        _document_edges(workspace_id, source_ids, source_kinds),
+        _document_edges(workspace_id, visible_placement, source_ids, source_kinds),
         adapt_on_names=True,
     )
-
-
-def select_document_edges_in_workspace(*, workspace_id, columns, predicates=()):
-    """Scope a read-only document projection without classifying it as a table."""
-    projection = document_projection_for_workspace(workspace_id)
-    return select(*columns).where(projection.workspace_id == workspace_id, *predicates)
 
 
 def document_citation_identities(session, workspace_id, identities):

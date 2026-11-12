@@ -1360,6 +1360,18 @@ def add_cross_workspace_decoys(
     return workspace_id
 
 
+def relation_edges(scene) -> list:
+    """Authored relations: every scene edge except TreeRail containment."""
+
+    return [edge for edge in scene.edges if edge.relation_kind != "tree"]
+
+
+def represented_nodes(scene) -> list:
+    """Documents and clusters: every scene node except folders."""
+
+    return [node for node in scene.nodes if node.grain != "folder"]
+
+
 def corpus_actor(
     corpus: WorkspaceGraphCorpus,
     *,

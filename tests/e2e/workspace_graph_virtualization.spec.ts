@@ -28,7 +28,7 @@ test.describe("Workspace Map synthetic 2k list", () => {
 
       await page.goto("/graph");
       await expect(page.getByRole("searchbox", { name: "Find in visible map" }))
-        .toHaveAttribute("placeholder", "Highlight matches and narrow the list without moving the map");
+        .toHaveAttribute("placeholder", "Name, location or kind");
       await expect(page.getByRole("searchbox", { name: "Search published documents" }))
         .toHaveCount(0);
       await page.getByRole("button", { name: "Refine" }).click();
@@ -173,7 +173,7 @@ test.describe("Workspace Map synthetic 2k list", () => {
 
       await page.goto("/graph");
       await expect(page.getByRole("searchbox", { name: "Find in visible map" }))
-        .toHaveAttribute("placeholder", "Find and highlight in this map");
+        .toHaveAttribute("placeholder", "Name, location or kind");
       await expect(page.getByRole("searchbox", { name: "Search published documents" }))
         .toHaveCount(0);
       await page.getByRole("button", { name: "Refine" }).click();
@@ -207,7 +207,7 @@ test.describe("Workspace Map synthetic 2k list", () => {
       await capture(page, testInfo, "synthetic-2k-mobile-list.png");
       // Closing the sheet hands focus to the selection card, which replaces its toggle.
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("region", { name: "Selection summary" })
+      await expect(page.getByRole("region", { name: "Details" })
         .getByRole("button", { name: "Details", exact: true })).toBeFocused();
 
       const openCanvas = page.getByRole("button", { name: "Open canvas fullscreen" });

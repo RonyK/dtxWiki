@@ -61,9 +61,10 @@ export function createWorkspaceLayoutSolver(budget: WorkspaceMapBudget) {
       if (!ownsPositionRows && count > WORKSPACE_MAP_DEFAULT_BUDGET.documents) attach();
     },
     collisionRadii(sizes: Float32Array, shapes: Float32Array, basis: WorkspaceRelationCollisionBasis,
-      maximum: number, scale: number, count: number): Float32Array | null {
+      maximum: number, scale: number, count: number, collisionSizes: Float32Array = sizes): Float32Array | null {
       if (ownsPositionRows || count <= WORKSPACE_MAP_DEFAULT_BUDGET.documents) return null;
-      return Float32Array.from(buildWorkspaceNativeCollisionRadii(sizes, shapes, basis, maximum), radius => radius * scale);
+      return Float32Array.from(buildWorkspaceNativeCollisionRadii(sizes, shapes, basis, maximum, collisionSizes),
+        radius => radius * scale);
     },
     collisionConfig(forceApplied: boolean, forceBasis: WorkspaceRelationCollisionBasis,
       collisionBasis: WorkspaceRelationCollisionBasis, scale: number, count: number): Partial<GraphConfig> {

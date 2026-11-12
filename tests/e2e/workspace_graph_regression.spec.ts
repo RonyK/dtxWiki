@@ -2,6 +2,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 import { currentWorkspace, login, signUp, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
+import { listedEdgeCount, listedNodeIds } from "./workspace_graph_scene";
 
 const GRAPH_OWNER_EMAIL = "e2e-graph-owner@example.com";
 const GRAPH_QUERY_PATH = "/graph/overview/query";
@@ -50,26 +51,23 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       expectKnowledgeRelations(initialScene, "combined");
       expect(initialScene.completeness).toBe("complete");
       await expect(page.getByRole("combobox", { name: "Lens" })).toHaveValue("combined");
+      const combinedList = listTotals(initialScene, documentIds(initialScene));
       await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", String(KNOWLEDGE_DOCUMENT_COUNT));
+        .toHaveAttribute("data-total-count", combinedList.nodes);
       await expect(page.getByTestId("workspace-graph-edge-list"))
-        .toHaveAttribute("data-total-count", String(KNOWLEDGE_COMBINED_RELATION_COUNT));
+        .toHaveAttribute("data-total-count", combinedList.edges);
       await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
 
-      // Combined connects all eight Library sources. Preserve the original
-      // orphan regression by explicitly choosing Links, not by hiding citations.
-      await selectKnowledgeLinks(page);
-
+      // Links alone leaves the eight Library sources without a link, but every
+      // document sits in a folder: containment is a relation, so none is hidden.
+      const links = await selectKnowledgeLinks(page);
+      const linksList = listTotals(links, documentIds(links));
+      expect(listTotals(links, linkedDocumentIds(links))).toEqual(linksList);
+      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
       await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", String(32));
-      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
-        .toHaveAttribute("title", "8 unlinked documents hidden from this map.");
-      await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
-
-      await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", String(40));
+        .toHaveAttribute("data-total-count", linksList.nodes);
       await expect(page.getByTestId("workspace-graph-edge-list"))
-        .toHaveAttribute("data-total-count", String(40));
+        .toHaveAttribute("data-total-count", linksList.edges);
       await expectRendererReady(page);
       // The worker's community attribute is set before Cosmos's scheduled
       // camera fit and paint. Capture the settled WebGL frame, not that gap.
@@ -150,7 +148,7 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
         hasText: "Full comparison projection is not available yet.",
       })).toBeVisible();
       await expect(page.getByTestId("workspace-graph-edge-list"))
-        .toHaveAttribute("data-total-count", String(48));
+        .toHaveAttribute("data-total-count", listTotals(compareScene, documentIds(compareScene)).edges);
       await captureViewport(page, testInfo, "knowledge-40-desktop-compare-partial.png");
 
       expect(diagnostics.pageErrors).toEqual([]);
@@ -211,16 +209,13 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       expectKnowledgeRelations(initialScene, "combined");
       await expect(page.getByRole("combobox", { name: "Lens" })).toHaveValue("combined");
       await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", String(KNOWLEDGE_DOCUMENT_COUNT));
+        .toHaveAttribute("data-total-count", listTotals(initialScene, documentIds(initialScene)).nodes);
       await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
-      await selectKnowledgeLinks(page);
+      const links = await selectKnowledgeLinks(page);
+      // Every document sits in a folder: Links hides none and offers no Unlinked toggle.
+      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
       await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", String(32));
-      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
-        .toHaveAttribute("title", "8 unlinked documents hidden from this map.");
-      await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
-      await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", String(40));
+        .toHaveAttribute("data-total-count", listTotals(links, documentIds(links)).nodes);
       // Phones open on the map; the list waits in the Map details sheet.
       await expectRendererReady(page);
       await captureViewport(page, testInfo, "knowledge-40-mobile-map-first.png");
@@ -229,7 +224,7 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
       await selectKnowledgeDocument00(page);
       // Closing the sheet hands focus to the selection card, which replaces its toggle.
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("region", { name: "Selection summary" })
+      await expect(page.getByRole("region", { name: "Details" })
         .getByRole("button", { name: "Details", exact: true })).toBeFocused();
       const openCanvas = page.getByRole("button", { name: "Open canvas fullscreen" });
       await openCanvas.click();
@@ -370,21 +365,25 @@ function expectKnowledgeRelations(scene: WorkspaceGraphScene, lens: "links" | "c
     rendered_documents: KNOWLEDGE_DOCUMENT_COUNT, candidate_relations: relationCount, rendered_relations: relationCount });
   const contextLabel = (index: number) => `Knowledge Document ${String(index).padStart(2, "0")}`;
   const libraryLabel = (index: number) => `Knowledge Source ${String(index).padStart(2, "0")}`;
-  expect(scene.nodes.map((node) => node.label).sort()).toEqual([
+  // Folders are scene nodes and containment is a `tree` relation; this fixture
+  // checks the documents and authored relations, counted by type.
+  const documents = scene.nodes.filter((node) => node.grain !== "folder");
+  const relations = scene.edges.filter((edge) => edge.relation_kind !== "tree");
+  expect(documents.map((node) => node.label).sort()).toEqual([
     ...Array.from({ length: KNOWLEDGE_CONTEXT_COUNT }, (_, index) => contextLabel(index)),
     ...Array.from({ length: KNOWLEDGE_LIBRARY_COUNT }, (_, index) => libraryLabel(index)),
   ].sort());
-  for (const node of scene.nodes) {
+  for (const node of documents) {
     expect(node.grain).toBe("document");
     expect(node.entity_kind).toBe(node.label.startsWith("Knowledge Document") ? "context" : "library");
     expect(node.id).toBe(`document:${node.entity_kind}:${node.entity_id}`);
   }
-  const byId = new Map(scene.nodes.map((node) => [node.id, node]));
+  const byId = new Map(documents.map((node) => [node.id, node]));
   expect(byId.size).toBe(KNOWLEDGE_DOCUMENT_COUNT);
-  expect(new Set(scene.edges.map((edge) => edge.id)).size).toBe(relationCount);
-  expect(scene.nodes.reduce((sum, node) => sum + node.reference_count, 0)).toBe(KNOWLEDGE_WIKILINK_COUNT);
-  expect(scene.nodes.reduce((sum, node) => sum + node.evidence_count, 0)).toBe(includesCitations ? KNOWLEDGE_LIBRARY_COUNT : 0);
-  const actual = scene.edges.map((edge) => {
+  expect(new Set(relations.map((edge) => edge.id)).size).toBe(relationCount);
+  expect(documents.reduce((sum, node) => sum + node.reference_count, 0)).toBe(KNOWLEDGE_WIKILINK_COUNT);
+  expect(documents.reduce((sum, node) => sum + node.evidence_count, 0)).toBe(includesCitations ? KNOWLEDGE_LIBRARY_COUNT : 0);
+  const actual = relations.map((edge) => {
     expect(edge.source).not.toBe(edge.target); // the fixture's weight-99 self-link is excluded
     expect(edge.aggregate).toBe(false);
     expect(edge.relation_count).toBe(1);
@@ -410,6 +409,26 @@ async function selectKnowledgeLinks(page: Page) {
   const links = await graphScene(response);
   expectKnowledgeRelations(links, "links");
   expect(links.completeness).toBe("complete");
+  return links;
+}
+
+const documentIds = (scene: WorkspaceGraphScene) =>
+  scene.nodes.filter((node) => node.grain !== "folder").map((node) => node.id);
+
+/** Nodes with any relation, containment included: the Map's "linked". */
+function linkedDocumentIds(scene: WorkspaceGraphScene) {
+  const ids = new Set<string>();
+  for (const edge of scene.edges) {
+    ids.add(edge.source);
+    ids.add(edge.target);
+  }
+  return ids;
+}
+
+/** The Map list: shown documents, the folders that hold them, and the relations among those rows. */
+function listTotals(scene: WorkspaceGraphScene, shownDocuments: Iterable<string>) {
+  const listed = listedNodeIds(scene, new Set(shownDocuments));
+  return { nodes: String(listed.size), edges: String(listedEdgeCount(scene, listed)) };
 }
 
 async function openAdvancedDataFilters(page: Page) {

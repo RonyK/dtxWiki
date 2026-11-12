@@ -9,6 +9,7 @@ import type { WorkspaceGraphDocumentNode, WorkspaceGraphOverviewRequest, Workspa
 import { backendBaseUrl, configureWorkspaceLabs, currentWorkspace, e2ePassword, login, enableKnowledgeMapLab } from "./auth";
 import { createOverviewResponseReader } from "./workspace_graph_response_reader";
 import { expectNativeCounts, installNativeDrawMeter, readNativeDraw } from "./workspace_graph_native_draw";
+import { admittedNodes, expectCurrentContainment, exportedNodeShape, listedEdgeCount, listedNodeIds, nativeDrawCounts, sceneRelations } from "./workspace_graph_scene";
 
 const OWNER_EMAIL = "e2e-graph-10k-owner@example.com";
 const DOCUMENT_COUNT = 10_000;
@@ -51,12 +52,12 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       const initial = await responseReader.read(initialResponse);
       expectCandidateUniverse(initial);
       expect(initial.representation).toBe("aggregated");
-      expect(initial.nodes.length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
-      expect(initial.edges.length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
+      expect(admittedNodes(initial).length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
+      expect(sceneRelations(initial).length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
       await expect(page.getByLabel("Lens", { exact: true })).toHaveValue("combined");
       await expectRendererReady(page);
 
-      const view = page.locator("details.workspace-graph-view-options");
+      const view = page.locator("details.graph-view-options");
       await view.locator("summary").click();
       const scale = page.getByRole("combobox", { name: "Map node limit", exact: true });
       await expect(scale).toHaveValue("2k");
@@ -72,14 +73,16 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       const nodeList = page.getByTestId("workspace-graph-node-list");
       const edgeList = page.getByTestId("workspace-graph-edge-list");
       const canvas = page.getByTestId("graph-canvas");
-      await expect(nodeList).toHaveAttribute("data-total-count", String(CONNECTED_DOCUMENT_COUNT));
+      const connected = new Set(sceneRelations(scene).flatMap((edge) => [edge.source, edge.target]));
+      const allListed = listedNodeIds(scene, new Set(admittedNodes(scene).map((node) => node.id)));
+      await expect(nodeList).toHaveAttribute("data-total-count", String(listedNodeIds(scene, connected).size));
       await expect(canvas).toHaveAttribute("data-map-node-count", String(CONNECTED_DOCUMENT_COUNT));
       const showUnlinked = page.getByRole("button", { name: /^Unlinked \d+$/ });
       await expect(showUnlinked).toHaveAttribute("title", "340 unlinked documents hidden from this map.");
       const readsBeforeDisplay = overviewRequests.length;
       await showUnlinked.click();
-      await expect(nodeList).toHaveAttribute("data-total-count", String(DOCUMENT_COUNT));
-      await expect(edgeList).toHaveAttribute("data-total-count", String(RELATION_COUNT));
+      await expect(nodeList).toHaveAttribute("data-total-count", String(allListed.size));
+      await expect(edgeList).toHaveAttribute("data-total-count", String(listedEdgeCount(scene, allListed)));
       await expect(canvas).toHaveAttribute("data-map-node-count", String(DOCUMENT_COUNT));
       await expect(canvas).toHaveAttribute("data-map-edge-count", String(RELATION_COUNT));
       await expectRendererReady(page);
@@ -98,7 +101,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
 
       // Search must reach the last original wire ID, not a renamed/sample row,
       // and list only original relationships of the matched documents.
-      const lastNode = scene.nodes.at(-1);
+      const lastNode = admittedNodes(scene).at(-1);
       if (!lastNode || lastNode.grain !== "document") throw new Error("Exact scene has no last document");
       const search = page.getByRole("searchbox", { name: "Find in visible map", exact: true });
       await search.fill(lastNode.label);
@@ -123,11 +126,11 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       const bounded = await responseReader.read(boundedResponse);
       expectCandidateUniverse(bounded);
       expect(bounded.representation).toBe("aggregated");
-      expect(bounded.nodes.length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
-      expect(bounded.edges.length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
+      expect(admittedNodes(bounded).length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
+      expect(sceneRelations(bounded).length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
       const boundedCanvasEdges = expectAggregatedSelfLoopPolicy(bounded);
       await expectRendererReady(page);
-      await expect(canvas).toHaveAttribute("data-map-node-count", String(bounded.nodes.length));
+      await expect(canvas).toHaveAttribute("data-map-node-count", String(admittedNodes(bounded).length));
       await expect(canvas).toHaveAttribute("data-map-edge-count", String(boundedCanvasEdges));
       await expect(nodeList).toHaveAttribute("data-total-count", String(bounded.nodes.length));
       await expect(edgeList).toHaveAttribute("data-total-count", String(bounded.edges.length));
@@ -141,8 +144,8 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
         source: "isolated synthetic.v3 seed260917 production API, visible export and native Chromium WebGL2",
         scope: "exact identity/topology/budget/list and GL-health proof; not native edge-ink, physics or server-authorization proof",
         requests: overviewRequests, counts: scene.counts, relationKinds: relationKindCounts(scene),
-        topology: { folders: scene.folder_topology!.folders.length, memberships: scene.folder_topology!.memberships.length,
-          edgeSlices: scene.folder_topology!.edge_slices.length },
+        containment: { folders: scene.nodes.length - admittedNodes(scene).length,
+          relations: scene.edges.length - sceneRelations(scene).length },
         originalLastNodeId: lastNode.id, gpu,
         sameOriginalUiResponses: responseReader.evidence(),
         boundedReturn: { apiListExportEdges: bounded.edges.length, canvasEdges: boundedCanvasEdges,
@@ -179,19 +182,19 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       const scene = await responseReader.read(response);
       expectCandidateUniverse(scene);
       expect(scene.representation).toBe("aggregated");
-      expect(scene.nodes.length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
-      expect(scene.edges.length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
+      expect(admittedNodes(scene).length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
+      expect(sceneRelations(scene).length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
       const canvasEdges = expectAggregatedSelfLoopPolicy(scene);
       await expectRendererReady(page);
       const canvas = page.getByTestId("graph-canvas");
-      await expect(canvas).toHaveAttribute("data-map-node-count", String(scene.nodes.length));
+      await expect(canvas).toHaveAttribute("data-map-node-count", String(admittedNodes(scene).length));
       await expect(canvas).toHaveAttribute("data-map-edge-count", String(canvasEdges));
       await expect(page.getByTestId("workspace-graph-node-list"))
         .toHaveAttribute("data-total-count", String(scene.nodes.length));
       await expect(page.getByTestId("workspace-graph-edge-list"))
         .toHaveAttribute("data-total-count", String(scene.edges.length));
       const gpu = await expectLiveWebGL(canvas);
-      const view = page.locator("details.workspace-graph-view-options");
+      const view = page.locator("details.graph-view-options");
       await view.locator("summary").click();
       await expect(page.getByRole("combobox", { name: "Map node limit", exact: true })).toHaveCount(0);
       await expect(view.getByText("Mobile and unrecognized devices use a maximum of 2,000 map nodes.", { exact: true }))
@@ -218,7 +221,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       await expect(page.getByRole("combobox", { name: "Map node limit", exact: true })).toHaveCount(0);
       expect(Number(await canvas.getAttribute("data-map-node-count"))).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
       expect(Number(await canvas.getAttribute("data-map-edge-count"))).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
-      await expect(canvas).toHaveAttribute("data-map-node-count", String(scene.nodes.length));
+      await expect(canvas).toHaveAttribute("data-map-node-count", String(admittedNodes(scene).length));
       await expect(canvas).toHaveAttribute("data-map-edge-count", String(canvasEdges));
       const rotatedGpu = await expectLiveWebGL(canvas);
       expect(diagnostics.pageErrors).toEqual([]);
@@ -256,7 +259,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
     const responseReader = await createOverviewResponseReader(page, workspace.id);
     try {
       const { initial, full, document, gpu } = await selectReal10kContextDocument(page, workspace.id, responseReader);
-      const explore = page.locator(".workspace-graph-details").getByRole("link", { name: "Explore", exact: true });
+      const explore = page.locator(".workspace-graph-details").getByRole("link", { name: "Explore neighborhood", exact: true });
       await expect(explore).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${document.entity_id}?tab=graph`);
       const detailRead = waitForContextDetail(page, workspace.id, document.entity_id);
       const currentRead = waitForLocalQuery(page, workspace.id, document.entity_id, "current");
@@ -279,7 +282,6 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
         .locator(`.graph-list-bowtie-hub button[data-local-graph-id="${seed.id}"], .relation-list-flow-hub button[data-local-graph-id="${seed.id}"]`);
       await originalSeedButton.click();
       await expect(originalSeedButton).toHaveAttribute("aria-pressed", "true");
-      await graphPanel.locator(".graph-details-more > summary").click();
       const showInMap = graphPanel.getByRole("complementary", { name: "Details", exact: true })
         .getByRole("link", { name: "Show in Knowledge Map", exact: true });
       // Map focus is the canonical Context entity UUID, not either engine's
@@ -397,8 +399,8 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       const secondaryResponse = await openAccountWorkspaceMapThroughUi(page, secondary);
       expectOverviewRequest(secondaryResponse.request(), secondary.id, DEFAULT_BUDGET);
       const secondaryScene = await secondaryReader.read(secondaryResponse);
-      expect(secondaryScene.nodes.length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
-      expect(secondaryScene.edges.length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
+      expect(admittedNodes(secondaryScene).length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
+      expect(sceneRelations(secondaryScene).length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
       expect(secondaryScene.nodes.some(node => oldIds.has(node.id))).toBe(false);
       await expect.poll(() => oldCanvas.evaluate(element => element.isConnected)).toBe(false);
       await oldCanvas.dispose();
@@ -409,20 +411,23 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       await expect.poll(async () => (await readAccountMapState(page, actorId, secondary.id))?.viewerId).toBe(actorId);
       const secondaryState = (await readAccountMapState(page, actorId, secondary.id))!;
       expect(secondaryState).toMatchObject({ viewerId: actorId, selectedId: null, pinnedIds: [], pinnedPositions: {}, viewport: null });
-      // The independent fresh workspace contains only its default Agent page.
-      // Its exact one-node scene is initially hidden by the unlinked display
-      // setting; retain that default and reveal the real node through the UI.
+      // The independent fresh workspace contains only its default Agent page
+      // and the folders that hold it. Its exact one-document scene is initially
+      // hidden by the unlinked display setting, and its folders with it; retain
+      // that default and reveal the real nodes through the UI.
       expect(secondaryScene.representation).toBe("exact");
       expect(secondaryScene.counts).toMatchObject({ candidate_documents: 1, candidate_relations: 0,
         rendered_documents: 1, rendered_clusters: 0, rendered_relations: 0 });
-      expect(secondaryScene.nodes).toHaveLength(secondaryAgents.length);
-      expect(secondaryScene.nodes[0]).toMatchObject({ grain: "document", entity_kind: "agent",
+      expect(admittedNodes(secondaryScene)).toHaveLength(secondaryAgents.length);
+      expect(admittedNodes(secondaryScene)[0]).toMatchObject({ grain: "document", entity_kind: "agent",
         entity_id: secondaryAgents[0].id, id: `document:agent:${secondaryAgents[0].id}` });
-      expect(secondaryScene.edges).toEqual([]);
+      expect(sceneRelations(secondaryScene)).toEqual([]);
+      expectCurrentContainment(secondaryScene);
       await expect(page.getByTestId("graph-canvas")).toHaveCount(0);
       await page.getByRole("button", { name: "Unlinked 1", exact: true }).click();
       await expectNavigationMapReady(page, secondaryScene, 0);
-      await expectNativeCounts(page, 1, 0);
+      const secondaryDrawn = nativeDrawCounts(secondaryScene);
+      await expectNativeCounts(page, secondaryDrawn.points, secondaryDrawn.links);
       await capture(page, testInfo, "real-api-pc10k-secondary-workspace-default2k.png");
       const secondaryEvidence = secondaryReader.evidence();
       await secondaryReader.dispose();
@@ -448,7 +453,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
         return state ? { selectedId: state.selectedId, pinnedIds: state.pinnedIds, pinnedPositions: state.pinnedPositions } : null;
       }).toEqual(retainedIntent);
       const boundedState = (await readAccountMapState(page, actorId, primary.id))!;
-      const view = page.locator("details.workspace-graph-view-options");
+      const view = page.locator("details.graph-view-options");
       await view.locator("summary").click();
       const explicitRead = waitForOverview(page, PC_BUDGET);
       await page.getByRole("combobox", { name: "Map node limit", exact: true }).selectOption("10k");
@@ -458,7 +463,8 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       expectExactAuthoredScene(returned);
       await view.locator("summary").click();
       await expectNavigationMapReady(page, returned, RELATION_COUNT);
-      await expectNativeCounts(page, DOCUMENT_COUNT, RELATION_COUNT);
+      const returnedDrawn = nativeDrawCounts(returned);
+      await expectNativeCounts(page, returnedDrawn.points, returnedDrawn.links);
       expect(new Set(returned.nodes.map(node => node.id))).toEqual(oldIds);
       const relationIdentity = (edge: WorkspaceGraphScene["edges"][number]) => JSON.stringify([
         edge.id, edge.source, edge.target, edge.direction, edge.relation_kind, edge.relation_count, edge.occurrence_weight,
@@ -680,7 +686,7 @@ async function retainPinned10kThroughThemes(
     // Search narrows the operable list, never the original native scene.
     // Requiring an unfiltered 10K list here would contradict search retention.
     await expectRendererReady(page);
-    await expect(canvas).toHaveAttribute("data-map-node-count", String(scene.nodes.length));
+    await expect(canvas).toHaveAttribute("data-map-node-count", String(admittedNodes(scene).length));
     await expect(canvas).toHaveAttribute("data-map-edge-count", String(RELATION_COUNT));
     await expect(nodeList).toHaveAttribute("data-total-count", listedCounts.nodes!);
     await expect(edgeList).toHaveAttribute("data-total-count", listedCounts.edges!);
@@ -688,7 +694,8 @@ async function retainPinned10kThroughThemes(
     expect(await edgeList.locator("li").evaluateAll(rows => rows.map(row => row.getAttribute("data-graph-edge-id")))).toEqual(listedIds.edges);
     await expect(nodeList.locator(`li[data-graph-node-id="${document.id}"] button.workspace-graph-list-select`)).toHaveAttribute("aria-pressed", "true");
     await expectLiveWebGL(canvas);
-    await expectNativeCounts(page, DOCUMENT_COUNT, RELATION_COUNT);
+    const drawn = nativeDrawCounts(scene);
+    await expectNativeCounts(page, drawn.points, drawn.links);
     await expect(page.getByRole("button", { name: "Layout motion is off", exact: true })).toBeDisabled();
     await expect(page.locator(".workspace-graph-details").getByRole("heading", { name: document.label, exact: true })).toBeVisible();
     await expect(page.getByRole("searchbox", { name: "Find in visible map", exact: true })).toHaveValue(document.label);
@@ -928,7 +935,7 @@ async function selectReal10kContextDocument(
   const initial = await responseReader.read(initialResponse);
   expectNavigationColumnEligibility(initial);
   await expectRendererReady(page);
-  const view = page.locator("details.workspace-graph-view-options");
+  const view = page.locator("details.graph-view-options");
   await view.locator("summary").click();
   const scale = page.getByRole("combobox", { name: "Map node limit", exact: true });
   await expect(scale).toHaveValue("2k");
@@ -943,8 +950,9 @@ async function selectReal10kContextDocument(
   await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
   await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-node-count", String(DOCUMENT_COUNT));
   await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-edge-count", String(RELATION_COUNT));
-  await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", String(DOCUMENT_COUNT));
-  await expect(page.getByTestId("workspace-graph-edge-list")).toHaveAttribute("data-total-count", String(RELATION_COUNT));
+  const fullListed = listedNodeIds(full, new Set(admittedNodes(full).map((node) => node.id)));
+  await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", String(fullListed.size));
+  await expect(page.getByTestId("workspace-graph-edge-list")).toHaveAttribute("data-total-count", String(listedEdgeCount(full, fullListed)));
   await expectRendererReady(page);
   const gpu = await expectLiveWebGL(page.getByTestId("graph-canvas"));
   await expectBoundedRows(page.getByTestId("workspace-graph-node-list"), page.getByTestId("workspace-graph-edge-list"));
@@ -952,7 +960,7 @@ async function selectReal10kContextDocument(
   // a cluster member) in the initial 2K response. Otherwise legitimate 2K
   // aggregation could retire the old 10K wire ID and make restoration invalid.
   const initialDocuments = new Set(initial.nodes.filter((node) => node.grain === "document").map((node) => node.id));
-  const connected = new Set(full.edges.flatMap((edge) => [edge.source, edge.target]));
+  const connected = new Set(sceneRelations(full).flatMap((edge) => [edge.source, edge.target]));
   const document = full.nodes.find((node): node is WorkspaceGraphDocumentNode => node.grain === "document"
     && node.entity_kind === "context" && connected.has(node.id) && initialDocuments.has(node.id));
   if (!document) throw new Error("No linked original Context document survived both initial 2K and exact 10K scenes");
@@ -1044,11 +1052,13 @@ function watchFailedWorkspaceReads(page: Page) {
 function expectNavigationColumnEligibility(scene: WorkspaceGraphScene) {
   expectCandidateUniverse(scene);
   expect(scene.representation).toBe("aggregated");
-  expect(scene.nodes.length).toBeGreaterThan(0);
-  expect(scene.nodes.length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
-  expect(scene.edges.length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
-  expect(scene.counts.rendered_documents + scene.counts.rendered_clusters).toBe(scene.nodes.length);
-  expect(scene.counts.rendered_relations).toBe(scene.edges.length);
+  const relations = sceneRelations(scene);
+  expect(admittedNodes(scene).length).toBeGreaterThan(0);
+  expect(admittedNodes(scene).length).toBeLessThanOrEqual(DEFAULT_BUDGET.documents);
+  expect(relations.length).toBeLessThanOrEqual(DEFAULT_BUDGET.relations);
+  expect(scene.counts.rendered_documents + scene.counts.rendered_clusters).toBe(admittedNodes(scene).length);
+  expect(scene.counts.rendered_relations).toBe(relations.length);
+  expectCurrentContainment(scene);
   const nodes = new Map(scene.nodes.map((node) => [node.id, node]));
   const semanticIds = new Set(scene.nodes.map((node) => node.grain === "document" ? `${node.entity_kind}:${node.entity_id}` : node.id));
   const edgeIds = new Set<string>();
@@ -1059,7 +1069,7 @@ function expectNavigationColumnEligibility(scene: WorkspaceGraphScene) {
     check(Boolean(node.id), "nonempty original scene node ID");
     if (node.grain === "document") check(node.id === `document:${node.entity_kind}:${node.entity_id}`, `canonical document wire ID ${node.id}`);
   }
-  for (const edge of scene.edges) {
+  for (const edge of relations) {
     check(Boolean(edge.id) && !edgeIds.has(edge.id), `unique original scene edge ${edge.id}`);
     edgeIds.add(edge.id);
     check(nodes.has(edge.source) && nodes.has(edge.target), `visible original scene endpoints ${edge.id}`);
@@ -1071,14 +1081,14 @@ function expectNavigationColumnEligibility(scene: WorkspaceGraphScene) {
     if (edge.source === edge.target) check(edge.aggregate && nodes.get(edge.source)?.grain === "cluster", `aggregate-only self-loop ${edge.id}`);
   }
   expect(failures, "Dynamic Canvas eligibility must exclude only actual aggregate self-loops, not lost or renamed API rows").toEqual([]);
-  return scene.edges.filter((edge) => edge.source !== edge.target).length;
+  return relations.filter((edge) => edge.source !== edge.target).length;
 }
 
 async function expectNavigationMapReady(page: Page, scene: WorkspaceGraphScene, canvasEdges: number) {
   await expect(page.getByRole("heading", { name: "Knowledge Map", exact: true })).toBeVisible();
   await expectRendererReady(page);
   const canvas = page.getByTestId("graph-canvas");
-  await expect(canvas).toHaveAttribute("data-map-node-count", String(scene.nodes.length));
+  await expect(canvas).toHaveAttribute("data-map-node-count", String(admittedNodes(scene).length));
   await expect(canvas).toHaveAttribute("data-map-edge-count", String(canvasEdges));
   const nodeList = page.getByTestId("workspace-graph-node-list");
   const edgeList = page.getByTestId("workspace-graph-edge-list");
@@ -1089,7 +1099,7 @@ async function expectNavigationMapReady(page: Page, scene: WorkspaceGraphScene, 
 }
 
 async function expectDefaultMapScale(page: Page) {
-  const view = page.locator("details.workspace-graph-view-options");
+  const view = page.locator("details.graph-view-options");
   await view.locator("summary").click();
   await expect(page.getByRole("combobox", { name: "Map node limit", exact: true })).toHaveValue("2k");
   await view.locator("summary").click();
@@ -1110,8 +1120,7 @@ function expectNavigationExportIdentity(scene: WorkspaceGraphScene, exported: Wo
   for (const node of exported.nodes) {
     const original = nodes.get(node.id);
     if (!original) { check(false, `unknown navigation export node ${node.id}`); continue; }
-    const grain = original.grain === "cluster" ? original.cluster_kind : "document";
-    const entityKind = original.grain === "cluster" ? "cluster" : original.entity_kind === "context" ? "context_page" : "library_item";
+    const { grain, entityKind } = exportedNodeShape(original);
     check(node.label === original.label && node.grain === grain && node.entityKind === entityKind, `original navigation export node ${node.id}`);
     check(!nodeIds.has(node.id), `unique navigation export node ${node.id}`);
     nodeIds.add(node.id);
@@ -1133,7 +1142,7 @@ function expectNavigationExportIdentity(scene: WorkspaceGraphScene, exported: Wo
 
 async function downloadVisibleMap(page: Page): Promise<WorkspaceMapExport> {
   const downloadEvent = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export visible map", exact: true }).click();
+  await page.getByRole("button", { name: "Export filtered graph", exact: true }).click();
   const download = await downloadEvent;
   expect(download.suggestedFilename()).toMatch(/^dtxwiki-knowledge-map-.*\.json$/);
   expect(await download.failure()).toBeNull();
@@ -1168,15 +1177,17 @@ function expectCandidateUniverse(scene: WorkspaceGraphScene) {
 
 function relationKindCounts(scene: WorkspaceGraphScene) {
   const counts: Record<string, number> = {};
-  for (const edge of scene.edges) counts[edge.relation_kind] = (counts[edge.relation_kind] ?? 0) + 1;
+  for (const edge of sceneRelations(scene)) counts[edge.relation_kind] = (counts[edge.relation_kind] ?? 0) + 1;
   return counts;
 }
 
 function expectAggregatedSelfLoopPolicy(scene: WorkspaceGraphScene) {
   expect(scene.representation).toBe("aggregated");
-  expect(scene.edges).toHaveLength(5_997);
-  const selfLoops = scene.edges.filter((edge) => edge.source === edge.target);
-  const nonSelfLoops = scene.edges.filter((edge) => edge.source !== edge.target);
+  const relations = sceneRelations(scene);
+  expect(relations).toHaveLength(5_997);
+  expectCurrentContainment(scene);
+  const selfLoops = relations.filter((edge) => edge.source === edge.target);
+  const nonSelfLoops = relations.filter((edge) => edge.source !== edge.target);
   expect(selfLoops, "Only five aggregate self-loop strokes are omitted by the existing Cosmos column policy")
     .toHaveLength(5);
   expect(nonSelfLoops).toHaveLength(5_992);
@@ -1189,9 +1200,9 @@ function expectAggregatedSelfLoopPolicy(scene: WorkspaceGraphScene) {
   check(nodes.size === scene.nodes.length && semanticKeys.size === scene.nodes.length,
     "every node has a unique wire ID and semantic identity; no column-node deduplication");
   for (const node of scene.nodes) {
-    check(Boolean(node.id && (node.grain === "cluster" || node.entity_id)), `valid column node ${node.id}`);
+    check(Boolean(node.id && (node.grain !== "document" || node.entity_id)), `valid column node ${node.id}`);
   }
-  for (const edge of scene.edges) {
+  for (const edge of relations) {
     check(Boolean(edge.id) && !edgeIds.has(edge.id), `unique column relationship ID ${edge.id}`);
     edgeIds.add(edge.id);
     check(nodes.has(edge.source) && nodes.has(edge.target), `no dangling column endpoints ${edge.id}`);
@@ -1230,9 +1241,7 @@ function expectAggregatedExportIdentity(scene: WorkspaceGraphScene, exported: Wo
       check(false, `unknown exported aggregate node ${node.id}`);
       continue;
     }
-    const grain = original.grain === "cluster" ? original.cluster_kind : "document";
-    const entityKind = original.grain === "cluster" ? "cluster"
-      : original.entity_kind === "context" ? "context_page" : "library_item";
+    const { grain, entityKind } = exportedNodeShape(original);
     check(node.label === original.label && node.grain === grain && node.entityKind === entityKind,
       `original exported aggregate node ${node.id}`);
     check(!nodeIds.has(node.id), `duplicate exported aggregate node ${node.id}`);
@@ -1256,58 +1265,24 @@ function expectExactAuthoredScene(scene: WorkspaceGraphScene) {
   expectCandidateUniverse(scene);
   expect(scene).toMatchObject({ representation: "exact", completeness: "complete", truncated: false, omission_reasons: [] });
   expect(scene.counts).toMatchObject({ rendered_documents: DOCUMENT_COUNT, rendered_clusters: 0, rendered_relations: RELATION_COUNT });
-  expect(scene.nodes).toHaveLength(DOCUMENT_COUNT);
-  expect(scene.edges).toHaveLength(RELATION_COUNT);
-  expect(scene.nodes.filter((node) => node.grain === "document" && node.entity_kind === "context")).toHaveLength(9_000);
-  expect(scene.nodes.filter((node) => node.grain === "document" && node.entity_kind === "library")).toHaveLength(1_000);
+  const documents = admittedNodes(scene);
+  const relations = sceneRelations(scene);
+  expect(documents).toHaveLength(DOCUMENT_COUNT);
+  expect(relations).toHaveLength(RELATION_COUNT);
+  expect(documents.filter((node) => node.grain === "document" && node.entity_kind === "context")).toHaveLength(9_000);
+  expect(documents.filter((node) => node.grain === "document" && node.entity_kind === "library")).toHaveLength(1_000);
   expect(relationKindCounts(scene)).toEqual({ wikilink: 26_394, citation_source: 3_596, citation_page: 905 });
-  expect(new Set(scene.edges.flatMap((edge) => [edge.source, edge.target])).size).toBe(CONNECTED_DOCUMENT_COUNT);
-  const topology = scene.folder_topology;
-  if (!topology) throw new Error("Exact 10K overview omitted current folder topology");
-  expect(topology.schema_version).toBe("workspace-graph-folders.v1");
-  expect(topology.memberships).toHaveLength(DOCUMENT_COUNT);
-  expect(topology.edge_slices).toHaveLength(RELATION_COUNT);
+  expect(new Set(relations.flatMap((edge) => [edge.source, edge.target])).size).toBe(CONNECTED_DOCUMENT_COUNT);
+  expectCurrentContainment(scene);
 
   // One bounded assertion for all rows: per-row Playwright expects create
   // tens of thousands of traced steps and measure the runner, not the app.
   const failures: string[] = [];
   const check = (condition: boolean, message: string) => { if (!condition && failures.length < 30) failures.push(message); };
-  const nodes = new Map(scene.nodes.map((node) => [node.id, node]));
-  const edges = new Map(scene.edges.map((edge) => [edge.id, edge]));
-  const folders = new Map(topology.folders.map((folder) => [folder.id, folder]));
+  const nodes = new Map(documents.map((node) => [node.id, node]));
+  const edges = new Map(relations.map((edge) => [edge.id, edge]));
   check(nodes.size === DOCUMENT_COUNT, "unique original document IDs");
   check(edges.size === RELATION_COUNT, "unique original relationship IDs");
-  check(folders.size === topology.folders.length, "unique folder IDs");
-  const memberships = new Set<string>();
-  const directCounts = new Map<string, number>();
-  const visibleFolders = new Set<string>();
-  for (const row of topology.memberships) {
-    const node = nodes.get(row.node_id);
-    check(Boolean(node && node.grain === "document" && node.primary_folder_id === row.folder_id
-      && node.entity_kind === row.entity_kind && row.member_count === 1), `original primary membership ${row.node_id}`);
-    check(!memberships.has(row.node_id), `duplicate membership ${row.node_id}`);
-    memberships.add(row.node_id);
-    if (row.folder_id !== null) {
-      directCounts.set(row.folder_id, (directCounts.get(row.folder_id) ?? 0) + 1);
-      const branch = new Set<string>();
-      let folderId: string | null = row.folder_id;
-      while (folderId !== null && !visibleFolders.has(folderId)) {
-        const folder = folders.get(folderId);
-        if (!folder || branch.has(folderId)) {
-          check(false, `missing/cyclic primary folder ancestor ${folderId}`);
-          break;
-        }
-        branch.add(folderId);
-        folderId = folder.parent_folder_id;
-      }
-      for (const id of branch) visibleFolders.add(id);
-    }
-  }
-  check(memberships.size === nodes.size, "every original document has one primary membership");
-  check(visibleFolders.size === folders.size, "folder set equals visible primary ancestor closure");
-  for (const folder of folders.values()) {
-    check(folder.direct_member_count === (directCounts.get(folder.id) ?? 0), `exact direct folder count ${folder.id}`);
-  }
   for (const node of nodes.values()) {
     check(node.grain === "document" && node.id === `document:${node.entity_kind}:${node.entity_id}`, `unrenamed entity ID ${node.id}`);
   }
@@ -1323,27 +1298,13 @@ function expectExactAuthoredScene(scene: WorkspaceGraphScene) {
     check(edge.layer === expectedLayer && edge.direction === "directed" && !edge.aggregate
       && edge.relation_count === 1 && edge.occurrence_weight === 1, `lossless relationship kind/count/layer ${edge.id}`);
   }
-  const slicedEdges = new Set<string>();
-  for (const row of topology.edge_slices) {
-    const edge = edges.get(row.edge_id);
-    const source = edge && nodes.get(edge.source);
-    const target = edge && nodes.get(edge.target);
-    check(Boolean(source && source.grain === "document" && source.primary_folder_id === row.source_folder_id
-      && source.entity_kind === row.source_entity_kind), `correlated source slice ${row.edge_id}`);
-    check(Boolean(target && target.grain === "document" && target.primary_folder_id === row.target_folder_id
-      && target.entity_kind === row.target_entity_kind), `correlated target slice ${row.edge_id}`);
-    check(Boolean(edge && row.relation_count === edge.relation_count && row.occurrence_weight === edge.occurrence_weight),
-      `exact edge-slice totals ${row.edge_id}`);
-    check(!slicedEdges.has(row.edge_id), `duplicate exact slice ${row.edge_id}`);
-    slicedEdges.add(row.edge_id);
-  }
-  check(slicedEdges.size === edges.size, "every original relationship has its exact correlated folder slice");
-  expect(failures, "Every real 10K wire ID, endpoint, kind and topology row must survive").toEqual([]);
+  expect(failures, "Every real 10K wire ID, endpoint and kind must survive").toEqual([]);
 }
 
 function expectVisibleExportIdentity(scene: WorkspaceGraphScene, exported: GraphRenderScene) {
-  expect(exported.nodes).toHaveLength(DOCUMENT_COUNT);
-  expect(exported.edges).toHaveLength(RELATION_COUNT);
+  // With every document shown, the export lists every node and relation, containment included.
+  expect(exported.nodes).toHaveLength(scene.nodes.length);
+  expect(exported.edges).toHaveLength(scene.edges.length);
   const nodes = new Map(scene.nodes.map((node) => [node.id, node]));
   const edges = new Map(scene.edges.map((edge) => [edge.id, edge]));
   const exportedNodeIds = new Set<string>();
@@ -1352,8 +1313,8 @@ function expectVisibleExportIdentity(scene: WorkspaceGraphScene, exported: Graph
   const check = (condition: boolean, message: string) => { if (!condition && failures.length < 30) failures.push(message); };
   for (const node of exported.nodes) {
     const original = nodes.get(node.id);
-    check(Boolean(original && original.grain === "document" && node.label === original.label && node.grain === "document"
-      && node.entityKind === (original.entity_kind === "context" ? "context_page" : "library_item")), `export original node ${node.id}`);
+    check(Boolean(original && node.label === original.label && node.grain === exportedNodeShape(original).grain
+      && node.entityKind === exportedNodeShape(original).entityKind), `export original node ${node.id}`);
     check(!exportedNodeIds.has(node.id), `duplicate exported node ${node.id}`);
     exportedNodeIds.add(node.id);
   }

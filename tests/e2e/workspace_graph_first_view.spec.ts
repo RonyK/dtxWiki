@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { login, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
+import { admittedNodes, listedNodeIds, sceneRelations } from "./workspace_graph_scene";
 
 test.describe("Knowledge Map compact first viewport with real 2k data", () => {
   test.skip(process.env.DTXWIKI_E2E_GRAPH_2K !== "1", "Requires the isolated 2k seed");
@@ -24,10 +26,17 @@ test.describe("Knowledge Map compact first viewport with real 2k data", () => {
       await login(page.request, "e2e-graph-2k-owner@example.com");
       await enableKnowledgeMapLab(page);
       await page.addInitScript((nextLanguage) => localStorage.setItem("dtxwiki.uiLanguage", nextLanguage), language);
+      const overview = page.waitForResponse((response) =>
+        response.url().includes("/graph/overview/query") && response.request().method() === "POST");
       await page.goto("/graph");
+      const scene = (await (await overview).json()).data as WorkspaceGraphScene;
+      const linked = new Set(sceneRelations(scene).flatMap((edge) => [edge.source, edge.target]));
+      expect(linked.size).toBe(1928);
+      // Authored relations reach 1,928 documents; containment keeps all 2K visible.
       const list = page.getByTestId("workspace-graph-node-list");
-      await expect(list).toHaveAttribute("data-total-count", "1928");
-      await expect(page.locator(".workspace-graph-coverage")).toContainText("1928/2000");
+      await expect(list).toHaveAttribute("data-total-count", String(listedNodeIds(scene,
+        new Set(admittedNodes(scene).map((node) => node.id))).size));
+      await expect(page.locator(".workspace-graph-coverage")).toContainText("2000/2000");
       const feature = page.locator(".feature-main.workspace-graph");
       const canvas = feature.locator(".graph-canvas-frame");
       await expect(canvas).toBeVisible();
@@ -55,16 +64,13 @@ test.describe("Knowledge Map compact first viewport with real 2k data", () => {
       expect(geometry.canvasTop).toBeLessThanOrEqual(220);
       expect(geometry.canvasTop).toBeGreaterThanOrEqual(geometry.titleBottom);
       expect(geometry.canvasVisibleHeight).toBeGreaterThanOrEqual(viewport.height * 0.4);
-      const view = page.locator(".workspace-graph-view-options");
+      const view = page.locator(".graph-view-options");
       await view.locator("summary").click();
       await expect(view).toHaveAttribute("open", "");
-      const menuBounds = await view.locator(".workspace-graph-view-panel").boundingBox();
+      const menuBounds = await view.locator(".graph-view-panel").boundingBox();
       expect(menuBounds!.x).toBeGreaterThanOrEqual(0);
       expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(viewport.width);
-      const folder = view.getByRole("button", { name: language === "en" ? "Folder context" : "폴더 보조 정보", exact: true });
-      await folder.click();
-      await expect(folder).toHaveAttribute("aria-pressed", "true");
-      // Metadata disclosure and selection must not push the original canvas down.
+      // Opening and closing the View disclosure must not push the original canvas down.
       await view.press("Escape");
       await expect(view.locator("summary")).toBeFocused();
       const after = await canvas.boundingBox();

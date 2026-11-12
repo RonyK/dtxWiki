@@ -12,6 +12,8 @@ from backend.tests.utils.workspace_graph_corpora import (
     build_star_250_750,
     corpus_actor,
     fixture_time,
+    relation_edges,
+    represented_nodes,
 )
 
 
@@ -73,10 +75,11 @@ def test_knowledge_40_is_exact_canonical_and_uses_distinct_authored_metrics(
     # not multiply the metric and the self-link does not survive normalization.
     assert sum(node.reference_count for node in document_nodes) == 40
     assert sum(node.evidence_count for node in document_nodes) == 0
-    assert all(edge.source != edge.target for edge in payload.edges)
-    assert {edge.relation_kind for edge in payload.edges} == {"wikilink"}
+    assert all(edge.source != edge.target for edge in relation_edges(payload))
+    assert {edge.relation_kind for edge in relation_edges(payload)} == {"wikilink"}
     assert all(
-        edge.aggregate is False and edge.relation_count == 1 for edge in payload.edges
+        edge.aggregate is False and edge.relation_count == 1
+        for edge in relation_edges(payload)
     )
     assert payload.generated_at == fixture_time(5_048)
     assert len(payload.graph_revision) >= 16
@@ -155,7 +158,7 @@ def test_folder_mismatch_80_uses_primary_tree_placement_not_uri_text(
     assert directory.truncated is False
     assert directory.counts.candidate_documents == 80
     assert directory.counts.candidate_relations == 0
-    assert directory.edges == []
+    assert relation_edges(directory) == []
     folder_sizes = Counter(corpus.primary_folder_labels.values())
     clusters = [node for node in directory.nodes if node.grain == "cluster"]
     singles = [node for node in directory.nodes if node.grain == "document"]
@@ -238,10 +241,10 @@ def test_star_250_750_remains_exact_at_the_provisional_boundary(session_factory)
         "rendered_clusters": 0,
         "rendered_relations": 750,
     }
-    assert len(payload.nodes) == 250
-    assert len(payload.edges) == 750
-    assert sum(edge.relation_count for edge in payload.edges) == 750
-    assert all(edge.aggregate is False for edge in payload.edges)
+    assert len(represented_nodes(payload)) == 250
+    assert len(relation_edges(payload)) == 750
+    assert sum(edge.relation_count for edge in relation_edges(payload)) == 750
+    assert all(edge.aggregate is False for edge in relation_edges(payload))
 
     nodes_by_entity = {
         node.entity_id: node for node in payload.nodes if node.grain == "document"

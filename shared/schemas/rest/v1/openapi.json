@@ -25138,19 +25138,6 @@
             "title": "Label",
             "type": "string"
           },
-          "parent_document_id": {
-            "anyOf": [
-              {
-                "maxLength": 220,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Document Id"
-          },
           "path": {
             "maxLength": 1024,
             "minLength": 1,
@@ -25255,6 +25242,11 @@
               }
             ],
             "title": "Occurrence Weight"
+          },
+          "primary": {
+            "default": false,
+            "title": "Primary",
+            "type": "boolean"
           },
           "relation_count": {
             "default": 1,
@@ -25499,121 +25491,6 @@
         "title": "WorkspaceGraphFocus",
         "type": "object"
       },
-      "WorkspaceGraphFolder": {
-        "additionalProperties": false,
-        "properties": {
-          "direct_member_count": {
-            "maximum": 9007199254740991.0,
-            "minimum": 0.0,
-            "title": "Direct Member Count",
-            "type": "integer"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "label": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
-          },
-          "parent_folder_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Folder Id"
-          }
-        },
-        "required": [
-          "id",
-          "label",
-          "direct_member_count"
-        ],
-        "title": "WorkspaceGraphFolder",
-        "type": "object"
-      },
-      "WorkspaceGraphFolderEdgeSlice": {
-        "additionalProperties": false,
-        "properties": {
-          "edge_id": {
-            "maxLength": 240,
-            "minLength": 1,
-            "title": "Edge Id",
-            "type": "string"
-          },
-          "occurrence_weight": {
-            "maximum": 9007199254740991.0,
-            "minimum": 1.0,
-            "title": "Occurrence Weight",
-            "type": "integer"
-          },
-          "relation_count": {
-            "maximum": 9007199254740991.0,
-            "minimum": 1.0,
-            "title": "Relation Count",
-            "type": "integer"
-          },
-          "source_entity_kind": {
-            "enum": [
-              "context",
-              "library",
-              "agent"
-            ],
-            "title": "Source Entity Kind",
-            "type": "string"
-          },
-          "source_folder_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Folder Id"
-          },
-          "target_entity_kind": {
-            "enum": [
-              "context",
-              "library",
-              "agent"
-            ],
-            "title": "Target Entity Kind",
-            "type": "string"
-          },
-          "target_folder_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Folder Id"
-          }
-        },
-        "required": [
-          "edge_id",
-          "source_entity_kind",
-          "target_entity_kind",
-          "relation_count",
-          "occurrence_weight"
-        ],
-        "title": "WorkspaceGraphFolderEdgeSlice",
-        "type": "object"
-      },
       "WorkspaceGraphFolderFilter": {
         "additionalProperties": false,
         "properties": {
@@ -25672,92 +25549,46 @@
         "title": "WorkspaceGraphFolderFilter",
         "type": "object"
       },
-      "WorkspaceGraphFolderMembership": {
+      "WorkspaceGraphFolderNode": {
         "additionalProperties": false,
         "properties": {
-          "entity_kind": {
-            "enum": [
-              "context",
-              "library",
-              "agent"
-            ],
-            "title": "Entity Kind",
+          "folder_id": {
+            "format": "uuid",
+            "title": "Folder Id",
             "type": "string"
           },
-          "folder_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Folder Id"
+          "grain": {
+            "const": "folder",
+            "default": "folder",
+            "title": "Grain",
+            "type": "string"
           },
-          "member_count": {
-            "maximum": 9007199254740991.0,
-            "minimum": 1.0,
-            "title": "Member Count",
-            "type": "integer"
-          },
-          "node_id": {
+          "id": {
             "maxLength": 220,
             "minLength": 1,
-            "title": "Node Id",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path",
             "type": "string"
           }
         },
         "required": [
-          "node_id",
-          "entity_kind",
-          "member_count"
+          "id",
+          "folder_id",
+          "label",
+          "path"
         ],
-        "title": "WorkspaceGraphFolderMembership",
-        "type": "object"
-      },
-      "WorkspaceGraphFolderTopology": {
-        "additionalProperties": false,
-        "description": "Lossless, actor-visible folder inputs, never layout coordinates.\n\nMembership distributions retain mixed aggregates. Correlated edge slices\nretain their real endpoint folder/kind pair, including aggregate self-edges;\nindependent source/target marginals cannot reconstruct that information.",
-        "properties": {
-          "edge_slices": {
-            "items": {
-              "$ref": "#/components/schemas/WorkspaceGraphFolderEdgeSlice"
-            },
-            "maxItems": 200000,
-            "title": "Edge Slices",
-            "type": "array"
-          },
-          "folders": {
-            "items": {
-              "$ref": "#/components/schemas/WorkspaceGraphFolder"
-            },
-            "maxItems": 200000,
-            "title": "Folders",
-            "type": "array"
-          },
-          "memberships": {
-            "items": {
-              "$ref": "#/components/schemas/WorkspaceGraphFolderMembership"
-            },
-            "maxItems": 200000,
-            "title": "Memberships",
-            "type": "array"
-          },
-          "schema_version": {
-            "const": "workspace-graph-folders.v1",
-            "default": "workspace-graph-folders.v1",
-            "title": "Schema Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "folders",
-          "memberships",
-          "edge_slices"
-        ],
-        "title": "WorkspaceGraphFolderTopology",
+        "title": "WorkspaceGraphFolderNode",
         "type": "object"
       },
       "WorkspaceGraphMapCapability": {
@@ -26071,16 +25902,6 @@
               }
             ]
           },
-          "folder_topology": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/WorkspaceGraphFolderTopology"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "generated_at": {
             "format": "date-time",
             "title": "Generated At",
@@ -26109,7 +25930,8 @@
               "discriminator": {
                 "mapping": {
                   "cluster": "#/components/schemas/WorkspaceGraphClusterNode",
-                  "document": "#/components/schemas/WorkspaceGraphDocumentNode"
+                  "document": "#/components/schemas/WorkspaceGraphDocumentNode",
+                  "folder": "#/components/schemas/WorkspaceGraphFolderNode"
                 },
                 "propertyName": "grain"
               },
@@ -26119,6 +25941,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/WorkspaceGraphClusterNode"
+                },
+                {
+                  "$ref": "#/components/schemas/WorkspaceGraphFolderNode"
                 }
               ]
             },

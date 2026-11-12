@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import type { WorkspaceGraphScene } from "../../../../shared/api/workspaceGraph";
+import type { WorkspaceGraphEdge, WorkspaceGraphNode, WorkspaceGraphScene } from "../../../../shared/api/workspaceGraph";
 import {
   buildWorkspaceMapColumns,
   type WorkspaceMapColumns,
@@ -17,6 +17,16 @@ const options = {
   actorId: "actor-a",
   selectionKey: "links:all-visible",
 };
+
+function folderNode(folderId: string, label: string): WorkspaceGraphNode {
+  return { grain: "folder", id: `folder:${folderId}`, folder_id: folderId, label, path: label };
+}
+
+function containment(source: string, target: string, primary = true): WorkspaceGraphEdge {
+  return { id: `contains:${source}|${target}`, source, target, relation_kind: "tree", label: null,
+    layer: "knowledge", direction: "directed", aggregate: false, relation_count: 1, occurrence_weight: 1,
+    cross_folder: false, primary };
+}
 
 function visibleScene(): WorkspaceGraphScene {
   return {
@@ -78,6 +88,7 @@ function visibleScene(): WorkspaceGraphScene {
         evidence_count: 2,
         also_appears_in: [],
       },
+      folderNode("folder-visible", "Research"),
     ],
     edges: [
       {
@@ -104,6 +115,8 @@ function visibleScene(): WorkspaceGraphScene {
         relation_count: 1,
         cross_folder: false,
       },
+      containment("folder:folder-visible", "row-b"),
+      containment("folder:folder-visible", "row-z"),
     ],
     facet_counts: {
       document_kinds: [],
@@ -125,7 +138,7 @@ function visibleScene(): WorkspaceGraphScene {
   };
 }
 
-/** Authored documents and relations, re-indexed without TreeRail hubs and containment lines. */
+/** Authored documents and relations, re-indexed without TreeRail folders and containment. */
 function relationRows(columns: WorkspaceMapColumns) {
   const nodes = [...columns.nodeKinds.keys()].filter((index) => columns.nodeKinds[index] !== WORKSPACE_MAP_NODE_KIND.folder);
   const edges = [...columns.edgeKinds.keys()].filter((index) => columns.edgeKinds[index] !== WORKSPACE_MAP_EDGE_KIND.membership);
@@ -194,10 +207,10 @@ describe("Workspace Map visible columns", () => {
   it("indexes stable visible nodes and relation columns for WebGL", () => {
     const tree = buildWorkspaceMapColumns(visibleScene(), options);
     const columns = relationRows(tree);
-    // The shared primary folder becomes one TreeRail hub holding both pages.
+    // The folder holding both pages is one node, and containment is one relation per page.
     expect(tree.nodeKeys).toContain("folder:folder-visible");
     expect(tree.edgeIds.filter((id) => id.startsWith("contains:"))).toEqual([
-      "contains:folder:folder-visible|context:page-b", "contains:folder:folder-visible|context:page-z"]);
+      "contains:folder:folder-visible|row-b", "contains:folder:folder-visible|row-z"]);
 
     expect(columns.nodeKeys).toEqual(["context:page-b", "context:page-z", "library:item-a"]);
     expect(columns.nodeIds).toEqual(["row-b", "row-z", "row-a"]);
@@ -230,7 +243,8 @@ describe("Workspace Map visible columns", () => {
     scene.nodes = scene.nodes.map((node) => node.grain === "document" && node.entity_kind === "library"
       ? { ...node, entity_kind: "agent" as const, path: "/workspaces/workspace/agent/pages/item-a" }
       : node);
-    scene.edges = scene.edges.map((edge) => ({ ...edge, relation_kind: "citation_agent", layer: "evidence" as const }));
+    scene.edges = scene.edges.map((edge) => edge.relation_kind === "tree" ? edge
+      : { ...edge, relation_kind: "citation_agent", layer: "evidence" as const });
     const columns = buildWorkspaceMapColumns(scene, options);
     expect(columns.nodeKeys).toContain("agent:item-a");
     const row = columns.nodeKeys.indexOf("agent:item-a");
@@ -325,11 +339,12 @@ describe("Workspace Map visible columns", () => {
     const changedEdge = visibleScene();
     changedEdge.edges[0].relation_count += 1;
     const changedFolder = visibleScene();
+    changedFolder.nodes.push(folderNode("another-visible-folder", "Another"));
+    changedFolder.edges = changedFolder.edges.map((edge) => edge.target === "row-z" && edge.relation_kind === "tree"
+      ? containment("folder:another-visible-folder", "row-z") : edge);
     const relabeledFolder = visibleScene();
-    if (changedFolder.nodes[0].grain === "document" && relabeledFolder.nodes[0].grain === "document") {
-      changedFolder.nodes[0].primary_folder_id = "another-visible-folder";
-      relabeledFolder.nodes[0].primary_folder_label = "Renamed";
-    }
+    relabeledFolder.nodes = relabeledFolder.nodes.map((node) => node.grain === "document"
+      ? { ...node, primary_folder_label: "Renamed" } : { ...node, label: "Renamed" });
 
     expect(buildWorkspaceMapColumns(changedEdge, options).identity.visibleFingerprint)
       .not.toBe(base.identity.visibleFingerprint);
@@ -351,13 +366,18 @@ describe("Workspace Map visible columns", () => {
     reassigned.nodes = reassigned.nodes.map((node) => node.grain === "document"
       ? { ...node, primary_folder_id: "different-directory", primary_folder_label: "Changed" }
       : node);
-    reassigned.edges = reassigned.edges.map((edge) => ({ ...edge, cross_folder: !edge.cross_folder }));
-    reassigned.folder_topology = { schema_version: "workspace-graph-folders.v1", memberships: [], edge_slices: [],
-      folders: [{ id: "parent-directory", label: "Parent", parent_folder_id: null, direct_member_count: 0 },
-        { id: "different-directory", label: "Changed", parent_folder_id: "parent-directory", direct_member_count: 2 }] };
-
-    // A sub-document hangs from its parent document, one TreeRail level further out.
-    reassigned.nodes = reassigned.nodes.map((node) => node.id === "row-z" ? { ...node, parent_document_id: "row-b" } : node);
+    reassigned.edges = reassigned.edges.filter((edge) => edge.relation_kind !== "tree")
+      .map((edge) => ({ ...edge, cross_folder: !edge.cross_folder }));
+    // A sub-document hangs from its parent document, one TreeRail level further
+    // out; a secondary placement under it closes a cycle, which a graph allows.
+    reassigned.nodes.push(folderNode("parent-directory", "Parent"), folderNode("different-directory", "Changed"));
+    reassigned.edges.push(
+      containment("folder:parent-directory", "folder:different-directory"),
+      containment("folder:different-directory", "row-a"),
+      containment("folder:different-directory", "row-b"),
+      containment("row-b", "row-z"),
+      containment("row-z", "row-b", false),
+    );
     const tree = buildWorkspaceMapColumns(reassigned, options);
     const containerKey = (id: string) => tree.nodeKeys[tree.nodeContainerIndices![tree.nodeIds.indexOf(id)]];
     expect(containerKey("row-z")).toBe("context:page-b");
@@ -366,8 +386,7 @@ describe("Workspace Map visible columns", () => {
     const beneath = workspaceMapContainedDocumentCounts(tree);
     expect(beneath[tree.nodeIds.indexOf("folder:parent-directory")]).toBe(3);
     expect(beneath[tree.nodeIds.indexOf("row-b")]).toBe(1);
-    expect(tree.edgeIds).toContain("contains:context:page-b|context:page-z");
-    expect(tree.edgeIds).not.toContain("contains:folder:different-directory|context:page-z");
+    expect(tree.edgeIds).toEqual(expect.arrayContaining(["contains:row-b|row-z", "contains:row-z|row-b"]));
     const after = relationRows(tree), before = relationRows(baseline);
     expect(after.nodeFolderKeys).not.toEqual(before.nodeFolderKeys);
     expect(after.edgeCrossFolder).not.toEqual(before.edgeCrossFolder);

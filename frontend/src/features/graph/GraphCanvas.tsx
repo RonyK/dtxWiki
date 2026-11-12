@@ -35,6 +35,8 @@ type GraphCanvasProps = {
   active: boolean;
   focusedId: string | null;
   forcedColors: boolean;
+  /** The reader paused the layout. Tab changes keep it; the view clears it for a new scene. */
+  layoutPaused?: boolean;
   onHover: (id: string | null) => void;
   onPin: (id: string, position: { x: number; y: number }) => void;
   onRendererStatusChange: (status: RendererStatus) => void;
@@ -68,6 +70,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       active,
       focusedId,
       forcedColors,
+      layoutPaused = false,
       onHover,
       onPin,
       onRendererStatusChange,
@@ -103,6 +106,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const focusedIdRef = useRef(focusedId);
     const activeRef = useRef(active);
     const showLabelsRef = useRef(showLabels);
+    const layoutPausedRef = useRef(layoutPaused);
+    layoutPausedRef.current = layoutPaused;
+    // A hidden tab or a paused reader keeps the layout still; otherwise it runs.
+    const reconcileLayout = (adapter: SigmaGraphAdapter) => {
+      if (!activeRef.current || layoutPausedRef.current) adapter.stopLayout();
+      else adapter.resumeLayout();
+    };
     const lastAppliedSceneRef = useRef<GraphRenderScene | null>(null);
     const pendingSceneRef = useRef<GraphRenderScene | null>(null);
     // The viewport prop is a restore hint, not a controlled value. Keep its
@@ -240,9 +250,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             replayPins(adapter);
             adapter.select(selectedIdRef.current);
             adapter.focus(focusedIdRef.current);
-          } else {
-            adapter.stopLayout();
           }
+          if (!activeRef.current || layoutPausedRef.current) adapter.stopLayout();
           await adapter.whenSettled();
           if (!rendererFailed) publishStatus("ready");
         })
@@ -302,6 +311,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       // would rewind an ongoing drag; replaying focus would discard pointer
       // hover. Independent prop effects still apply actual state changes.
       if (update === "metadata" || update === "topology") return;
+      // A rebuilt scene starts a new layout: a paused reader's stays still.
+      if (layoutPausedRef.current) adapter.stopLayout();
       // A rebuilt scene resets elements, so unchanged external state must be
       // reconciled after a filter/timeline round-trip.
       adapter.select(selectedIdRef.current);
@@ -318,7 +329,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       }
       const pendingScene = pendingSceneRef.current;
       if (!pendingScene || pendingScene === lastAppliedSceneRef.current) {
-        adapter.resumeLayout();
+        reconcileLayout(adapter);
         return;
       }
       const update = adapter.replaceScene(pendingScene);
@@ -329,8 +340,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         adapter.focus(focusedIdRef.current);
         replayPins(adapter);
       }
-      adapter.resumeLayout();
+      reconcileLayout(adapter);
     }, [active]);
+
+    useEffect(() => {
+      const adapter = adapterRef.current;
+      if (adapter) reconcileLayout(adapter);
+    }, [layoutPaused]);
 
     useEffect(() => {
       if (!active) return;

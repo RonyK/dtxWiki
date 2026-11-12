@@ -1,0 +1,74 @@
+import assert from "node:assert/strict";
+import { COSMOS_COLLISION_RADII_PATCH_HUNKS } from "./cosmos-collision-radii-patch.mjs";
+import { COSMOS_LINK_PATTERN_PATCH_HUNKS } from "./cosmos-link-pattern-patch.mjs";
+import { COSMOS_POINT_PICKER_PATCH_HUNKS } from "./cosmos-point-picker-patch.mjs";
+import { COSMOS_SOURCE_SHA256, COSMOS_VERSION, sha256 } from "./cosmos-source.mjs";
+
+// A ninth point shape, RING (9): a band `pointRingWidth` CSS px wide (× pixelRatio
+// device px) at every size and zoom, over a disc of the background colour. A
+// texture ring scales with the point and breaks up below a few pixels.
+const band = "pointRingBandPx";
+const bandValue = config => `${config}.pointRingWidth * ${config}.pixelRatio`;
+
+/** Every change is reversible; force shaders and the other eight shapes stay intact. */
+export const COSMOS_POINT_RING_PATCH_HUNKS = Object.freeze([
+  { id: "ring-config-default", before: "  pointOpacity: 1,\n  pointGreyoutOpacity: void 0,",
+    after: "  pointOpacity: 1,\n  pointRingWidth: 2,\n  pointGreyoutOpacity: void 0," },
+  { id: "ring-default-shape-range", before: "t >= 0 && t <= 8 ? t : E.pointDefaultShape",
+    after: "t >= 0 && t <= 9 ? t : E.pointDefaultShape" },
+  { id: "ring-shape-range", before: "(!Number.isInteger(s) || s < 0 || s > 8) && (n[o] = i);",
+    after: "(!Number.isInteger(s) || s < 0 || s > 9) && (n[o] = i);" },
+  { id: "ring-uniform-block", before: "  float outlineWidth;\n  float renderMode;\n} drawFragment;",
+    after: `  float outlineWidth;\n  float ${band};\n  float renderMode;\n} drawFragment;` },
+  { id: "ring-uniform-define", before: "#define outlineWidth drawFragment.outlineWidth\n",
+    after: `#define outlineWidth drawFragment.outlineWidth\n#define ${band} drawFragment.${band}\n` },
+  { id: "ring-uniform", before: "uniform float outlineWidth;\n",
+    after: `uniform float outlineWidth;\nuniform float ${band};\n` },
+  { id: "ring-shape-constant", before: "const float NONE = 8.0;\n",
+    after: "const float NONE = 8.0;\nconst float RING = 9.0;\n" },
+  { id: "ring-shape-coverage",
+    before: "        float opacity;\n        if (pointShape == CIRCLE) {",
+    after: `        float opacity;
+        // dtxWiki RING: share of the shape colour; the rest is the background disc.
+        float ringBand = 1.0;
+        if (pointShape == RING) {
+            float rPx = length(coreCoord) * coreDiameterPx * 0.5;
+            float outerPx = coreDiameterPx * 0.5;
+            float innerPx = outerPx - ${band};
+            opacity = 1.0 - smoothstep(outerPx - halfRampPx, outerPx + halfRampPx, rPx);
+            ringBand = smoothstep(innerPx - halfRampPx, innerPx + halfRampPx, rPx);
+        } else if (pointShape == CIRCLE) {` },
+  { id: "ring-shape-colour", before: "        finalShapeColor = vec4(shapeColor.rgb, opacity);\n",
+    after: "        finalShapeColor = vec4(mix(backgroundColor.rgb, shapeColor.rgb, ringBand), opacity);\n" },
+  { id: "ring-uniform-type", before: "          outlineWidth: \"f32\",\n          renderMode: \"f32\"",
+    after: `          outlineWidth: "f32",\n          ${band}: "f32",\n          renderMode: "f32"` },
+  { id: "ring-default-uniform", before: "          outlineWidth: 0.9,\n          renderMode: 0\n        }",
+    after: `          outlineWidth: 0.9,\n          ${band}: ${bandValue("t")},\n          renderMode: 0\n        }` },
+  { id: "ring-draw-uniform", before: "      outlineWidth: 0.9,\n      renderMode: 0\n    }, r = {",
+    after: `      outlineWidth: 0.9,\n      ${band}: ${bandValue("i")},\n      renderMode: 0\n    }, r = {` },
+].map(hunk => Object.freeze(hunk)));
+
+/** Applied last, to the collision-radii, point-picker and link-pattern output. */
+export function patchCosmosPointRing(source, version) {
+  assert.equal(version, COSMOS_VERSION, "Review the ring shape and its uniform before upgrading Cosmos");
+  let original = source;
+  for (const hunks of [COSMOS_LINK_PATTERN_PATCH_HUNKS, COSMOS_POINT_PICKER_PATCH_HUNKS, COSMOS_COLLISION_RADII_PATCH_HUNKS]) {
+    for (const { id, before, after } of [...hunks].reverse()) {
+      assert.equal(original.split(after).length, 2, `Expected exactly one reviewed ${id} seam`);
+      original = original.replace(after, before);
+    }
+  }
+  assert.equal(sha256(original), COSMOS_SOURCE_SHA256, "Cosmos source differs from the reviewed package");
+  let modified = source;
+  for (const { id, before, after } of COSMOS_POINT_RING_PATCH_HUNKS) {
+    assert.equal(modified.split(before).length, 2, `Expected exactly one ${id} seam`);
+    modified = modified.replace(before, after);
+  }
+  let reversed = modified;
+  for (const { id, before, after } of [...COSMOS_POINT_RING_PATCH_HUNKS].reverse()) {
+    assert.equal(reversed.split(after).length, 2, `Expected exactly one patched ${id} seam`);
+    reversed = reversed.replace(after, before);
+  }
+  assert.equal(reversed, source, "Unexpected extra point ring SDK change");
+  return modified;
+}

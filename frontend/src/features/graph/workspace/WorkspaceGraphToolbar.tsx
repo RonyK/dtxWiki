@@ -1,15 +1,15 @@
-import { Eye, Filter, Search } from "lucide-react";
+import { Filter, Search } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { WorkspaceGraphAvailableLens, WorkspaceGraphScene } from "../../../shared/api/workspaceGraph";
+import { workspaceGraphNodeDocuments, type WorkspaceGraphAvailableLens, type WorkspaceGraphScene } from "../../../shared/api/workspaceGraph";
 import type { WorkspaceGraphRestorableState } from "../workspaceGraphModel";
 import type { WorkspaceMapDeviceProfile, WorkspaceMapScale } from "../shared/workspaceMapBudget";
+import { GraphViewMenu } from "../shared/GraphViewMenu";
 
 export function visibleWorkspaceGraphDocumentCount(scene: WorkspaceGraphScene, nodeIds: readonly string[]): number {
   const visible = new Set(nodeIds);
-  return scene.nodes.reduce((count, node) => count + (visible.has(node.id)
-    ? node.grain === "cluster" ? node.member_count : 1 : 0), 0);
+  return scene.nodes.reduce((count, node) => count + (visible.has(node.id) ? workspaceGraphNodeDocuments(node) : 0), 0);
 }
 
 /**
@@ -25,23 +25,20 @@ export function workspaceGraphClusterCoverage(
   let shown = 0, grouped = 0, clusters = 0;
   for (const node of scene.nodes) {
     if (visible && !visible.has(node.id)) continue;
-    if (node.grain === "cluster") { grouped += node.member_count; clusters += 1; } else shown += 1;
+    if (node.grain === "cluster") { grouped += node.member_count; clusters += 1; } else shown += workspaceGraphNodeDocuments(node);
   }
   return clusters ? { shown, grouped, clusters } : null;
 }
 
 /** Immediate view controls stay separate from Refine's staged data filters. */
 export function WorkspaceGraphToolbar({
-  activeFilterCount, display, folderAvailable, folderEnabled, onDisplay,
-  onLens, onOpenRefine, onSearch, onToggleFolder, orphanCount, pendingChanges,
-  ready, search, showOrphans, lens, mobileLayout, deviceProfile, mapScale, onMapScale,
+  activeFilterCount, display, onDisplay,
+  onLens, onOpenRefine, onSearch, orphanCount, pendingChanges,
+  ready, search, showOrphans, lens, deviceProfile, mapScale, onMapScale,
 }: {
   activeFilterCount: number;
   display: WorkspaceGraphRestorableState["display"];
-  folderAvailable: boolean;
-  folderEnabled: boolean;
   lens: WorkspaceGraphAvailableLens;
-  mobileLayout: boolean;
   deviceProfile: WorkspaceMapDeviceProfile;
   mapScale: WorkspaceMapScale;
   onMapScale(scale: WorkspaceMapScale): void;
@@ -49,7 +46,6 @@ export function WorkspaceGraphToolbar({
   onLens(lens: WorkspaceGraphAvailableLens): void;
   onOpenRefine(trigger: HTMLButtonElement): void;
   onSearch(search: string): void;
-  onToggleFolder(): void;
   orphanCount: number;
   pendingChanges: boolean;
   ready: boolean;
@@ -98,23 +94,20 @@ export function WorkspaceGraphToolbar({
         <Search aria-hidden="true" size={16} />
         <label className="visually-hidden" htmlFor="workspace-graph-visible-search">{t("workspaceGraph.ui.findVisible")}</label>
         <input disabled={!ready} id="workspace-graph-visible-search" onChange={(event) => onSearch(event.currentTarget.value)}
-          placeholder={t(mobileLayout ? "workspaceGraph.ui.findVisiblePlaceholderMobile"
-            : "workspaceGraph.ui.findVisiblePlaceholder")} type="search" value={search} />
+          placeholder={t("relationList.searchPlaceholder")} type="search" value={search} />
       </div>
       <button aria-describedby={refineStatus ? "workspace-graph-refine-status" : undefined}
-        aria-label={t("workspaceGraph.controls.refine")} className="workspace-graph-refine-trigger"
+        aria-label={t("graph.filters.refine")} className="workspace-graph-refine-trigger"
         onClick={(event) => {
           if (viewRef.current) viewRef.current.open = false;
           onOpenRefine(event.currentTarget);
         }} type="button">
-        <Filter aria-hidden="true" size={15} /><span className="workspace-graph-toolbar-text">{t("workspaceGraph.controls.refine")}</span>
+        <Filter aria-hidden="true" size={15} /><span className="workspace-graph-toolbar-text">{t("graph.filters.refine")}</span>
         {activeFilterCount ? <span aria-hidden="true" className="workspace-graph-refine-state">{t("workspaceGraph.controls.activeFilterCount", { count: activeFilterCount })}</span> : null}
         {pendingChanges ? <span aria-hidden="true" className="workspace-graph-refine-state is-pending">{t("workspaceGraph.controls.pendingChanges")}</span> : null}
       </button>
       {refineStatus ? <span className="visually-hidden" id="workspace-graph-refine-status">{refineStatus}</span> : null}
-      <details className="workspace-graph-view-options" ref={viewRef}>
-        <summary><Eye aria-hidden="true" size={16} />{t("workspaceGraph.ui.view")}</summary>
-        <div className="workspace-graph-view-panel">
+      <GraphViewMenu ref={viewRef}>
           {deviceProfile === "desktop" ? <label>
             {t("workspaceGraph.ui.mapSize")}
             <select onChange={(event) => onMapScale(event.currentTarget.value as WorkspaceMapScale)} value={mapScale}>
@@ -122,15 +115,11 @@ export function WorkspaceGraphToolbar({
               <option value="10k">{t("workspaceGraph.ui.mapSize10k")}</option>
             </select>
           </label> : <small>{t("workspaceGraph.ui.mobileMapLimit")}</small>}
-          <button aria-pressed={folderEnabled} className="workspace-graph-folder-toggle" disabled={!folderAvailable}
-            onClick={onToggleFolder} type="button">{t("workspaceGraph.folders.groupByFolder")}</button>
-          <small>{t(folderAvailable ? "workspaceGraph.folders.primaryOnly" : "workspaceGraph.folders.unavailable")}</small>
           <label><input checked={display.show_edges} onChange={(event) => onDisplay({ ...display, show_edges: event.currentTarget.checked })}
-            type="checkbox" />{t("workspaceGraph.drawer.showRelationships")}</label>
+            type="checkbox" />{t("graph.display.relationships")}</label>
           <label><input checked={display.show_labels} onChange={(event) => onDisplay({ ...display, show_labels: event.currentTarget.checked })}
-            type="checkbox" />{t("workspaceGraph.drawer.showLabels")}</label>
-        </div>
-      </details>
+            type="checkbox" />{t("graph.display.labels")}</label>
+      </GraphViewMenu>
       {orphanCount ? <button aria-pressed={showOrphans} className="workspace-graph-orphan-toggle"
         onClick={() => onDisplay({ ...display, show_orphans: !showOrphans })}
         title={t(showOrphans ? "workspaceGraph.ui.orphansShown" : "workspaceGraph.ui.orphansHidden", { count: orphanCount })}

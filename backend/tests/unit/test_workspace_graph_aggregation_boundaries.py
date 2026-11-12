@@ -45,7 +45,11 @@ def _ring_relations(documents: dict, count: int) -> list:
 def _service(monkeypatch, documents: dict, relations: list):
     service = graph.WorkspaceGraphService(cursor_secret="boundary-test-secret")
     monkeypatch.setattr(service, "_load_documents", lambda *_args: dict(documents))
-    monkeypatch.setattr(service, "_attach_tree_placements", lambda *_args: None)
+    monkeypatch.setattr(
+        service,
+        "_attach_tree_placements",
+        lambda *_args: graph._VisibleTree(graph._TreeIndex({}), {}),
+    )
     monkeypatch.setattr(
         service, "_load_relation_universe", lambda *_args: list(relations)
     )

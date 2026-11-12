@@ -42,7 +42,7 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.schemas.workspace_graph import (
-    WORKSPACE_GRAPH_FOLDER_TOPOLOGY_ROW_LIMIT,
+    WORKSPACE_GRAPH_CONTAINMENT_KIND,
     WorkspaceGraphCapabilities,
     WorkspaceGraphClusterNode,
     WorkspaceGraphDocumentNode,
@@ -51,11 +51,8 @@ from backend.schemas.workspace_graph import (
     WorkspaceGraphFacetCounts,
     WorkspaceGraphFacetValue,
     WorkspaceGraphFocus,
-    WorkspaceGraphFolder,
-    WorkspaceGraphFolderEdgeSlice,
     WorkspaceGraphFolderKey,
-    WorkspaceGraphFolderMembership,
-    WorkspaceGraphFolderTopology,
+    WorkspaceGraphFolderNode,
     WorkspaceGraphOverviewRequest,
     WorkspaceGraphPlacementRef,
     WorkspaceGraphSceneCounts,
@@ -66,6 +63,7 @@ from backend.services.actor_visible_read import (
     agent_page_visible,
     library_item_visible,
 )
+from backend.services.graph_semantics import edge_semantic
 from backend.services.read_errors import ReadValidationError
 from backend.services.workspace_urls import (
     agent_page_url,
@@ -153,6 +151,23 @@ class _TreeIndex:
         ancestors.reverse()
         return ancestors
 
+    def parents(self, node_id: UUID) -> Iterable[_TreeNode]:
+        """Ancestors nearest first, stopping at a loop."""
+        seen = {node_id}
+        current = self.nodes.get(self.nodes[node_id].parent_id)
+        while current is not None and current.id not in seen:
+            seen.add(current.id)
+            yield current
+            current = self.nodes.get(current.parent_id)
+
+
+@dataclass(frozen=True, slots=True)
+class _VisibleTree:
+    """The actor's TreeRail: visible nodes and the scene document each one is."""
+
+    index: _TreeIndex
+    documents: dict[UUID, _DocumentKey]
+
 
 def _visible_folders(ancestors: list[_TreeNode]) -> tuple[_VisibleFolder, ...]:
     folders = [node for node in ancestors if node.node_kind == "folder"]
@@ -224,8 +239,6 @@ class _Document:
     secondary_capped: bool = False
     reference_count: int = 0
     evidence_count: int = 0
-    # TreeRail document ancestors below the primary folder, nearest first.
-    container_keys: tuple[_DocumentKey, ...] = ()
 
     @property
     def node_id(self) -> str:
@@ -478,7 +491,7 @@ class WorkspaceGraphService:
         # publication can therefore omit a relation for this response, but it
         # cannot mix an old-head document with a new-head relation.
         documents = self._load_documents(session, workspace_id, actor)
-        self._attach_tree_placements(session, workspace_id, documents)
+        tree = self._attach_tree_placements(session, workspace_id, documents)
         # Revision and freshness describe the whole actor-visible published
         # document/relation universe, not one lens/filter scene. Applying a
         # filter therefore preserves viewport/pin state while any visible
@@ -571,11 +584,7 @@ class WorkspaceGraphService:
             folder_documents=folder_facet_documents,
             quick_filter_counts=quick_filter_counts,
         )
-        folder_topology = self._folder_topology(documents, relations, rendered)
-        if folder_topology is None:
-            # This is an explicit optional-feature fallback, not a clipped or
-            # invented membership distribution. The authored scene is intact.
-            warnings.append("folder_topology_row_budget_exceeded")
+        folders, containment = self._containment(tree, documents, rendered.groups)
         return WorkspaceGraphScenePayload(
             graph_revision=graph_revision,
             generated_at=generated_at,
@@ -596,9 +605,8 @@ class WorkspaceGraphService:
                 rendered_relations=len(rendered.edges),
             ),
             omission_reasons=rendered.omission_reasons,
-            nodes=rendered.nodes,
-            edges=rendered.edges,
-            folder_topology=folder_topology,
+            nodes=[*rendered.nodes, *folders],
+            edges=[*rendered.edges, *containment],
             facet_counts=facet_counts,
             expansion_cursor=rendered.expansion_cursor,
             expansions=rendered.expansions,
@@ -780,9 +788,9 @@ class WorkspaceGraphService:
         session: Session,
         workspace_id: UUID,
         documents: dict[_DocumentKey, _Document],
-    ) -> None:
+    ) -> _VisibleTree:
         if not documents:
-            return
+            return _VisibleTree(_TreeIndex({}), {})
         node_rows = session.execute(
             select(
                 WorkspaceTreeNode.id,
@@ -954,19 +962,14 @@ class WorkspaceGraphService:
             document.secondary_capped = len(secondary) > 32
             document.secondary = secondary[:32]
             document.secondary_revision = tuple(secondary)
-            # A filtered-out parent document yields to the next one up; the
-            # primary folder ends the walk because it is the folder container.
-            if isinstance(document.primary, _CapturedPlacement):
-                containers: list[_DocumentKey] = []
-                for ancestor in reversed(
-                    index.ancestors(document.primary.tree_node_id)
-                ):
-                    if ancestor.node_kind == "folder":
-                        break
-                    ancestor_key = document_key(ancestor)
-                    if ancestor_key not in (None, key) and ancestor_key in documents:
-                        containers.append(ancestor_key)
-                document.container_keys = tuple(containers)
+        return _VisibleTree(
+            _TreeIndex({node_id: nodes_by_id[node_id] for node_id in visible_ids}),
+            {
+                node_id: key
+                for node_id in visible_ids
+                if (key := document_key(nodes_by_id[node_id])) in documents
+            },
+        )
 
     @staticmethod
     def _apply_document_filters(
@@ -1506,9 +1509,29 @@ class WorkspaceGraphService:
         filter_name: str,
     ) -> set[_DocumentKey]:
         if filter_name == "orphans":
+            # Unlinked: no relation at all. Both ends of containment count,
+            # including a root document that holds another shown document.
             incident = {relation.source for relation in relations} | {
                 relation.target for relation in relations
             }
+            placements = [
+                (key, placement)
+                for key, document in documents.items()
+                for placement in (document.primary, *document.secondary_revision)
+                if isinstance(placement, _CapturedPlacement)
+            ]
+            document_at = {
+                placement.tree_node_id: key for key, placement in placements
+            }
+            for key, placement in placements:
+                for ancestor in placement.index.parents(placement.tree_node_id):
+                    parent = document_at.get(ancestor.id)
+                    if ancestor.node_kind == "folder" or (
+                        parent is not None and parent != key
+                    ):
+                        incident.add(key)
+                    if parent is not None and parent != key:
+                        incident.add(parent)
             return set(documents) - incident
         if filter_name == "highly_referenced":
             inbound_sources: dict[_DocumentKey, set[_DocumentKey]] = defaultdict(set)
@@ -2527,17 +2550,12 @@ class WorkspaceGraphService:
                 incident_by_group[target_group] += 1
 
         nodes: list[WorkspaceGraphDocumentNode | WorkspaceGraphClusterNode] = []
-        rendered_documents = {group.members[0] for group in groups if group.is_document}
         for group in sorted(
             groups, key=lambda value: _group_sort_key(value, documents)
         ):
             if group.is_document:
                 document = documents[group.members[0]]
-                nodes.append(
-                    self._materialize_document_detail(
-                        document, documents, rendered_documents
-                    )
-                )
+                nodes.append(self._materialize_document_detail(document))
             else:
                 nodes.append(
                     WorkspaceGraphClusterNode(
@@ -2589,15 +2607,9 @@ class WorkspaceGraphService:
     @staticmethod
     def _materialize_document_detail(
         document: _Document,
-        documents: dict[_DocumentKey, _Document],
-        rendered_documents: set[_DocumentKey],
     ) -> WorkspaceGraphDocumentNode:
         """Expand presentation only for final, admitted singleton documents."""
 
-        parent_key = next(
-            (key for key in document.container_keys if key in rendered_documents),
-            None,
-        )
         return WorkspaceGraphDocumentNode(
             id=document.node_id,
             entity_kind=document.entity_kind,
@@ -2606,9 +2618,6 @@ class WorkspaceGraphService:
             path=document.path[:1024],
             primary_folder_id=document.folder_id,
             primary_folder_label=document.folder_label[:200],
-            parent_document_id=(
-                documents[parent_key].node_id if parent_key is not None else None
-            ),
             reference_count=document.reference_count,
             evidence_count=document.evidence_count,
             also_appears_in=[
@@ -2622,133 +2631,102 @@ class WorkspaceGraphService:
         )
 
     @staticmethod
-    def _folder_topology(
+    def _containment(
+        tree: _VisibleTree,
         documents: dict[_DocumentKey, _Document],
-        relations: list[_Relation],
-        rendered: _RenderedScene,
-    ) -> WorkspaceGraphFolderTopology | None:
-        """Emit lossless folder inputs after filters, grouping, and edge caps.
+        groups: list[_Group],
+    ) -> tuple[list[WorkspaceGraphFolderNode], list[WorkspaceGraphEdge]]:
+        """TreeRail containment as ordinary relations between scene nodes.
 
-        Complexity is linear in represented documents, relations, and their
-        primary folder ancestor closure. No secondary placement or facet-only
-        folder enters this input. A row-budget overflow disables the entire
-        optional topology, rather than truncating correlated distributions.
+        Each visible placement of a represented document, and each folder node,
+        hangs from its nearest represented ancestor: a document's node (or the
+        cluster holding it), otherwise a folder node. Cycles and several
+        containers are kept like any other relation. ``primary`` marks the one
+        containment a node is laid out from: the most primary placements, then
+        the most placements, then the smaller source id.
         """
 
-        folders: dict[UUID, _VisibleFolder] = {}
-        direct_counts: Counter[UUID] = Counter()
-        memberships: Counter[tuple[str, UUID | None, str]] = Counter()
-        # Rows sort by the text of a folder id (unplaced first); render it once
-        # per folder instead of once per row.
-        folder_text: dict[UUID | None, str] = {None: ""}
-        # What a relation needs from each endpoint, found with one lookup.
-        endpoint: dict[_DocumentKey, tuple[str, UUID | None, str]] = {}
-        for group in rendered.groups:
-            node_id = _group_id(group, documents)
-            for member in group.members:
-                document = documents[member]
-                folder_id = document.folder_id
-                membership = (node_id, folder_id, document.entity_kind)
-                endpoint[member] = membership
-                memberships[membership] += 1
-                if folder_id is not None:
-                    direct_counts[folder_id] += 1
-                    if folder_id not in folder_text:
-                        folder_text[folder_id] = str(folder_id)
-                if document.primary is not None:
-                    for folder in document.primary.folder_ancestors:
-                        folders[folder.id] = folder
-                if (
-                    len(folders) + len(memberships)
-                    > WORKSPACE_GRAPH_FOLDER_TOPOLOGY_ROW_LIMIT
-                ):
-                    return None
+        node_of = {
+            member: _group_id(group, documents)
+            for group in groups
+            for member in group.members
+        }
+        clusters = {
+            _group_id(group, documents) for group in groups if not group.is_document
+        }
+        folders: dict[str, _TreeNode] = {}
+        # (source, target) -> [placements, primary placements]
+        counts: dict[tuple[str, str], list[int]] = {}
 
-        emitted_edges = {edge.id for edge in rendered.edges}
-        edge_ids: dict[tuple[str, str, str, str], str] = {}
-        slices: dict[tuple[str, UUID | None, str, UUID | None, str], list[int]] = {}
-        for relation in relations:
-            source_node, source_folder, source_kind = endpoint[relation.source]
-            target_node, target_folder, target_kind = endpoint[relation.target]
-            # Relations that fold into one rendered edge share its id.
-            edge_key = (source_node, target_node, relation.kind, relation.layer)
-            edge_id = edge_ids.get(edge_key)
-            if edge_id is None:
-                edge_id = edge_ids[edge_key] = _aggregate_edge_id(*edge_key)
-            if edge_id not in emitted_edges:
-                # The existing irreducible kind-floor fallback may omit a
-                # whole edge. Never assign its counts to another visible edge.
-                continue
-            identity = (
-                edge_id,
-                source_folder,
-                source_kind,
-                target_folder,
-                target_kind,
+        def container(tree_node_id: UUID, own: _DocumentKey | None) -> str | None:
+            for ancestor in tree.index.parents(tree_node_id):
+                if ancestor.node_kind == "folder":
+                    folder_id = f"folder:{ancestor.id}"
+                    folders.setdefault(folder_id, ancestor)
+                    return folder_id
+                key = tree.documents.get(ancestor.id)
+                if key is not None and key != own and key in node_of:
+                    return node_of[key]
+            return None
+
+        def contain(source: str | None, target: str, primary: bool) -> None:
+            if source is None or source == target:
+                return
+            entry = counts.setdefault((source, target), [0, 0])
+            entry[0] += 1
+            entry[1] += primary
+
+        for key, node_id in node_of.items():
+            document = documents[key]
+            for placement in (document.primary, *document.secondary_revision):
+                if isinstance(placement, _CapturedPlacement):
+                    contain(
+                        container(placement.tree_node_id, key),
+                        node_id,
+                        placement is document.primary,
+                    )
+        done: set[str] = set()
+        while pending := [folder_id for folder_id in folders if folder_id not in done]:
+            for folder_id in pending:
+                done.add(folder_id)
+                contain(container(folders[folder_id].id, None), folder_id, True)
+
+        primary: dict[str, tuple[int, int, str]] = {}
+        for (source, target), (count, primaries) in counts.items():
+            rank = (-primaries, -count, source)
+            if target not in primary or rank < primary[target]:
+                primary[target] = rank
+        semantic = edge_semantic(WORKSPACE_GRAPH_CONTAINMENT_KIND)
+        edges = [
+            WorkspaceGraphEdge(
+                id=f"contains:{source}|{target}",
+                source=source,
+                target=target,
+                relation_kind=WORKSPACE_GRAPH_CONTAINMENT_KIND,
+                label=semantic.label,
+                layer=semantic.layer,
+                direction="directed",
+                aggregate=count > 1 or source in clusters or target in clusters,
+                relation_count=count,
+                occurrence_weight=count,
+                cross_folder=False,
+                primary=primary[target][2] == source,
             )
-            counts = slices.setdefault(identity, [0, 0])
-            counts[0] += 1
-            counts[1] += relation.occurrence_weight
-            if (
-                len(folders) + len(memberships) + len(slices)
-                > WORKSPACE_GRAPH_FOLDER_TOPOLOGY_ROW_LIMIT
-            ):
-                return None
-
-        return WorkspaceGraphFolderTopology(
-            folders=[
-                WorkspaceGraphFolder(
-                    id=folder.id,
-                    label=folder.label[:200],
-                    parent_folder_id=folder.parent_folder_id,
-                    direct_member_count=direct_counts[folder.id],
-                )
-                for folder in sorted(folders.values(), key=lambda item: str(item.id))
-            ],
-            memberships=[
-                WorkspaceGraphFolderMembership(
-                    node_id=node_id,
-                    folder_id=folder_id,
-                    entity_kind=entity_kind,
-                    member_count=count,
-                )
-                for (node_id, folder_id, entity_kind), count in sorted(
-                    memberships.items(),
-                    key=lambda item: (
-                        item[0][0],
-                        folder_text[item[0][1]],
-                        item[0][2],
-                    ),
-                )
-            ],
-            edge_slices=[
-                WorkspaceGraphFolderEdgeSlice(
-                    edge_id=edge_id,
-                    source_folder_id=source_folder_id,
-                    source_entity_kind=source_entity_kind,
-                    target_folder_id=target_folder_id,
-                    target_entity_kind=target_entity_kind,
-                    relation_count=count,
-                    occurrence_weight=weight,
-                )
-                for (
-                    edge_id,
-                    source_folder_id,
-                    source_entity_kind,
-                    target_folder_id,
-                    target_entity_kind,
-                ), (count, weight) in sorted(
-                    slices.items(),
-                    key=lambda item: (
-                        item[0][0],
-                        folder_text[item[0][1]],
-                        item[0][2],
-                        folder_text[item[0][3]],
-                        item[0][4],
-                    ),
-                )
-            ],
-        )
+            for (source, target), (count, _primaries) in sorted(counts.items())
+        ]
+        nodes = [
+            WorkspaceGraphFolderNode(
+                id=folder_id,
+                folder_id=folder.id,
+                label=folder.title[:200],
+                path=" / ".join(
+                    [node.title for node in tree.index.ancestors(folder.id)]
+                    + [folder.title]
+                )[:1024],
+            )
+            for folder_id, folder in sorted(folders.items())
+        ]
+        return nodes, edges
 
     @staticmethod
     def _graph_revision(

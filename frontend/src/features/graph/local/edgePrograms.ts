@@ -5,24 +5,53 @@ import {
   type ProgramDefinition,
   type ProgramInfo,
 } from "sigma/rendering";
+import type Sigma from "sigma";
 import type { EdgeDisplayData, NodeDisplayData, RenderParams } from "sigma/types";
-import { floatColor } from "sigma/utils";
+import { parseColor, rgbaToFloat } from "sigma/utils";
 
-import { GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, type GraphEdgeVisualKind } from "../shared/graphTokens";
+import {
+  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, graphLineFade, type GraphEdgeVisualKind,
+} from "../shared/graphTokens";
 
-// Local strokes deliberately use CSS-pixel widths. The Workspace Map has a
-// separate renderer and should not inherit these values or this edge buffer.
-export const LOCAL_EDGE_HALF_WIDTH_PX = {
-  link: 0.75,
-  citation: 0.75,
-  coAccess: 0.8,
-  membership: 0.65,
-  actionWrite: 1,
-  actionCite: 0.85,
-  actionRead: 0.55,
-  actionReference: 0.5,
-  action: 0.85,
-} as const satisfies Record<GraphEdgeVisualKind, number>;
+// Every line has the legend's one CSS-pixel width; half of it on each side.
+export const LOCAL_EDGE_HALF_WIDTH_PX = GRAPH_EDGE_WIDTH_PX / 2;
+
+/**
+ * The edge reducer's line state, as on the Map: "selected" while a selection
+ * or history step is emphasised (ink x emphasis, no fade), "forced" in forced
+ * colours (ink, no fade).
+ */
+export type LocalLineState = "rest" | "selected" | "forced";
+
+// Lines are measured in the camera of the renderer's last Fit, so the reader's
+// zoom never changes a line's opacity. Before any Fit: Sigma's home view.
+const HOME_CAMERA = { x: 0.5, y: 0.5, angle: 0, ratio: 1 };
+const fitCameras = new WeakMap<Sigma, typeof HOME_CAMERA>();
+
+/** Records the camera ratio a Fit used: the long-line fade measures lines in that view. */
+export function setLocalFitRatio(renderer: Sigma, ratio: number): void {
+  fitCameras.set(renderer, { ...HOME_CAMERA, ratio });
+}
+
+/** The Map's line opacity rules (GRAPH_LINE_OPACITY) for one Context line. */
+function lineOpacity(renderer: Sigma, source: NodeDisplayData, target: NodeDisplayData, data: EdgeDisplayData): number {
+  const state = (data as EdgeDisplayData & { lineState?: LocalLineState }).lineState;
+  const ink = data.type === "citation" ? GRAPH_LINE_OPACITY.citation : GRAPH_LINE_OPACITY.line;
+  if (state === "selected") return Math.min(1, ink * GRAPH_LINE_OPACITY.emphasis);
+  if (state === "forced") return ink;
+  const cameraState = fitCameras.get(renderer) ?? HOME_CAMERA;
+  const start = renderer.framedGraphToViewport(source, { cameraState });
+  const end = renderer.framedGraphToViewport(target, { cameraState });
+  return ink * graphLineFade(Math.hypot(end.x - start.x, end.y - start.y), renderer.getGraph().size);
+}
+
+const inks = new Map<string, ReturnType<typeof parseColor>>();
+/** The colour's alpha times the line opacity, in whole 1/255 steps (Sigma's packing). */
+function fadedAlpha(color: string, opacity: number): { ink: ReturnType<typeof parseColor>; alpha: number } {
+  let ink = inks.get(color);
+  if (ink === undefined) { ink = parseColor(color); inks.set(color, ink); }
+  return { ink, alpha: (ink.a * opacity * 255) | 0 };
+}
 
 // Sigma sizes an arrowhead from the edge's `size`, which hover and history
 // emphasis change. The head keeps one size; only its line is emphasised.
@@ -45,8 +74,14 @@ type ProcessVisibleItem = (
 const arrowHead = LocalArrowHeadProgram.prototype as unknown as { processVisibleItem: ProcessVisibleItem };
 const processArrowHead = arrowHead.processVisibleItem;
 arrowHead.processVisibleItem = function (edgeIndex, startIndex, sourceData, targetData, data) {
+  // The head fades with its line. Sigma packs the head's colour from a string;
+  // its shader passes the colour through, so premultiply it here as the line does.
+  const { ink, alpha } = fadedAlpha(data.color,
+    lineOpacity((this as { renderer: Sigma }).renderer, sourceData, targetData, data));
+  const share = alpha / 255;
   processArrowHead.call(this, edgeIndex, startIndex, sourceData, targetData, {
     ...data,
+    color: `rgba(${Math.round(ink.r * share)}, ${Math.round(ink.g * share)}, ${Math.round(ink.b * share)}, ${share})`,
     size: ARROW_HEAD_THICKNESS,
   });
 };
@@ -64,6 +99,7 @@ const UNIFORMS = [
   "u_halfWidthPx",
   "u_dashOnPx",
   "u_dashOffPx",
+  "u_rampPx",
 ] as const;
 type EdgeUniform = (typeof UNIFORMS)[number];
 
@@ -89,6 +125,7 @@ attribute float a_normalCoef;
 uniform mat3 u_matrix;
 uniform vec2 u_viewportPx;
 uniform float u_halfWidthPx;
+uniform float u_rampPx;
 
 varying vec4 v_color;
 varying float v_alongPx;
@@ -102,8 +139,9 @@ void main(void) {
   vec2 perpendicularPx = edgeLengthPx > 0.0001
     ? vec2(-edgePx.y, edgePx.x) / edgeLengthPx
     : vec2(0.0, 1.0);
+  // The quad also holds half a ramp outside the stroke, as the Map's line does.
   vec2 offsetClip = perpendicularPx * a_normalCoef
-    * u_halfWidthPx * (2.0 / u_viewportPx);
+    * (u_halfWidthPx + 0.5 * u_rampPx) * (2.0 / u_viewportPx);
 
   gl_Position = vec4(mix(startClip, endClip, a_positionCoef) + offsetClip, 0.0, 1.0);
   v_alongPx = a_positionCoef * edgeLengthPx;
@@ -128,6 +166,7 @@ precision mediump float;
 uniform float u_halfWidthPx;
 uniform float u_dashOnPx;
 uniform float u_dashOffPx;
+uniform float u_rampPx;
 
 varying vec4 v_color;
 varying float v_alongPx;
@@ -142,17 +181,20 @@ void main(void) {
   if (u_dashOffPx > 0.0 && mod(v_alongPx, u_dashOnPx + u_dashOffPx) >= u_dashOnPx) {
     discard;
   }
-  // A quarter CSS pixel of feather preserves thin membership strokes at DPR 1.
-  float inner = max(0.0, u_halfWidthPx - 0.25);
-  float alpha = 1.0 - smoothstep(inner, u_halfWidthPx, abs(v_across) * u_halfWidthPx);
-  gl_FragColor = vec4(v_color.rgb, v_color.a * alpha);
+  // The Map line's anti-aliasing: a one-device-pixel ramp centred on the stroke edge.
+  float distancePx = abs(v_across) * (u_halfWidthPx + 0.5 * u_rampPx);
+  float alpha = 1.0 - smoothstep(u_halfWidthPx - 0.5 * u_rampPx, u_halfWidthPx + 0.5 * u_rampPx, distancePx);
+  // Sigma blends premultiplied (ONE, ONE_MINUS_SRC_ALPHA): a translucent line
+  // must scale its colour by its alpha, or the browser composites it too light.
+  float opacity = v_color.a * alpha;
+  gl_FragColor = vec4(v_color.rgb * opacity, opacity);
 #endif
 }
 `;
 
 function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
   const dash = GRAPH_EDGE_PATTERN[kind];
-  const halfWidthPx = LOCAL_EDGE_HALF_WIDTH_PX[kind];
+  const halfWidthPx = LOCAL_EDGE_HALF_WIDTH_PX;
 
   return class LocalEdgeProgram extends EdgeProgram<EdgeUniform> {
     getDefinition(): ProgramDefinition<EdgeUniform> {
@@ -180,7 +222,8 @@ function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
       targetData: NodeDisplayData,
       data: EdgeDisplayData,
     ): void {
-      const color = floatColor(data.color);
+      const { ink, alpha } = fadedAlpha(data.color, lineOpacity(this.renderer, sourceData, targetData, data));
+      const color = rgbaToFloat(ink.r, ink.g, ink.b, alpha, true);
       for (const [along, across] of QUAD_CORNERS) {
         this.array[startIndex++] = sourceData.x;
         this.array[startIndex++] = sourceData.y;
@@ -201,6 +244,8 @@ function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
       gl.uniform1f(uniformLocations.u_halfWidthPx, isPicking
         ? Math.max(halfWidthPx, PICK_HALF_WIDTH_PX)
         : halfWidthPx);
+      // One device pixel in CSS px: the same ramp as the Map's line shader.
+      gl.uniform1f(uniformLocations.u_rampPx, isPicking ? 0 : 1 / Math.max(1, params.pixelRatio));
       // The picking shader removes dash uniforms at compile time.
       if (uniformLocations.u_dashOnPx) {
         gl.uniform1f(uniformLocations.u_dashOnPx, dash?.[0] ?? 0);

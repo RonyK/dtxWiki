@@ -21,6 +21,10 @@ from backend.policy.auth import ActorContext
 from backend.schemas.workspace_graph import WorkspaceGraphOverviewRequest
 from backend.services.read_errors import ReadValidationError
 from backend.services.workspace_graph_service import WorkspaceGraphService
+from backend.tests.utils.workspace_graph_corpora import (
+    relation_edges,
+    represented_nodes,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -281,7 +285,7 @@ def test_exact_workspace_scene_uses_published_authored_metrics_and_placements(
         assert [
             placement.tree_node_id for placement in target_node.also_appears_in
         ] == [secondary.id]
-        assert all(edge.cross_folder for edge in links.edges)
+        assert all(edge.cross_folder for edge in relation_edges(links))
         orphan_node = next(
             node
             for node in links.nodes
@@ -313,7 +317,7 @@ def test_exact_workspace_scene_uses_published_authored_metrics_and_placements(
         )
         assert default_scene.completeness == "complete"
         assert default_scene.counts.candidate_relations == 3
-        assert {edge.relation_kind for edge in default_scene.edges} == {
+        assert {edge.relation_kind for edge in relation_edges(default_scene)} == {
             "wikilink",
             "citation_source",
         }
@@ -598,6 +602,41 @@ def test_highly_referenced_metric_stays_pre_quick_filter_authoritative(
         )
         assert hub_node.reference_count == 3
         assert scene.metric_basis.endswith("pre_quick.v1")
+
+
+def test_orphans_quick_filter_counts_containment_as_a_relation(session_factory):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        lonely, _lonely_version = _page(session, workspace_id, "orphan-lonely")
+        _placement(session, workspace_id, lonely, None)
+        placed, _placed_version = _page(session, workspace_id, "orphan-placed")
+        _placement(
+            session,
+            workspace_id,
+            placed,
+            _folder(session, workspace_id, "Orphan folder"),
+        )
+        parent, _parent_version = _page(session, workspace_id, "orphan-parent")
+        parent_placement = _placement(session, workspace_id, parent, None)
+        child, _child_version = _page(session, workspace_id, "orphan-child")
+        _placement(session, workspace_id, child, parent_placement)
+        source, source_version = _page(session, workspace_id, "orphan-source")
+        target, _target_version = _page(session, workspace_id, "orphan-target")
+        _link(session, workspace_id, source, source_version, target)
+
+    with session_factory() as session:
+        scene = WorkspaceGraphService(cursor_secret="orphan-secret").query(
+            session,
+            workspace_id,
+            request=WorkspaceGraphOverviewRequest(
+                lens="links", quick_filters=["orphans"]
+            ),
+            actor=_actor(),
+        )
+    shown = {node.entity_id for node in scene.nodes if node.grain == "document"}
+    # Containment links both the held document and its root-level container.
+    assert lonely.id in shown
+    assert not shown & {placed.id, parent.id, child.id, source.id, target.id}
 
 
 def test_authored_relations_do_not_require_edge_projection(session_factory):
@@ -1173,8 +1212,8 @@ def test_dense_component_suppresses_infeasible_expansion_without_error(
             actor=actor,
         )
         cluster = next(node for node in base.nodes if node.grain == "cluster")
-        assert len(base.nodes) <= 3
-        assert len(base.edges) <= 1
+        assert len(represented_nodes(base)) <= 3
+        assert len(relation_edges(base)) <= 1
         assert base.expansion_cursor is None
         assert base.capabilities.expand is False
 
@@ -1190,13 +1229,13 @@ def test_dense_component_suppresses_infeasible_expansion_without_error(
             ),
             actor=actor,
         )
-        assert len(suppressed.nodes) <= 3
-        assert len(suppressed.edges) <= 1
+        assert len(represented_nodes(suppressed)) <= 3
+        assert len(relation_edges(suppressed)) <= 1
         assert suppressed.expansion_cursor is None
         assert suppressed.capabilities.expand is False
         assert sum(
             1 if node.grain == "document" else node.member_count
-            for node in suppressed.nodes
+            for node in represented_nodes(suppressed)
         ) == len(pages)
 
 
@@ -1278,11 +1317,11 @@ def test_aggregate_cursor_round_trip_is_bounded_bound_and_tamper_evident(
             actor=actor,
         )
         assert base.representation == "aggregated"
-        assert len(base.nodes) <= 3
+        assert len(represented_nodes(base)) <= 3
         assert (
             sum(
                 1 if node.grain == "document" else node.member_count
-                for node in base.nodes
+                for node in represented_nodes(base)
             )
             == 6
         )
@@ -1305,12 +1344,12 @@ def test_aggregate_cursor_round_trip_is_bounded_bound_and_tamper_evident(
                 ),
                 actor=actor,
             )
-            assert len(expanded.nodes) <= 3
-            assert len(expanded.edges) <= 10
+            assert len(represented_nodes(expanded)) <= 3
+            assert len(relation_edges(expanded)) <= 10
             assert (
                 sum(
                     1 if node.grain == "document" else node.member_count
-                    for node in expanded.nodes
+                    for node in represented_nodes(expanded)
                 )
                 == 6
             )
@@ -1413,8 +1452,8 @@ def test_focus_document_is_pinned_when_the_scene_is_aggregated(session_factory):
             assert scene.focus.status == "document"
             assert scene.focus.node_id == focused.id
             assert scene.counts.candidate_documents == len(page_ids)
-            assert len(scene.nodes) <= 250
-            assert len(scene.edges) <= 750
+            assert len(represented_nodes(scene)) <= 250
+            assert len(relation_edges(scene)) <= 750
 
 
 def test_focus_falls_back_to_its_cluster_when_no_slot_can_be_reserved(
@@ -1521,7 +1560,7 @@ def test_focus_is_pinned_when_the_relation_budget_forces_aggregation(
         for node in scene.nodes
         if node.grain == "document"
     )
-    assert len(scene.edges) <= 4
+    assert len(relation_edges(scene)) <= 4
 
 
 def test_cluster_expansion_keeps_the_pinned_focus(session_factory):
@@ -1594,7 +1633,7 @@ def test_cluster_expansion_keeps_the_pinned_focus(session_factory):
                 node.id == expanded.focus.node_id and node.entity_id == focus_id
                 for node in expanded.nodes
             )
-            assert len(expanded.nodes) <= 3
+            assert len(represented_nodes(expanded)) <= 3
 
 
 @pytest.mark.parametrize("document_kind", ["context", "library", "library_uri"])
@@ -1833,7 +1872,9 @@ def test_map_search_matches_full_titles_and_primary_visible_placement_path(
                 request=WorkspaceGraphOverviewRequest(search=search),
                 actor=_actor(),
             )
-            assert {node.entity_id for node in payload.nodes} == expected, search
+            assert {
+                node.entity_id for node in represented_nodes(payload)
+            } == expected, search
             if search == "FullTitleTail":
                 assert payload.nodes[0].label == "A" * 200
 
@@ -1854,7 +1895,7 @@ def test_map_search_ignores_navigation_uuid_but_matches_uuid_in_real_title(
         session.get(ContextPage, page_id).title = f"A real identifier {page_id}"
     with session_factory() as session:
         after = service.query(session, workspace_id, request=request, actor=_actor())
-    assert {node.entity_id for node in after.nodes} == {page_id}
+    assert {node.entity_id for node in represented_nodes(after)} == {page_id}
 
 
 def test_map_search_uses_no_hidden_ancestor_or_secondary_placement_metadata(
@@ -1889,7 +1930,7 @@ def test_map_search_uses_no_hidden_ancestor_or_secondary_placement_metadata(
             request=WorkspaceGraphOverviewRequest(search="Visible Primary"),
             actor=_actor(),
         )
-    assert {node.entity_id for node in visible.nodes} == {primary_id}
+    assert {node.entity_id for node in represented_nodes(visible)} == {primary_id}
 
 
 def _unplaced_folder_fixture(session, workspace_id):
@@ -1941,7 +1982,9 @@ def test_unplaced_filter_matches_root_missing_and_hidden_primary_folders(
                 request=WorkspaceGraphOverviewRequest(folders=folders),
                 actor=_actor(),
             )
-            assert {node.entity_id for node in payload.nodes} == expected, folders
+            assert {
+                node.entity_id for node in represented_nodes(payload)
+            } == expected, folders
             assert {
                 facet.value: facet.count for facet in payload.facet_counts.folders
             } == {

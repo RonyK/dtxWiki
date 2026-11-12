@@ -213,8 +213,8 @@ export function LocalGraphListView({
   const matches = useMemo(() => localListMatches(query), [query]);
   const nodeText = useCallback((id: string) => {
     const node = analysis.nodesById.get(id);
-    return node ? localNodeSearchText(node, t) : "";
-  }, [analysis, t]);
+    return node ? localNodeSearchText(node, context) : "";
+  }, [analysis, context]);
   const relationText = useCallback((edge: GraphEdge) => localRelationSearchText(edgeView(edge)), [edgeView]);
   // A relation matches by its own names or by either end (a node matches by
   // its name and kind names). In a seed's group every row has the seed at one
@@ -225,7 +225,7 @@ export function LocalGraphListView({
     [nodeText, relationText]);
   const seedRowMatches = useCallback((seedId: string) => (edge: GraphEdge) =>
     matches(seedRowText(edge, edge.source === seedId ? edge.target : edge.source)), [matches, seedRowText]);
-  const nodeMatches = useCallback((node: GraphNode) => matches(localNodeSearchText(node, t)), [matches, t]);
+  const nodeMatches = useCallback((node: GraphNode) => matches(localNodeSearchText(node, context)), [context, matches]);
   const rings = useMemo(() => localSceneRings(analysis), [analysis]);
   const searching = Boolean(query.trim());
   const filtered = useMemo(() => ({
@@ -384,7 +384,7 @@ export function LocalGraphListView({
             incomingNote: t("graph.list.incomingNote"),
             outgoingNote: t("graph.list.outgoingNote"),
             searchLabel: t("graph.list.search"),
-            searchPlaceholder: t("graph.list.searchPlaceholder"),
+            searchPlaceholder: t("relationList.searchPlaceholder"),
             self: t("graph.view.seed"),
             title: t("graph.list.groups.seed"),
             undirectedNote: t("graph.list.undirectedNote"),
@@ -420,7 +420,7 @@ export function LocalGraphListView({
       <div className="relation-list-search graph-list-search">
         <Search aria-hidden="true" size={15} />
         <input aria-label={t("graph.list.search")} onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder={t("graph.list.searchPlaceholder")} ref={inputRef} type="search" value={query} />
+          placeholder={t("relationList.searchPlaceholder")} ref={inputRef} type="search" value={query} />
         {query ? <button aria-label={t("graph.list.clearSearch")} className="relation-list-search-clear"
           onClick={() => { setQuery(""); inputRef.current?.focus(); }} type="button"><X aria-hidden="true" size={14} /></button> : null}
       </div>

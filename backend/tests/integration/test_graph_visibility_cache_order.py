@@ -13,7 +13,12 @@ from backend.models.context import ContextPage, ContextPageVersion, EdgeProjecti
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
-from backend.schemas.graph import GraphBudget, GraphQueryRequest, GraphSeed
+from backend.schemas.graph import (
+    GraphBudget,
+    GraphQueryRequest,
+    GraphSeed,
+    GraphTimeQuery,
+)
 from backend.services import graph_query_service as query_module
 from backend.services import graph_service as graph_module
 from backend.services.graph_query_service import GraphQueryService
@@ -157,9 +162,7 @@ def test_reader_cache_order_preserves_each_readers_fresh_graph_scene(
                     visibility_status="visible",
                 )
             )
-            session.add(
-                _tree_edge(workspace_id, placement_id, seed.id, weight=9.0)
-            )
+            session.add(_tree_edge(workspace_id, placement_id, seed.id, weight=9.0))
         seed_id = seed.id
 
     def clear_caches():
@@ -188,3 +191,83 @@ def test_reader_cache_order_preserves_each_readers_fresh_graph_scene(
     # Preserve the existing internal tree semantics rather than silently
     # narrowing actor=None to viewer visibility to make the cache test pass.
     assert any("PRIVACY SENTINEL" in node.label for node in fresh["internal"].nodes)
+
+
+def _placement(workspace_id, page, *, parent_id=None):
+    return WorkspaceTreeNode(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        section="context",
+        node_kind="page_ref",
+        parent_id=parent_id,
+        sort_key=page.slug,
+        title=page.title,
+        slug=page.slug,
+        target_kind="context_page",
+        target_id=page.id,
+        visibility_status="visible",
+    )
+
+
+def test_document_containment_follows_the_readers_treerail_placement(
+    session_factory, monkeypatch
+):
+    # Independent failure path: a placement chain hidden above a visible
+    # container document. Reading the placement as the document must not
+    # skip the TreeRail chain check that the placement itself would get.
+    monkeypatch.setattr(query_module, "utc_now", lambda: _NOW)
+    with session_factory.begin() as session:
+        workspace_id = session.scalar(
+            select(Workspace.id).where(Workspace.slug == "default")
+        )
+        draft = _page(session, workspace_id, "PRIVATE DRAFT", published=False)
+        container = _page(session, workspace_id, "Visible Container")
+        child = _page(session, workspace_id, "Visible Child")
+        draft_placement = _placement(workspace_id, draft)
+        container_placement = _placement(
+            workspace_id, container, parent_id=draft_placement.id
+        )
+        session.add_all([draft_placement, container_placement])
+        session.flush()
+        session.add(_placement(workspace_id, child, parent_id=container_placement.id))
+        session.add(
+            _tree_edge(workspace_id, draft_placement.id, container.id, weight=1)
+        )
+        session.add(
+            _tree_edge(workspace_id, container_placement.id, child.id, weight=1)
+        )
+        container_id, child_id = container.id, child.id
+
+    editor = ActorContext(
+        actor_kind="human",
+        actor_id="cache-order-editor",
+        token_kind="session",
+        scopes=(),
+        workspace_role="editor",
+    )
+    contained = {}
+    with session_factory() as session:
+        for name, actor in (("viewer", _VIEWER), ("editor", editor)):
+            scene = GraphQueryService().query(
+                session,
+                workspace_id,
+                request=GraphQueryRequest(
+                    seeds=[GraphSeed(kind="context_page", id=container_id)],
+                    preset="all",
+                    direction="both",
+                    time=GraphTimeQuery(mode="appearance"),
+                    budget=GraphBudget(nodes=50, edges=150),
+                ),
+                actor=actor,
+                usage_signals_enabled=False,
+            )
+            node_ids = {node.entity_id: node.id for node in scene.nodes}
+            assert container_id in node_ids, name
+            contained[name] = any(
+                edge.edge_kind == "tree"
+                and edge.source == node_ids[container_id]
+                and edge.target == node_ids.get(child_id)
+                for edge in scene.edges
+            )
+
+    assert contained == {"viewer": False, "editor": True}

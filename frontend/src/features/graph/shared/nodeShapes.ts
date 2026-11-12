@@ -7,8 +7,8 @@ import type { GraphNodeShape } from "./graphTokens";
  * and a triangle's circumradius is enlarged so its area does not read smaller.
  */
 export const TRIANGLE_RADIUS_FACTOR = 1.35;
-/** Folder/grouping ring: band width as a fraction of the outer radius. */
-export const RING_BAND_FACTOR = 0.24;
+/** Folder/grouping ring: band width in CSS pixels at every size and zoom. */
+export const GRAPH_RING_BAND_PX = 2;
 /** Forced-colours Agent outline: [inner gap radius, inner fill radius] as fractions of the outer extent. */
 export const FORCED_OUTLINE_INSETS = {
   circle: [0.8, 0.55],

@@ -1,13 +1,7 @@
 import {
-  Download,
+  Layers,
   Maximize2,
-  Scan,
-  Pause,
-  Play,
-  RotateCcw,
   X,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import {
@@ -18,18 +12,18 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { CitationEvidenceSection } from "./shared/CitationEvidenceSection";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import {
   queryWorkspaceGraph,
+  workspaceGraphAdmissionCounts,
   type WorkspaceGraphAvailableLens,
   type WorkspaceGraphDataFilters,
   type WorkspaceGraphEdge,
@@ -49,8 +43,6 @@ import { useWorkspaceRoute } from "../../shared/lib/workspaceRoutes";
 import { useWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 import type { GraphCanvasHandle } from "./GraphCanvas";
 import { buildWorkspaceMapColumns, workspaceMapAdmissionCounts } from "./map/sceneColumns";
-import { prepareWorkspaceMapFolderSceneOnce } from "./map/folderPreparationCache";
-import type { WorkspaceMapPreparedFolderScene } from "./map/folderScene";
 import { canAnimateWorkspaceRelationLayout } from "./shared/workspaceLayoutPolicy";
 import { assertWorkspaceMapWithinBudget, isWorkspaceMapWithinBudget, readWorkspaceMapDeviceProfile,
   workspaceMapBudget, type WorkspaceMapScale } from "./shared/workspaceMapBudget";
@@ -75,9 +67,12 @@ import {
   workspaceGraphRelationNames,
 } from "./workspace/WorkspaceGraphSidebarParts";
 import { GraphEdgeCue } from "./shared/GraphCues";
+import { GraphLegendGroups, graphLegendRelationNames } from "./shared/GraphLegend";
+import { GraphCanvasControls } from "./shared/GraphCanvasControls";
+import { GraphDetailActions, GraphDetailCenterButton, type GraphPinState } from "./shared/GraphDetailActions";
 import { WorkspaceGraphSelectionCard } from "./workspace/WorkspaceGraphSelectionCard";
 import { RETAINED_EXPANSION_LIMIT, retainedExpansions, type WorkspaceGraphExpansionStep } from "./workspace/workspaceGraphExpansion";
-import { formatCount, workspaceGraphEnumLabel } from "./workspace/workspaceGraphLabels";
+import { formatCount, workspaceGraphEnumLabel, workspaceGraphNodeLocation } from "./workspace/workspaceGraphLabels";
 import type { WorkspaceMapSafeInsets } from "./workspace/cosmosAdapter";
 import { localizeWorkspaceRenderEdges } from "./workspace/localizeRenderEdges";
 import { WorkspaceGraphFolderFilters } from "./WorkspaceGraphFolderFilters";
@@ -96,6 +91,7 @@ import {
   searchWorkspaceGraphItems,
   WORKSPACE_GRAPH_RELATION_GROUPS,
   workspaceGraphDisplayItems,
+  workspaceGraphHeldCount,
   workspaceGraphNodeRelations,
   workspaceGraphRenderScene,
   workspaceGraphRequest,
@@ -121,15 +117,6 @@ type WorkspaceGraphListFocus = {
   request: WorkspaceGraphOverviewRequest;
   storageEpoch: number;
 };
-type WorkspaceGraphFolderSelection = {
-  id: string;
-  scope: WorkspaceGraphAuthorityScope;
-  request: WorkspaceGraphOverviewRequest;
-  visibleFingerprint: string;
-};
-type WorkspaceMapFolderContext = Pick<WorkspaceMapPreparedFolderScene,
-  "points" | "folders" | "relations" | "folderBundles" | "geometryFingerprint">;
-const WORKSPACE_MAP_FOLDER_METADATA_BUDGET = { points: 25_000, relations: 100_000 } as const;
 
 export function WorkspaceGraphScreen() {
   const { t } = useTranslation("graph");
@@ -260,11 +247,6 @@ export function WorkspaceGraphScreen() {
     setAnnouncement("");
   }, []);
   const [layoutPaused, setLayoutPaused] = useState(false);
-  const [folderGrouping, setFolderGrouping] = useState(false);
-  // Optional metadata has its own scoped selection, never a native point ID.
-  const [folderSelection, setFolderSelection] = useState<WorkspaceGraphFolderSelection | null>(null);
-  const selectedFolderIdRef = useRef<string | null>(null);
-  const folderOpenerRef = useRef<HTMLButtonElement | null>(null);
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const forcedColors = useMediaQuery("(forced-colors: active)");
   const mobileLayout = useMediaQuery("(max-width: 640px)");
@@ -320,8 +302,6 @@ export function WorkspaceGraphScreen() {
     resetExpansionState();
     setLoading(false);
     setLayoutPaused(false);
-    setFolderGrouping(false);
-    setFolderSelection(null);
   }, [actorId, authorityScope, observedRole, resetExpansionState, workspaceId]);
 
   const request = useMemo(
@@ -340,7 +320,7 @@ export function WorkspaceGraphScreen() {
   const committedRequestRef = useRef(request);
   useLayoutEffect(() => { committedRequestRef.current = request; }, [request]);
   const scene = receivedScene && sceneOwner?.scope === authorityScope && sceneOwner.request === request
-    && isWorkspaceMapWithinBudget({ nodeCount: receivedScene.nodes.length, edgeCount: receivedScene.edges.length }, mapBudget)
+    && isWorkspaceMapWithinBudget(workspaceGraphAdmissionCounts(receivedScene), mapBudget)
     ? receivedScene : null;
 
   useEffect(() => {
@@ -371,7 +351,7 @@ export function WorkspaceGraphScreen() {
     void queryWorkspaceGraph(workspaceId, request, { signal: controller.signal })
       .then((payload) => {
         if (!readIsCurrent()) return;
-        assertWorkspaceMapWithinBudget({ nodeCount: payload.nodes.length, edgeCount: payload.edges.length }, request.budget);
+        assertWorkspaceMapWithinBudget(workspaceGraphAdmissionCounts(payload), request.budget);
         let invalidOwnerRestoration = false;
         const restored = loadWorkspaceGraphState(
           workspaceId,
@@ -481,9 +461,8 @@ export function WorkspaceGraphScreen() {
   }, []);
 
   const orphanIds = useMemo(() => scene ? workspaceGraphOrphanIds(scene) : new Set<string>(), [scene]);
-  // Directory has no relations, so "unlinked" would hide every document there;
-  // the orphan quick filter keeps only unlinked documents.
-  const orphansAlwaysShown = state.lens === "directory" || state.dataFilters.quick_filters.includes("orphans");
+  // The orphan quick filter keeps only unlinked documents: hiding them would empty the map.
+  const orphansAlwaysShown = state.dataFilters.quick_filters.includes("orphans");
   const showOrphans = orphansAlwaysShown || state.display.show_orphans;
   // The same lack of relations leaves a relation-time window with no documents.
   const directoryRelationTime = state.lens === "directory"
@@ -516,80 +495,6 @@ export function WorkspaceGraphScreen() {
     })
     : null,
   [actorId, authorityScope, orphanIds, request, scene, sceneOwner, showOrphans, state.viewerId, workspaceId]);
-  // The API has already validated correlated topology. Keep the optional
-  // control available without eagerly sorting/hashing every folder relation.
-  const folderMetadataInBudget = useMemo(() => {
-    const topology = scene?.folder_topology;
-    return Boolean(topology
-      && topology.memberships.length + topology.folders.length <= WORKSPACE_MAP_FOLDER_METADATA_BUDGET.points
-      && topology.edge_slices.length + topology.folders.reduce((count, folder) =>
-        count + Number(folder.parent_folder_id !== null), 0) <= WORKSPACE_MAP_FOLDER_METADATA_BUDGET.relations);
-  }, [scene]);
-  const ownsMapScene = mapColumns !== null;
-  // Still null until the first enable; a later off -> on reuses the scene's
-  // preparation instead of sorting and hashing every relation again.
-  const folderPreparation = useMemo(() => scene && ownsMapScene && folderGrouping && folderMetadataInBudget
-    ? prepareWorkspaceMapFolderSceneOnce(scene, { budgets: WORKSPACE_MAP_FOLDER_METADATA_BUDGET }) : null,
-  [folderGrouping, folderMetadataInBudget, ownsMapScene, scene]);
-  const folderAvailable = ownsMapScene && folderMetadataInBudget
-    && (!folderGrouping || folderPreparation?.supported === true);
-  const folderContext = useMemo(() => folderPreparation?.supported && mapColumns
-    ? visibleWorkspaceMapFolderContext(folderPreparation, new Set(mapColumns.nodeIds)) : null,
-  [folderPreparation, mapColumns]);
-  const folderScene = folderGrouping ? folderContext : null;
-  const effectiveFolderGrouping = folderScene !== null;
-  const folderSelectionFingerprint = mapColumns && folderContext
-    ? `${mapColumns.identity.visibleFingerprint}:${folderContext.geometryFingerprint}` : null;
-  const selectedFolderId = folderSelection && folderSelection.scope === authorityScope
-    && folderSelection.request === request
-    && folderSelection.visibleFingerprint === folderSelectionFingerprint
-    ? folderSelection.id : null;
-  const selectedFolder = folderScene?.folders.find((folder) => folder.id === selectedFolderId) ?? null;
-  useLayoutEffect(() => { selectedFolderIdRef.current = selectedFolder?.id ?? null; }, [selectedFolder?.id]);
-  const restoreFolderFocus = useCallback((sourceId: string | null) => {
-    const modalPanel = modalPanelRef.current;
-    const panel = modalPanel?.dataset.workspaceGraphModal === "mobile-canvas" ? modalPanel : screenRef.current;
-    if (!panel) return;
-    const usable = (element: HTMLElement | null | undefined): element is HTMLElement => {
-      const closed = element?.closest("details:not([open])");
-      return Boolean(element && panel.contains(element)
-        && (!closed || closed.querySelector("summary")?.contains(element))
-        && isUsableModalOpener(element));
-    };
-    const originalOpener = folderOpenerRef.current;
-    const folderButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("[data-map-folder-id]"))
-      .find((button) => button.dataset.mapFolderId === selectedFolderIdRef.current);
-    const sourceButton = sourceId === null ? null
-      : Array.from(panel.querySelectorAll<HTMLElement>("[data-graph-node-id]"))
-        .find((row) => row.dataset.graphNodeId === sourceId)?.querySelector<HTMLButtonElement>(".workspace-graph-list-select");
-    const mapControl = sourceId === null ? null
-      : panel.querySelector<HTMLButtonElement>(".graph-canvas-toolbar button:not(:disabled)");
-    const folderToggle = panel.querySelector<HTMLButtonElement>(".workspace-graph-folder-toggle");
-    const viewSummary = panel.querySelector<HTMLElement>(".workspace-graph-view-options > summary");
-    const candidates = sourceId === null ? [originalOpener, folderButton, folderToggle, viewSummary]
-      : [mapControl, sourceButton, originalOpener, folderButton, folderToggle, viewSummary];
-    const target = candidates.find(usable);
-    const scope = committedScopeRef.current;
-    const storageEpoch = workspaceGraphStorageEpoch();
-    requestAnimationFrame(() => {
-      if (!authorityIsCurrent(scope, storageEpoch) || !panel.isConnected || !usable(target)) return;
-      target.focus({ preventScroll: true });
-    });
-  }, [authorityIsCurrent]);
-  const closeFolderDetails = useCallback(() => {
-    restoreFolderFocus(null);
-    setFolderSelection(null);
-  }, [restoreFolderFocus]);
-  const selectFolder = (id: string) => {
-    if (!folderScene?.folders.some((folder) => folder.id === id)
-      || !actorId || !workspaceId || !folderSelectionFingerprint) return;
-    setFolderSelection({ id, scope: authorityScope, request,
-      visibleFingerprint: folderSelectionFingerprint });
-  };
-  useEffect(() => {
-    setFolderSelection(null);
-    folderOpenerRef.current = null;
-  }, [authorityScope, request, folderSelectionFingerprint]);
   /** Map search matches, highlighted on the canvas. */
   const visibleNodeIds = useMemo(
     () => new Set(renderScene.nodes.map((node) => node.id)),
@@ -656,9 +561,12 @@ export function WorkspaceGraphScreen() {
     () => selectedNode ? workspaceGraphNodeRelations(displayItems, selectedNode.id, nodeLabels) : null,
     [displayItems, nodeLabels, selectedNode],
   );
+  const selectedHeldCount = useMemo(
+    () => selectedNode && scene ? workspaceGraphHeldCount(scene, selectedNode.id, displayNodeIds) : 0,
+    [displayNodeIds, scene, selectedNode],
+  );
   /** A sidebar row (result or related document) selects on the map and centres it. */
   const selectFromSidebar = (id: string) => {
-    setFolderSelection(null);
     setState((current) => ({ ...current, selectedId: id }));
     if (canvasRef.current) canvasRef.current.centerOn(id);
     else pendingListCenterRef.current = id;
@@ -673,9 +581,9 @@ export function WorkspaceGraphScreen() {
   // In the sheet layout a map selection is summarised on the canvas; the full
   // details open only when asked for, so the sheet never covers exploration.
   const selectionCardVisible = Boolean(scene && sheetLayout && !fullscreenCanvas && (selectedNode || selectedEdge));
-  const inspectorAttention = selectedFolder || selectedNode || selectedEdge
+  const inspectorAttention = selectedNode || selectedEdge
     ? t("workspaceGraph.ui.inspectorAttention", {
-      label: selectedFolder?.label ?? selectedNode?.label
+      label: selectedNode?.label
         ?? (selectedEdge ? workspaceGraphEnumLabel(selectedEdge.relation_kind, t) : ""),
     })
     : null;
@@ -753,13 +661,9 @@ export function WorkspaceGraphScreen() {
       if (event.key !== "Escape") return;
       // An open inspector sheet is the top layer; its own handler closes it first.
       if (region.querySelector('.workspace-screen[data-mobile-inspector-open="true"]')) return;
-      if (state.selectedId || selectedFolderId) {
+      if (state.selectedId) {
         event.preventDefault();
         event.stopPropagation();
-        if (selectedFolderId) {
-          closeFolderDetails();
-          return;
-        }
         // Clearing removes the clear button and the selection card; focus inside
         // either would otherwise fall to the document.
         const focusLeaving = document.activeElement instanceof Element
@@ -767,7 +671,6 @@ export function WorkspaceGraphScreen() {
         pendingListCenterRef.current = null;
         setState((current) => ({ ...current, selectedId: null }));
         setListFocus(null);
-        setFolderSelection(null);
         if (focusLeaving) requestAnimationFrame(() => {
           region.querySelector<HTMLInputElement>("#workspace-graph-visible-search")?.focus({ preventScroll: true });
         });
@@ -775,7 +678,7 @@ export function WorkspaceGraphScreen() {
     };
     region.addEventListener("keydown", handleEscape);
     return () => region.removeEventListener("keydown", handleEscape);
-  }, [closeFolderDetails, state.selectedId, selectedFolderId]);
+  }, [state.selectedId]);
 
   useEffect(() => {
     if (!modal) return undefined;
@@ -838,10 +741,6 @@ export function WorkspaceGraphScreen() {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        if (modal.kind === "mobileCanvas" && selectedFolderIdRef.current) {
-          closeFolderDetails();
-          return;
-        }
         if (modal.kind === "mobileCanvas" && selectedIdRef.current) {
           const clearButtonFocused = document.activeElement?.classList.contains("workspace-graph-selection-clear");
           pendingListCenterRef.current = null;
@@ -895,7 +794,7 @@ export function WorkspaceGraphScreen() {
         preserveRegionScroll();
       });
     };
-  }, [closeFolderDetails, modal, state.dataFilters]);
+  }, [modal, state.dataFilters]);
 
   useEffect(() => {
     if (modal?.kind !== "mobileCanvas") return;
@@ -1013,7 +912,7 @@ export function WorkspaceGraphScreen() {
     )
       .then((payload) => {
         if (!readIsCurrent()) return;
-        assertWorkspaceMapWithinBudget({ nodeCount: payload.nodes.length, edgeCount: payload.edges.length }, request.budget);
+        assertWorkspaceMapWithinBudget(workspaceGraphAdmissionCounts(payload), request.budget);
         const firstExpanded = clusterId ? payload.nodes.find((node) =>
           node.grain === "document" && !previousDocumentIds.has(node.id),
         ) ?? null : null;
@@ -1179,21 +1078,10 @@ export function WorkspaceGraphScreen() {
       pendingListCenterRef.current = null;
     }
   };
-  const handleFolderMemberSelect = (sourceId: string) => {
-    if (!mapColumns?.nodeIds.includes(sourceId)) return;
-    restoreFolderFocus(sourceId);
-    setListFocus(null);
-    setFolderSelection(null);
-    setState((current) => ({ ...current, selectedId: sourceId }));
-    // Aggregate memberships describe a source node, not new native points.
-    if (canvasRef.current) canvasRef.current.centerOn(sourceId);
-    else pendingListCenterRef.current = sourceId;
-  };
   const handleMapSelect = (id: string | null) => {
     if (!sceneIsCurrent()) return;
     setListFocus(null);
     if (id === null) pendingListCenterRef.current = null;
-    setFolderSelection(null);
     setState((current) => ({ ...current, selectedId: id }));
   };
   const handleMapDisplay = (display: WorkspaceGraphRestorableState["display"]) => {
@@ -1212,7 +1100,6 @@ export function WorkspaceGraphScreen() {
     ) ?? []).find((row) => row.dataset.graphNodeId === state.selectedId
       || row.dataset.graphEdgeId === state.selectedId)?.querySelector<HTMLButtonElement>("button");
     setState((current) => ({ ...current, selectedId: null }));
-    setFolderSelection(null);
     pendingListCenterRef.current = null;
     requestAnimationFrame(() => {
       const target = modal?.kind === "mobileCanvas" ? mobileCanvasCloseRef.current
@@ -1221,35 +1108,37 @@ export function WorkspaceGraphScreen() {
       target?.focus({ preventScroll: true });
     });
   };
-  const toggleFolderGrouping = () => {
-    setFolderGrouping((enabled) => !enabled);
-    setFolderSelection(null);
-    folderOpenerRef.current = null;
+  // A pin from Details fixes the point where it is now, as a drag does.
+  const toggleMapPin = (id: string) => {
+    if (!sceneIsCurrent()) return;
+    if (state.pinnedIds.includes(id)) {
+      canvasRef.current?.pin(id, false);
+      setState((current) => {
+        const pinnedPositions = { ...current.pinnedPositions };
+        delete pinnedPositions[id];
+        return { ...current, pinnedIds: current.pinnedIds.filter((pinned) => pinned !== id), pinnedPositions };
+      });
+      return;
+    }
+    const position = canvasRef.current?.pin(id, true);
+    if (!position) return;
+    setState((current) => ({
+      ...current,
+      pinnedIds: current.pinnedIds.includes(id) ? current.pinnedIds : [...current.pinnedIds, id],
+      pinnedPositions: { ...current.pinnedPositions, [id]: position },
+    }));
   };
-  const renderFolderIndex = () => folderScene ? <details className="workspace-graph-folder-index">
-    <summary>{t("workspaceGraph.folders.index", { count: folderScene.folders.length })}</summary>
-    <ul>{folderScene.folders.map((folder) => <li key={folder.id}>
-      <button aria-pressed={selectedFolderId === folder.id} className="workspace-map-folder-action"
-        data-map-folder-id={folder.id} onClick={(event) => {
-          folderOpenerRef.current = event.currentTarget;
-          selectFolder(folder.id);
-        }} type="button">
-        {folder.label} · {folder.direct_member_count}
-      </button>
-    </li>)}</ul>
-  </details> : null;
+  const mapPinState = (id: string | undefined): GraphPinState => id && state.pinnedIds.includes(id) ? "pinned" : "unpinned";
   const selectionNote = state.selectedId ? (
     <div className="workspace-graph-selection-note" role="status">
       <span className="visually-hidden">{t("workspaceGraph.ui.selectionFocus")}</span>
       <button
-        aria-label={t("workspaceGraph.ui.clearSelection")}
         className="workspace-graph-selection-clear"
         onClick={clearSelection}
-        title={t("workspaceGraph.ui.clearSelection")}
         type="button"
       >
         <X aria-hidden="true" size={16} />
-        {t("workspaceGraph.ui.clearSelectionAction")}
+        {t("graph.details.clearSelection")}
       </button>
     </div>
   ) : null;
@@ -1296,23 +1185,19 @@ export function WorkspaceGraphScreen() {
           onDetails={() => setInspectorOpenRequest(String(++inspectorOpenCountRef.current))}
           onExpand={(clusterId) => expandCluster(clusterId)}
           onNavigate={handleDocumentNavigation}
+          onTogglePin={toggleMapPin}
+          pinState={mapPinState(selectedNode?.id)}
         /> : null}
-        {mobileDialog ? <button
-          aria-pressed={effectiveFolderGrouping}
-          className="workspace-graph-folder-toggle"
-          disabled={!folderAvailable}
-          onClick={toggleFolderGrouping} type="button"
-        >{t("workspaceGraph.folders.groupByFolder")}</button> : null}
-        <WorkspaceGraphCanvasToolbar
-          canvasRef={canvasRef}
+        <GraphCanvasControls
+          className="graph-canvas-toolbar"
           exportEnabled={canvasScene.capabilities.export}
-          layoutPaused={layoutPaused}
+          layout={staticLayout ? "fixed" : reducedMotion ? "reducedMotion" : layoutPaused ? "paused" : "running"}
           onExport={handleMapExport}
+          onFit={() => canvasRef.current?.fit()}
           onReset={() => {
             if (!sceneIsCurrent()) return;
             pendingListCenterRef.current = null;
             setListFocus(null);
-            setFolderSelection(null);
             canvasRef.current?.reset();
             setLayoutPaused(false);
             setState((current) => ({
@@ -1330,12 +1215,11 @@ export function WorkspaceGraphScreen() {
             else canvasRef.current?.resumeLayout();
             setLayoutPaused(paused);
           }}
-          reducedMotion={reducedMotion}
-          staticLayout={staticLayout}
+          onZoomIn={() => canvasRef.current?.zoomIn()}
+          onZoomOut={() => canvasRef.current?.zoomOut()}
         />
         {staticLayout ? <p className="workspace-graph-layout-hint">{t("workspaceGraph.canvas.fixedLayoutHint")}</p> : null}
         {mobileDialog ? selectionNote : null}
-        {mobileDialog ? renderFolderIndex() : null}
       </div>
       {mapColumns ? <WorkspaceMapCanvas
         ref={canvasRef}
@@ -1380,17 +1264,6 @@ export function WorkspaceGraphScreen() {
           {t("workspaceGraph.ui.requestFailed")}
         </StatusBanner>
       )}
-      {mobileDialog && selectedFolder && folderScene ? <WorkspaceMapFolderDetails
-        folderId={selectedFolder.id}
-        mobileLayout
-        memberLimit={mapBudget.documents}
-        onClose={closeFolderDetails}
-        onFolder={selectFolder}
-        onNavigate={handleDocumentNavigation}
-        onSelect={handleFolderMemberSelect}
-        prepared={folderScene}
-        scene={canvasScene}
-      /> : null}
     </section>
   );
 
@@ -1414,22 +1287,11 @@ export function WorkspaceGraphScreen() {
           <>
             {scene && mapColumns?.nodeIds.length ? (
                 <div className="workspace-graph-sidebar">
-                {renderFolderIndex()}
-                {selectedFolder && folderScene ? <WorkspaceMapFolderDetails
-                  folderId={selectedFolder.id}
-                  mobileLayout={mobileLayout}
-                  memberLimit={mapBudget.documents}
-                  onClose={closeFolderDetails}
-                  onFolder={selectFolder}
-                  onNavigate={handleDocumentNavigation}
-                  onSelect={handleFolderMemberSelect}
-                  prepared={folderScene}
-                  scene={scene}
-                /> : null}
-                {!selectedFolder && (selectedNode || selectedEdge) ? <WorkspaceGraphDetails
+                {selectedNode || selectedEdge ? <WorkspaceGraphDetails
                   busy={pendingReplay !== null}
                   canExpand={selectedNode?.grain === "cluster"
                     && expandableClusterIds.has(selectedNode.id)}
+                  contained={selectedHeldCount}
                   edge={selectedEdge}
                   expanding={selectedNode?.grain === "cluster" && expandingClusterId === selectedNode.id}
                   labels={nodeLabels}
@@ -1444,6 +1306,8 @@ export function WorkspaceGraphScreen() {
                   onFocusRelation={handleListFocus}
                   onNavigate={handleDocumentNavigation}
                   onSelectRelated={selectFromSidebar}
+                  onTogglePin={toggleMapPin}
+                  pinState={mapPinState(selectedNode?.id)}
                   relations={selectedRelations}
                 /> : null}
                 <WorkspaceGraphList
@@ -1504,10 +1368,7 @@ export function WorkspaceGraphScreen() {
         <WorkspaceGraphToolbar
           activeFilterCount={countActiveRefineFilters(state.dataFilters)}
           display={state.display}
-          folderAvailable={folderAvailable}
-          folderEnabled={effectiveFolderGrouping}
           lens={state.lens}
-          mobileLayout={mobileLayout}
           deviceProfile={deviceProfile}
           mapScale={mapScale}
           onMapScale={(scale) => {
@@ -1527,7 +1388,6 @@ export function WorkspaceGraphScreen() {
           }}
           onOpenRefine={(trigger) => openRefine("overview", trigger)}
           onSearch={setVisibleSearch}
-          onToggleFolder={toggleFolderGrouping}
           orphanCount={orphansAlwaysShown ? 0 : orphanIds.size}
           pendingChanges={refineFiltersDiffer(draftFilters, state.dataFilters)}
           ready={Boolean(scene)}
@@ -2022,7 +1882,7 @@ function WorkspaceGraphRefineDrawer({
               onChange={(event) => onDisplay({ ...display, show_labels: event.currentTarget.checked })}
               type="checkbox"
             />
-            {t("workspaceGraph.drawer.showLabels")}
+            {t("graph.display.labels")}
           </label>
           <small>{t("workspaceGraph.drawer.showLabelsHint")}</small>
           <label>
@@ -2041,7 +1901,7 @@ function WorkspaceGraphRefineDrawer({
               onChange={(event) => onDisplay({ ...display, show_edges: event.currentTarget.checked })}
               type="checkbox"
             />
-            {t("workspaceGraph.drawer.showRelationships")}
+            {t("graph.display.relationships")}
           </label>
         </fieldset>
 
@@ -2089,33 +1949,31 @@ function WorkspaceGraphMetadata({ scene }: { scene: WorkspaceGraphScene }) {
   );
 }
 
-/** The Map's fixed legend: the glyphs and lines this view can draw. */
+/** The relationship kinds each Map line style draws. */
+const MAP_LEGEND_LINES = {
+  link: ["wikilink"], citation: ["citation_page", "citation_source", "citation_agent"], membership: ["tree"],
+} as const;
+
+/** The Map's fixed legend: the glyphs and lines this view can draw, in the shared legend form. */
 function WorkspaceGraphLegend() {
   const { t } = useTranslation("graph");
   return (
     <details className="graph-legend workspace-graph-legend">
-      <summary>{t("workspaceGraph.legend.title")}</summary>
-      <div className="graph-legend-groups">
-        <ul aria-label={t("workspaceGraph.legend.shapes")}>
-          {(["context", "agent", "library", "cluster"] as const).map((kind) => (
-            <li data-node-cue-kind={kind} key={kind}>
-              <WorkspaceGraphNodeCue kind={kind} size="legend" />
-              {t(`workspaceGraph.legend.${kind}`)}
-            </li>
-          ))}
-        </ul>
-        <ul aria-label={t("workspaceGraph.legend.lines")}>
-          {(["link", "citation"] as const).map((kind) => (
-            <li data-edge-visual-kind={kind} key={kind}>
-              <GraphEdgeCue kind={kind} />
-              {t(`workspaceGraph.legend.${kind}`)}
-            </li>
-          ))}
-        </ul>
-        <ul aria-label={t("workspaceGraph.legend.size")}>
-          <li>{t("workspaceGraph.legend.visibleRelationMetric")}</li>
-        </ul>
-      </div>
+      <summary><Layers aria-hidden="true" size={15} />{t("graph.legend.heading")}</summary>
+      <GraphLegendGroups
+        lines={(Object.keys(MAP_LEGEND_LINES) as Array<keyof typeof MAP_LEGEND_LINES>).map((kind) => ({
+          cue: <GraphEdgeCue kind={kind} />,
+          key: kind,
+          label: t(`graph.legend.edge.${kind}`),
+          names: graphLegendRelationNames(MAP_LEGEND_LINES[kind], t(`graph.legend.edge.${kind}`), t),
+        }))}
+        nodes={(["context", "agent", "library", "cluster", "folder"] as const).map((kind) => ({
+          cue: <WorkspaceGraphNodeCue kind={kind} size="legend" />,
+          key: kind,
+          label: t(`graph.legend.node.${kind}`),
+        }))}
+        size={[t("graph.legend.sizeRelations"), t("graph.legend.sizeFolder"), t("graph.legend.sizeCluster")]}
+      />
     </details>
   );
 }
@@ -2247,15 +2105,15 @@ function WorkspaceGraphList({
         if (id) onBlur(id);
       }}
     >
-      <h2 id="workspace-graph-list-title" tabIndex={-1}>{t("workspaceGraph.list.title")}</h2>
+      <h2 id="workspace-graph-list-title" tabIndex={-1}>{t("graph.list.title")}</h2>
       {results ? <p className="workspace-graph-list-status" role="status">
         {results.nodes.length || results.relationCount
-          ? t("workspaceGraph.list.status", {
-            nodes: formatCount(results.nodes.length),
+          ? t("graph.list.status", {
+            edges: t("graph.list.relationCount", { count: results.relationCount, value: formatCount(results.relationCount) }),
+            nodes: t("graph.list.nodeCount", { count: results.nodes.length, value: formatCount(results.nodes.length) }),
             query: query.trim(),
-            relations: formatCount(results.relationCount),
           })
-          : t("workspaceGraph.list.noMatch", { query: query.trim() })}
+          : `${t("graph.list.noMatch", { query: query.trim() })} ${t("workspaceGraph.list.noMatchHint")}`}
       </p> : <p className="workspace-graph-list-hint">{t("workspaceGraph.list.hint")}</p>}
       {activeExpansion?.cursor ? (
         <button
@@ -2306,379 +2164,10 @@ function WorkspaceGraphList({
   );
 }
 
-const VIRTUAL_LIST_THRESHOLD = 1_000;
-const VIRTUAL_LIST_OVERSCAN = 6;
-
-/** Metadata follows exactly the original map's visible sources and ancestors. */
-function visibleWorkspaceMapFolderContext(
-  prepared: WorkspaceMapPreparedFolderScene,
-  visibleSourceIds: ReadonlySet<string>,
-): WorkspaceMapFolderContext {
-  const points = prepared.points.filter((point) => visibleSourceIds.has(point.sourceNodeId));
-  const pointIds = new Set(points.map((point) => point.id));
-  const foldersById = new Map(prepared.folders.map((folder) => [folder.id, folder]));
-  const folderClosure = new Set<string>();
-  const pointsByFolder = new Map<string, typeof points>();
-  for (const point of points) {
-    if (point.folderId === null) continue;
-    const members = pointsByFolder.get(point.folderId) ?? [];
-    members.push(point);
-    pointsByFolder.set(point.folderId, members);
-    let current: string | null = point.folderId;
-    while (current !== null && !folderClosure.has(current)) {
-      folderClosure.add(current);
-      current = foldersById.get(current)!.parent_folder_id;
-    }
-  }
-  const folders = prepared.folders.filter((folder) => folderClosure.has(folder.id)).map((folder) => ({
-    ...folder,
-    direct_member_count: (pointsByFolder.get(folder.id) ?? []).reduce((count, point) => count + point.memberCount, 0),
-    childFolderIds: folder.childFolderIds.filter((id) => folderClosure.has(id)),
-    pointIds: (pointsByFolder.get(folder.id) ?? []).map((point) => point.id),
-  }));
-  const relations = prepared.relations.filter((relation) => pointIds.has(relation.source) && pointIds.has(relation.target));
-  const pointsById = new Map(points.map((point) => [point.id, point]));
-  const bundles = new Map<string, WorkspaceMapPreparedFolderScene["folderBundles"][number]>();
-  for (const relation of relations) {
-    const source = pointsById.get(relation.source)!.folderId;
-    const target = pointsById.get(relation.target)!.folderId;
-    if (source === target) continue;
-    const [sourceFolderId, targetFolderId] = source === null || target !== null && source < target
-      ? [source, target] : [target, source];
-    const key = JSON.stringify([sourceFolderId, targetFolderId]);
-    const previous = bundles.get(key);
-    bundles.set(key, { sourceFolderId, targetFolderId,
-      relationCount: (previous?.relationCount ?? 0) + relation.relationCount,
-      occurrenceWeight: (previous?.occurrenceWeight ?? 0) + relation.occurrenceWeight });
-  }
-  return { points, folders, relations, folderBundles: [...bundles.values()],
-    // Used only with the original map fingerprint to scope metadata selection.
-    // It is never supplied as a native layout or geometry identity.
-    geometryFingerprint: prepared.geometryFingerprint };
-}
-
-function WorkspaceMapFolderDetails({ folderId, mobileLayout, memberLimit, onClose, onFolder, onNavigate, onSelect, prepared, scene }: {
-  folderId: string;
-  mobileLayout: boolean;
-  memberLimit: number;
-  onClose(): void;
-  onFolder(id: string): void;
-  onNavigate: WorkspaceGraphDocumentNavigation;
-  onSelect(sourceId: string): void;
-  prepared: WorkspaceMapFolderContext;
-  scene: WorkspaceGraphScene;
-}) {
-  const { t } = useTranslation("graph");
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  const pendingNavigationRef = useRef<string | null>(null);
-  useLayoutEffect(() => {
-    if (pendingNavigationRef.current !== folderId) return;
-    pendingNavigationRef.current = null;
-    headingRef.current?.focus({ preventScroll: true });
-  }, [folderId]);
-  const navigateFolder = (id: string) => {
-    pendingNavigationRef.current = id;
-    onFolder(id);
-  };
-  const folder = prepared.folders.find((item) => item.id === folderId);
-  const foldersById = new Map(prepared.folders.map((item) => [item.id, item]));
-  const pointsById = new Map(prepared.points.map((item) => [item.id, item]));
-  const nodesById = new Map(scene.nodes.map((item) => [item.id, item]));
-  const members = prepared.points.filter((point) => point.folderId === folderId)
-    .sort((left, right) => (right.referenceCount ?? 0) + (right.evidenceCount ?? 0)
-      - (left.referenceCount ?? 0) - (left.evidenceCount ?? 0)
-      || (left.entityKey < right.entityKey ? -1 : 1));
-  const displayedMembers = members.slice(0, memberLimit);
-  const bundles = prepared.folderBundles.filter((bundle) => bundle.sourceFolderId === folderId
-    || bundle.targetFolderId === folderId).sort((left, right) => right.relationCount - left.relationCount);
-  const directions = new Map<string | null, { outgoing: number; incoming: number; undirected: number }>();
-  for (const relation of prepared.relations) {
-    const sourceFolder = pointsById.get(relation.source)!.folderId;
-    const targetFolder = pointsById.get(relation.target)!.folderId;
-    if (sourceFolder === targetFolder || sourceFolder !== folderId && targetFolder !== folderId) continue;
-    const other = sourceFolder === folderId ? targetFolder : sourceFolder;
-    const count = directions.get(other) ?? { outgoing: 0, incoming: 0, undirected: 0 };
-    if (relation.direction === "undirected") count.undirected += relation.relationCount;
-    else if (sourceFolder === folderId) count.outgoing += relation.relationCount;
-    else count.incoming += relation.relationCount;
-    directions.set(other, count);
-  }
-  if (!folder) return null;
-  return <section aria-label={t("workspaceGraph.folders.detailsLabel")}
-    className="workspace-graph-details workspace-map-folder-details" data-map-folder-details={folder.id}>
-    <div className="workspace-map-folder-heading">
-      <h2 ref={headingRef} tabIndex={-1}>{folder.label}</h2>
-      <button aria-label={t("workspaceGraph.folders.close")} className="workspace-map-folder-action" onClick={onClose} type="button">
-        <X aria-hidden="true" size={16} />
-      </button>
-    </div>
-    {folder.parent_folder_id ? <button className="workspace-map-folder-action" onClick={() => navigateFolder(folder.parent_folder_id!)} type="button">
-      {t("workspaceGraph.folders.parent", { label: foldersById.get(folder.parent_folder_id)?.label })}
-    </button> : null}
-    {folder.childFolderIds.length ? <div className="workspace-map-folder-children">
-      <h3>{t("workspaceGraph.folders.children")}</h3>
-      {folder.childFolderIds.map((id) => <button className="workspace-map-folder-action" key={id} onClick={() => navigateFolder(id)} type="button">
-        {foldersById.get(id)?.label}
-      </button>)}
-    </div> : null}
-    <h3>{t("workspaceGraph.folders.members", { count: folder.direct_member_count })}</h3>
-    <WindowedWorkspaceGraphRows
-      focusedId={null}
-      getId={(point) => point.id}
-      hint={t("workspaceGraph.list.virtualKeyboardHint", { count: displayedMembers.length })}
-      items={displayedMembers}
-      label={t("workspaceGraph.folders.members", { count: folder.direct_member_count })}
-      mobileLayout={mobileLayout}
-      onBlur={() => {}}
-      selectedId={null}
-      testId={mobileLayout ? "workspace-map-folder-members-mobile" : "workspace-map-folder-members"}
-      renderRow={(point, index, virtualized, rowHeight, onKeyDown) => {
-        const source = nodesById.get(point.sourceNodeId);
-        return <li aria-posinset={virtualized ? index + 1 : undefined}
-          aria-setsize={virtualized ? displayedMembers.length : undefined}
-          className={virtualized ? "workspace-graph-virtual-row" : undefined}
-          data-map-folder-member={point.id} key={point.id}
-          style={virtualized ? { height: rowHeight } : undefined}>
-          <button className="workspace-graph-list-select"
-            data-list-index={virtualized ? index : undefined}
-            onClick={() => onSelect(point.sourceNodeId)} onKeyDown={onKeyDown} type="button">
-            <strong><WorkspaceGraphNodeCue className="workspace-map-member-dot" kind={point.entityKind} />{point.label}</strong>
-            <small>{t(`workspaceGraph.enums.${point.entityKind}`)}{point.grain === "fragment"
-              ? ` · ${t("workspaceGraph.folders.fragment", { count: point.memberCount })}` : ""}</small>
-          </button>
-          {source?.grain === "document" ? <Link onClick={onNavigate} to={source.path}>{t("workspaceGraph.list.open")}</Link> : null}
-        </li>;
-      }}
-    />
-    {members.length > displayedMembers.length ? <p>{t("workspaceGraph.folders.moreMembers", {
-      count: members.length - displayedMembers.length,
-    })}</p> : null}
-    {bundles.length ? <>
-      <h3>{t("workspaceGraph.folders.bundles")}</h3>
-      <p>{t("workspaceGraph.folders.bundleLimit")}</p>
-      <ul className="workspace-map-folder-bundles">{bundles.map((bundle) => {
-        const other = bundle.sourceFolderId === folderId ? bundle.targetFolderId : bundle.sourceFolderId;
-        const counts = directions.get(other)!;
-        const label = other === null ? t("workspaceGraph.folders.unplaced") : foldersById.get(other)!.label;
-        return <li key={other ?? "unplaced"}>
-          {other !== null ? <button className="workspace-map-folder-action" onClick={() => navigateFolder(other)} type="button">{label}</button> : <strong>{label}</strong>}
-          <span>{t("workspaceGraph.list.relationCount", { count: bundle.relationCount })}</span>
-          <small>{t("workspaceGraph.folders.directions", counts)}</small>
-        </li>;
-      })}</ul>
-    </> : null}
-    <p>{t("workspaceGraph.folders.primaryOnly")}</p>
-  </section>;
-}
-
-/** Keep small v1 scenes unchanged; larger Map scenes mount only nearby rows. */
-function WindowedWorkspaceGraphRows<Item>({
-  focusedId,
-  onBlur,
-  getId,
-  hint,
-  items,
-  label,
-  mobileLayout,
-  renderRow,
-  selectedId,
-  testId,
-}: {
-  focusedId: string | null;
-  onBlur: (id: string) => void;
-  getId: (item: Item) => string;
-  hint: string;
-  items: Item[];
-  label: string;
-  mobileLayout: boolean;
-  renderRow: (
-    item: Item,
-    index: number,
-    virtualized: boolean,
-    rowHeight: number,
-    onKeyDown?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void,
-  ) => ReactNode;
-  selectedId: string | null;
-  testId: string;
-}) {
-  const listRef = useRef<HTMLUListElement>(null);
-  const lastScrolledSelectionRef = useRef<string | null>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [focusIndex, setFocusIndex] = useState<number | null>(null);
-  const virtualized = items.length > VIRTUAL_LIST_THRESHOLD;
-  const rowHeight = mobileLayout ? 112 : 64;
-  const viewportHeight = mobileLayout ? 336 : 448;
-  const visibleRows = Math.ceil(viewportHeight / rowHeight);
-  const maximumScrollTop = virtualized ? Math.max(0, items.length * rowHeight - viewportHeight) : 0;
-  const boundedScrollTop = Math.min(maximumScrollTop, Math.max(0, scrollTop));
-  const start = virtualized
-    ? Math.max(0, Math.floor(boundedScrollTop / rowHeight) - VIRTUAL_LIST_OVERSCAN)
-    : 0;
-  const end = virtualized
-    ? Math.min(items.length, start + visibleRows + VIRTUAL_LIST_OVERSCAN * 2)
-    : items.length;
-  const hintId = `${testId}-keyboard-hint`;
-
-  useLayoutEffect(() => {
-    if (scrollTop === boundedScrollTop) return;
-    // Clamp both the first rendered window and the DOM offset when filtering
-    // removes rows; otherwise stale scroll state can render an empty spacer.
-    if (listRef.current) listRef.current.scrollTop = boundedScrollTop;
-    setScrollTop(boundedScrollTop);
-  }, [boundedScrollTop, scrollTop]);
-
-  useLayoutEffect(() => {
-    if (!virtualized || !focusedId) return;
-    const index = items.findIndex((item) => getId(item) === focusedId);
-    // Removing a focused DOM row need not dispatch blur in the browser. Do
-    // not clear a focus belonging to the other (node/relationship) list.
-    if (index >= 0 && (index < start || index >= end)) onBlur(focusedId);
-  }, [end, focusedId, getId, items, onBlur, start, virtualized]);
-
-  useEffect(() => {
-    if (!virtualized || focusIndex === null) return;
-    const button = listRef.current?.querySelector<HTMLButtonElement>(
-      `button[data-list-index="${focusIndex}"]`,
-    );
-    if (button) {
-      button.focus();
-      setFocusIndex(null);
-    }
-  }, [end, focusIndex, start, virtualized]);
-
-  useEffect(() => {
-    if (lastScrolledSelectionRef.current === selectedId) return;
-    lastScrolledSelectionRef.current = selectedId;
-    if (!virtualized || !selectedId || !listRef.current) return;
-    const index = items.findIndex((item) => getId(item) === selectedId);
-    if (index < 0) return;
-    const list = listRef.current;
-    const rowTop = index * rowHeight;
-    const rowBottom = rowTop + rowHeight;
-    if (rowTop < list.scrollTop || rowBottom > list.scrollTop + viewportHeight) {
-      list.scrollTop = Math.max(0, rowTop - Math.floor(viewportHeight / 2));
-      setScrollTop(list.scrollTop);
-    }
-  }, [getId, items, rowHeight, selectedId, viewportHeight, virtualized]);
-
-  function onVirtualKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
-    const list = event.currentTarget.closest("ul");
-    if (!list) return;
-    let next: number;
-    switch (event.key) {
-      case "ArrowDown": next = index + 1; break;
-      case "ArrowUp": next = index - 1; break;
-      case "PageDown": next = index + visibleRows; break;
-      case "PageUp": next = index - visibleRows; break;
-      case "Home": next = 0; break;
-      case "End": next = items.length - 1; break;
-      default: return;
-    }
-    event.preventDefault();
-    next = Math.min(items.length - 1, Math.max(0, next));
-    const rowTop = next * rowHeight;
-    const rowBottom = rowTop + rowHeight;
-    if (rowTop < list.scrollTop) list.scrollTop = rowTop;
-    else if (rowBottom > list.scrollTop + viewportHeight) {
-      list.scrollTop = rowBottom - viewportHeight;
-    }
-    setScrollTop(list.scrollTop);
-    setFocusIndex(next);
-  }
-
-  return (
-    <>
-      {virtualized ? <p className="workspace-graph-list-window-hint" id={hintId}>{hint}</p> : null}
-      <ul
-        aria-describedby={virtualized ? hintId : undefined}
-        aria-label={virtualized ? label : undefined}
-        className={virtualized ? "workspace-graph-windowed-list" : undefined}
-        data-testid={testId}
-        data-total-count={items.length}
-        onScroll={virtualized ? (event) => setScrollTop(event.currentTarget.scrollTop) : undefined}
-        ref={listRef}
-        style={virtualized ? { height: viewportHeight } : undefined}
-      >
-        {virtualized && start > 0 ? (
-          <li aria-hidden="true" className="workspace-graph-list-spacer" role="presentation" style={{ height: start * rowHeight }} />
-        ) : null}
-        {items.slice(start, end).map((item, offset) => {
-          const index = start + offset;
-          return renderRow(
-            item,
-            index,
-            virtualized,
-            rowHeight,
-            virtualized ? (event) => onVirtualKeyDown(event, index) : undefined,
-          );
-        })}
-        {virtualized && end < items.length ? (
-          <li aria-hidden="true" className="workspace-graph-list-spacer" role="presentation" style={{ height: (items.length - end) * rowHeight }} />
-        ) : null}
-      </ul>
-    </>
-  );
-}
-
-function WorkspaceGraphCanvasToolbar({
-  canvasRef,
-  exportEnabled,
-  layoutPaused,
-  onExport,
-  onReset,
-  onToggleLayout,
-  reducedMotion,
-  staticLayout,
-}: {
-  canvasRef: RefObject<GraphCanvasHandle | null>;
-  exportEnabled: boolean;
-  layoutPaused: boolean;
-  onExport: () => void;
-  onReset: () => void;
-  onToggleLayout: () => void;
-  reducedMotion: boolean;
-  staticLayout: boolean;
-}) {
-  const { t } = useTranslation("graph");
-  return (
-    <div aria-label={t("workspaceGraph.canvas.aria")} className="graph-canvas-toolbar" role="toolbar">
-      <GraphControlButton label={t("workspaceGraph.canvas.zoomIn")} onClick={() => canvasRef.current?.zoomIn()}><ZoomIn aria-hidden="true" size={17} /></GraphControlButton>
-      <GraphControlButton label={t("workspaceGraph.canvas.zoomOut")} onClick={() => canvasRef.current?.zoomOut()}><ZoomOut aria-hidden="true" size={17} /></GraphControlButton>
-      <GraphControlButton label={t("workspaceGraph.canvas.fit")} onClick={() => canvasRef.current?.fit()}><Scan aria-hidden="true" size={17} /></GraphControlButton>
-      <GraphControlButton
-        disabled={reducedMotion || staticLayout}
-        label={t(staticLayout
-          ? "workspaceGraph.canvas.fixedLayout"
-          : reducedMotion
-            ? "workspaceGraph.canvas.reducedMotionLayout"
-            : layoutPaused ? "workspaceGraph.canvas.resume" : "workspaceGraph.canvas.pause")}
-        onClick={onToggleLayout}
-      >
-        {layoutPaused ? <Play aria-hidden="true" size={17} /> : <Pause aria-hidden="true" size={17} />}
-      </GraphControlButton>
-      <GraphControlButton label={t("workspaceGraph.canvas.reset")} onClick={onReset}><RotateCcw aria-hidden="true" size={17} /></GraphControlButton>
-      <GraphControlButton disabled={!exportEnabled} label={t(exportEnabled ? "workspaceGraph.canvas.export" : "workspaceGraph.canvas.exportUnavailable")} onClick={onExport}><Download aria-hidden="true" size={17} /></GraphControlButton>
-    </div>
-  );
-}
-
-function GraphControlButton({
-  children,
-  disabled = false,
-  label,
-  onClick,
-}: {
-  children: ReactNode;
-  disabled?: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return <button aria-label={label} className="graph-icon-button" disabled={disabled} onClick={onClick} title={label} type="button">{children}</button>;
-}
-
 function WorkspaceGraphDetails({
   busy,
   canExpand,
+  contained,
   edge,
   expanding,
   labels,
@@ -2693,10 +2182,13 @@ function WorkspaceGraphDetails({
   onFocusRelation,
   onNavigate,
   onSelectRelated,
+  onTogglePin,
+  pinState,
   relations,
 }: {
   busy: boolean;
   canExpand: boolean;
+  contained: number;
   edge: WorkspaceGraphEdge | null;
   expanding: boolean;
   labels: ReadonlyMap<string, string>;
@@ -2706,11 +2198,13 @@ function WorkspaceGraphDetails({
   workspaceId: string;
   nodesById: ReadonlyMap<string, WorkspaceGraphNode>;
   onBlurRelation: (edgeId: string) => void;
-  onCenter?: (id: string) => void;
+  onCenter: (id: string) => void;
   onExpand: (clusterId: string) => void;
   onFocusRelation: (edgeId: string) => void;
   onNavigate: WorkspaceGraphDocumentNavigation;
   onSelectRelated: (nodeId: string) => void;
+  onTogglePin: (id: string) => void;
+  pinState: GraphPinState;
   relations: WorkspaceGraphNodeRelations | null;
 }) {
   const { t } = useTranslation("graph");
@@ -2721,17 +2215,21 @@ function WorkspaceGraphDetails({
     ? { source_page_id: source.entity_id, target_kind: target.entity_kind === "context" ? "context_page" as const : target.entity_kind === "library" ? "library_item" as const : "agent_page" as const, target_id: target.entity_id } : null;
   return (
     <section aria-labelledby="workspace-graph-details-title" className="workspace-graph-details">
-      <h2 id="workspace-graph-details-title">{t("workspaceGraph.details.title")}</h2>
-      {!node && !edge ? <p>{t("workspaceGraph.details.empty")}</p> : null}
+      <h2 id="workspace-graph-details-title">{t("graph.details.heading")}</h2>
+      {!node && !edge ? <p>{t("graph.details.empty")}</p> : null}
       {node ? (
         <WorkspaceGraphNodeDetails
           busy={busy}
           canExpand={canExpand}
+          // What a folder holds among the shown nodes, whether or not lines are drawn.
+          contained={contained}
           expanding={expanding}
           node={node}
           onCenter={onCenter}
           onExpand={onExpand}
           onNavigate={onNavigate}
+          onTogglePin={onTogglePin}
+          pinState={pinState}
         />
       ) : null}
       {node && relations ? (
@@ -2744,14 +2242,16 @@ function WorkspaceGraphDetails({
           <h3>{workspaceGraphEnumLabel(edge.relation_kind, t)}</h3>
           <WorkspaceGraphRelationEnds edge={edge} nodesById={nodesById} onNavigate={onNavigate} />
           <dl className="workspace-graph-detail-fields">
-            <WorkspaceGraphDetailField label={t("workspaceGraph.details.layer")}>{workspaceGraphEnumLabel(edge.layer, t)}</WorkspaceGraphDetailField>
-            <WorkspaceGraphDetailField label={t("workspaceGraph.details.direction")}>{workspaceGraphEnumLabel(edge.direction, t)}</WorkspaceGraphDetailField>
+            <WorkspaceGraphDetailField label={t("graph.details.layer")}>{workspaceGraphEnumLabel(edge.layer, t)}</WorkspaceGraphDetailField>
+            <WorkspaceGraphDetailField label={t("graph.details.relationship")}>{workspaceGraphEnumLabel(edge.relation_kind, t)}</WorkspaceGraphDetailField>
+            <WorkspaceGraphDetailField label={t("graph.details.direction")}>{workspaceGraphEnumLabel(edge.direction, t)}</WorkspaceGraphDetailField>
             <WorkspaceGraphDetailField label={t("workspaceGraph.details.relationsRepresented")}>{formatCount(edge.relation_count)}</WorkspaceGraphDetailField>
             <WorkspaceGraphDetailField label={t("workspaceGraph.details.crossFolder")}>{t(edge.cross_folder ? "workspaceGraph.details.yes" : "workspaceGraph.details.no")}</WorkspaceGraphDetailField>
           </dl>
         </>
       ) : null}
       {pair ? <CitationEvidenceSection pair={pair} revision={revision} workspaceId={workspaceId} /> : null}
+      {edge ? <GraphDetailActions><GraphDetailCenterButton onCenter={() => onCenter(edge.id)} /></GraphDetailActions> : null}
     </section>
   );
 }
@@ -2759,49 +2259,52 @@ function WorkspaceGraphDetails({
 function WorkspaceGraphNodeDetails({
   busy,
   canExpand,
+  contained,
   expanding,
   node,
   onCenter,
   onExpand,
   onNavigate,
+  onTogglePin,
+  pinState,
 }: {
   busy: boolean;
   canExpand: boolean;
+  contained: number;
   expanding: boolean;
   node: WorkspaceGraphNode;
-  onCenter?: (id: string) => void;
+  onCenter: (id: string) => void;
   onExpand: (clusterId: string) => void;
   onNavigate: WorkspaceGraphDocumentNavigation;
+  onTogglePin: (id: string) => void;
+  pinState: GraphPinState;
 }) {
   const { t } = useTranslation("graph");
-  if (node.grain === "cluster") {
-    return (
-      <>
-        <h3>{node.label}</h3>
-        <dl className="workspace-graph-detail-fields">
-          <WorkspaceGraphDetailField label={t("workspaceGraph.details.kind")}>{workspaceGraphEnumLabel(node.cluster_kind, t)}</WorkspaceGraphDetailField>
-          <WorkspaceGraphDetailField label={t("workspaceGraph.details.members")}>{formatCount(node.member_count)}</WorkspaceGraphDetailField>
-          <WorkspaceGraphDetailField label={t("workspaceGraph.details.relations")}>{formatCount(node.relation_count)}</WorkspaceGraphDetailField>
-        </dl>
-        <WorkspaceGraphNodeActions busy={busy} canExpand={canExpand} expanding={expanding} node={node}
-          onCenter={onCenter} onExpand={onExpand} onNavigate={onNavigate} />
-      </>
-    );
-  }
+  const location = workspaceGraphNodeLocation(node) ?? (node.grain === "document" ? t("workspaceGraph.folders.unplaced") : null);
+  // Title, then the kind chip and location, then fields, actions and relations, as in the Context graph.
   return (
     <>
       <h3>{node.label}</h3>
+      <div className="graph-details-meta">
+        <span className="graph-details-meta-line"><WorkspaceGraphNodeChip node={node} /></span>
+        {location ? <span className="graph-details-location" title={location}>{location}</span> : null}
+      </div>
       <dl className="workspace-graph-detail-fields">
-        <WorkspaceGraphDetailField label={t("workspaceGraph.details.kind")}>{workspaceGraphEnumLabel(node.entity_kind, t)}</WorkspaceGraphDetailField>
-        <WorkspaceGraphDetailField label={t("workspaceGraph.details.primaryFolder")}>{node.primary_folder_label || t("workspaceGraph.folders.unplaced")}</WorkspaceGraphDetailField>
-        <WorkspaceGraphDetailField label={t("workspaceGraph.details.referencedBy")}>{t("workspaceGraph.details.referencedByValue", { count: node.reference_count })}</WorkspaceGraphDetailField>
-        <WorkspaceGraphDetailField label={t("workspaceGraph.details.evidence")}>{formatCount(node.evidence_count)}</WorkspaceGraphDetailField>
-        {node.also_appears_in.length ? (
-          <WorkspaceGraphDetailField label={t("workspaceGraph.details.alsoAppears")}>{node.also_appears_in.map((placement) => placement.label).join(", ")}</WorkspaceGraphDetailField>
-        ) : null}
+        {node.grain === "folder" ? <WorkspaceGraphDetailField label={t("graph.details.containedItems")}>{formatCount(contained)}</WorkspaceGraphDetailField> : null}
+        {node.grain === "cluster" ? <>
+          <WorkspaceGraphDetailField label={t("workspaceGraph.details.members")}>{formatCount(node.member_count)}</WorkspaceGraphDetailField>
+          <WorkspaceGraphDetailField label={t("workspaceGraph.details.relations")}>{formatCount(node.relation_count)}</WorkspaceGraphDetailField>
+        </> : null}
+        {node.grain === "document" ? <>
+          <WorkspaceGraphDetailField label={t("workspaceGraph.details.referencedBy")}>{t("workspaceGraph.details.referencedByValue", { count: node.reference_count })}</WorkspaceGraphDetailField>
+          <WorkspaceGraphDetailField label={t("workspaceGraph.details.evidence")}>{formatCount(node.evidence_count)}</WorkspaceGraphDetailField>
+          {node.also_appears_in.length ? (
+            <WorkspaceGraphDetailField label={t("workspaceGraph.details.alsoAppears")}>{node.also_appears_in.map((placement) => placement.label).join(", ")}</WorkspaceGraphDetailField>
+          ) : null}
+        </> : null}
       </dl>
-      <WorkspaceGraphNodeActions busy={busy} canExpand={false} expanding={false} node={node}
-        onCenter={onCenter} onExpand={onExpand} onNavigate={onNavigate} />
+      <WorkspaceGraphNodeActions busy={busy} canExpand={canExpand} expanding={expanding} node={node}
+        onCenter={onCenter} onExpand={onExpand} onNavigate={onNavigate} onTogglePin={onTogglePin} pinState={pinState} />
     </>
   );
 }
@@ -2926,6 +2429,7 @@ function nodeSummary(
       relations: node.relation_count,
     });
   }
+  if (node.grain === "folder") return `${workspaceGraphEnumLabel(node.grain, t)} · ${node.path}`;
   const metric = lens === "combined"
     ? t("workspaceGraph.list.combinedMetric", { references: node.reference_count, evidence: node.evidence_count })
     : lens === "links"
@@ -2949,7 +2453,8 @@ function nodeMeta(
   if (node.grain === "cluster") {
     return t("workspaceGraph.list.clusterMeta", { members: node.member_count, relations: node.relation_count });
   }
-  const folder = node.primary_folder_label || t("workspaceGraph.folders.unplaced");
+  const folder = workspaceGraphNodeLocation(node) || t("workspaceGraph.folders.unplaced");
+  if (node.grain === "folder") return folder;
   const metric = lens === "combined"
     ? t("workspaceGraph.list.combinedMetricShort", { references: node.reference_count, evidence: node.evidence_count })
     : lens === "links"

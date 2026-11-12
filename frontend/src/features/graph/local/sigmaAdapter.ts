@@ -8,9 +8,11 @@ import { colorToArray, floatColor } from "sigma/utils";
 
 import type { GraphRenderScene, GraphPoint, GraphViewport } from "../shared/rendererTypes";
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../shared/hoverChip";
-import { GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type GraphNodeShape } from "../shared/graphTokens";
-import { FORCED_OUTLINE_INSETS, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, TRIANGLE_RADIUS_FACTOR, drawShapeRing } from "../shared/nodeShapes";
-import { LOCAL_EDGE_PROGRAMS } from "./edgePrograms";
+import {
+  GRAPH_LINE_OPACITY, GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, readGraphTokens, type GraphNodeShape,
+} from "../shared/graphTokens";
+import { FORCED_OUTLINE_INSETS, GRAPH_RING_BAND_PX, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, TRIANGLE_RADIUS_FACTOR, drawShapeRing } from "../shared/nodeShapes";
+import { LOCAL_EDGE_PROGRAMS, setLocalFitRatio, type LocalLineState } from "./edgePrograms";
 import { createLocalLayout, type LocalLayout } from "./layout";
 import { createLocateTrace } from "./locateTrace";
 import { buildLocalScene, type LocalScene, type LocalSceneNode, type LocalSceneEdge } from "./sceneInput";
@@ -164,9 +166,13 @@ const OutlinedTriangleNodeProgram = createNodeCompoundProgram([
   createTriangleNodeProgram(FORCED_OUTLINE_INSETS.triangle[1]),
 ], (context, data, settings) => settings.defaultDrawNodeLabel(context, data, settings), () => undefined);
 
+// Legend folder ring: a constant pixel band at every size and zoom. node-border
+// feathers each edge over 2 px inside the band; one more pixel keeps a fully
+// opaque core, so the band reads as the Map's 2 px ring.
+const SIGMA_BORDER_FEATHER_PX = 1;
 const FolderNodeProgram = createNodeBorderProgram({
   borders: [
-    { size: { value: 0.24 }, color: { attribute: "color" } },
+    { size: { value: GRAPH_RING_BAND_PX + SIGMA_BORDER_FEATHER_PX, mode: "pixels" }, color: { attribute: "color" } },
     { size: { fill: true }, color: { transparent: true } },
   ],
 });
@@ -192,7 +198,8 @@ const OutlinedCircleNodeProgram = createNodeBorderProgram({
 function nodeProgramType(shape: GraphNodeShape, forcedOutline: boolean): string {
   if (forcedOutline && shape === "circle") return "outlinedCircle";
   if (forcedOutline && shape === "triangle") return "outlinedTriangle";
-  return shape === "ring" ? "folder" : shape;
+  // The Context graph has no aggregates; a count disc would draw as its disc.
+  return shape === "ring" ? "folder" : shape === "countDisc" ? "circle" : shape;
 }
 
 function finitePoint(point: GraphPoint | undefined): point is GraphPoint {
@@ -200,11 +207,11 @@ function finitePoint(point: GraphPoint | undefined): point is GraphPoint {
 }
 
 /** Preblend, rather than hide, so quiet points remain visible and pickable. */
-function quietColor(color: string, surface: string): string {
+function quietColor(color: string, surface: string, share = 0.14): string {
   const foreground = colorToArray(color);
   const background = colorToArray(surface);
   const channels = foreground.slice(0, 3).map((value, index) =>
-    Math.round(value * 0.14 + background[index] * 0.86));
+    Math.round(value * share + background[index] * (1 - share)));
   return `rgb(${channels.join(", ")})`;
 }
 
@@ -336,6 +343,7 @@ export function createSigmaGraphAdapter(
       quietBorderColor: quietColor(ink, tokens.surface),
       isSeed: node.isSeed,
       isCurrent: node.isCurrent,
+      isFolder: localNodeVisualKind(node.entityKind, node.family) === "folder",
       // Drawn last, above the dense centre where it is pinned.
       zIndex: node.isCurrent ? 1 : 0,
       label: node.label,
@@ -351,7 +359,8 @@ export function createSigmaGraphAdapter(
     type: edge.kind,
     size: 1,
     color: tokens.edge[edge.kind],
-    quietColor: quietColor(tokens.edge[edge.kind], tokens.surface),
+    // The Map's dimmed line share.
+    quietColor: quietColor(tokens.edge[edge.kind], tokens.surface, GRAPH_LINE_OPACITY.dimmed),
     label,
   });
 
@@ -577,7 +586,9 @@ export function createSigmaGraphAdapter(
       // otherwise have no room left.
       const badgeWidth = badge && room - context.measureText(badge).width - 12 >= 24
         ? context.measureText(badge).width + 12 : 0;
-      context.font = `${current ? 700 : settings.labelWeight} ${fontSize}px ${settings.labelFont}`;
+      // Folder names are semibold, as on the Map.
+      const folder = Boolean((data as { isFolder?: boolean }).isFolder);
+      context.font = `${current ? 700 : folder ? 600 : settings.labelWeight} ${fontSize}px ${settings.labelFont}`;
       context.textAlign = right ? "left" : "right";
       context.textBaseline = "middle";
       const textRoom = room - badgeWidth;
@@ -702,6 +713,9 @@ export function createSigmaGraphAdapter(
         size: presentation?.highlighted ? 2.5 : hoveredId === key ? Number(data.size) * 1.5 : data.size,
         type: presentation?.removed ? "action" : data.type,
         color: presentation?.removed ? GRAPH_REMOVED_EDGE_COLOR : presentation?.highlighted ? tokens.highlight : quiet ? data.quietColor : data.color,
+        // The Map's line rules: no fade while a selection is shown, none in forced colours.
+        lineState: (mode === "forced" ? "forced"
+          : highlightedStar !== null || presentation?.highlighted ? "selected" : "rest") satisfies LocalLineState,
         forceLabel: Boolean(presentation?.eventCaption),
         hidden: presentation?.hidden ?? false,
       };
@@ -1096,7 +1110,9 @@ export function createSigmaGraphAdapter(
       const width = container.clientWidth, height = container.clientHeight;
       const ratio = insets ? Math.max(width / Math.max(1, width - insets.left - insets.right),
         height / Math.max(1, height - insets.top - insets.bottom)) : 1;
-      camera.setState({ x: 0.5, y: 0.5, angle: 0, ratio: insets ? camera.getBoundedRatio(ratio) : 1 });
+      const fitRatio = insets ? camera.getBoundedRatio(ratio) : 1;
+      setLocalFitRatio(sigma, fitRatio);
+      camera.setState({ x: 0.5, y: 0.5, angle: 0, ratio: fitRatio });
       if (insets && width && height) {
         const center = sigma.viewportToFramedGraph({ x: (width + insets.left - insets.right) / 2,
           y: (height + insets.top - insets.bottom) / 2 });

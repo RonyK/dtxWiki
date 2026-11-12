@@ -251,6 +251,18 @@ describe("GraphCanvas reconciliation", () => {
     expect(freshAdapter.pin).not.toHaveBeenCalled();
     view.rerender(<GraphCanvas {...common} {...pins} active forcedColors scene={filteredScene} />);
     expect(freshAdapter.pin).toHaveBeenCalledExactlyOnceWith("node:related", true, undefined);
+
+    // A reader's pause holds when the tab returns with a rebuilt scene, until resumed.
+    adapter.stopLayout.mockClear();
+    view.rerender(<GraphCanvas {...common} {...pins} active forcedColors layoutPaused scene={filteredScene} />);
+    expect(adapter.stopLayout).toHaveBeenCalledOnce();
+    view.rerender(<GraphCanvas {...common} {...pins} active={false} forcedColors layoutPaused scene={fullScene} />);
+    adapter.resumeLayout.mockClear();
+    view.rerender(<GraphCanvas {...common} {...pins} active forcedColors layoutPaused scene={fullScene} />);
+    await waitFor(() => expect(adapter.replaceScene).toHaveBeenCalledWith(fullScene));
+    expect(adapter.resumeLayout).not.toHaveBeenCalled();
+    view.rerender(<GraphCanvas {...common} {...pins} active forcedColors scene={fullScene} />);
+    expect(adapter.resumeLayout).toHaveBeenCalledOnce();
   });
 
   it("recreates the renderer boundary when application theme tokens change", async () => {

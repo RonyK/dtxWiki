@@ -4,7 +4,8 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import { WorkspaceGraphScreen } from "../../frontend/src/features/graph/WorkspaceGraphScreen";
-import { isWorkspaceGraphResponse, type WorkspaceGraphOverviewRequest, type WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
+import { isWorkspaceGraphContainment, isWorkspaceGraphResponse, workspaceGraphAdmissionCounts,
+  type WorkspaceGraphOverviewRequest, type WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { initI18n } from "../../frontend/src/shared/i18n";
 import { freshWorkspaceGraphState, saveWorkspaceGraphState } from "../../frontend/src/features/graph/workspaceGraphModel";
 import "../../frontend/src/styles/index.css";
@@ -154,33 +155,20 @@ if (folderMembers > 0 && folderMembers <= count) {
     : node);
   scene.facet_counts.folders = [{ value: folderId, label: "Folder documents", count: folderMembers }];
   const nodesById = new Map(scene.nodes.map((node) => [node.id, node]));
-  scene.folder_topology = {
-    schema_version: "workspace-graph-folders.v1",
-    folders: [{ id: folderId, label: "Folder documents", parent_folder_id: null,
-      direct_member_count: folderMembers }],
-    memberships: scene.nodes.map((node) => {
-      if (node.grain !== "document") throw new Error("Expected document folder fixture");
-      return { node_id: node.id, folder_id: node.primary_folder_id,
-        entity_kind: node.entity_kind, member_count: 1 };
-    }),
-    edge_slices: scene.edges.map((edge) => {
-      const source = nodesById.get(edge.source)!;
-      const target = nodesById.get(edge.target)!;
-      if (source.grain !== "document" || target.grain !== "document") {
-        throw new Error("Expected document folder relation fixture");
-      }
-      return { edge_id: edge.id, source_folder_id: source.primary_folder_id,
-        source_entity_kind: source.entity_kind, target_folder_id: target.primary_folder_id,
-        target_entity_kind: target.entity_kind, relation_count: edge.relation_count,
-        occurrence_weight: 1 };
-    }),
-  };
   scene.edges = scene.edges.map((edge) => {
     const source = nodesById.get(edge.source)!;
     const target = nodesById.get(edge.target)!;
     return { ...edge, occurrence_weight: 1, cross_folder: source.grain === "document" && target.grain === "document"
       && source.primary_folder_id !== target.primary_folder_id };
   });
+  // The folder is an ordinary node; what it holds are its containment relations.
+  const folder = `folder:${folderId}`;
+  scene.nodes.push({ grain: "folder", id: folder, folder_id: folderId, label: "Folder documents", path: "Folder documents" });
+  scene.edges.push(...scene.nodes.slice(0, folderMembers).map((node) => ({
+    id: `contains:${folder}|${node.id}`, source: folder, target: node.id, relation_kind: "tree", label: null,
+    layer: "knowledge" as const, direction: "directed" as const, aggregate: false, relation_count: 1,
+    occurrence_weight: 1, cross_folder: false, primary: true,
+  })));
   if (!isWorkspaceGraphResponse({ data: scene })) throw new Error("Invalid folder-member fixture scene");
 }
 // Refine's large-facet fixture changes only this opt-in scene. All ordinary
@@ -215,26 +203,21 @@ function visibleScene(role: "owner" | "viewer"): WorkspaceGraphScene {
   };
 }
 
-/** Synthetic transport boundary only, not the real server's aggregation. */
+/** Synthetic transport boundary only, not the real server's aggregation. Budgets count documents and relations. */
 function budgetedScaleScene(result: WorkspaceGraphScene, request?: WorkspaceGraphOverviewRequest): WorkspaceGraphScene {
-  if (!pc10k || !request || result.nodes.length <= request.budget.documents) return result;
-  const nodes = result.nodes.slice(0, request.budget.documents);
+  const admitted = workspaceGraphAdmissionCounts(result);
+  if (!pc10k || !request || admitted.nodeCount <= request.budget.documents) return result;
+  const documents = result.nodes.filter((node) => node.grain !== "folder").slice(0, request.budget.documents);
+  const nodes = [...documents, ...result.nodes.filter((node) => node.grain === "folder")];
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edges = result.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
-    .slice(0, request.budget.relations);
-  const edgeIds = new Set(edges.map((edge) => edge.id));
-  const memberships = result.folder_topology?.memberships.filter((row) => nodeIds.has(row.node_id));
-  const folders = result.folder_topology?.folders.map((folder) => ({ ...folder,
-    direct_member_count: memberships?.filter((row) => row.folder_id === folder.id).length ?? 0,
-  })).filter((folder) => folder.direct_member_count > 0);
+  const visible = result.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+  const edges = [...visible.filter((edge) => !isWorkspaceGraphContainment(edge)).slice(0, request.budget.relations),
+    ...visible.filter(isWorkspaceGraphContainment)];
   return {
     ...result, nodes, edges, completeness: "partial", truncated: true,
-    counts: { ...result.counts, rendered_documents: nodes.length, rendered_relations: edges.length },
+    counts: { ...result.counts, rendered_documents: documents.length,
+      rendered_relations: workspaceGraphAdmissionCounts({ nodes, edges }).edgeCount },
     omission_reasons: ["document_budget"],
-    folder_topology: result.folder_topology ? {
-      ...result.folder_topology, folders: folders!, memberships: memberships!,
-      edge_slices: result.folder_topology.edge_slices.filter((row) => edgeIds.has(row.edge_id)),
-    } : undefined,
   };
 }
 

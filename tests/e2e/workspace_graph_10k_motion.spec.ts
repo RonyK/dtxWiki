@@ -6,6 +6,7 @@ import { createOverviewResponseReader, type OverviewResponseReader } from "./wor
 import { movedPointCount, readWorkspacePointFrameOnPage, visibleOrdinaryTitleCountOnPage } from "./workspace_graph_point_frame";
 import { captureNativeLongCalls, expectNativeCounts, installNativeDrawMeter, readNativeDraw, readNativeDrawDiagnostics } from "./workspace_graph_native_draw";
 import { sameWorkspaceRemountCamera } from "./workspace_graph_camera";
+import { admittedNodes, nativeDrawCounts, sceneRelations } from "./workspace_graph_scene";
 import { createDenseCpuProfile } from "./workspace_graph_cpu_profile";
 
 const PC_BUDGET = { documents: 10_000, relations: 100_000 };
@@ -68,7 +69,8 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
     await installNativeDrawMeter(page);
     const scene = await openPc10k(page, "e2e-graph-10k-owner@example.com", 30_895);
     const canvas = page.getByTestId("graph-canvas");
-    await expectNativeCounts(page, 10_000, 30_895);
+    const drawn = nativeDrawCounts(scene);
+    await expectNativeCounts(page, drawn.points, drawn.links);
 
     // A real user wheel consumes automatic-camera ownership. Native label
     // point coordinates then prove motion rather than counting RAF callbacks.
@@ -96,7 +98,7 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
     const stopped = await stablePointFrame(page);
     expect(stopped.camera).toEqual(paused.camera);
 
-    const linkedIds = new Set(scene.edges.flatMap((edge) => [edge.source, edge.target]));
+    const linkedIds = new Set(sceneRelations(scene).flatMap((edge) => [edge.source, edge.target]));
     const document = scene.nodes.find((node) => node.grain === "document" && linkedIds.has(node.id));
     if (!document) throw new Error("No original linked document in real PC10K response");
     await page.getByRole("searchbox", { name: "Find in visible map", exact: true }).fill(document.label);
@@ -125,7 +127,7 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
       await previousCanvas.dispose();
       await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
       await expect(canvas).toHaveAttribute("data-map-node-count", "10000");
-      await expectNativeCounts(page, 10_000, 30_895);
+      await expectNativeCounts(page, drawn.points, drawn.links);
       await expect(page.getByRole("button", { name: "Resume layout", exact: true })).toBeEnabled();
       const remounted = await stablePointFrame(page);
       expect(sameWorkspaceRemountCamera(themeCamera.camera, remounted.camera)).toBe(true);
@@ -146,13 +148,14 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
       extension.loseContext();
     });
     await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "error");
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "10000");
+    // The list keeps all 10,000 documents and the folders that hold them.
+    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", String(scene.nodes.length));
     await expect(details.getByRole("heading", { name: document.label, exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Retry interactive map", exact: true }).click();
     await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
     expect(await originalCanvas.evaluate((element) => element.isConnected)).toBe(false);
     await originalCanvas.dispose();
-    await expectNativeCounts(page, 10_000, 30_895);
+    await expectNativeCounts(page, drawn.points, drawn.links);
     await expect(page.getByRole("button", { name: "Resume layout", exact: true })).toBeEnabled();
     await stablePointFrame(page);
     await expect(details.getByRole("heading", { name: document.label, exact: true })).toBeVisible();
@@ -180,7 +183,8 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
       await profile.prepare();
     } : undefined;
     const scene = await openPc10k(page, "e2e-graph-10k-dense-owner@example.com", 100_000, prepareProfile);
-    await expectNativeCounts(page, 10_000, 100_000);
+    const drawn = nativeDrawCounts(scene);
+    await expectNativeCounts(page, drawn.points, drawn.links);
     const canvas = page.getByTestId("graph-canvas");
     const cpuProfile = cpuProfiles.get(page);
     if (cpuProfile) await cpuProfile.start();
@@ -240,7 +244,7 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
     expect(await nodes.locator("li").count()).toBeLessThan(30);
     expect(await edges.locator("li").count()).toBeLessThan(30);
     // Search reaches the last original document; its listed relations keep original wire IDs.
-    const lastNode = scene.nodes.at(-1)!;
+    const lastNode = admittedNodes(scene).at(-1)!;
     const search = page.getByRole("searchbox", { name: "Find in visible map", exact: true });
     await search.fill(lastNode.label);
     const lastButton = nodes.locator(`li[data-graph-node-id="${lastNode.id}"] button.workspace-graph-list-select`);
@@ -254,7 +258,7 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
     await search.clear();
 
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export visible map", exact: true }).click();
+    await page.getByRole("button", { name: "Export filtered graph", exact: true }).click();
     const stream = await (await downloadPromise).createReadStream();
     if (!stream) throw new Error("No visible-map export stream");
     const chunks: Buffer[] = [];
@@ -268,24 +272,26 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
     const exported = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
       nodes: { id: string }[]; edges: { id: string; source: string; target: string }[];
     };
-    expect(exported.nodes).toHaveLength(10_000);
+    // The export holds the 10,000 documents and 100,000 relations with every
+    // folder and containment row; openPc10k counted each type.
+    expect(exported.nodes).toHaveLength(scene.nodes.length);
     expect(new Set(exported.nodes.map((node) => node.id))).toEqual(new Set(scene.nodes.map((node) => node.id)));
     const original = new Map(scene.edges.map((edge) => [edge.id, `${edge.source}\0${edge.target}`]));
-    expect(exported.edges).toHaveLength(100_000);
+    expect(exported.edges).toHaveLength(scene.edges.length);
     expect(exported.edges.every((edge) => original.get(edge.id) === `${edge.source}\0${edge.target}`)).toBe(true);
-    expect(new Set(exported.edges.map((edge) => edge.id)).size).toBe(100_000);
+    expect(new Set(exported.edges.map((edge) => edge.id)).size).toBe(scene.edges.length);
     await info.attach("pc10k-100k.png", { body: await page.screenshot(), contentType: "image/png" });
 
-    const view = page.locator("details.workspace-graph-view-options");
+    const view = page.locator("details.graph-view-options");
     await view.locator("summary").click();
     const boundedRead = waitOverview(page, MOBILE_BUDGET.documents);
     await page.getByRole("combobox", { name: "Map node limit", exact: true }).selectOption("2k");
     const bounded = await boundedRead;
-    expect(bounded.nodes.length).toBeLessThanOrEqual(2_000);
-    expect(bounded.edges.length).toBeLessThanOrEqual(6_000);
-    await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-node-count", String(bounded.nodes.length));
-    await expectNativeCounts(page, bounded.nodes.length,
-      bounded.edges.filter((edge) => edge.source !== edge.target).length);
+    expect(admittedNodes(bounded).length).toBeLessThanOrEqual(2_000);
+    expect(sceneRelations(bounded).length).toBeLessThanOrEqual(6_000);
+    await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-node-count", String(admittedNodes(bounded).length));
+    const boundedDrawn = nativeDrawCounts(bounded);
+    await expectNativeCounts(page, boundedDrawn.points, boundedDrawn.links);
     await info.attach("pc10k-100k-stability.json", { body: JSON.stringify({
       scope: "exact real API/native10K100K motion/pause and original export; maximum-capacity stability, not representative latency",
       counts: scene.counts, bounded: bounded.counts, errors, publicationReads, nativeBeforePublication,
@@ -323,7 +329,7 @@ async function openPc10k(page: Page, email: string, relations: number, before10k
     await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible();
     await before10k();
   }
-  const view = page.locator("details.workspace-graph-view-options");
+  const view = page.locator("details.graph-view-options");
   await view.locator("summary").click();
   const full = waitOverview(page, PC_BUDGET.documents);
   await page.getByRole("combobox", { name: "Map node limit", exact: true }).selectOption("10k");
@@ -331,8 +337,8 @@ async function openPc10k(page: Page, email: string, relations: number, before10k
   expect(scene.representation).toBe("exact");
   expect(scene.completeness).toBe("complete");
   expect(scene.truncated).toBe(false);
-  expect(scene.nodes).toHaveLength(10_000);
-  expect(scene.edges).toHaveLength(relations);
+  expect(admittedNodes(scene)).toHaveLength(10_000);
+  expect(sceneRelations(scene)).toHaveLength(relations);
   const canvas = page.getByTestId("graph-canvas");
   // Receiving the original API body does not settle the native scene. Bind
   // readiness to its new edge count before another real toolbar click;

@@ -19,6 +19,7 @@ import {
   workspaceGraphRenderScene,
   workspaceGraphRequest,
   workspaceGraphOrphanIds,
+  workspaceGraphHeldCount,
 } from "../workspaceGraphModel";
 
 const scene: WorkspaceGraphScene = {
@@ -247,6 +248,25 @@ describe("workspaceGraphModel", () => {
     );
     expect(searched.nodes.map((node) => node.id)).toEqual(["context:one"]);
     expect(searched.edges).toEqual([]);
+  });
+
+  it("counts every relation, containment included, as a link and counts held nodes whether or not lines are drawn", () => {
+    const doc = (id: string) => ({ ...scene.nodes[0], id, label: id, reference_count: 0, evidence_count: 0 });
+    const folder = (id: string) => ({ grain: "folder", id, folder_id: id, label: id, path: id }) as WorkspaceGraphScene["nodes"][number];
+    const edge = (source: string, target: string, relation_kind: string) => ({
+      ...scene.edges[0], id: `${source}|${target}`, source, target, relation_kind,
+    });
+    // Folder -> parent -> child -> other; only "lonely" has no relation at all.
+    const payload: WorkspaceGraphScene = {
+      ...scene,
+      nodes: [folder("folder"), doc("parent"), doc("child"), doc("other"), doc("lonely")],
+      edges: [edge("folder", "parent", "tree"), edge("parent", "child", "tree"), edge("child", "other", "wikilink")],
+    };
+    expect([...workspaceGraphOrphanIds(payload)]).toEqual(["lonely"]);
+    const shown = new Set(workspaceGraphDisplayItems(payload, { show_orphans: false, show_edges: false }).nodes
+      .map((node) => node.id));
+    expect([workspaceGraphHeldCount(payload, "folder", shown), workspaceGraphHeldCount(payload, "parent", shown)])
+      .toEqual([1, 1]);
   });
 
   it("groups sidebar search results by match and splits a node's relations by direction", () => {

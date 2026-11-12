@@ -14,19 +14,11 @@ export type LocalViewContext = {
   /** The document the graph is opened from: its rows show the legend's "This document" glyph. */
   currentId: string | null;
   hrefFor: (node: GraphNode) => string | null;
+  /** Where a node sits: the folder holding it in this scene. */
+  locationOf: (node: GraphNode) => string | null;
   t: TFunction<"graph">;
   visuals: LocalNodeVisuals;
 };
-
-/** How Details and the flow name a node kind ("this document", "this folder" …). */
-export type LocalSelfKind = "document" | "library" | "folder" | "other";
-
-export function localSelfKind(node: GraphNode): LocalSelfKind {
-  const kind = localNodeVisualKind(node.entity_kind, node.family);
-  // A version is one point in its document's history.
-  return ["context", "version", "agent", "agentVersion"].includes(kind) ? "document"
-    : kind === "library" ? "library" : kind === "folder" ? "folder" : "other";
-}
 
 export function localStroke(edge: GraphEdge): RelationListStroke {
   const visual = localEdgeVisualKind(edge.edge_kind);
@@ -36,8 +28,9 @@ export function localStroke(edge: GraphEdge): RelationListStroke {
 
 export const LOCAL_STROKE_ORDER: readonly RelationListStroke[] = ["link", "citation", "coAccess", "membership", "action", "other"];
 
+/** Line names come from the legend, as in the Knowledge Map. */
 export function localStrokeLabel(t: TFunction<"graph">) {
-  return (stroke: RelationListStroke) => t(`relationList.lines.${stroke}`);
+  return (stroke: RelationListStroke) => t(`graph.legend.edge.${stroke}`);
 }
 
 /**
@@ -56,9 +49,10 @@ function nodeChipLabel(node: GraphNode, t: TFunction<"graph">) {
     : t(`graph.listChips.node.${kind}`);
 }
 
-/** The names a node is shown with, for list search without building its view. */
-export function localNodeSearchText(node: GraphNode, t: TFunction<"graph">) {
-  return [node.label, nodeChipLabel(node, t), domainLabel("graph", "graphEntityKind", node.entity_kind, t)].join(" ");
+/** The names a node is shown with (name, location, kind), for list search without building its view. */
+export function localNodeSearchText(node: GraphNode, context: LocalViewContext) {
+  const { t } = context;
+  return [node.label, context.locationOf(node) ?? "", nodeChipLabel(node, t), domainLabel("graph", "graphEntityKind", node.entity_kind, t)].join(" ");
 }
 
 export function localNodeView(node: GraphNode, context: LocalViewContext): RelationListNodeView {
@@ -77,6 +71,8 @@ export function localNodeView(node: GraphNode, context: LocalViewContext): Relat
     href: hrefFor(node),
     id: node.id,
     label: node.label,
+    // Where the node sits, as in the Map's rows.
+    meta: context.locationOf(node),
   };
 }
 

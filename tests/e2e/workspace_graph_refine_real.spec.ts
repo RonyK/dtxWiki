@@ -3,6 +3,7 @@ import { expect, test, type Page, type Response, type TestInfo } from "@playwrig
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { login, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
+import { admittedNodes, listedNodeIds } from "./workspace_graph_scene";
 
 const OWNER_EMAIL = "e2e-graph-refine-owner@example.com";
 const OVERVIEW_PATH = "/graph/overview/query";
@@ -35,7 +36,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     expect(initial.facet_counts.folders.find((folder) => folder.value === "unplaced")?.count).toBe(2);
     const researchFolder = initial.facet_counts.folders.find((folder) => folder.label === "Research Delta")?.value;
     expect(researchFolder).toBeTruthy();
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "3");
+    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", listedTotal(initial));
 
     const refine = page.getByRole("button", { name: "Refine", exact: true });
     const dialog = page.getByRole("dialog", { name: "Refine data" });
@@ -72,8 +73,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await search.fill("Research Delta");
     const pathResponse = nextOverview(page);
     await apply.click();
-    expect(labels(await scene(pathResponse))).toEqual(["Alpha"]);
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "1");
+    const pathScene = await scene(pathResponse);
+    expect(labels(pathScene)).toEqual(["Alpha"]);
+    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", listedTotal(pathScene));
 
     await openRefine();
     await search.fill("target");
@@ -96,7 +98,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     const only = await scene(onlyResponse);
     expect(labels(only)).toEqual(["Beta", "Gamma"]);
     expect(posts.at(-1)).toMatchObject({ folders: { only: ["unplaced"], include: [], exclude: [] } });
-    expect(only.nodes.every((node) => node.grain === "document" && node.primary_folder_id === null)).toBe(true);
+    expect(admittedNodes(only).every((node) => node.grain === "document" && node.primary_folder_id === null)).toBe(true);
     const countBeforeCancel = posts.length;
     await openRefine();
     await draftFolderRule("unplaced", "exclude");
@@ -112,9 +114,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     const restoredResponse = nextOverview(page);
     await page.reload();
-    expect(labels(await scene(restoredResponse))).toEqual(["Beta", "Gamma"]);
+    const restored = await scene(restoredResponse);
+    expect(labels(restored)).toEqual(["Beta", "Gamma"]);
     expect(posts.at(-1)).toMatchObject({ folders: { only: ["unplaced"], include: [], exclude: [] } });
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2");
+    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", listedTotal(restored));
     await openRefine();
     await editFolderRule("No visible placement");
     await expect(folder).toHaveValue("unplaced");
@@ -132,13 +135,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await capture(page, testInfo, `real-refine-${viewport.width}.png`);
     const mixedResponse = nextOverview(page);
     await apply.click();
-    expect(labels(await scene(mixedResponse))).toEqual(["Alpha", "Beta", "Gamma"]);
+    const mixed = await scene(mixedResponse);
+    expect(labels(mixed)).toEqual(["Alpha", "Beta", "Gamma"]);
     const mixedRequest = posts.at(-1) as { folders: { include: string[]; exclude: string[]; only: string[] } };
     expect(mixedRequest.folders.include).toContain("unplaced");
     expect(mixedRequest.folders.include).toHaveLength(2);
     expect(mixedRequest.folders.exclude).toEqual([]);
     expect(mixedRequest.folders.only).toEqual([]);
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "3");
+    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", listedTotal(mixed));
     if (viewport.width < 600) await page.getByRole("button", { name: "Open canvas fullscreen", exact: true }).click();
     await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible();
     await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-node-count", "3");
@@ -166,7 +170,13 @@ async function scene(responsePromise: Promise<Response>) {
   return (await response.json()).data as WorkspaceGraphScene;
 }
 
+/** Folders are list rows too: every shown document plus the folders that hold it. */
+function listedTotal(payload: WorkspaceGraphScene) {
+  return String(listedNodeIds(payload, new Set(admittedNodes(payload).map((node) => node.id))).size);
+}
+
 function labels(payload: WorkspaceGraphScene) {
-  expect(payload.counts.candidate_documents).toBe(payload.nodes.length);
-  return payload.nodes.map((node) => node.label).sort();
+  const documents = admittedNodes(payload);
+  expect(payload.counts.candidate_documents).toBe(documents.length);
+  return documents.map((node) => node.label).sort();
 }

@@ -8,6 +8,8 @@ export type WorkspaceMapLabelCandidate = {
   priority: "active" | "explicit" | "ordinary";
   /** The previous placement showed this same node's title. Omitted: no history. */
   wasVisible?: boolean;
+  /** Horizontal and vertical distance from the anchor to the title; 8 px unless a wide glyph needs more. */
+  clearance?: number;
 };
 
 export type WorkspaceMapLabelPlacement = {
@@ -57,6 +59,7 @@ export function placeWorkspaceMapLabels(
       || left.index - right.index);
   for (const { candidate, index } of order) {
     const { screenX, screenY, width, height, priority, wasVisible } = candidate;
+    const clear = Math.max(8, candidate.clearance ?? 8);
     if (![screenX, screenY, width, height].every(Number.isFinite) || width <= 0 || height <= 0) continue;
     if (width > viewport.width || height > viewport.height) {
       // An oversized active title cannot fit an immutable stage. Keep its full
@@ -73,7 +76,7 @@ export function placeWorkspaceMapLabels(
     const clamp = ([x, y]: readonly number[]): [number, number] => [
       Math.max(0, Math.min(x, viewport.width - width)), Math.max(0, Math.min(y, viewport.height - height)),
     ];
-    const preferred: [number, number] = [screenX + 8, screenY - 9];
+    const preferred: [number, number] = [screenX + clear, screenY - 9];
     if (priority === "ordinary" && options.freeze) {
       const rectangle = { x: preferred[0], y: preferred[1], width, height };
       if (rectangle.x < 0 || rectangle.y < 0 || rectangle.x + width > viewport.width || rectangle.y + height > viewport.height) {
@@ -91,9 +94,9 @@ export function placeWorkspaceMapLabels(
     // get bounded alternatives around the anchor and previously reserved
     // title edges (at most 6 + 2*40 candidates, never a viewport-wide search).
     const alternatives: Array<[number, number]> = priority === "ordinary" ? [preferred] : [
-      preferred, [screenX - width - 8, screenY - 9],
-      [screenX - width / 2, screenY - height - 8], [screenX - width / 2, screenY + 8],
-      [screenX + 8, screenY + 8], [screenX - width - 8, screenY + 8],
+      preferred, [screenX - width - clear, screenY - 9],
+      [screenX - width / 2, screenY - height - clear], [screenX - width / 2, screenY + clear],
+      [screenX + clear, screenY + clear], [screenX - width - clear, screenY + clear],
       ...explicit.flatMap((rectangle): Array<[number, number]> => [
         [preferred[0], rectangle.y - height - GAP], [preferred[0], rectangle.y + rectangle.height + GAP],
       ]),

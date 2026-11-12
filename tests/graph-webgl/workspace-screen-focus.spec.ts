@@ -4,6 +4,7 @@ import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 
 import { evidenceScreenshot } from "../e2e/evidence";
+import { GRAPH_LINE_OPACITY } from "../../frontend/src/features/graph/shared/graphTokens";
 import { fixtureServerConfig } from "./vite-fixture";
 
 import type {} from "./workspace-screen-focus-entry";
@@ -518,7 +519,7 @@ test("observed owner downgrade disposes live CPU layout and Cosmos 2k graph befo
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.queries.length)).toBe(2);
   await expect(page.getByText("Owner-only Library", { exact: true })).toHaveCount(0);
   await expect(page.locator(".graph-canvas canvas")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Export visible map", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export filtered graph", exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.simulationLifecycle()
     .every((graph) => graph.destroys === 1 && graph.callsAfterDestroy === 0)),
   { timeout: 3000 }).toBe(true);
@@ -564,7 +565,7 @@ test("observed owner downgrade disposes live CPU layout and Cosmos 2k graph befo
   expect(freshGraphs.length).toBe(disposed.length + 1);
   await expect(page.getByText("Owner-only Library", { exact: true })).toHaveCount(0);
   const downloading = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export visible map", exact: true }).click();
+  await page.getByRole("button", { name: "Export filtered graph", exact: true }).click();
   const downloadPath = await (await downloading).path();
   expect(downloadPath).not.toBeNull();
   const exported = await readFile(downloadPath!, "utf8");
@@ -586,7 +587,7 @@ test("observed owner downgrade disposes live CPU layout and Cosmos 2k graph befo
 });
 test.afterAll(async () => { await server?.close(); });
 
-test("PC10K explicit scale reaches native buffers, preserves theme geometry, and virtualizes all folder members @pc10k", async ({ page }, testInfo) => {
+test("PC10K explicit scale reaches native buffers and preserves theme geometry @pc10k", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -606,8 +607,9 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(`${origin}/?pc10k=1&folderMembers=10000`);
+  // The list holds every node, so the one folder is a row beside the documents.
   const list = page.getByTestId("workspace-graph-node-list");
-  await expect(list).toHaveAttribute("data-total-count", "2000");
+  await expect(list).toHaveAttribute("data-total-count", "2001");
   try { await expectSettledNativeScene(page); }
   catch (error) {
     await testInfo.attach("pc10k-initial-readiness-errors", { contentType: "application/json",
@@ -617,15 +619,15 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
       }, null, 2) });
     throw error;
   }
-  const view = page.locator(".workspace-graph-view-options");
+  const view = page.locator(".graph-view-options");
   await view.locator("summary").click();
   const scale = view.getByRole("combobox", { name: "Map node limit" });
   await scale.selectOption("10k");
-  await expect(list).toHaveAttribute("data-total-count", "10000");
+  await expect(list).toHaveAttribute("data-total-count", "10001");
   await expectSettledNativeScene(page);
   const expanded = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-  // 10,000 documents and 30,000 relations, plus the one TreeRail folder that
-  // holds every document and its 10,000 containment lines.
+  // 10,000 documents and 30,000 relations, plus the one folder that holds
+  // every document and its 10,000 containment relations.
   expect(expanded.positions).toHaveLength((10000 + 1) * 2);
   expect(expanded.linkAlphas).toHaveLength(30000 + 10000);
   expect(expanded.positions.every(Number.isFinite)).toBe(true);
@@ -651,29 +653,15 @@ test("PC10K explicit scale reaches native buffers, preserves theme geometry, and
   expect(afterTheme.glError).toBe(0);
   expect(afterTheme.pinned).toContain(0);
 
-  await view.locator("summary").click();
-  await view.getByRole("button", { name: "Folder context", exact: true }).click();
-  await view.locator("summary").click();
-  const folderIndex = page.locator(".workspace-graph-folder-index");
-  await folderIndex.locator("summary").click();
-  await folderIndex.getByRole("button", { name: "Folder documents · 10000", exact: true }).click();
-  const members = page.getByTestId("workspace-map-folder-members");
-  await expect(members).toHaveAttribute("data-total-count", "10000");
-  await members.locator("button[data-list-index='0']").focus();
-  await page.keyboard.press("End");
-  await expect(members.locator("button[data-list-index='9999']")).toBeFocused();
-  expect(await members.locator("button[data-list-index]").count()).toBeLessThan(30);
-  expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
-  await evidenceScreenshot(page, testInfo, "pc10k-native-folder-end.png");
   await testInfo.attach("pc10k-native-counts", { contentType: "application/json", body: JSON.stringify({
     nodes: afterTheme.positions.length / 2, edges: afterTheme.linkAlphas.length,
     glError: afterTheme.glError, requests, errors,
   }) });
   await view.locator("summary").click();
   await scale.selectOption("2k");
-  await expect(list).toHaveAttribute("data-total-count", "2000");
+  await expect(list).toHaveAttribute("data-total-count", "2001");
   await expectSettledNativeScene(page);
-  // 2,000 documents plus their one TreeRail folder.
+  // 2,000 documents plus their one folder.
   expect((await page.evaluate(() => window.__workspaceScreenFocus.snapshot())).positions).toHaveLength((2000 + 1) * 2);
   expect(errors).toEqual([]);
 });
@@ -686,9 +674,9 @@ test("PC10K native physics moves, pauses, and resumes without releasing an expli
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto(`${origin}/?pc10k=1`);
   await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
-  await page.locator(".workspace-graph-view-options summary").click();
+  await page.locator(".graph-view-options summary").click();
   await page.getByRole("combobox", { name: "Map node limit" }).selectOption("10k");
-  await page.locator(".workspace-graph-view-options summary").click();
+  await page.locator(".graph-view-options summary").click();
   await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "10000");
   await expectSettledNativeScene(page);
   const moving = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
@@ -739,10 +727,10 @@ for (const overBudget of [false, true]) {
         await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
         await expectSettledNativeScene(page);
         expect((await page.evaluate(() => window.__workspaceScreenFocus.snapshot())).positions).toHaveLength(4000);
-        await page.locator(".workspace-graph-view-options summary").click();
+        await page.locator(".graph-view-options summary").click();
         await expect(page.getByText("Mobile and unrecognized devices use a maximum of 2,000 map nodes.", { exact: true })).toBeVisible();
         expect(await page.getByRole("combobox", { name: "Map node limit" }).count()).toBe(0);
-        await page.locator(".workspace-graph-view-options summary").click();
+        await page.locator(".graph-view-options summary").click();
         await page.setViewportSize({ width: 390, height: 844 });
         await page.getByRole("button", { name: "Open canvas fullscreen", exact: true }).click();
         await expectSettledNativeScene(page);
@@ -804,103 +792,6 @@ async function dragFirstNativeNode(page: Page): Promise<void> {
   await page.mouse.move(point[0] + 35, point[1] + 20, { steps: 8 });
   await page.mouse.up();
   await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.snapshot().pinned)).toContain(0);
-}
-
-for (const mode of ["desktop", "mobile", "mobile-fullscreen"] as const) {
-  test(`real 2k folder members scroll and End reaches the last mounted row on ${mode}`, async ({ page }, testInfo) => {
-    const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-    await page.setViewportSize(mode === "desktop"
-      ? { width: 1440, height: 1000 } : { width: 390, height: 844 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto(`${origin}/?folderMembers=2000`);
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
-    if (mode === "mobile-fullscreen") await page.getByRole("button", { name: "Open canvas" }).click();
-    const scope = mode === "mobile-fullscreen" ? page.getByRole("dialog") : page.locator(".workspace-graph-screen");
-    if (mode !== "mobile-fullscreen") {
-      await scope.locator(".workspace-graph-view-options summary").click();
-      await expect(scope.locator(".workspace-graph-view-options")).toHaveAttribute("open", "");
-    }
-    await scope.getByRole("button", { name: "Folder context", exact: true }).click();
-    if (mode !== "mobile-fullscreen") await scope.locator(".workspace-graph-view-options summary").click();
-    if (mode === "mobile") await page.getByRole("button", { name: "Open Map details sheet", exact: true }).click();
-    const index = scope.locator(".workspace-graph-folder-index");
-    await index.locator("summary").click();
-    await index.getByRole("button", { name: "Folder documents · 2000", exact: true }).click();
-    const details = scope.locator(".workspace-map-folder-details");
-    const list = details.getByTestId(mode === "desktop"
-      ? "workspace-map-folder-members" : "workspace-map-folder-members-mobile");
-    await expect(list).toHaveAttribute("data-total-count", "2000");
-    const before = await list.evaluate((element) => ({
-      overflow: getComputedStyle(element).overflowY,
-      height: element.clientHeight, scrollHeight: element.scrollHeight,
-      rowCount: element.querySelectorAll("li[data-map-folder-member]").length,
-    }));
-    await testInfo.attach("folder-scroll-before", { contentType: "application/json", body: JSON.stringify(before) });
-    await evidenceScreenshot(page, testInfo, `folder-${mode}-before-end.png`);
-    expect(before.overflow).toBe("auto");
-    expect(before.scrollHeight).toBeGreaterThan(before.height);
-    expect(before.rowCount).toBeLessThan(30);
-    const firstMember = list.locator("button[data-list-index='0']");
-    const textBounds = await firstMember.evaluate((button) => {
-      const title = button.querySelector("strong")!.getBoundingClientRect();
-      const kind = button.querySelector("small")!.getBoundingClientRect();
-      return { titleBottom: title.bottom, kindTop: kind.top };
-    });
-    expect(textBounds.kindTop).toBeGreaterThan(textBounds.titleBottom);
-    await firstMember.focus();
-    await page.keyboard.press("End");
-    await expect(list.locator("button[data-list-index='1999']")).toBeFocused();
-    expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    expect(await list.locator("li[data-map-folder-member]").count()).toBeLessThan(30);
-    await testInfo.attach("folder-scroll-after-end", { contentType: "application/json", body: JSON.stringify(
-      await list.evaluate((element) => ({ overflow: getComputedStyle(element).overflowY,
-        scrollTop: element.scrollTop, height: element.clientHeight, scrollHeight: element.scrollHeight,
-        activeIndex: document.activeElement?.getAttribute("data-list-index"),
-        mountedIndices: Array.from(element.querySelectorAll("button[data-list-index]"),
-          (button) => button.getAttribute("data-list-index")),
-      })),
-    ) });
-    expect(errors).toEqual([]);
-    await evidenceScreenshot(page, testInfo, `folder-${mode}-end.png`);
-  });
-}
-
-// The unvirtualized cap is CSS: 448px on desktop, one 336px media rule for
-// every mobile container. Fullscreen also caps its details panel around it.
-for (const mode of ["desktop", "mobile-fullscreen"] as const) {
-  test(`folder members remain bounded below the virtualization threshold on ${mode}`, async ({ page }, testInfo) => {
-    await page.setViewportSize(mode === "desktop"
-      ? { width: 1440, height: 1000 } : { width: 390, height: 844 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto(`${origin}/?folderMembers=900`);
-    await expect(page.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
-    if (mode === "mobile-fullscreen") await page.getByRole("button", { name: "Open canvas" }).click();
-    const scope = mode === "mobile-fullscreen" ? page.getByRole("dialog") : page.locator(".workspace-graph-screen");
-    if (mode !== "mobile-fullscreen") {
-      await scope.locator(".workspace-graph-view-options summary").click();
-      await expect(scope.locator(".workspace-graph-view-options")).toHaveAttribute("open", "");
-    }
-    await scope.getByRole("button", { name: "Folder context", exact: true }).click();
-    if (mode !== "mobile-fullscreen") await scope.locator(".workspace-graph-view-options summary").click();
-    const index = scope.locator(".workspace-graph-folder-index");
-    await index.locator("summary").click();
-    await index.getByRole("button", { name: "Folder documents · 900", exact: true }).click();
-    const list = scope.locator(".workspace-map-folder-details").getByTestId(mode === "desktop"
-      ? "workspace-map-folder-members" : "workspace-map-folder-members-mobile");
-    await expect(list).toHaveAttribute("data-total-count", "900");
-    const dimensions = await list.evaluate((element) => ({
-      overflow: getComputedStyle(element).overflowY,
-      height: element.clientHeight, scrollHeight: element.scrollHeight,
-    }));
-    expect(dimensions.overflow).toBe("auto");
-    expect(dimensions.height).toBeLessThanOrEqual(mode === "desktop" ? 448 : 336);
-    expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.height);
-    await list.locator("li[data-map-folder-member]").last().getByRole("button").focus();
-    expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    await testInfo.attach("bounded-folder-dimensions", { contentType: "application/json", body: JSON.stringify(dimensions) });
-  });
 }
 
 /** Without a search the sidebar sections start folded; opening one lists rows in scene order. */
@@ -1018,7 +909,7 @@ for (const { language, mobile } of [
       expect(after.map(item => [item.id, item.destroys])).toEqual(lifecycle.map(item => [item.id, item.destroys]));
       expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(1);
     }
-    const view = page.locator(".workspace-graph-view-options");
+    const view = page.locator(".graph-view-options");
     const stageTop = await page.locator(".workspace-graph-stage").evaluate(element => element.getBoundingClientRect().top);
     await view.locator("summary").click();
     await expect(view).toHaveAttribute("open", "");
@@ -1160,7 +1051,7 @@ test("native 2k dark selection emphasizes original incident links without hiding
   expect(selected.linkGreyoutOpacity!).toBeGreaterThan(0);
   expect(selected.linkGreyoutOpacity!).toBeLessThanOrEqual(0.1);
   expect(selected.linkAlphas).toHaveLength(1999);
-  expect(selected.linkAlphas[0]).toBeGreaterThanOrEqual(0.85);
+  expect(selected.linkAlphas[0]).toBeCloseTo(GRAPH_LINE_OPACITY.overview.selected);
   expect(selected.linkAlphas.slice(1).every((alpha) => alpha > 0 && alpha < selected.linkAlphas[0])).toBe(true);
   await evidenceScreenshot(page, testInfo, "selection-contrast-dark.png");
   await page.getByRole("button", { name: "Clear selection", exact: true }).click();
@@ -1385,8 +1276,7 @@ for (const { language, mobile } of [
         ? "Open canvas fullscreen" : "캔버스 전체 화면으로 열기", exact: true }).click();
       await expectSettledNativeScene(page);
       const native = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
-      // 2,000 documents plus one TreeRail hub for each of the 300 placed folders.
-      expect(native.positions).toHaveLength((2000 + 300) * 2);
+      expect(native.positions).toHaveLength(4000);
       expect(native.glError).toBe(0);
       expect(await page.evaluate(() => window.__workspaceScreenFocus.requests.length)).toBe(2);
       await evidenceScreenshot(page, testInfo, `refine-${language}-mobile-2k-fullscreen.png`);

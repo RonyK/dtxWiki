@@ -74,8 +74,6 @@ from backend.services.graph_rank import (
 from backend.services.graph_reference_projection import (
     DOCUMENT_TREE_TARGET_KINDS,
     document_citation_identities,
-    document_projection_for_workspace,
-    select_document_edges_in_workspace,
 )
 from backend.services.graph_semantics import (
     ACTION_SEMANTICS,
@@ -88,7 +86,9 @@ from backend.services.graph_service import (
     GraphHydrationContext,
     GraphService,
     VisibleProjectionEdge,
+    document_projection_for_workspace,
     graph_neighbor_visibility_predicate,
+    select_document_edges_in_workspace,
 )
 from backend.services.graph_session_activity import (
     CO_USED_PER_SESSION,
@@ -834,13 +834,11 @@ class GraphQueryService:
             cache_key = frozenset(selected_documents)
             if cache_key in folder_selection_cache:
                 return folder_selection_cache[cache_key]
-            folder_candidates, memberships, placed_documents = (
-                self._primary_placement_folders(
-                    session,
-                    workspace_id,
-                    nodes=selected_documents,
-                    hydration_context=hydration_context,
-                )
+            folder_candidates, memberships, containers = self._placement_containers(
+                session,
+                workspace_id,
+                nodes=selected_documents,
+                hydration_context=hydration_context,
             )
             for candidate in [*candidates, *second_candidates]:
                 if candidate.edge.edge_kind != "tree":
@@ -857,7 +855,7 @@ class GraphQueryService:
                     folder is None
                     or document is None
                     or document.id == folder.id
-                    or document.id in placed_documents
+                    or folder.id not in containers.get(document.id, {folder.id})
                 ):
                     continue
                 folder_candidates[folder.id] = folder
@@ -1156,18 +1154,19 @@ class GraphQueryService:
             and request.time.from_ is None
             and request.time.to is None
         ):
-            folders, memberships, placed = self._primary_placement_folders(
+            folders, memberships, containers = self._placement_containers(
                 session,
                 workspace_id,
                 nodes=seeds,
                 hydration_context=hydration_context,
             )
-            # A primary placement supersedes stale/fallback projected folders.
+            # The live tree decides a seed's containers; stale projected rows go.
             direct = [
                 candidate
                 for candidate in direct
                 if candidate.edge.edge_kind != "tree"
-                or candidate.edge.target not in placed
+                or candidate.edge.source
+                in containers.get(candidate.edge.target, {candidate.edge.source})
             ]
             for folder_id, document_ids in sorted(memberships.items()):
                 folder = folders.get(folder_id) or seeds[folder_id]
@@ -1226,20 +1225,20 @@ class GraphQueryService:
         return nodes, edges, capped, folder_capped, omissions
 
     @staticmethod
-    def _primary_placement_folders(
+    def _placement_containers(
         session: Session,
         workspace_id: UUID,
         *,
         nodes: dict[str, GraphNode],
         hydration_context: GraphHydrationContext,
-    ) -> tuple[dict[str, GraphNode], dict[str, set[str]], set[str]]:
-        """Resolve each selected document's TreeRail container.
+    ) -> tuple[dict[str, GraphNode], dict[str, set[str]], dict[str, set[str]]]:
+        """Resolve each selected document's TreeRail containers.
 
-        The container is the immediate visible parent placement: a folder
-        becomes a structural node, a document is that document's own node.
-        A parent document outside the selection is left to the projected
-        tree relation, which reads it as the document (never the folder above
-        it). ``memberships`` may therefore be keyed by a selected document.
+        Every visible placement, primary or not, hangs from its immediate
+        visible parent: a folder becomes a structural node, a document is that
+        document's node. ``memberships`` holds the containers in the selection
+        (possibly a selected document); ``containers`` maps every placed
+        document to all its live container node ids, selected or not.
         """
 
         document_refs = {
@@ -1248,13 +1247,12 @@ class GraphQueryService:
             if node.entity_kind in {"context_page", "library_item", "agent_page"}
         }
         if not document_refs:
-            return {}, defaultdict(set), set()
+            return {}, defaultdict(set), {}
         placements = session.scalars(
             select_in_workspace(
                 WorkspaceTreeNode,
                 workspace_id=workspace_id,
                 conditions=(
-                    WorkspaceTreeNode.primary_placement.is_(True),
                     WorkspaceTreeNode.visibility_status == "visible",
                     WorkspaceTreeNode.target_kind.in_(
                         ("context_page", "library_item", "agent_page")
@@ -1270,13 +1268,14 @@ class GraphQueryService:
         )
         folders: dict[str, GraphNode] = {}
         memberships: dict[str, set[str]] = defaultdict(set)
-        placed_documents: set[str] = set()
+        containers: dict[str, set[str]] = {}
         for placement in sorted(placements, key=lambda item: str(item.id)):
             if placement.id not in visible or placement.target_id is None:
                 continue
             document = document_refs.get((placement.target_kind, placement.target_id))
             if document is None:
                 continue
+            live = containers.setdefault(document.id, set())
             parent_id = placement.parent_id
             seen: set[UUID] = set()
             while parent_id is not None and parent_id not in seen:
@@ -1296,21 +1295,20 @@ class GraphQueryService:
                     )
                     folders[folder.id] = folder
                     memberships[folder.id].add(document.id)
-                    placed_documents.add(document.id)
+                    live.add(folder.id)
                     break
                 if (
                     parent.target_id is not None
                     and parent.target_kind in DOCUMENT_TREE_TARGET_KINDS
                 ):
-                    container = document_refs.get(
-                        (parent.target_kind, parent.target_id)
-                    )
-                    if container is not None and container.id != document.id:
-                        memberships[container.id].add(document.id)
-                        placed_documents.add(document.id)
+                    container = graph_node_id(parent.target_kind, parent.target_id)
+                    if container != document.id:
+                        live.add(container)
+                        if (parent.target_kind, parent.target_id) in document_refs:
+                            memberships[container].add(document.id)
                     break
                 parent_id = parent.parent_id
-        return folders, memberships, placed_documents
+        return folders, memberships, containers
 
     def _induced_projection_edges(
         self,
@@ -1334,6 +1332,7 @@ class GraphQueryService:
         """
         EdgeProjection = document_projection_for_workspace(
             workspace_id,
+            actor,
             tuple(sorted({node.entity_id for node in nodes.values()}, key=str)),
             tuple(sorted({node.entity_kind for node in nodes.values()})),
         )
@@ -2468,7 +2467,7 @@ class GraphQueryService:
         rewriting immutable history. Activity observations, whose semantics
         are not curated, need not have a current projection row.
         """
-        EdgeProjection = document_projection_for_workspace(workspace_id)
+        EdgeProjection = document_projection_for_workspace(workspace_id, actor)
 
         curated = {
             identity
@@ -2481,6 +2480,7 @@ class GraphQueryService:
             session.execute(
                 select_document_edges_in_workspace(
                     workspace_id=workspace_id,
+                    actor=actor,
                     columns=(
                         EdgeProjection.source_kind,
                         EdgeProjection.source_id,
