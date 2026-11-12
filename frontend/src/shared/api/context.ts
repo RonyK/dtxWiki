@@ -50,6 +50,7 @@ export type ContextPageDetail = ContextPageSummary & {
   version_info: VersionInfo | null;
   tree_path: Array<{ id: string; title: string; section: string }>;
   parent_node_id: string | null;
+  // Inspector findings/counts load on demand; detail defaults are not loaded results.
   children_count: number | null;
   backlink_count: number | null;
   wikilink_targets: Array<{
@@ -59,10 +60,7 @@ export type ContextPageDetail = ContextPageSummary & {
   }>;
   link_targets: ContextLinkTarget[];
   warnings: string[];
-  // Sidebar findings/counts are read through readContextPageInspector. Keep the
-  // legacy fields for other callers, without treating their defaults as loaded.
   pending_draft_version_id: string | null;
-  pending_draft_warnings: string[];
   pending_review: PendingReviewInfo | null;
   reconciliation_pending_count: number;
   reconciliation_pending_count_truncated: boolean;
@@ -236,7 +234,6 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
     link_targets: raw.link_targets ?? [],
     warnings: raw.warnings ?? [],
     pending_draft_version_id: raw.pending_draft_version_id ?? null,
-    pending_draft_warnings: raw.pending_draft_warnings ?? [],
     pending_review: raw.pending_review ?? null,
     reconciliation_pending_count: raw.reconciliation_pending_count,
     reconciliation_pending_count_truncated:

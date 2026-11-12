@@ -4835,9 +4835,6 @@ describe("ContextScreen", () => {
           children_count: 0,
           warnings: [],
           pending_draft_version_id: "version-2",
-          pending_draft_warnings: [
-            "Heading level jumps from H1 to H3 at line 5.",
-          ],
           reconciliation_pending_count: reconciliationPendingCount,
           reconciliation_pending_count_truncated: false,
           next_reconciliation_version_id:
@@ -4933,7 +4930,6 @@ describe("ContextScreen", () => {
         backlink_count: 0,
         warnings: [],
         pending_draft_version_id: null,
-        pending_draft_warnings: [],
         pending_review: null,
       },
     };
@@ -5166,7 +5162,6 @@ describe("ContextScreen", () => {
           backlink_count: 0,
           warnings: [],
           pending_draft_version_id: null,
-          pending_draft_warnings: [],
           pending_review: null,
         },
       },
@@ -5727,11 +5722,11 @@ describe("ContextScreen", () => {
     );
   });
 
-  it("surfaces pending-draft navigation before reviewer actions (F1)", async () => {
+  it("loads pending-draft status and reviewer actions without inspector lint (F1)", async () => {
     ctxWorkspace.current = {
       selectedWorkspace: { role: "owner", id: WORKSPACE_ID },
     };
-    mockFetch(pendingReviewFetch());
+    const fetchMock = mockFetch(pendingReviewFetch());
     render(
       <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
         <ContextScreen />
@@ -5743,8 +5738,7 @@ describe("ContextScreen", () => {
     expect(
       await screen.findByText(/1 pending review for this page/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/lint warning/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
     expect(
       screen.getByRole("button", { name: "Request changes" }),
     ).toBeInTheDocument();
@@ -5753,6 +5747,10 @@ describe("ContextScreen", () => {
     expect(
       [...banner.querySelectorAll("a, button")].map((action) => action.textContent?.trim()),
     ).toEqual(["View review", "View changes", "Request changes", "Approve"]);
+    const requestedUrls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(requestedUrls).toContain(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/rev-1`);
+    expect(requestedUrls.filter((url) => /\/(?:inspector|neighbors|lint)(?:[/?]|$)/.test(url)))
+      .toEqual([]);
   });
 
   it("warns about pending reconciliation before publish without blocking approval", async () => {

@@ -5799,7 +5799,8 @@ export interface components {
             pending_draft_version_id?: string | null;
             /**
              * Pending Draft Warnings
-             * @description Legacy field, not computed by the canonical detail read.
+             * @deprecated
+             * @description Deprecated compatibility field; always empty. Pending review state is provided by pending_review and pending_draft_version_id.
              */
             pending_draft_warnings?: string[];
             pending_review?: components["schemas"]["PendingReviewInfo"] | null;

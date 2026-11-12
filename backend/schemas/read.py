@@ -448,11 +448,15 @@ class ContextPageDetail(ContextPageSummary):
     warnings: list[str] = Field(default_factory=list)
     # F1: a draft awaiting review + the open review item, so the Context surface
     # can show "pending draft" + an inline approve/request-changes affordance.
-    # pending_draft_warnings lints the DRAFT body (not the displayed/published
-    # one), so a reviewer sees the draft's format issues before approving even
-    # when the page's published head is clean (Sweep-2).
     pending_draft_version_id: UUID | None = None
-    pending_draft_warnings: list[str] = Field(default_factory=list)
+    pending_draft_warnings: list[str] = Field(
+        default_factory=list,
+        deprecated=True,
+        description=(
+            "Deprecated compatibility field; always empty. Pending review state "
+            "is provided by pending_review and pending_draft_version_id."
+        ),
+    )
     pending_review: PendingReviewInfo | None = None
     reconciliation_pending_count: int = Field(default=0, ge=0)
     reconciliation_pending_count_truncated: bool = False

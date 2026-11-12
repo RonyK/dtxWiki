@@ -64,26 +64,28 @@ def test_context_detail_surfaces_pending_review_for_draft():
             workspace_id=workspace.id,
             page_id=result.page_id,
             actor=_editor_actor(workspace.id),
+            include_warnings=False,
         )
         assert detail.pending_review is not None
         assert detail.pending_review.review_item_id == result.review_item_id
         assert detail.pending_review.status in ("pending", "changes_requested")
         assert detail.pending_review.risk_level
         assert detail.pending_draft_version_id == result.draft_version_id
-        # the internal existence-check path skips the pending-review query
+        # Internal existence checks explicitly skip review metadata as well.
         skipped = read_service.read_context_page(
             session=session,
             workspace_id=workspace.id,
             page_id=result.page_id,
             actor=_editor_actor(workspace.id),
             include_warnings=False,
+            include_pending_review=False,
         )
         assert skipped.pending_review is None
 
 
-def test_pending_draft_warnings_lint_the_draft_body():
-    # Sweep-2: the F1 block carries the DRAFT's lint warnings so a reviewer sees
-    # the draft's format issues before approving (not just the published body's).
+def test_pending_review_metadata_does_not_lint_the_draft_again(monkeypatch):
+    from backend.services import domain_read as read_module
+
     session_factory = make_session_factory()
     read_service = DomainReadService()
     write_service = ContextWriteService()
@@ -103,6 +105,14 @@ def test_pending_draft_warnings_lint_the_draft_body():
             actor_id=ACTOR,
             actor_role="owner",
         )
+    real_lint = read_module.page_format_warnings_for_body
+    linted_bodies = []
+
+    def track_lint(*args, **kwargs):
+        linted_bodies.append(args[3])
+        return real_lint(*args, **kwargs)
+
+    monkeypatch.setattr(read_module, "page_format_warnings_for_body", track_lint)
     with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
         detail = read_service.read_context_page(
@@ -112,7 +122,11 @@ def test_pending_draft_warnings_lint_the_draft_body():
             actor=_editor_actor(workspace.id),
         )
         assert detail.pending_review is not None
-        assert any("heading" in w.lower() for w in detail.pending_draft_warnings)
+        assert detail.pending_review.review_item_id == result.review_item_id
+        assert detail.pending_draft_version_id == result.draft_version_id
+        assert detail.model_dump()["pending_draft_warnings"] == []
+        assert any("heading" in warning.lower() for warning in detail.warnings)
+        assert linted_bodies == [detail.body_markdown]
 
 
 def _write_unformatted(session, write_service, workspace_id):

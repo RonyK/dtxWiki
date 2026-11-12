@@ -54,7 +54,6 @@ function detail(overrides: Partial<ContextPageDetail> = {}): ContextPageDetail {
     link_targets: [],
     warnings: [],
     pending_draft_version_id: null,
-    pending_draft_warnings: [],
     pending_review: null,
     reconciliation_pending_count: 0,
     reconciliation_pending_count_truncated: false,

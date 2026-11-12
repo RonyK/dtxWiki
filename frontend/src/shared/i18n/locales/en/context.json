@@ -399,8 +399,6 @@
     "reasonPlaceholder": "What should change before this is approved?",
     "submitChanges": "Send request",
     "error": "Could not record the decision.",
-    "warnings_one": "{{count}} lint warning",
-    "warnings_other": "{{count}} lint warnings",
     "approveImpact_one": "Approving will publish this version. {{count}} earlier pending review will be settled with it.",
     "approveImpact_other": "Approving will publish this version. {{count}} earlier pending reviews will be settled with it.",
     "reconciliationPublishWarning_one": "{{count}} branch is still waiting for reconciliation. Publish this version anyway?",

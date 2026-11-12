@@ -724,7 +724,11 @@ class ContextPageDetail(PagePayload):
     pending_draft_version_id: UUID | None = None
     pending_draft_warnings: list[str] = Field(
         default_factory=list,
-        description="Legacy field, not computed by the canonical detail read.",
+        deprecated=True,
+        description=(
+            "Deprecated compatibility field; always empty. Pending review state "
+            "is provided by pending_review and pending_draft_version_id."
+        ),
     )
     pending_review: PendingReviewInfo | None = None
     reconciliation_pending_count: int = Field(default=0, ge=0)

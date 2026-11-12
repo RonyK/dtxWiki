@@ -6228,7 +6228,8 @@
             "title": "Pending Draft Version Id"
           },
           "pending_draft_warnings": {
-            "description": "Legacy field, not computed by the canonical detail read.",
+            "deprecated": true,
+            "description": "Deprecated compatibility field; always empty. Pending review state is provided by pending_review and pending_draft_version_id.",
             "items": {
               "type": "string"
             },
