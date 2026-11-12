@@ -71,6 +71,7 @@ from backend.schemas.page import (
     ContextPageCreateRequest,
     ContextPageDetail,
     ContextPageDetailResponse,
+    ContextPageInspectorResponse,
     DiscardContextEditRequest,
     PageAutosaveRequest,
     PageBacklinkListResponse,
@@ -319,7 +320,14 @@ def get_context_page(
                 actor=actor,
             )
             enrichment = services.domain_read.context_page_read_enrichment(
-                session, workspace_id, page, version, actor
+                session,
+                workspace_id,
+                page,
+                version,
+                actor,
+                include_warnings=False,
+                include_pending_review=True,
+                include_inspector_counts=False,
             )
             latest_draft_version_id = services.domain_read._context_page_summary(
                 page, actor=actor
@@ -337,6 +345,36 @@ def get_context_page(
     return page_write_response(
         detail, write_operation=False, lint_registry=page_service.lint_registry
     )
+
+
+@router.get(
+    "/{page_id}/inspector",
+    response_model=ContextPageInspectorResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def get_context_page_inspector(
+    request: Request,
+    workspace_id: UUID,
+    page_id: UUID,
+    actor: RestActorDep,
+    section: Literal["summary", "backlinks"],
+    version_id: UUID | None = None,
+):
+    services = get_container_from_app(request).get_services()
+    try:
+        actor, page_service = _workspace_page_service(
+            request, actor, workspace_id, required_role="viewer"
+        )
+        with page_service.session_factory() as session:
+            page, version = page_service.resolve_page_version_for_read(
+                session, page_id=page_id, version_id=version_id, actor=actor
+            )
+            data = services.domain_read.context_page_inspector(
+                session, workspace_id, page, version, actor, section=section
+            )
+    except PageServiceError as exc:
+        return service_error_response(exc)
+    return {"data": data}
 
 
 @router.get(

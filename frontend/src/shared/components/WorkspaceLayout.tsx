@@ -27,6 +27,8 @@ type WorkspaceLayoutProps = {
   inspectorHideLabel?: string;
   inspectorLabel?: string;
   inspectorRestoreLabel?: string;
+  /** Mount on-demand inspector content only while its panel is visible. */
+  lazyInspector?: boolean;
   layoutKey: string;
   left?: (controls: {
     expandWidthLabel: string;
@@ -52,6 +54,7 @@ export function WorkspaceLayout({
   inspectorHideLabel,
   inspectorLabel,
   inspectorRestoreLabel,
+  lazyInspector = false,
   layoutKey,
   left,
   leftLabel = "",
@@ -396,7 +399,9 @@ export function WorkspaceLayout({
               panel's own overflow:hidden) -- consumers with content taller
               than the panel (e.g. a long version history) need this to
               actually scroll instead of being silently clipped. */}
-          <div className="inspector-panel-body">{inspector}</div>
+          <div className="inspector-panel-body">
+            {!lazyInspector || !mobileLayout || mobileInspectorOpen ? inspector : null}
+          </div>
         </BottomSheet>
       ) : hasInspector ? (
         <button

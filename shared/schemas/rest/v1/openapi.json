@@ -5966,9 +5966,16 @@
             "title": "Alternative Draft Id"
           },
           "backlink_count": {
-            "default": 0,
-            "title": "Backlink Count",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Visible backlink count; null until requested by the inspector.",
+            "title": "Backlink Count"
           },
           "block_map_stale": {
             "default": false,
@@ -5999,9 +6006,16 @@
             "title": "Change Set Id"
           },
           "children_count": {
-            "default": 0,
-            "title": "Children Count",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Direct child count; null until requested by the inspector.",
+            "title": "Children Count"
           },
           "content_hash": {
             "pattern": "^[a-f0-9]{64}$",
@@ -6219,6 +6233,8 @@
             "title": "Pending Draft Version Id"
           },
           "pending_draft_warnings": {
+            "deprecated": true,
+            "description": "Deprecated compatibility field; always empty. Pending review state is provided by pending_review and pending_draft_version_id.",
             "items": {
               "type": "string"
             },
@@ -6370,6 +6386,7 @@
             "title": "Visible Version Id"
           },
           "warnings": {
+            "description": "Legacy field, not computed by the canonical detail read. Request inspector section=summary for the displayed version's warnings.",
             "items": {
               "type": "string"
             },
@@ -6417,6 +6434,80 @@
           "data"
         ],
         "title": "ContextPageDetailResponse",
+        "type": "object"
+      },
+      "ContextPageInspector": {
+        "properties": {
+          "backlink_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backlink Count"
+          },
+          "children_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Children Count"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "summary",
+              "backlinks"
+            ],
+            "title": "Section",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "page_id",
+          "version_id",
+          "section"
+        ],
+        "title": "ContextPageInspector",
+        "type": "object"
+      },
+      "ContextPageInspectorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ContextPageInspector"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ContextPageInspectorResponse",
         "type": "object"
       },
       "ContextPageListResponse": {
@@ -38120,6 +38211,127 @@
           }
         ],
         "summary": "Discard Context Edit",
+        "tags": [
+          "context-pages"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/inspector": {
+      "get": {
+        "operationId": "get_context_page_inspector_api_v1_workspaces__workspace_id__context_pages__page_id__inspector_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "section",
+            "required": true,
+            "schema": {
+              "enum": [
+                "summary",
+                "backlinks"
+              ],
+              "title": "Section",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextPageInspectorResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Context Page Inspector",
         "tags": [
           "context-pages"
         ]
