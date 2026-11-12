@@ -721,11 +721,6 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "action:created|action:published");
     expect(listRows()).toHaveLength(2);
     expect(screen.getByText("4 nodes · 2 edges")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Legend" }));
-    // Each activity line names the verbs it draws; the plain one the rest.
-    const legend = screen.getByTestId("graph-view").querySelector(".graph-legend")!;
-    expect(legend.querySelector('li[data-edge-visual-kind="actionWrite"]')).toHaveTextContent("Created · Edited");
-    expect(screen.getByText("Review, publish, search and other records")).toBeVisible();
   });
 
   it("requests depth changes from the main toolbar without optimistically relabeling the scene", async () => {

@@ -67,7 +67,7 @@ import {
   workspaceGraphRelationNames,
 } from "./workspace/WorkspaceGraphSidebarParts";
 import { GraphEdgeCue } from "./shared/GraphCues";
-import { GraphLegendGroups, graphLegendRelationNames } from "./shared/GraphLegend";
+import { GraphLegendGroups } from "./shared/GraphLegend";
 import { GraphCanvasControls } from "./shared/GraphCanvasControls";
 import { GraphDetailActions, GraphDetailCenterButton, type GraphPinState } from "./shared/GraphDetailActions";
 import { WorkspaceGraphSelectionCard } from "./workspace/WorkspaceGraphSelectionCard";
@@ -1949,10 +1949,8 @@ function WorkspaceGraphMetadata({ scene }: { scene: WorkspaceGraphScene }) {
   );
 }
 
-/** The relationship kinds each Map line style draws. */
-const MAP_LEGEND_LINES = {
-  link: ["wikilink"], citation: ["citation_page", "citation_source", "citation_agent"], membership: ["tree"],
-} as const;
+/** The line styles the Map can draw. */
+const MAP_LEGEND_LINE_KINDS = ["link", "citation", "membership"] as const;
 
 /** The Map's fixed legend: the glyphs and lines this view can draw, in the shared legend form. */
 function WorkspaceGraphLegend() {
@@ -1961,11 +1959,10 @@ function WorkspaceGraphLegend() {
     <details className="graph-legend workspace-graph-legend">
       <summary><Layers aria-hidden="true" size={15} />{t("graph.legend.heading")}</summary>
       <GraphLegendGroups
-        lines={(Object.keys(MAP_LEGEND_LINES) as Array<keyof typeof MAP_LEGEND_LINES>).map((kind) => ({
+        lines={MAP_LEGEND_LINE_KINDS.map((kind) => ({
           cue: <GraphEdgeCue kind={kind} />,
           key: kind,
           label: t(`graph.legend.edge.${kind}`),
-          names: graphLegendRelationNames(MAP_LEGEND_LINES[kind], t(`graph.legend.edge.${kind}`), t),
         }))}
         nodes={(["context", "agent", "library", "cluster", "folder"] as const).map((kind) => ({
           cue: <WorkspaceGraphNodeCue kind={kind} size="legend" />,

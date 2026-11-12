@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties, type ReactNode } from "react";
 
 import {
   GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR,
@@ -149,7 +149,7 @@ export function GraphSeedCue({ color, ink = "currentColor" }: { color?: string; 
 export type GraphEdgeCueKind = GraphEdgeVisualKind | "removed" | "other";
 
 /** A relationship line sample: the canvas dash pattern, colour and weight. */
-export function GraphEdgeCue({ kind, color, width = 34, className }: {
+export function GraphEdgeCue({ kind, color, width = 28, className }: {
   kind: GraphEdgeCueKind; color?: string; width?: number; className?: string;
 }) {
   const pattern = kind === "removed" ? GRAPH_EDGE_PATTERN.action
@@ -168,5 +168,19 @@ export function GraphEdgeCue({ kind, color, width = 34, className }: {
         {...paint("stroke", stroke)} />
       {arrow ? <path d={`M${width - 7} 1.5 L${width - 0.5} 5 L${width - 7} 8.5 Z`} {...paint("fill", stroke)} /> : null}
     </svg>
+  );
+}
+
+/**
+ * One legend group in either graph view: a visible title over a two-column
+ * list whose rows are a cue and its name.
+ */
+export function GraphLegendGroup({ children, title }: { children: ReactNode; title: string }) {
+  const titleId = useId();
+  return (
+    <div className="graph-legend-group">
+      <p className="graph-legend-group-title" id={titleId}>{title}</p>
+      <ul aria-labelledby={titleId}>{children}</ul>
+    </div>
   );
 }

@@ -57,10 +57,3 @@ export function localEdgeVisualKind(
   return edgeKind && Object.hasOwn(LOCAL_EDGE_VISUAL_BY_KIND, edgeKind)
     ? LOCAL_EDGE_VISUAL_BY_KIND[edgeKind] : null;
 }
-
-/** The relationship kinds drawn with one line style, in table order. */
-export function localEdgeKindsFor(visual: GraphEdgeVisualKind): string[] {
-  return Object.entries(LOCAL_EDGE_VISUAL_BY_KIND)
-    .filter(([, kind]) => kind === visual)
-    .map(([edgeKind]) => edgeKind);
-}

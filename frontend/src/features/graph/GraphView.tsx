@@ -5,10 +5,10 @@ import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { MermaidDiagram } from "../pages/MarkdownView";
-import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeKindsFor, localEdgeVisualKind } from "./local/edgeKinds";
+import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeVisualKind } from "./local/edgeKinds";
 import { decorateStaticDiagramSvg, graphSceneToMermaid, type StaticDiagramVisuals } from "./local/staticDiagram";
 import { GraphCanvasRatioPicker, GraphPreviewBadge, GraphScopeSelector, GraphTypeSelector, eventInvolves } from "./local/LocalGraphChrome";
-import { GraphLegendGroups, graphLegendRelationNames } from "./shared/GraphLegend";
+import { GraphLegendGroups } from "./shared/GraphLegend";
 import { GraphCanvasControls } from "./shared/GraphCanvasControls";
 import { GraphViewMenu } from "./shared/GraphViewMenu";
 import { localNodeVisualKind } from "./local/nodeVisual";
@@ -30,7 +30,7 @@ import { localEdgeKindLabel, type LocalViewContext } from "./local/localRelation
 import type { RovingSelectionOrigin as LocalGraphSelectionOrigin } from "./shared/relationList/useRovingList";
 import { localSceneScopeKey } from "./local/sceneScope";
 import { localSceneAdmits } from "./local/sceneInput";
-import { GraphEdgeCue, GraphNodeCue, GraphSeedCue } from "./shared/GraphCues";
+import { GraphEdgeCue, GraphLegendGroup, GraphNodeCue, GraphSeedCue } from "./shared/GraphCues";
 import { GRAPH_NODE_VISUALS, isActionEdgeVisualKind, readGraphTokens, type GraphEdgeVisualKind, type GraphNodeVisualKind } from "./shared/graphTokens";
 import { hasSessionDetails, SessionActivityDetails } from "./shared/SessionActivityDetails";
 import { isSessionGroupNode, isSessionNode } from "./shared/sessionNodes";
@@ -1244,19 +1244,11 @@ const LEGEND_EDGE_KINDS = {
 
 /**
  * A fixed legend per mode: every glyph and line this mode can draw, in one
- * order, whatever the current scene happens to contain. Each line style
- * carries the relationship names it draws.
+ * order, whatever the current scene happens to contain.
  */
 function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVisuals: LocalNodeVisuals }) {
   const { t } = useTranslation("graph");
   const { tokens, forcedColors } = nodeVisuals;
-  const relationNames = (kind: GraphEdgeVisualKind) => {
-    if (kind === "action") return t(historical ? "graph.legend.edgeNote.actionOther" : "graph.legend.edgeNote.action");
-    if (isActionEdgeVisualKind(kind)) {
-      return localEdgeKindsFor(kind).map((actionKind) => graphLabel(t, "graphActionKind", actionKind)).join(" · ");
-    }
-    return graphLegendRelationNames(localEdgeKindsFor(kind), t(`graph.legend.edge.${kind}`), t);
-  };
   return (
     <div className="graph-legend" data-legend-mode={historical ? "history" : "current"}>
       <h4 className="visually-hidden">{t("graph.legend.heading")}</h4>
@@ -1266,7 +1258,6 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
             cue: <GraphEdgeCue color={tokens.edge[kind]} kind={kind} />,
             key: kind,
             label: t(`graph.legend.edge.${historical && kind === "action" ? "actionOther" : kind}`),
-            names: relationNames(kind),
           })),
           ...historical ? [{ cue: <GraphEdgeCue kind="removed" />, key: "removed", label: t("graph.legend.edge.removed") }] : [],
         ]}
@@ -1283,7 +1274,7 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
         size={[t("graph.legend.sizeRelations")]}
       >
         {historical ? (
-          <ul aria-label={t("graph.legend.history", { defaultValue: "History marks" })} className="graph-legend-stack">
+          <GraphLegendGroup title={t("graph.legend.history", { defaultValue: "History marks" })}>
             <li data-legend-mark="event-target">
               <GraphNodeCue className="graph-local-node-cue" color={tokens.node.library} forcedColors={forcedColors}
                 kind="library" ring={tokens.highlight} surface={tokens.surface} />
@@ -1295,7 +1286,7 @@ function GraphLegend({ historical, nodeVisuals }: { historical: boolean; nodeVis
                 {t(`graph.historyUi.kind.${kind}`)}
               </li>
             ))}
-          </ul>
+          </GraphLegendGroup>
         ) : null}
       </GraphLegendGroups>
     </div>

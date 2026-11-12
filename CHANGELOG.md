@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Graph legends
+
+- Lay out the Context Graph and Knowledge Map legends with one rule: visible
+  group titles, two columns inside each group, and groups side by side while
+  they fit. The Knowledge Map legend is titled "Legend" like the Context
+  Graph's and uses the same group titles.
+- Name each line style without the relationship-name notes under it, and call
+  the containment line "Contains".
+
 ### Context editor on phones and tablets
 
 - Give the body the screen: on widths up to 1024px, short screens and touch

@@ -256,10 +256,6 @@
         "actionOther": "그 밖의 활동",
         "other": "기타 관계"
       },
-      "edgeNote": {
-        "action": "생성·편집·리뷰·검색·인용 같은 활동 기록",
-        "actionOther": "리뷰·게시·검색 같은 그 밖의 기록"
-      },
       "history": "이력 표시",
       "eventTarget": "현재 이벤트 대상",
       "size": "노드 크기",

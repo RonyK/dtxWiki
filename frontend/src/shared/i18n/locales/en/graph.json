@@ -256,10 +256,6 @@
         "actionOther": "Other activity",
         "other": "Other relationships"
       },
-      "edgeNote": {
-        "action": "Recorded activity such as creating, editing, reviewing, searching and citing",
-        "actionOther": "Review, publish, search and other records"
-      },
       "history": "History marks",
       "eventTarget": "Current event target",
       "size": "Node size",
