@@ -134,7 +134,7 @@ describe("Graph View expansion transcript (extended)", () => {
         error_code: "forbidden", message: "Access revoked.", request_id: "request-1", warnings: [],
       }));
     render(<div className="app-shell"><MemoryRouter initialEntries={["/graph"]}><WorkspaceGraphScreen /></MemoryRouter></div>);
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByTestId("workspace-graph-node-list");
 
     await expand("open-7");
     await waitFor(() => expect(chips()).toHaveLength(8));
@@ -148,7 +148,7 @@ describe("Graph View expansion transcript (extended)", () => {
     expect(screen.getByText(/Up to 8 expanded groups stay open together/)).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Lens" }), "links");
     await waitFor(() => expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(3));
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByTestId("workspace-graph-node-list");
     expect(chips()).toHaveLength(0);
     expect(screen.queryByText(/Up to 8 expanded groups/)).not.toBeInTheDocument();
 
@@ -167,7 +167,7 @@ describe("Graph View expansion transcript (extended)", () => {
       .mockResolvedValueOnce(scene(["second", "third"], { expansions: [outcome("first")] }))
       .mockResolvedValueOnce(scene(["third"], { expansions: [outcome("first"), outcome("second")] }));
     render(<div className="app-shell"><MemoryRouter initialEntries={["/graph"]}><WorkspaceGraphScreen /></MemoryRouter></div>);
-    await screen.findByRole("heading", { name: "Map items" });
+    await screen.findByTestId("workspace-graph-node-list");
     await expand("first");
     await waitFor(() => expect(chips()).toHaveLength(1));
     await expand("second");

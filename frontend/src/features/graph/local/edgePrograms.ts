@@ -74,12 +74,14 @@ type ProcessVisibleItem = (
 const arrowHead = LocalArrowHeadProgram.prototype as unknown as { processVisibleItem: ProcessVisibleItem };
 const processArrowHead = arrowHead.processVisibleItem;
 arrowHead.processVisibleItem = function (edgeIndex, startIndex, sourceData, targetData, data) {
-  // The head fades with its line. Sigma packs the head's colour from a string.
+  // The head fades with its line. Sigma packs the head's colour from a string;
+  // its shader passes the colour through, so premultiply it here as the line does.
   const { ink, alpha } = fadedAlpha(data.color,
     lineOpacity((this as { renderer: Sigma }).renderer, sourceData, targetData, data));
+  const share = alpha / 255;
   processArrowHead.call(this, edgeIndex, startIndex, sourceData, targetData, {
     ...data,
-    color: `rgba(${ink.r}, ${ink.g}, ${ink.b}, ${alpha / 255})`,
+    color: `rgba(${Math.round(ink.r * share)}, ${Math.round(ink.g * share)}, ${Math.round(ink.b * share)}, ${share})`,
     size: ARROW_HEAD_THICKNESS,
   });
 };
@@ -182,7 +184,10 @@ void main(void) {
   // The Map line's anti-aliasing: a one-device-pixel ramp centred on the stroke edge.
   float distancePx = abs(v_across) * (u_halfWidthPx + 0.5 * u_rampPx);
   float alpha = 1.0 - smoothstep(u_halfWidthPx - 0.5 * u_rampPx, u_halfWidthPx + 0.5 * u_rampPx, distancePx);
-  gl_FragColor = vec4(v_color.rgb, v_color.a * alpha);
+  // Sigma blends premultiplied (ONE, ONE_MINUS_SRC_ALPHA): a translucent line
+  // must scale its colour by its alpha, or the browser composites it too light.
+  float opacity = v_color.a * alpha;
+  gl_FragColor = vec4(v_color.rgb * opacity, opacity);
 #endif
 }
 `;

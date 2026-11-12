@@ -152,7 +152,8 @@ function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): ProbeResult {
         strongest = Math.max(strongest, pixelAlpha);
         if (pixelAlpha > peakAlpha) {
           peakAlpha = pixelAlpha;
-          peakRgb = [rgba[offset], rgba[offset + 1], rgba[offset + 2]];
+          // The canvas holds premultiplied colour: divide by alpha to read the ink.
+          peakRgb = [rgba[offset], rgba[offset + 1], rgba[offset + 2]].map((value) => Math.round(value * 255 / pixelAlpha)) as [number, number, number];
         }
       }
       alpha.push(strongest);

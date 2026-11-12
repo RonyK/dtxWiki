@@ -1534,6 +1534,7 @@ function GraphSelectedNodeActions({ actions, node, onCollapse, onExpand, reasonI
   return (
     <button
       aria-describedby={actions.reason ? reasonId : undefined}
+      className="graph-detail-expand"
       disabled={actions.disabled}
       onClick={() => actions.action === "collapse" ? onCollapse(node) : onExpand(node)}
       type="button"
