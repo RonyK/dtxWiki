@@ -2,8 +2,8 @@ import type {
   WorkspaceGraphNode,
   WorkspaceGraphScene,
 } from "../../../shared/api/workspaceGraph";
-import { GRAPH_NODE_RADIUS_PX } from "../shared/graphTokens";
-import type { GraphVisibleIdentity } from "../shared/rendererTypes";
+import { GRAPH_NODE_RADIUS_PX, type GraphNodeVisualKind } from "../shared/graphTokens";
+import type { CosmosSceneColumns } from "../shared/cosmos/sceneTypes";
 
 export const WORKSPACE_MAP_NODE_KIND = {
   context: 0,
@@ -39,31 +39,7 @@ export type WorkspaceMapBuildOptions = {
  * keys and indexed endpoints are for GPU buffers, layout and cache identity.
  * Positions/community hints are never accepted from the server.
  */
-export type WorkspaceMapColumns = {
-  identity: GraphVisibleIdentity;
-  nodeIds: string[];
-  nodeKeys: string[];
-  nodeLabels: string[];
-  nodeFolderKeys: Array<string | null>;
-  /** Row of each node's primary TreeRail container (folder, document or cluster), or -1. */
-  nodeContainerIndices?: Int32Array;
-  nodeKinds: Uint8Array;
-  nodeSizes: Float32Array;
-  /**
-   * Documents a node stands for: 1 for a document, the server's member count
-   * for a cluster. Render emphasis only, so it is not part of the fingerprint.
-   * Optional: older callers and fixtures that omit it draw every node as before.
-   */
-  nodeDocumentCounts?: Uint32Array;
-  edgeIds: string[];
-  edgeSources: Uint32Array;
-  edgeTargets: Uint32Array;
-  edgeKinds: Uint8Array;
-  edgeCounts: Uint32Array;
-  /** Authored occurrences, not the number of distinct relation identities. */
-  edgeWeights: Float64Array;
-  edgeCrossFolder: Uint8Array;
-};
+export type WorkspaceMapColumns = CosmosSceneColumns;
 
 type VisibleNode = {
   key: string;
@@ -72,6 +48,9 @@ type VisibleNode = {
   kind: number;
   folderKey: string | null;
   documentCount: number;
+  entityKind: string;
+  grain: string;
+  visualKind: GraphNodeVisualKind;
 };
 type VisibleEdge = {
   id: string;
@@ -81,6 +60,9 @@ type VisibleEdge = {
   count: number;
   weight: number;
   crossFolder: number;
+  relationKind: string;
+  direction: string;
+  visualKind: WorkspaceRelationVisual;
 };
 
 function compare(left: string, right: string): number {
@@ -210,6 +192,9 @@ export function buildWorkspaceMapColumns(
       kind: nodeKind(node),
       folderKey: node.grain === "document" ? node.primary_folder_id : null,
       documentCount: node.grain === "cluster" ? positiveCount(node.member_count) ?? 1 : 1,
+      entityKind: node.grain === "document" ? node.entity_kind : node.grain === "cluster" ? node.cluster_kind : node.grain,
+      grain: node.grain,
+      visualKind: node.grain === "document" ? node.entity_kind : node.grain,
     });
   }
 
@@ -244,6 +229,9 @@ export function buildWorkspaceMapColumns(
       count,
       weight,
       crossFolder: edge.cross_folder ? 1 : 0,
+      relationKind: edge.relation_kind,
+      direction: edge.direction,
+      visualKind: workspaceRelationVisual(edge.relation_kind)!,
     }];
   }).sort((left, right) => compare(nodeKeys[left.source], nodeKeys[right.source])
     || compare(nodeKeys[left.target], nodeKeys[right.target])
@@ -312,6 +300,9 @@ export function buildWorkspaceMapColumns(
     nodeKinds,
     nodeSizes,
     nodeDocumentCounts,
+    nodeGrains: nodes.map((node) => node.grain),
+    nodeEntityKinds: nodes.map((node) => node.entityKind),
+    nodeVisualKinds: nodes.map((node) => node.visualKind),
     edgeIds: edges.map((edge) => edge.id),
     edgeSources: Uint32Array.from(edges.map((edge) => edge.source)),
     edgeTargets: Uint32Array.from(edges.map((edge) => edge.target)),
@@ -319,6 +310,9 @@ export function buildWorkspaceMapColumns(
     edgeCounts: Uint32Array.from(edges.map((edge) => edge.count)),
     edgeWeights: Float64Array.from(edges.map((edge) => edge.weight)),
     edgeCrossFolder: Uint8Array.from(edges.map((edge) => edge.crossFolder)),
+    edgeRelationKinds: edges.map((edge) => edge.relationKind),
+    edgeDirections: edges.map((edge) => edge.direction),
+    edgeVisualKinds: edges.map((edge) => edge.visualKind),
   };
 }
 

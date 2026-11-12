@@ -13,7 +13,7 @@ container.style.width = `${canvasWidth}px`; container.style.height = `${canvasHe
 // a loaded machine delays can never look slow to them and start a back-off.
 const clock = () => frameNumber * 16;
 const COLUMNS = 25, ROWS = 9;
-type Body = { position: [number, number]; size: number; shape: 0 | 1 };
+type Body = { position: [number, number]; size: number; shape: 0 | 1 | 2 };
 // An answer the picker delivered, with the pointer it was asked at and the pointer it was delivered for.
 type Take = { pointer: [number, number] | null; asked: [number, number] | null; index: number | null };
 const takes: Take[] = [], overs: number[] = [];
@@ -121,11 +121,12 @@ async function loadGrid(spacing: number) {
 }
 
 async function loadIsolated(options: { zoom: number; center: [number, number] }) {
-  // Three bodies far apart, so a query near one can only ever answer that one.
+  // Four bodies far apart, so a query near one can only ever answer that one.
   const next: Body[] = [
     { position: [options.center[0], options.center[1]], size: 6, shape: 0 },
     { position: [options.center[0] + 130 / options.zoom, options.center[1] - 60 / options.zoom], size: 40, shape: 0 },
     { position: [options.center[0] - 130 / options.zoom, options.center[1] + 60 / options.zoom], size: 40, shape: 1 },
+    { position: [options.center[0] - 130 / options.zoom, options.center[1] - 60 / options.zoom], size: 40, shape: 2 },
   ];
   return load(next, options);
 }
@@ -138,6 +139,23 @@ function agreement(samples: ReadonlyArray<{ node: number; offset: [number, numbe
     const gpu = probe!.pickSync(frame), projected = projectNativePoint(frame, body.position);
     return { node, offset, gpu: gpu?.index ?? null, cpu: nativePointTargetsPointer(frame, body.position, body.size, body.shape),
       projectedX: projected[0], projectedY: frame.screenSize[1] - projected[1], centerX: center[0], centerY: center[1] };
+  });
+}
+
+/** Sample the real native sprite, separately from the picking shader's body test. */
+function trianglePaint() {
+  const body = bodies[3], frame = sceneFrame(), center = graph.spaceToScreenPosition(body.position);
+  const zoom = frame.scalePointsOnZoom ? frame.transformationMatrix[0]
+    : Math.min(5, Math.max(1, frame.transformationMatrix[0] * .01));
+  const diameter = Math.min(body.size * frame.pointSizeScale * zoom, frame.maxPointSize);
+  const { gl } = frame, canvas = container.querySelector("canvas")!;
+  const width = canvas.getBoundingClientRect().width, height = canvas.getBoundingClientRect().height;
+  return [-.4, .4].map(dy => {
+    const pixel = new Uint8Array(4);
+    const x = Math.floor(center[0] * gl.drawingBufferWidth / width);
+    const y = gl.drawingBufferHeight - 1 - Math.floor((center[1] + diameter * dy) * gl.drawingBufferHeight / height);
+    gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    return { dy, ink: pixel[1] < 128 };
   });
 }
 
@@ -168,6 +186,7 @@ declare global {
     loadGrid: typeof loadGrid;
     loadIsolated: typeof loadIsolated;
     agreement: typeof agreement;
+    trianglePaint: typeof trianglePaint;
     aged: typeof aged;
     sweep: typeof sweep;
     /** Forget what was recorded so far, so a phase of the test starts from what is shown now. */
@@ -180,7 +199,7 @@ void graph.ready.then(async () => {
   const gl = container.querySelector("canvas")!.getContext("webgl2")!;
   await loadGrid(16);
   window.__nativeHover = {
-    loadGrid, loadIsolated, agreement, aged, sweep,
+    loadGrid, loadIsolated, agreement, trianglePaint, aged, sweep,
     reset() { takes.length = 0; overs.length = 0; },
     snapshot: () => ({ hovered, overs: overs.slice(), takes: takes.slice(), glError: gl.getError() }),
   };

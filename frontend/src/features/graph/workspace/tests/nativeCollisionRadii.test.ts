@@ -1,4 +1,5 @@
-import { workspaceNominalGlyphRadiusCss } from "../../shared/workspaceGlyphGeometry";
+import { nativeGlyphContainsPoint, nativeGlyphDiameterScale, nativeGlyphInsetOutline, nativeGlyphOutline,
+  workspaceNominalGlyphRadiusCss } from "../../shared/workspaceGlyphGeometry";
 import { describe, expect, it } from "vitest";
 import { buildWorkspaceNativeCollisionRadii } from "../nativeCollisionRadii";
 import { buildWorkspaceRelationCollisionBasis, buildWorkspaceRelationForceConfig } from "../relationPhysics";
@@ -38,9 +39,25 @@ describe("native per-point glyph collision units", () => {
 });
 
 // Retained from the removed FA2-unit suite: this geometry is renderer-owned.
-it("encloses native circle, square and diamond glyphs with their nominal envelopes", () => {
+it("encloses native glyphs and aligns the upward triangle body, collision and parallel outline", () => {
   expect(workspaceNominalGlyphRadiusCss(10, 0)).toBe(5);
   expect(workspaceNominalGlyphRadiusCss(10, 1)).toBeCloseTo(4 * Math.SQRT2, 14);
   expect(workspaceNominalGlyphRadiusCss(10, 3)).toBe(4.8);
-  expect(() => workspaceNominalGlyphRadiusCss(10, 2)).toThrow();
+  expect(workspaceNominalGlyphRadiusCss(10, 9)).toBe(5);
+  expect(() => workspaceNominalGlyphRadiusCss(10, 8)).toThrow();
+  const diameter = 20 * nativeGlyphDiameterScale("triangle");
+  expect(workspaceNominalGlyphRadiusCss(diameter, 2)).toBe(13.5);
+  expect(nativeGlyphContainsPoint(2, 60, 0, -29)).toBe(true);
+  expect(nativeGlyphContainsPoint(2, 60, 0, 16)).toBe(false);
+  expect(nativeGlyphContainsPoint(2, 60, 20, -20)).toBe(false);
+  const outline = nativeGlyphOutline(2, 10, 20, diameter, 2);
+  expect(outline.kind).toBe("polygon");
+  if (outline.kind !== "polygon") throw new Error("Triangle outline must remain polygonal");
+  // Moving an equilateral edge 2px outward grows its circumradius by 4px.
+  expect(outline.points[0][0]).toBeCloseTo(10);
+  expect(outline.points[0][1]).toBeCloseTo(2.5);
+  expect(outline.points[1][1]).toBeCloseTo(28.75);
+  const inset = nativeGlyphInsetOutline(2, 10, 20, diameter, .5);
+  expect(inset.kind).toBe("polygon");
+  if (inset.kind === "polygon") expect(inset.points[0][1]).toBeCloseTo(13.25);
 });

@@ -327,21 +327,52 @@ const scene = (await overviewResponse.json()).data;
 expect(scene.representation).toBe('exact');
 expect(scene.completeness).toBe('complete');
 expect(scene.truncated).toBe(false);
-const contextNodes = scene.nodes.filter(node => node.entity_kind === 'context');
-const agentNodes = scene.nodes.filter(node => node.entity_kind === 'agent');
+const documentNodes = scene.nodes.filter(node => node.grain === 'document');
+const folderNodes = scene.nodes.filter(node => node.grain === 'folder');
+const contextNodes = documentNodes.filter(node => node.entity_kind === 'context');
+const agentNodes = documentNodes.filter(node => node.entity_kind === 'agent');
+const authoredEdges = scene.edges.filter(edge => edge.relation_kind !== 'tree');
+const containmentEdges = scene.edges.filter(edge => edge.relation_kind === 'tree');
 expect(contextNodes).toHaveLength(documents.length);
 expect(new Set(agentNodes.map(node => node.entity_id))).toEqual(
   new Set(seededAgents.map(agent => agent.id)));
-expect(scene.nodes).toHaveLength(documents.length + seededAgents.length);
-expect(scene.edges).toHaveLength(documents.length - 1);
+expect(documentNodes).toHaveLength(documents.length + seededAgents.length);
+// The provisioned Context/Inbox and Agent/Agent Guide ancestors are rendered
+// as ordinary folder nodes. Their containment is outside authored budgets.
+expect(folderNodes.map(node => node.path).sort()).toEqual([
+  'Agent', 'Agent / Agent Guide', 'Context', 'Context / Inbox',
+]);
+expect(folderNodes.every(node => node.id === `folder:${node.folder_id}`)).toBe(true);
+expect(scene.nodes).toHaveLength(documents.length + seededAgents.length + 4);
+expect(authoredEdges).toHaveLength(documents.length - 1);
+expect(scene.counts).toMatchObject({
+  rendered_documents: documents.length + seededAgents.length,
+  rendered_clusters: 0,
+  rendered_relations: documents.length - 1,
+});
 const ids = new Map(contextNodes.map(node => [node.entity_id, node.id]));
 expect(new Set(ids.keys())).toEqual(new Set(documents.map(document => document.id)));
-expect(new Set(scene.edges.map(edge => `${edge.source}->${edge.target}`))).toEqual(
+expect(new Set(authoredEdges.map(edge => `${edge.source}->${edge.target}`))).toEqual(
   new Set(documents.slice(1).map((document, index) =>
     `${ids.get(document.id)}->${ids.get(documents[index].id)}`)));
-expect(scene.edges.every(edge => edge.relation_kind === 'wikilink'
+expect(authoredEdges.every(edge => edge.relation_kind === 'wikilink'
   && edge.direction === 'directed' && !edge.aggregate
   && edge.relation_count === 1)).toBe(true);
+const folders = new Map(folderNodes.map(node => [node.path, node.id]));
+const expectedContainment = [
+  ...contextNodes.map(node => [folders.get('Context / Inbox'), node.id]),
+  ...agentNodes.map(node => [folders.get('Agent / Agent Guide'), node.id]),
+  [folders.get('Context'), folders.get('Context / Inbox')],
+  [folders.get('Agent'), folders.get('Agent / Agent Guide')],
+];
+expect(containmentEdges).toHaveLength(documents.length + seededAgents.length + 2);
+expect(new Set(containmentEdges.map(edge => `${edge.source}->${edge.target}`))).toEqual(
+  new Set(expectedContainment.map(([source, target]) => `${source}->${target}`)));
+expect(containmentEdges.every(edge =>
+  edge.id === `contains:${edge.source}|${edge.target}`
+  && edge.direction === 'directed' && !edge.aggregate && edge.primary
+  && edge.relation_count === 1)).toBe(true);
+expect(scene.edges).toHaveLength((documents.length - 1) + expectedContainment.length);
 const canvas = page.getByTestId('graph-canvas');
 await expect(canvas.locator('..')).toHaveAttribute(
   'data-renderer-status', 'ready', { timeout: 30000 });
@@ -359,8 +390,10 @@ await expect.poll(async () => {
   return ['live', 'cooled'].includes(state.phase) && state.ticks > 0;
 }, { timeout: 45000 }).toBe(true);
 await expect(page.getByTestId('workspace-map-layout-status')).toHaveCount(0);
-// The default canvas hides the unlinked Agent; every Context is in the chain.
-expect(Number(await canvas.getAttribute('data-map-node-count'))).toBe(documents.length);
+// Containment keeps the seeded Agent connected. Canvas diagnostics report
+// admitted documents/authored relations, excluding structural folders/lines.
+expect(Number(await canvas.getAttribute('data-map-node-count')))
+  .toBe(documents.length + seededAgents.length);
 expect(Number(await canvas.getAttribute('data-map-edge-count')))
   .toBe(documents.length - 1);
 expect(workerUrls.some(url =>
@@ -393,7 +426,9 @@ if (sameOrigin.length === 0) {
   throw new Error(`no same-origin packaged API requests: ${apiRequests.join(', ')}`);
 }
 console.log(JSON.stringify({ apiRequests: sameOrigin, layoutResponses,
-  graph: { nodes: scene.nodes.length, originalRelations: scene.edges.length,
+  graph: { nodes: scene.nodes.length, documents: documentNodes.length,
+    folders: folderNodes.length, originalRelations: authoredEdges.length,
+    containmentRelations: containmentEdges.length,
     physics: await canvas.getAttribute('data-map-physics'),
     ...await readPublishedLayout() },
   scope: 'Small installed-wheel Worker/CSP runtime smoke; '

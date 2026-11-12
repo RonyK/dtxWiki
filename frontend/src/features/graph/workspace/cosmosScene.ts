@@ -1,3 +1,4 @@
+import { buildCosmosAdjacency } from "../shared/cosmos/sceneBuffers";
 import { workspaceBaseBodyDiameterCss } from "../shared/workspaceGlyphGeometry";
 import { GRAPH_LINE_OPACITY, type GraphVisualTokens } from "../shared/graphTokens";
 import { rgb } from "./cosmosColor";
@@ -6,37 +7,9 @@ import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, type WorkspaceMap
 import { isWorkspaceMapWithinBudget, WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
 import { buildWorkspaceRelationLinkStrength } from "./relationPhysics";
 
-/** The Map owns only typed GPU inputs and a bounded adjacency index, never per-node DOM. */
-export type CosmosSceneBuffers = {
-  positions: Float32Array;
-  pointColors: Float32Array;
-  pointShapes: Float32Array;
-  /** Relation-based sizes: the only sizes that layout and collision may read. */
-  pointSizes: Float32Array;
-  /**
-   * What is drawn and picked: minimum visible diameters and each cluster's
-   * count disc. Forces read `pointSizes`; only collision reads a cluster's disc.
-   */
-  drawPointSizes: Float32Array;
-  /** Collision sizes: `pointSizes`, except a cluster occupies its drawn count disc. */
-  collisionPointSizes: Float32Array;
-  /**
-   * Per point: an index into `[agent outline, ...countImages]`, or -1. The
-   * adapter turns that list into the native graph's SDF images.
-   */
-  pointImageIndices: Float32Array;
-  pointImageSizes: Float32Array;
-  /** Distinct cluster counts and the disc each is drawn in, after the agent outline image. */
-  countImages: Array<{ text: string; diameterCss: number }>;
-  links: Float32Array;
-  linkColors: Float32Array;
-  /** Legend widths relative to a link; the adapter scales them for density. */
-  linkStyles: Float32Array;
-  linkStrength: Float32Array;
-  adjacencyOffsets: Uint32Array;
-  adjacencyNodes: Uint32Array;
-  adjacencyEdges: Uint32Array;
-};
+export type { CosmosSceneBuffers } from "../shared/cosmos/buffers";
+import type { CosmosSceneBuffers } from "../shared/cosmos/buffers";
+export { incidentStar } from "../shared/cosmos/buffers";
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
@@ -53,8 +26,8 @@ export function isReadableWorkspaceMapScene(
 export function isDenseWorkspaceMapOverview(
   columns: WorkspaceMapColumns,
   budget: WorkspaceMapBudget = WORKSPACE_MAP_DEFAULT_BUDGET,
+  admitted = workspaceMapAdmissionCounts(columns),
 ): boolean {
-  const admitted = workspaceMapAdmissionCounts(columns);
   return admitted.nodeCount > 1_000
     && isReadableWorkspaceMapScene(admitted.nodeCount, admitted.edgeCount, budget);
 }
@@ -66,12 +39,13 @@ export function buildCosmosRelationColors(
   communityIds?: Uint32Array,
   incidentLinks: readonly number[] = [],
   budget: WorkspaceMapBudget = WORKSPACE_MAP_DEFAULT_BUDGET,
+  admitted = workspaceMapAdmissionCounts(columns),
 ): Float32Array {
   if (baseColors.length !== columns.edgeIds.length * 4
     || (communityIds && communityIds.length !== columns.nodeIds.length)) {
     throw new Error("Workspace Map relation color columns have mismatched lengths.");
   }
-  if (!isDenseWorkspaceMapOverview(columns, budget)) return baseColors;
+  if (!isDenseWorkspaceMapOverview(columns, budget, admitted)) return baseColors;
   const colors = baseColors.slice();
   const emphasized = new Set(incidentLinks);
   const { overview } = GRAPH_LINE_OPACITY;
@@ -155,10 +129,10 @@ export function buildCosmosSceneBuffers(
     /** Width of a count in the cluster font (CSS px); a canvas measure in the browser. */
     measureCount?: WorkspaceCountMeasure;
   } = {},
+  admitted = workspaceMapAdmissionCounts(columns),
 ): CosmosSceneBuffers {
   const count = columns.nodeIds.length;
   const edges = columns.edgeIds.length;
-  const admitted = workspaceMapAdmissionCounts(columns);
   const documentCounts = columns.nodeDocumentCounts;
   // The GPU cap counts what the budget admits; folders and containment ride on top.
   if (admitted.nodeCount > 25_000 || admitted.edgeCount > 100_000 ||
@@ -230,22 +204,18 @@ export function buildCosmosSceneBuffers(
     pointImageIndices[node] = image;
     pointImageSizes[node] = diameterCss;
   }
-  const links = new Float32Array(edges * 2);
   const linkColors = new Float32Array(edges * 4);
   const linkStyles = new Float32Array(edges);
-  const offsets = new Uint32Array(count + 1);
   const solid = rgb(tokens.edge.link);
   const citation = rgb(tokens.edge.citation);
   const membership = rgb(tokens.edge.membership);
   const readableScene = isReadableWorkspaceMapScene(admitted.nodeCount, admitted.edgeCount, budget);
-  const denseOverview = isDenseWorkspaceMapOverview(columns, budget);
+  const denseOverview = isDenseWorkspaceMapOverview(columns, budget, admitted);
   for (let edge = 0; edge < edges; edge += 1) {
     const source = columns.edgeSources[edge];
     const target = columns.edgeTargets[edge];
     const kind = columns.edgeKinds[edge];
     if (source >= count || target >= count || kind > 2) throw new Error("Invalid Workspace Map edge");
-    links[edge * 2] = source;
-    links[edge * 2 + 1] = target;
     // Legend strokes: solid link, dashed citation, short-dash containment (Cosmos style per kind).
     linkStyles[edge] = kind;
     const ink = GRAPH_LINE_OPACITY, { overview, unadmitted } = ink;
@@ -257,48 +227,11 @@ export function buildCosmosSceneBuffers(
       kind === 1 ? citation : kind === 2 ? membership : solid,
       alpha,
     );
-    offsets[source + 1] += 1;
-    offsets[target + 1] += 1;
   }
-  for (let node = 1; node <= count; node += 1) offsets[node] += offsets[node - 1];
-  const cursors = offsets.slice(0, count);
-  const adjacencyNodes = new Uint32Array(edges * 2);
-  const adjacencyEdges = new Uint32Array(edges * 2);
-  for (let edge = 0; edge < edges; edge += 1) {
-    const source = columns.edgeSources[edge];
-    const target = columns.edgeTargets[edge];
-    let slot = cursors[source]++;
-    adjacencyNodes[slot] = target;
-    adjacencyEdges[slot] = edge;
-    slot = cursors[target]++;
-    adjacencyNodes[slot] = source;
-    adjacencyEdges[slot] = edge;
-  }
+  const adjacency = buildCosmosAdjacency(columns);
   return {
     positions: initialPositions(columns), pointColors, pointShapes, pointSizes, drawPointSizes, collisionPointSizes,
     pointImageIndices, pointImageSizes, countImages,
-    links, linkColors, linkStyles, linkStrength: buildWorkspaceRelationLinkStrength(columns),
-    adjacencyOffsets: offsets, adjacencyNodes, adjacencyEdges,
+    ...adjacency, linkColors, linkStyles, linkStrength: buildWorkspaceRelationLinkStrength(columns),
   };
-}
-
-export function incidentStar(buffers: CosmosSceneBuffers, center: number): {
-  points: number[];
-  links: number[];
-} {
-  if (!Number.isInteger(center) || center < 0 || center + 1 >= buffers.adjacencyOffsets.length) {
-    return { points: [], links: [] };
-  }
-  const points = [center];
-  const links = [];
-  const visited = new Set([center]);
-  for (let index = buffers.adjacencyOffsets[center]; index < buffers.adjacencyOffsets[center + 1]; index += 1) {
-    const neighbor = buffers.adjacencyNodes[index];
-    if (!visited.has(neighbor)) {
-      visited.add(neighbor);
-      points.push(neighbor);
-    }
-    links.push(buffers.adjacencyEdges[index]);
-  }
-  return { points, links };
 }
