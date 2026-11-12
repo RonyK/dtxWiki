@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { login, enableKnowledgeMapLab } from "./auth";
 import { isResizeObserverDeferralReport } from "./fixtures";
-import { listedNodeIds, sceneRelations } from "./workspace_graph_scene";
+import { admittedNodes, listedNodeIds, sceneRelations } from "./workspace_graph_scene";
 
 test.describe("Knowledge Map compact first viewport with real 2k data", () => {
   test.skip(process.env.DTXWIKI_E2E_GRAPH_2K !== "1", "Requires the isolated 2k seed");
@@ -32,10 +32,11 @@ test.describe("Knowledge Map compact first viewport with real 2k data", () => {
       const scene = (await (await overview).json()).data as WorkspaceGraphScene;
       const linked = new Set(sceneRelations(scene).flatMap((edge) => [edge.source, edge.target]));
       expect(linked.size).toBe(1928);
-      // The list holds the 1,928 linked documents and the folders that hold them.
+      // Authored relations reach 1,928 documents; containment keeps all 2K visible.
       const list = page.getByTestId("workspace-graph-node-list");
-      await expect(list).toHaveAttribute("data-total-count", String(listedNodeIds(scene, linked).size));
-      await expect(page.locator(".workspace-graph-coverage")).toContainText("1928/2000");
+      await expect(list).toHaveAttribute("data-total-count", String(listedNodeIds(scene,
+        new Set(admittedNodes(scene).map((node) => node.id))).size));
+      await expect(page.locator(".workspace-graph-coverage")).toContainText("2000/2000");
       const feature = page.locator(".feature-main.workspace-graph");
       const canvas = feature.locator(".graph-canvas-frame");
       await expect(canvas).toBeVisible();

@@ -941,17 +941,13 @@ describe("WorkspaceGraphScreen", () => {
       source: edge.source === "context:1999" ? "context:1997" : edge.source,
       target: edge.target === "context:1999" ? "context:1998" : edge.target,
     }));
-    // A folder holding only the unlinked document hides with it, but the
-    // Unlinked count names documents only.
-    const folder = uiFolder(UI_FOLDERS.secondary, "Only unlinked", "Only unlinked");
-    scene.nodes.push(folder);
-    scene.edges.push(uiContainment(folder.id, "context:unlinked"));
+    // Unlinked means no relation at all, containment included.
     queryWorkspaceGraphMock.mockResolvedValue(scene);
     renderScreen();
     await screen.findByRole("heading", { name: "List" });
     openMapList();
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids"))
-      .not.toMatch(/context:unlinked|Only unlinked|folder:/);
+      .not.toContain("context:unlinked");
     expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "1999");
     const unlinked = screen.getByRole("button", { name: "Unlinked 1" });
     expect(unlinked).toHaveAttribute("title", "1 unlinked document hidden from this map.");
@@ -960,8 +956,7 @@ describe("WorkspaceGraphScreen", () => {
     expect(unlinked).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids"))
       .toContain("context:unlinked");
-    expect(screen.getByTestId("workspace-graph-canvas").getAttribute("data-node-ids")).toContain(folder.id);
-    expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2001");
+    expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "2000");
     expect(queryWorkspaceGraphMock).toHaveBeenCalledTimes(1);
     await userEvent.click(unlinked);
     expect(screen.getByTestId("workspace-graph-node-list")).toHaveAttribute("data-total-count", "1999");

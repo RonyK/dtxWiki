@@ -1509,9 +1509,29 @@ class WorkspaceGraphService:
         filter_name: str,
     ) -> set[_DocumentKey]:
         if filter_name == "orphans":
+            # Unlinked: no relation at all. Both ends of containment count,
+            # including a root document that holds another shown document.
             incident = {relation.source for relation in relations} | {
                 relation.target for relation in relations
             }
+            placements = [
+                (key, placement)
+                for key, document in documents.items()
+                for placement in (document.primary, *document.secondary_revision)
+                if isinstance(placement, _CapturedPlacement)
+            ]
+            document_at = {
+                placement.tree_node_id: key for key, placement in placements
+            }
+            for key, placement in placements:
+                for ancestor in placement.index.parents(placement.tree_node_id):
+                    parent = document_at.get(ancestor.id)
+                    if ancestor.node_kind == "folder" or (
+                        parent is not None and parent != key
+                    ):
+                        incident.add(key)
+                    if parent is not None and parent != key:
+                        incident.add(parent)
             return set(documents) - incident
         if filter_name == "highly_referenced":
             inbound_sources: dict[_DocumentKey, set[_DocumentKey]] = defaultdict(set)

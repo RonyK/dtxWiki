@@ -175,7 +175,7 @@ export function workspaceGraphDisplayItems(
   payload: WorkspaceGraphScene,
   display: Pick<WorkspaceGraphDisplaySettings, "show_orphans" | "show_edges">,
 ): WorkspaceGraphDisplayItems {
-  const hiddenOrphans = display.show_orphans ? new Set<string>() : workspaceGraphHiddenUnlinkedIds(payload);
+  const hiddenOrphans = display.show_orphans ? new Set<string>() : workspaceGraphOrphanIds(payload);
   const nodes = payload.nodes.filter((node) => !hiddenOrphans.has(node.id));
   const ids = new Set(nodes.map((node) => node.id));
   const edges = display.show_edges
@@ -307,45 +307,26 @@ function visibleSceneEdges(payload: WorkspaceGraphScene): WorkspaceGraphEdge[] {
  * complete: a missing edge in a capped/aggregated response is not evidence of
  * an orphan. Counts are actor-visible metrics; incoming-only counts alone are
  * insufficient, so an outgoing scene relation also keeps its document in the
- * map. Being placed in a folder does not link a document.
+ * map. Every relation links, containment included.
  */
 export function workspaceGraphOrphanIds(payload: WorkspaceGraphScene): Set<string> {
   if (payload.representation !== "exact" || payload.completeness !== "complete" || payload.truncated) {
     return new Set();
   }
-  const connected = new Set(visibleSceneEdges(payload).filter((edge) => !isWorkspaceGraphContainment(edge))
-    .flatMap((edge) => [edge.source, edge.target]));
+  const connected = new Set(visibleSceneEdges(payload).flatMap((edge) => [edge.source, edge.target]));
   return new Set(payload.nodes.filter((node) => node.grain === "document"
     && node.reference_count === 0 && node.evidence_count === 0
     && !connected.has(node.id) && payload.focus?.node_id !== node.id).map((node) => node.id));
 }
 
-/**
- * What hiding the unlinked documents hides: those documents and every folder
- * whose held nodes are all hidden, since it has nothing left to show.
- */
-export function workspaceGraphHiddenUnlinkedIds(
+/** What a container holds among the shown nodes; drawing lines or not does not change it. */
+export function workspaceGraphHeldCount(
   payload: WorkspaceGraphScene,
-  orphans: ReadonlySet<string> = workspaceGraphOrphanIds(payload),
-): Set<string> {
-  const hidden = new Set(orphans);
-  if (!hidden.size) return hidden;
-  const folders = new Set(payload.nodes.filter((node) => node.grain === "folder").map((node) => node.id));
-  const held = new Map<string, string[]>();
-  for (const edge of visibleSceneEdges(payload)) {
-    if (folders.has(edge.source) && isWorkspaceGraphContainment(edge)) {
-      held.set(edge.source, [...held.get(edge.source) ?? [], edge.target]);
-    }
-  }
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const [folder, items] of held) {
-      if (hidden.has(folder) || !items.every((item) => hidden.has(item))) continue;
-      hidden.add(folder);
-      grew = true;
-    }
-  }
-  return hidden;
+  containerId: string,
+  shown: ReadonlySet<string>,
+): number {
+  return visibleSceneEdges(payload).filter((edge) => edge.source === containerId
+    && isWorkspaceGraphContainment(edge) && shown.has(edge.target)).length;
 }
 
 export function estimateWorkspaceGraphImpact(

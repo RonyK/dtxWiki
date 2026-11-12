@@ -58,17 +58,12 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
         .toHaveAttribute("data-total-count", combinedList.edges);
       await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
 
-      // Combined connects all eight Library sources. Preserve the original
-      // orphan regression by explicitly choosing Links, not by hiding citations.
+      // Links alone leaves the eight Library sources without a link, but every
+      // document sits in a folder: containment is a relation, so none is hidden.
       const links = await selectKnowledgeLinks(page);
-
-      await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", listTotals(links, linkedDocumentIds(links)).nodes);
-      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
-        .toHaveAttribute("title", "8 unlinked documents hidden from this map.");
-      await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
-
       const linksList = listTotals(links, documentIds(links));
+      expect(listTotals(links, linkedDocumentIds(links))).toEqual(linksList);
+      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
       await expect(page.getByTestId("workspace-graph-node-list"))
         .toHaveAttribute("data-total-count", linksList.nodes);
       await expect(page.getByTestId("workspace-graph-edge-list"))
@@ -217,11 +212,8 @@ test.describe("Workspace Knowledge Map real-route regression", () => {
         .toHaveAttribute("data-total-count", listTotals(initialScene, documentIds(initialScene)).nodes);
       await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
       const links = await selectKnowledgeLinks(page);
-      await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", listTotals(links, linkedDocumentIds(links)).nodes);
-      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
-        .toHaveAttribute("title", "8 unlinked documents hidden from this map.");
-      await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
+      // Every document sits in a folder: Links hides none and offers no Unlinked toggle.
+      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
       await expect(page.getByTestId("workspace-graph-node-list"))
         .toHaveAttribute("data-total-count", listTotals(links, documentIds(links)).nodes);
       // Phones open on the map; the list waits in the Map details sheet.
@@ -423,11 +415,10 @@ async function selectKnowledgeLinks(page: Page) {
 const documentIds = (scene: WorkspaceGraphScene) =>
   scene.nodes.filter((node) => node.grain !== "folder").map((node) => node.id);
 
-/** Documents with an authored relation in this lens; containment is not a link. */
+/** Nodes with any relation, containment included: the Map's "linked". */
 function linkedDocumentIds(scene: WorkspaceGraphScene) {
   const ids = new Set<string>();
   for (const edge of scene.edges) {
-    if (edge.relation_kind === "tree") continue;
     ids.add(edge.source);
     ids.add(edge.target);
   }

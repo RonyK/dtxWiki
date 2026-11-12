@@ -68,11 +68,11 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       .includes(edge.relation_kind))).toBe(true);
     const combinedConnected = new Set(sceneRelations(combined).flatMap((edge) => [edge.source, edge.target]));
     expect(combinedConnected.size).toBe(COMBINED_CONNECTED_DOCUMENT_COUNT);
+    const combinedListed = listedNodeIds(combined, new Set(admittedNodes(combined).map((node) => node.id)));
     await expect(page.getByLabel("Lens", { exact: true })).toHaveValue("combined");
     await expect(page.getByTestId("workspace-graph-node-list"))
-      .toHaveAttribute("data-total-count", String(listedNodeIds(combined, combinedConnected).size));
-    await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
-      .toHaveAttribute("title", "72 unlinked documents hidden from this map.");
+      .toHaveAttribute("data-total-count", String(combinedListed.size));
+    await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
     await expect(page.getByTestId("graph-canvas"))
       .toHaveAttribute("data-map-edge-count", String(COMBINED_RELATION_COUNT));
     await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]'))
@@ -108,18 +108,10 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
 
     const nodeList = page.getByTestId("workspace-graph-node-list");
     const edgeList = page.getByTestId("workspace-graph-edge-list");
-    // The real corpus includes 252 unlinked documents. Keep the API's complete
-    // 2K proof above, while the first viewport prioritizes its 1,748 connected
-    // documents. The display toggle reveals the same authoritative 2K scene.
+    // Authored links reach 1,748 documents, but all 2K have containment relations.
+    // The first viewport therefore shows every document without an Unlinked toggle.
     expect(linksConnected.size).toBe(1748);
-    await expect(nodeList).toHaveAttribute("data-total-count", String(listedNodeIds(scene, linksConnected).size));
-    await expect(page.getByRole("button", { name: /^Unlinked \d+$/ }))
-      .toHaveAttribute("title", "252 unlinked documents hidden from this map.");
-    const initialCanvas = page.getByTestId("graph-canvas");
-    await expect(initialCanvas).toHaveAttribute("data-map-node-count", "1748");
-    await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible({ timeout: 60_000 });
-    await capture(page, testInfo, "real-api-2k-connected-first-viewport.png");
-    await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
+    await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
     await expect(nodeList).toHaveAttribute("data-total-count", String(allListed.size));
     await expect(edgeList).toHaveAttribute("data-total-count", String(listedEdgeCount(scene, allListed)));
     await expectBoundedRows(nodeList, edgeList);
@@ -129,6 +121,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       .toBeVisible({ timeout: 60_000 });
     await expect(canvas).toHaveAttribute("data-map-node-count", String(DOCUMENT_COUNT));
     await expect(canvas).toHaveAttribute("data-map-edge-count", String(LINK_RELATION_COUNT));
+    await capture(page, testInfo, "real-api-2k-contained-first-viewport.png");
     await expect(canvas).toHaveAttribute("data-map-community-count", /^[1-9]\d*$/);
     expect((await canvas.boundingBox())?.y).toBeLessThan(700);
     await afterAnimationFrame(page);
@@ -321,10 +314,11 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       expect(restoredScene.nodes.map((node) => node.id).sort()).toEqual(scene.nodes.map((node) => node.id).sort());
       expect(restoredScene.edges.map((edge) => edge.id).sort()).toEqual(scene.edges.map((edge) => edge.id).sort());
       await expect(page.getByRole("heading", { name: "Knowledge Map", exact: true })).toBeVisible();
-      // Citations connect 180 documents that are unlinked in Links alone.
-      // The first test retains the separate Links count of 1,748.
+      // Both lenses retain every contained document; their authored relation
+      // counts remain distinct, as the first test verifies.
       await expect(page.getByTestId("workspace-graph-node-list"))
-        .toHaveAttribute("data-total-count", String(listedNodeIds(scene, connectedIds).size));
+        .toHaveAttribute("data-total-count", String(listedNodeIds(scene,
+          new Set(admittedNodes(scene).map((node) => node.id))).size));
       await expect(page.getByRole("searchbox", { name: "Find in visible map" })).toHaveValue("");
       const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
       expect(horizontalOverflow).toBe(false);
@@ -744,8 +738,8 @@ async function expectRealMapContinuity(
   const mobile = page.viewportSize()!.width === 390;
   const suffix = `${language}-${page.viewportSize()!.width}`;
   const relations = sceneRelations(scene);
-  const connected = new Set(relations.flatMap((edge) => [edge.source, edge.target]));
-  const listed = listedNodeIds(scene, connected);
+  const documents = admittedNodes(scene);
+  const listed = listedNodeIds(scene, new Set(documents.map((node) => node.id)));
   const nodes = new Map(scene.nodes.map((node) => [node.id, node]));
   const originalTheme = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
   // This shipped DOM ID also permits read-only value checks while the mobile
@@ -769,7 +763,7 @@ async function expectRealMapContinuity(
     await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
     await expect(native).toHaveCount(1);
     await expect(native).toBeVisible();
-    await expect(canvas).toHaveAttribute("data-map-node-count", String(connected.size));
+    await expect(canvas).toHaveAttribute("data-map-node-count", String(documents.length));
     await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations.length));
     await expect(canvas).toHaveAttribute("data-map-community-count", /^[1-9]\d*$/);
     if (mobile) {
@@ -790,7 +784,7 @@ async function expectRealMapContinuity(
     const assertNativeIdentity = async () => {
       expect(await nativeIdentity.evaluate((element) => element.isConnected)).toBe(true);
       expect(await native.evaluate((element, original) => element === original, nativeIdentity)).toBe(true);
-      await expect(canvas).toHaveAttribute("data-map-node-count", String(connected.size));
+      await expect(canvas).toHaveAttribute("data-map-node-count", String(documents.length));
       await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations.length));
       await expect(native).toHaveCount(1);
       await expect(scope.getByRole("button", { name: labels.resume, exact: true })).toBeEnabled();
@@ -943,7 +937,7 @@ async function expectRealMapContinuity(
         await previous.dispose();
         await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
         await expect(native).toHaveCount(1);
-        await expect(canvas).toHaveAttribute("data-map-node-count", String(connected.size));
+        await expect(canvas).toHaveAttribute("data-map-node-count", String(documents.length));
         await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations.length));
         await expect(canvas).toHaveAttribute("data-map-community-count", /^[1-9]\d*$/);
         await expect(scope.getByRole("button", { name: labels.resume, exact: true })).toBeEnabled();

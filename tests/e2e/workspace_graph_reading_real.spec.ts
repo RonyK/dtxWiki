@@ -6,6 +6,7 @@ import { admittedNodes, listedNodeIds, sceneRelations } from "./workspace_graph_
 
 const OVERVIEW_PATH = "/graph/overview/query";
 const CONNECTED_DOCUMENTS = 1_928;
+const VISIBLE_DOCUMENTS = 2_000;
 const RELATIONS = 5_929;
 
 // The existing run-e2e.mjs fresh-SQLite wrapper seeds this account/corpus.
@@ -96,9 +97,10 @@ test.describe("real API 2K Knowledge Map reading", () => {
     expect(new Set(selectedCandidates.slice(0, neighbors.length + 1))).toEqual(new Set([document.id, ...neighbors]));
     const paintedNeighbors = selected.candidates.filter(label => neighbors.includes(label.id) && label.painted);
     expect(paintedNeighbors.length, "A selected document must have at least one painted direct-neighbor title").toBeGreaterThan(0);
-    // The list holds the linked documents and the folders that hold them.
+    // Containment keeps every admitted document and its folders in the list.
     await expect(page.getByTestId("workspace-graph-node-list"))
-      .toHaveAttribute("data-total-count", String(listedNodeIds(scene, connected).size));
+      .toHaveAttribute("data-total-count", String(listedNodeIds(scene,
+        new Set(admittedNodes(scene).map((node) => node.id))).size));
     const selectedState = await readState(page);
     expect(selectedState.pinnedIds).toEqual(initialState.pinnedIds);
     expect(selectedState.pinnedPositions).toEqual(initialState.pinnedPositions);
@@ -321,7 +323,7 @@ async function readFrame(page: Page, canvas: Locator) {
 type Frame = Awaited<ReturnType<typeof readFrame>>;
 
 function expectCounts(frame: Frame) {
-  expect(frame.nodes).toBe(CONNECTED_DOCUMENTS);
+  expect(frame.nodes).toBe(VISIBLE_DOCUMENTS);
   expect(frame.edges).toBe(RELATIONS);
 }
 

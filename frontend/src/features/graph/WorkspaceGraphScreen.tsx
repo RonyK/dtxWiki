@@ -84,7 +84,6 @@ import {
   clearWorkspaceGraphState,
   freshWorkspaceGraphState,
   estimateWorkspaceGraphImpact,
-  workspaceGraphHiddenUnlinkedIds,
   workspaceGraphOrphanIds,
   loadWorkspaceGraphState,
   refineFiltersDiffer,
@@ -92,6 +91,7 @@ import {
   searchWorkspaceGraphItems,
   WORKSPACE_GRAPH_RELATION_GROUPS,
   workspaceGraphDisplayItems,
+  workspaceGraphHeldCount,
   workspaceGraphNodeRelations,
   workspaceGraphRenderScene,
   workspaceGraphRequest,
@@ -461,11 +461,8 @@ export function WorkspaceGraphScreen() {
   }, []);
 
   const orphanIds = useMemo(() => scene ? workspaceGraphOrphanIds(scene) : new Set<string>(), [scene]);
-  const hiddenUnlinkedIds = useMemo(() => scene ? workspaceGraphHiddenUnlinkedIds(scene, orphanIds) : new Set<string>(),
-    [orphanIds, scene]);
-  // Directory has no relations, so "unlinked" would hide every document there;
-  // the orphan quick filter keeps only unlinked documents.
-  const orphansAlwaysShown = state.lens === "directory" || state.dataFilters.quick_filters.includes("orphans");
+  // The orphan quick filter keeps only unlinked documents: hiding them would empty the map.
+  const orphansAlwaysShown = state.dataFilters.quick_filters.includes("orphans");
   const showOrphans = orphansAlwaysShown || state.display.show_orphans;
   // The same lack of relations leaves a relation-time window with no documents.
   const directoryRelationTime = state.lens === "directory"
@@ -494,10 +491,10 @@ export function WorkspaceGraphScreen() {
       workspaceId,
       actorId,
       selectionKey: JSON.stringify(request),
-      excludedNodeIds: showOrphans ? undefined : hiddenUnlinkedIds,
+      excludedNodeIds: showOrphans ? undefined : orphanIds,
     })
     : null,
-  [actorId, authorityScope, hiddenUnlinkedIds, request, scene, sceneOwner, showOrphans, state.viewerId, workspaceId]);
+  [actorId, authorityScope, orphanIds, request, scene, sceneOwner, showOrphans, state.viewerId, workspaceId]);
   /** Map search matches, highlighted on the canvas. */
   const visibleNodeIds = useMemo(
     () => new Set(renderScene.nodes.map((node) => node.id)),
@@ -563,6 +560,10 @@ export function WorkspaceGraphScreen() {
   const selectedRelations = useMemo(
     () => selectedNode ? workspaceGraphNodeRelations(displayItems, selectedNode.id, nodeLabels) : null,
     [displayItems, nodeLabels, selectedNode],
+  );
+  const selectedHeldCount = useMemo(
+    () => selectedNode && scene ? workspaceGraphHeldCount(scene, selectedNode.id, displayNodeIds) : 0,
+    [displayNodeIds, scene, selectedNode],
   );
   /** A sidebar row (result or related document) selects on the map and centres it. */
   const selectFromSidebar = (id: string) => {
@@ -1085,11 +1086,11 @@ export function WorkspaceGraphScreen() {
   };
   const handleMapDisplay = (display: WorkspaceGraphRestorableState["display"]) => {
     const hideOrphans = !display.show_orphans && !orphansAlwaysShown;
-    if (hideOrphans && state.selectedId && hiddenUnlinkedIds.has(state.selectedId)) pendingListCenterRef.current = null;
+    if (hideOrphans && state.selectedId && orphanIds.has(state.selectedId)) pendingListCenterRef.current = null;
     setState((current) => ({
       ...current,
       display,
-      selectedId: hideOrphans && current.selectedId && hiddenUnlinkedIds.has(current.selectedId)
+      selectedId: hideOrphans && current.selectedId && orphanIds.has(current.selectedId)
         ? null : current.selectedId,
     }));
   };
@@ -1290,6 +1291,7 @@ export function WorkspaceGraphScreen() {
                   busy={pendingReplay !== null}
                   canExpand={selectedNode?.grain === "cluster"
                     && expandableClusterIds.has(selectedNode.id)}
+                  contained={selectedHeldCount}
                   edge={selectedEdge}
                   expanding={selectedNode?.grain === "cluster" && expandingClusterId === selectedNode.id}
                   labels={nodeLabels}
@@ -2165,6 +2167,7 @@ function WorkspaceGraphList({
 function WorkspaceGraphDetails({
   busy,
   canExpand,
+  contained,
   edge,
   expanding,
   labels,
@@ -2185,6 +2188,7 @@ function WorkspaceGraphDetails({
 }: {
   busy: boolean;
   canExpand: boolean;
+  contained: number;
   edge: WorkspaceGraphEdge | null;
   expanding: boolean;
   labels: ReadonlyMap<string, string>;
@@ -2217,8 +2221,8 @@ function WorkspaceGraphDetails({
         <WorkspaceGraphNodeDetails
           busy={busy}
           canExpand={canExpand}
-          // What a folder holds is its outgoing containment, as in the Context graph.
-          contained={relations?.outgoing.filter((item) => item.relation_kind === "tree").length ?? 0}
+          // What a folder holds among the shown nodes, whether or not lines are drawn.
+          contained={contained}
           expanding={expanding}
           node={node}
           onCenter={onCenter}

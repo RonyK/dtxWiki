@@ -7068,14 +7068,17 @@ body[data-focus-mode="true"] .editor-command-actions [aria-label="Keyboard short
 .graph-scope-short { display: none; }
 .graph-frame-header .graph-local-relation-chips { flex: 1 1 auto; justify-content: flex-end; gap: 4px; }
 .graph-frame-header .graph-local-relation-chip { min-height: 28px; padding: 3px 7px; gap: 4px; font-size: 11px; }
-.graph-view .graph-frame-filters { position: relative; padding: 0; border: 0; border-radius: 0; background: transparent; }
+/* Refine and View keep to the header's end, also on a wrapped line, and their
+   panels hang from the header's right edge: inside the frame wherever the
+   header wraps its controls. */
+.graph-view .graph-frame-filters { position: static; margin-left: auto; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .graph-frame-filters > summary { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 30px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 7px; font-size: 11px; cursor: pointer; }
 /* View sits after Refine in the header, at the header's control size. */
-.graph-frame-header .graph-view-options { position: relative; }
+.graph-frame-header .graph-view-options { position: static; }
 .graph-frame-header .graph-view-options > summary { min-height: 30px; padding: 4px 6px; border-radius: 7px; font-size: 11px; font-weight: inherit; }
-.graph-frame-header .graph-view-panel { z-index: 10; top: calc(100% + 4px); }
+.graph-frame-header .graph-view-panel { z-index: 10; top: calc(100% + 4px); right: 10px; max-width: calc(100% - 20px); }
 .graph-filter-active-count { display: none; }
-.graph-filter-popover { position: absolute; z-index: 10; right: 0; top: calc(100% + 4px); width: min(540px, 80vw); max-height: 65vh; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 25px #0002; }
+.graph-filter-popover { position: absolute; z-index: 10; right: 10px; top: calc(100% + 4px); width: min(540px, 80vw); max-width: calc(100% - 20px); max-height: 65vh; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 25px #0002; }
 .graph-frame .graph-local-stage { overflow: hidden; }
 .graph-view .graph-frame .graph-canvas-frame { height: 560px; min-height: 560px; border: 0; border-radius: 0; }
 .graph-view .graph-frame-history .graph-canvas-frame { height: 440px; min-height: 440px; }
@@ -7161,9 +7164,9 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
   .graph-frame-filters > summary > span:not(.graph-filter-active-count), .graph-frame-header .graph-view-options > summary > span { display: none; }
   .graph-view .graph-frame-header .graph-view-options { position: absolute; right: 148px; top: calc(100% + 11px); }
   .graph-frame-header .graph-view-options > summary { width: 44px; height: 44px; padding: 0; background: var(--surface); }
-  .graph-frame-header .graph-view-panel { right: -141px; width: calc(100cqi - 16px); }
+  .graph-frame-header .graph-view-panel { right: -141px; width: calc(100cqi - 16px); max-width: none; }
   /* 8px from both reader edges: the anchor sits 100px inside the header, itself inside the frame's 1px border. */
-  .graph-filter-popover { width: calc(100cqi - 16px); right: -93px; }
+  .graph-filter-popover { width: calc(100cqi - 16px); max-width: none; right: -93px; }
   .graph-canvas-utilities { top: 10px; right: 6px; }
   .graph-canvas-utilities > button, .graph-camera-controls > button, .graph-canvas-more > summary { width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
   .graph-canvas-context { max-width: calc(100% - 228px); left: 7px; }

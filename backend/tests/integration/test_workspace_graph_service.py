@@ -604,6 +604,41 @@ def test_highly_referenced_metric_stays_pre_quick_filter_authoritative(
         assert scene.metric_basis.endswith("pre_quick.v1")
 
 
+def test_orphans_quick_filter_counts_containment_as_a_relation(session_factory):
+    with session_factory.begin() as session:
+        workspace_id = _workspace_id(session)
+        lonely, _lonely_version = _page(session, workspace_id, "orphan-lonely")
+        _placement(session, workspace_id, lonely, None)
+        placed, _placed_version = _page(session, workspace_id, "orphan-placed")
+        _placement(
+            session,
+            workspace_id,
+            placed,
+            _folder(session, workspace_id, "Orphan folder"),
+        )
+        parent, _parent_version = _page(session, workspace_id, "orphan-parent")
+        parent_placement = _placement(session, workspace_id, parent, None)
+        child, _child_version = _page(session, workspace_id, "orphan-child")
+        _placement(session, workspace_id, child, parent_placement)
+        source, source_version = _page(session, workspace_id, "orphan-source")
+        target, _target_version = _page(session, workspace_id, "orphan-target")
+        _link(session, workspace_id, source, source_version, target)
+
+    with session_factory() as session:
+        scene = WorkspaceGraphService(cursor_secret="orphan-secret").query(
+            session,
+            workspace_id,
+            request=WorkspaceGraphOverviewRequest(
+                lens="links", quick_filters=["orphans"]
+            ),
+            actor=_actor(),
+        )
+    shown = {node.entity_id for node in scene.nodes if node.grain == "document"}
+    # Containment links both the held document and its root-level container.
+    assert lonely.id in shown
+    assert not shown & {placed.id, parent.id, child.id, source.id, target.id}
+
+
 def test_authored_relations_do_not_require_edge_projection(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
