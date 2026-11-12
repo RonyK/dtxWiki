@@ -222,14 +222,7 @@ def _create_editing_page(
     *,
     workspace_slug: str = "default",
 ) -> dict:
-    """Page-first creation: the only live path that reaches "editing" status.
-
-    No live path reopens a fresh "editing" session on an already-existing
-    page (that was the deleted begin_editing bridge's job, and it had no
-    real caller) -- every test here reaches a specific, predictable page
-    identity by reading it back off this call's own response (e.g. `slug`)
-    instead of asking for one by name.
-    """
+    """Create a private editing page and use the returned page identity."""
     response = client.post(f"/api/v1/workspaces/{workspace_id}/context/pages", json={})
     assert response.status_code == 201, response.text
     page = response.json()["data"]
@@ -1039,7 +1032,7 @@ def test_asset_uploaded_then_orphaned_by_discard_cannot_be_adopted_later(
     monkeypatch,
 ) -> None:
     """P8.5: an upload registered against an "editing" row that is later
-    DISCARDED (never published_editing_page's content, never given a body
+    DISCARDED (never published, never given a body
     reference) must not be adoptable into some other, later version -- that
     would resurrect a session the author explicitly threw away. This is
     different from `test_context_media_in_place_autosave_replaces_exact_

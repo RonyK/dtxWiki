@@ -63,8 +63,8 @@ MCPContextPathInput = Annotated[
             "minLength": 1,
             "maxLength": 512,
             "description": (
-                "Context page UUID or stable URL. Legacy /context/...md paths "
-                "remain accepted for read_concept and outline path fields."
+                "Context page UUID, stable /p/<workspace_id>/<page_id> or "
+                "/p/<page_id> URL, or legacy /context/<slug>.md path."
             ),
         }
     ),

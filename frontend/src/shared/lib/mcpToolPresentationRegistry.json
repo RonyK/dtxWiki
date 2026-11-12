@@ -6,6 +6,7 @@
   "discard_context_edit": "discard_context_edit",
   "fetch": "fetch",
   "get_index": "get_index",
+  "get_operation_status": "get_operation_status",
   "grep_wiki": "grep_wiki",
   "guide": "guide",
   "list_agent_categories": "list_agent_categories",

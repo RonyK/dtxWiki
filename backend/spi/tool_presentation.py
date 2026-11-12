@@ -8,6 +8,7 @@ layer both are allowed to depend on.
 """
 
 KOREAN_TOOL_TITLES = {
+    "get_operation_status": "작업 상태 조회",
     "list_my_workspaces": "내 워크스페이스 목록",
     "guide": "워크스페이스 가이드 보기",
     "search": "워크스페이스 지식 검색",
@@ -43,6 +44,7 @@ KOREAN_TOOL_TITLES = {
 # read model sends this stable action key and the frontend translates it; no
 # pre-built English sentence crosses the API boundary.
 TOOL_ACTIONS = {
+    "get_operation_status": "read",
     "list_my_workspaces": "read",
     "guide": "guide",
     "search": "search",

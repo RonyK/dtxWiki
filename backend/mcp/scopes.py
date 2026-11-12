@@ -19,6 +19,7 @@ from backend.policy.mcp_scopes import (  # noqa: F401
 TOOL_REQUIRED_SCOPES = {
     "list_my_workspaces": ("workspace-read", "guide", "read"),
     "guide": ("guide", "workspace-read"),
+    "get_operation_status": ("draft-write", "agent-page-draft", "review-write"),
     "search": ("search",),
     "fetch": ("read",),
     "grep_wiki": ("search", "read"),
@@ -85,6 +86,7 @@ CONTENT_TOOLS = frozenset(
 TOOL_REQUIRED_ROLES = {
     "list_my_workspaces": None,
     "guide": "viewer",
+    "get_operation_status": "editor",
     "search": "viewer",
     "fetch": "viewer",
     "grep_wiki": "viewer",

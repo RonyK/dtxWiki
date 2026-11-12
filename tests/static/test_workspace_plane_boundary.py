@@ -143,6 +143,12 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
         "_principal_role's control_factory backs only get_workspace_access "
         "(WorkspaceMembership) for an already-resolved workspace_id."
     ),
+    "backend/mcp/operation_tools.py": (
+        "Reauthorizes the recorded tool through resolve_target_actor: the "
+        "control factory reads only workspace membership/credential scope. "
+        "Operation attempts, receipts and review audiences are read through "
+        "ctx.session_factory (session_for(workspace_id))."
+    ),
     "backend/api/public.py": (
         "WorkspaceDirectory thin-lookup pattern, same shape as "
         "backend/api/context_pages.py above. read_public_workspace (Workspace table "

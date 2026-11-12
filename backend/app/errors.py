@@ -48,13 +48,16 @@ def build_rest_error_response(
 
 def rest_error_status(error_code: str) -> str:
     if error_code in {
+        "content_hash_mismatch",
         "decision_id_conflict",
         "disambiguation_required",
+        "editing_revision_conflict",
         "legacy_media_cutover_conflict",
         "media_editing_not_open",
         "media_install_in_progress",
         "media_policy_changed",
         "media_state_changed",
+        "no_open_edit",
         "page_name_occupied",
         "stale_base_version",
         "stale_context_draft",

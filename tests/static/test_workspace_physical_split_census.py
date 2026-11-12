@@ -207,6 +207,8 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     Bibliography metadata, publication rows and its completion marker add
     three workspace-only tables: resident 92, insertable 34. Their composite
     FKs remain on the workspace plane; the cross-plane edge census stays 61.
+    MCP operation lifecycle fields extend the existing call log, without
+    changing table or cross-plane FK counts.
     """
 
     edges = workspace_to_control_fk_edges()

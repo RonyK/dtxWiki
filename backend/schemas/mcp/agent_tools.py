@@ -20,17 +20,16 @@ CONVERSATION_TOKEN_FIELD = Field(
     ),
 )
 IDEMPOTENCY_KEY_FIELD = Field(
-    default=None,
     min_length=1,
     max_length=128,
     pattern=r"^[A-Za-z0-9._:-]+$",
-    description="Optional 24-hour retry key scoped to actor, workspace, and tool.",
+    description="24-hour retry key. Generate and hold it before the first send.",
 )
 
 
 class WriteAgentPageDraftInput(AgentPageDraftRequest):
     workspace_id: UUID
-    idempotency_key: str | None = IDEMPOTENCY_KEY_FIELD
+    idempotency_key: str = IDEMPOTENCY_KEY_FIELD
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")

@@ -104,13 +104,7 @@ class IdempotencyKeyConflictError(ReadServiceError):
 
 
 class OperationOutcomeUnknownError(ReadServiceError):
-    """``retry_only`` found no valid (unexpired) receipt for the given key.
-
-    This is a read-only answer, not a license to execute: a caller in doubt
-    about whether its own prior send landed must not treat "no receipt" as
-    "safe to try for real" -- it re-sends the same idempotency_key WITHOUT
-    ``retry_only`` only once it has decided that on its own terms.
-    """
+    """A REST lookup-only retry found no unexpired receipt; nothing executed."""
 
     error_code = "operation_outcome_unknown"
 
@@ -182,9 +176,7 @@ class ReviewDecisionIdConflictError(ReadServiceError):
     error_code = "decision_id_conflict"
 
     def __init__(self) -> None:
-        super().__init__(
-            "decision_id was already used for a different review decision"
-        )
+        super().__init__("decision_id was already used for a different review decision")
 
 
 class RevisionSubmissionRequiredError(ReadServiceError):

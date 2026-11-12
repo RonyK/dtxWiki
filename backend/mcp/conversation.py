@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
@@ -32,6 +34,7 @@ def resolve_conversation_token(
     requested_workspace_id: UUID | None = None,
     requested_workspace_authorized: bool,
     require_token: bool = False,
+    idempotency_key: str | None = None,
 ) -> ConversationResolution:
     # C-03: no default — every caller must PROVE the requested workspace was
     # authorized. A permissive default would let a future caller silently skip
@@ -53,6 +56,28 @@ def resolve_conversation_token(
             return ConversationResolution(
                 token=mint_conversation_token(),
                 error_code="conversation_token_required",
+            )
+        if (
+            idempotency_key
+            and requested_workspace_authorized
+            and requested_workspace_id is not None
+        ):
+            # One key is one operation, so its conversation is derived from the
+            # key: a resend after a lost first response, and a status lookup
+            # for it, land in the conversation of the original call. Serialize
+            # the components so keys and actor ids cannot alias one another.
+            scope = json.dumps(
+                [
+                    "dtxwiki-keyed-conversation-v2",
+                    str(requested_workspace_id),
+                    actor.actor_kind,
+                    actor.actor_id,
+                    idempotency_key,
+                ],
+                separators=(",", ":"),
+            )
+            return ConversationResolution(
+                token="conv_" + hashlib.sha256(scope.encode("utf-8")).hexdigest()
             )
         return ConversationResolution(token=mint_conversation_token())
     if not requested_workspace_authorized:
@@ -87,10 +112,7 @@ def resolve_conversation_token(
 
 
 def _is_new_sentinel(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and value.strip().lower() == NEW_CONVERSATION_SENTINEL
-    )
+    return isinstance(value, str) and value.strip().lower() == NEW_CONVERSATION_SENTINEL
 
 
 def _normalize_requested_token(value: Any) -> tuple[str | None, str | None]:

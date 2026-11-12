@@ -344,6 +344,7 @@ def test_submit_revision_returns_pending_never_approved(page_service, editor_act
         {
             "workspace_id": str(workspace_id),
             "review_item_id": str(review_id),
+            "idempotency_key": str(uuid4()),
             "update": {
                 "page_id": str(page_id),
                 "base_version_id": base["version_id"],
@@ -401,6 +402,7 @@ def test_submit_revision_out_of_audience_is_not_found(page_service, editor_actor
         {
             "workspace_id": str(workspace_id),
             "review_item_id": str(review_id),
+            "idempotency_key": str(uuid4()),
             "update": {
                 "page_id": str(page_id),
                 "base_version_id": base["version_id"],
@@ -446,6 +448,7 @@ def test_submit_revision_soft_claim_conflict(page_service, editor_actor):
         {
             "workspace_id": str(workspace_id),
             "review_item_id": str(review_id),
+            "idempotency_key": str(uuid4()),
             "update": {
                 "page_id": str(page_id),
                 "base_version_id": base["version_id"],
@@ -491,6 +494,7 @@ def test_submit_revision_stale_claim_can_be_taken_over(page_service, editor_acto
         {
             "workspace_id": str(workspace_id),
             "review_item_id": str(review_id),
+            "idempotency_key": str(uuid4()),
             "update": {
                 "page_id": str(page_id),
                 "base_version_id": base["version_id"],
@@ -529,6 +533,7 @@ def test_submit_revision_idempotent_retry(page_service, editor_actor):
     body = {
         "workspace_id": str(workspace_id),
         "review_item_id": str(review_id),
+        "idempotency_key": str(uuid4()),
         "update": {
             "page_id": str(page_id),
             "base_version_id": base["version_id"],
@@ -558,7 +563,7 @@ def test_submit_revision_idempotent_retry(page_service, editor_actor):
     assert first.envelope.result_status == "succeeded"
     assert second.envelope.result_status == "succeeded"
     # The retry returns the prior result, not a duplicate draft.
-    assert second.data.deduplicated is True
+    assert second.data.replayed is True
     assert second.data.new_change_set_id == first.data.new_change_set_id
     assert second.data.new_review_item_id == first.data.new_review_item_id
 
@@ -594,6 +599,7 @@ def test_submit_revision_cross_principal_dedup_does_not_leak(
     body = {
         "workspace_id": str(workspace_id),
         "review_item_id": str(review_id),
+        "idempotency_key": "cross-principal-revision",
         "update": {
             "page_id": str(page_id),
             "base_version_id": base["version_id"],
@@ -615,10 +621,12 @@ def test_submit_revision_cross_principal_dedup_does_not_leak(
     assert first.envelope.result_status == "succeeded"
 
     # B (out of audience, SAME MCP client/actor) submits the SAME body via
-    # conversation B → must be not_found, NOT a dedup hit of A's result.
+    # conversation B with its own key → must be not_found, NOT a dedup hit of
+    # A's result. (A key is one caller's operation; the ledger scopes it to the
+    # actor, and bearer actors are per user.)
     leaked = dispatch(
         "submit_revision_for_review",
-        body,
+        {**body, "idempotency_key": "cross-principal-revision-b"},
         actor=editor_actor,
         page_service=page_service,
         session_factory=page_service.session_factory,
@@ -668,6 +676,7 @@ def test_submit_revision_rejects_target_mismatch(page_service, editor_actor):
         {
             "workspace_id": str(workspace_id),
             "review_item_id": str(review_id),
+            "idempotency_key": str(uuid4()),
             "update": {
                 "page_id": str(other_page_id),  # MISMATCH: page B, not the bound A
                 "base_version_id": base_b["version_id"],
@@ -715,6 +724,7 @@ def test_submit_revision_rejects_create_source(page_service, editor_actor):
         {
             "workspace_id": str(workspace_id),
             "review_item_id": str(review_id),
+            "idempotency_key": str(uuid4()),
             "create": {
                 "title": "Brand New Page",
                 "page_type": "overview",
@@ -743,6 +753,7 @@ def test_submit_revision_requires_mcp_write_scope(page_service, mcp_default_acto
         {
             "workspace_id": str(workspace_id),
             "review_item_id": str(uuid4()),
+            "idempotency_key": str(uuid4()),
             "update": {
                 "page_id": str(uuid4()),
                 "update_mode": "full_rewrite",

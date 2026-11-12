@@ -106,7 +106,7 @@ def test_read_context_outline_caps_the_heading_list_and_pages_with_a_cursor(
 ):
     workspace_id = _workspace_id(page_service)
     page = _write(page_service, "outline-bounds", _heading_heavy_body())
-    request = {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}}
+    request = {"workspace_id": str(workspace_id), "page_id": str(page.id)}
 
     first = dispatch(
         "read_context_outline", request, actor=actor, page_service=page_service
@@ -160,7 +160,7 @@ def test_read_context_outline_caps_the_heading_list_and_pages_with_a_cursor(
 def test_read_structure_map_caps_blocks_and_pages_with_a_cursor(page_service, actor):
     workspace_id = _workspace_id(page_service)
     page = _write(page_service, "structure-map-bounds", _heading_heavy_body())
-    request = {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}}
+    request = {"workspace_id": str(workspace_id), "page_id": str(page.id)}
 
     first = dispatch(
         "read_structure_map", request, actor=actor, page_service=page_service
@@ -214,7 +214,7 @@ def test_read_structure_map_caps_rows_of_a_single_table_and_resumes_mid_block(
 
     workspace_id = _workspace_id(page_service)
     page = _write(page_service, "structure-map-rows", _single_table_body())
-    request = {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}}
+    request = {"workspace_id": str(workspace_id), "page_id": str(page.id)}
 
     first = dispatch(
         "read_structure_map", request, actor=actor, page_service=page_service
@@ -256,7 +256,7 @@ def test_outline_wire_budget_binds_before_the_item_cap(page_service, actor):
 
     workspace_id = _workspace_id(page_service)
     page = _write(page_service, "outline-wire-budget", _wide_heading_body())
-    request = {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}}
+    request = {"workspace_id": str(workspace_id), "page_id": str(page.id)}
 
     result = dispatch(
         "read_context_outline", request, actor=actor, page_service=page_service

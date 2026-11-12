@@ -44,6 +44,7 @@ from backend.repositories.workspace_scoped import (
     get_in_workspace,
     join_in_workspace,
     select_in_workspace,
+    select_projection_in_workspace,
 )
 from backend.schemas.common import DraftReviewReason
 from backend.schemas.context_edit import EditOperation
@@ -64,6 +65,7 @@ from backend.schemas.page import (
 )
 from backend.services.actor_visible_read import (
     PUBLISHED_CONTEXT_VERSION_STATUSES,
+    context_page_visible,
     context_parent_projection,
     context_version_is_visible,
 )
@@ -275,8 +277,12 @@ class PageConflictError(PageServiceError):
         server_editing_revision: int | None = None,
         *,
         no_open_edit: bool = False,
+        error_code: str | None = None,
     ) -> None:
-        super().__init__("stale base version")
+        self.error_code = error_code or (
+            "no_open_edit" if no_open_edit else "stale_base_version"
+        )
+        super().__init__(self.error_code.replace("_", " "))
         self.server_version_id = server_version_id
         self.server_content_hash = server_content_hash
         # Only ever set for the caller's OWN open edit (the same disclosure
@@ -1861,6 +1867,7 @@ class PageService:
         placement_parent_node_id: UUID | None = None,
         with_edit_receipt: bool = False,
         share_draft: bool = False,
+        idempotency_key: str | None = None,
     ) -> PagePayload:
         """Create a page with a private edit or an explicitly shared browser draft.
 
@@ -1881,111 +1888,143 @@ class PageService:
             )
 
         with self.session_factory.begin() as session:
-            acquire_write_intent(session)
             workspace = self._require_workspace(session, workspace_slug)
-            next_title = title or "제목 없음"
-            page_id = uuid4()
-            default_slug = f"p-{page_id}"
-            prepared = self._prepare_body(
-                BodyInput(
-                    body_md=body_md,
-                    metadata=PageMetadataInput(
-                        title=next_title,
-                        slug=default_slug,
-                        page_type=page_type,
-                        tags=tags,
-                        aliases=aliases,
+
+            def _execute() -> PagePayload:
+                acquire_write_intent(session)
+                page_id = uuid4()
+                default_slug = f"p-{page_id}"
+                prepared = self._prepare_body(
+                    BodyInput(
+                        body_md=body_md,
+                        metadata=PageMetadataInput(
+                            title=title,
+                            slug=default_slug,
+                            page_type=page_type,
+                            tags=tags,
+                            aliases=aliases,
+                        ),
+                        fallback_metadata=PreparedMetadata(
+                            title="제목 없음",
+                            page_type=None,
+                            tags=None,
+                            aliases=None,
+                        ),
                     ),
-                    fallback_metadata=PreparedMetadata(
-                        page_type=None,
-                        tags=None,
-                        aliases=None,
+                    WriteContext(
+                        actor=self.actor_context,
+                        workspace=workspace,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        actor_provenance=actor_provenance,
+                        page=None,
+                        version=None,
+                        session=session,
                     ),
-                ),
-                WriteContext(
-                    actor=self.actor_context,
-                    workspace=workspace,
+                )
+                next_title = prepared.metadata.title
+                page = ContextPage(
+                    id=page_id,
+                    workspace_id=workspace.id,
+                    slug=default_slug,
+                    title=next_title,
+                    page_type=prepared.metadata.page_type or "overview",
+                    tags=prepared.metadata.tags or [],
+                    aliases=prepared.metadata.aliases or [],
+                )
+                session.add(page)
+                session.flush()
+                version = self._insert_version(
+                    session,
+                    page_id=page.id,
+                    parent_version_id=None,
+                    body=prepared,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    actor_provenance=actor_provenance,
-                    page=None,
-                    version=None,
-                    session=session,
-                ),
-            )
-            page = ContextPage(
-                id=page_id,
-                workspace_id=workspace.id,
-                slug=default_slug,
-                title=next_title,
-                page_type=prepared.metadata.page_type or "overview",
-                tags=prepared.metadata.tags or [],
-                aliases=prepared.metadata.aliases or [],
-            )
-            session.add(page)
-            session.flush()
-            version = self._insert_version(
-                session,
-                page_id=page.id,
-                parent_version_id=None,
-                body=prepared,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-                version_status="draft" if share_draft else "editing",
-            )
-            # Without this, the page has no stored head at all: an ordinary
-            # read_page/list_pages by its own author would 404 immediately
-            # after a 201 create, since nothing else ever points at a fresh
-            # page's first version for them (confirmed the hard way -- an
-            # end-to-end create-then-read test failed until this was added).
-            # Private creation keeps the submitted pointer empty. Browser
-            # creation explicitly shares the saved draft without publishing.
-            page.current_version_id = version.id
-            if share_draft:
-                page.latest_draft_version_id = version.id
-            page.placement_parent_node_id = placement_parent_node_id
-            sync_page_link_projection(session, page=page, version=version)
-            self._ensure_context_tree_placement(
-                session=session,
-                workspace_id=workspace.id,
-                page=page,
-                parent_id=placement_parent_node_id,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-            )
-            self._refresh_page_links(session, page=page, version=version)
-            AuditService().emit(
-                session=session,
-                workspace_id=workspace.id,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-                action="page.create",
-                target_kind="context_page",
-                target_id=page.id,
-                payload={
-                    "version_id": str(version.id),
-                    "editing_revision": version.editing_revision,
-                    "was_private_edit": not share_draft,
-                },
-            )
-            payload = self._payload_from_page(
-                session,
-                page,
-                version,
-                current_version_id_override=version.id,
-                prepared=prepared,
-            )
-            if with_edit_receipt:
-                payload._edit_receipt = build_edit_receipt(
-                    edit_mode="create",
-                    before_body=None,
-                    after_body=payload.body_md,
-                    editing_revision_before=None,
-                    editing_revision_after=payload.editing_revision,
-                    requested_body=body_md,
-                    server_fixes=prepared.fixes,
+                    version_status="draft" if share_draft else "editing",
                 )
-            return payload
+                # Without this, the page has no stored head at all: an ordinary
+                # read_page/list_pages by its own author would 404 immediately
+                # after a 201 create, since nothing else ever points at a fresh
+                # page's first version for them (confirmed the hard way -- an
+                # end-to-end create-then-read test failed until this was added).
+                # Private creation keeps the submitted pointer empty. Browser
+                # creation explicitly shares the saved draft without publishing.
+                page.current_version_id = version.id
+                if share_draft:
+                    page.latest_draft_version_id = version.id
+                page.placement_parent_node_id = placement_parent_node_id
+                sync_page_link_projection(session, page=page, version=version)
+                self._ensure_context_tree_placement(
+                    session=session,
+                    workspace_id=workspace.id,
+                    page=page,
+                    parent_id=placement_parent_node_id,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                )
+                self._refresh_page_links(session, page=page, version=version)
+                AuditService().emit(
+                    session=session,
+                    workspace_id=workspace.id,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    action="page.create",
+                    target_kind="context_page",
+                    target_id=page.id,
+                    payload={
+                        "version_id": str(version.id),
+                        "editing_revision": version.editing_revision,
+                        "was_private_edit": not share_draft,
+                    },
+                )
+                payload = self._payload_from_page(
+                    session,
+                    page,
+                    version,
+                    current_version_id_override=version.id,
+                    prepared=prepared,
+                )
+                if placement_parent_node_id is not None:
+                    payload._placement_parent_node_id = placement_parent_node_id
+                    payload._placement_changed = True
+                if with_edit_receipt:
+                    payload._edit_receipt = build_edit_receipt(
+                        edit_mode="create",
+                        before_body=None,
+                        after_body=payload.body_md,
+                        editing_revision_before=None,
+                        editing_revision_after=payload.editing_revision,
+                        requested_body=body_md,
+                        server_fixes=prepared.fixes,
+                    )
+                return payload
+
+            return execute_idempotent_write(
+                session,
+                workspace_id=workspace.id,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                tool_name="create_context_page",
+                idempotency_key=idempotency_key,
+                fingerprint=request_fingerprint(
+                    {
+                        "title": title,
+                        "body_md": body_md,
+                        "page_type": page_type,
+                        "tags": tags,
+                        "aliases": aliases,
+                        "placement_parent_node_id": (
+                            str(placement_parent_node_id)
+                            if placement_parent_node_id is not None
+                            else None
+                        ),
+                        "share_draft": share_draft,
+                    }
+                ),
+                result_model=PagePayload,
+                execute=_execute,
+            )
 
     def begin_context_edit(
         self,
@@ -2008,15 +2047,13 @@ class PageService:
         ``chat_session_id`` (the MCP chat) submitted the page's latest draft
         and its review is still pending, that same version is reopened
         instead (``_reopen_own_pending_submission``). Otherwise a fresh row is
-        parented on the current published head (or the page's own current
-        head for a page that has never published), matching the "base
+        parented on the current published version (or an actor-visible shared
+        draft before first publication), matching the "base
         version/hash the caller means to build from" contract. Shared by
         Browser REST and MCP -- there is exactly one implementation.
 
         P8.5: ``idempotency_key`` is required and replayed through the shared
-        Context-command ledger (``execute_idempotent_write``), and
-        ``retry_only`` asks for a prior receipt's outcome without touching the
-        page at all -- the lookup happens before anything below is entered.
+        Context-command ledger (``execute_idempotent_write``).
         """
 
         with self.session_factory.begin() as session:
@@ -2025,7 +2062,7 @@ class PageService:
                 acquire_write_intent(session)
                 self._lock_context_media_usage_intent_for_page(session, page_id)
                 page = context_page_repo.get_page_by_id_for_update(session, page_id)
-                if page is None:
+                if page is None or page.workspace_id != workspace_id:
                     raise PageNotFoundError("page not found")
                 existing = session.scalar(
                     select(ContextPageVersion).where(
@@ -2055,6 +2092,29 @@ class PageService:
                             actor_provenance=actor_provenance,
                         ),
                     )
+                # Knowing a page UUID does not grant access to its author's
+                # unsubmitted private edit. Do not create an empty edit for
+                # another author. The author may start empty again after
+                # discarding their private work, which clears the pointers.
+                readable_version_id = self._editable_version_id_for_actor(
+                    session, page, actor_kind, actor_id
+                )
+                if readable_version_id is None:
+                    own_discarded_id = session.scalar(
+                        select_projection_in_workspace(
+                            ContextPageVersion,
+                            workspace_id=workspace_id,
+                            columns=(ContextPageVersion.id,),
+                            predicates=(
+                                ContextPageVersion.page_id == page.id,
+                                ContextPageVersion.version_status == "discarded",
+                                ContextPageVersion.created_by_actor_kind == actor_kind,
+                                ContextPageVersion.created_by_actor_id == actor_id,
+                            ),
+                        ).limit(1)
+                    )
+                    if own_discarded_id is None:
+                        raise PageNotFoundError("page not found")
                 reopened = self._reopen_own_pending_submission(
                     session,
                     page,
@@ -2094,25 +2154,12 @@ class PageService:
                             actor_provenance=actor_provenance,
                         ),
                     )
-                base_id = page.current_published_version_id or page.current_version_id
+                base_id = page.current_published_version_id or readable_version_id
                 base = (
                     self._require_page_version(session, page, base_id)
                     if base_id is not None
                     else None
                 )
-                if base is not None and base.version_status == "editing":
-                    # `page.current_version_id` is a page-global pointer that
-                    # ordinary autosaves (`_set_current_version`) legitimately
-                    # leave pointing at an "editing" row while it is still
-                    # private to its own author (P8.1). We already know this
-                    # actor has no open "editing" row of their own (the
-                    # `existing` check above returned early otherwise), so an
-                    # "editing" row found here always belongs to a DIFFERENT
-                    # author. Using it as a base would copy that author's
-                    # private, unsubmitted content into this actor's new
-                    # editing row -- exactly the cross-author leak P8 exists to
-                    # close. Treat it as "nothing to build from" instead.
-                    base = None
                 if base_version_id is not None or base_content_hash is not None:
                     actual_id = base.id if base is not None else None
                     actual_hash = base.content_hash if base is not None else None
@@ -2396,30 +2443,20 @@ class PageService:
             page = context_page_repo.get_page_by_id_for_update(session, page_id)
             if page is None:
                 raise PageNotFoundError("page not found")
-            version = self._require_page_version(session, page, version_id)
-            # A DIFFERENT author's version -- editing or not -- must be
-            # opaque not-found here (P2.2/P2.6): a 409 Conflict would itself
-            # confirm "this id exists" to a non-owner regardless of which
-            # fields come back populated. The version's OWN author gets a
-            # clear conflict instead when it simply is not "editing" any
-            # more (already submitted, published, or discarded) -- that is
-            # ordinary same-author feedback, not a disclosure to someone
-            # else.
-            if (
-                version.created_by_actor_kind != actor_kind
-                or version.created_by_actor_id != actor_id
-            ):
-                raise PageNotFoundError("page version not found")
-            browser_draft = self._is_unreviewed_browser_draft(
+            version = self._own_page_version(
+                session, page, version_id, actor_kind, actor_id
+            )
+            browser_draft = version is not None and self._is_unreviewed_browser_draft(
                 session=session,
                 page=page,
                 version=version,
                 actor_provenance=actor_provenance,
             )
-            if version.version_status != "editing" and not browser_draft:
-                raise PageConflictError(
-                    server_version_id=version.id,
-                    server_content_hash=version.content_hash,
+            if version is None or (
+                version.version_status != "editing" and not browser_draft
+            ):
+                version = self._require_named_open_edit(
+                    session, page, version_id, actor_kind, actor_id
                 )
             if version.editing_revision != expected_editing_revision:
                 # The caller's own open edit (ownership checked above):
@@ -2429,6 +2466,7 @@ class PageService:
                     server_version_id=version.id,
                     server_content_hash=version.content_hash,
                     server_editing_revision=version.editing_revision,
+                    error_code="editing_revision_conflict",
                 )
             # page.latest_draft_version_id is still a page-global pointer
             # (P8.2's full removal is out of scope this pass) -- overwriting
@@ -2591,16 +2629,12 @@ class PageService:
                 page = context_page_repo.get_page_by_id_for_update(session, page_id)
                 if page is None:
                     raise PageNotFoundError("page not found")
-                version = self._require_page_version(session, page, version_id)
-                if (
-                    version.created_by_actor_kind != actor_kind
-                    or version.created_by_actor_id != actor_id
-                ):
-                    raise PageNotFoundError("page version not found")
-                if version.version_status != "editing":
-                    raise PageConflictError(
-                        server_version_id=version.id,
-                        server_content_hash=version.content_hash,
+                version = self._own_page_version(
+                    session, page, version_id, actor_kind, actor_id
+                )
+                if version is None or version.version_status != "editing":
+                    version = self._require_named_open_edit(
+                        session, page, version_id, actor_kind, actor_id
                     )
                 version.version_status = "discarded"
                 session.add(version)
@@ -2793,7 +2827,6 @@ class PageService:
         actor_provenance: str,
         expected_editing_revision: int,
         idempotency_key: str,
-        retry_only: bool = False,
     ) -> PagePayload:
         """Apply typed block/section edit operations to the caller's own open
         "editing" row in place (P8.6's seventh tool).
@@ -2827,22 +2860,12 @@ class PageService:
                 page = context_page_repo.get_page_by_id_for_update(session, page_id)
                 if page is None:
                     raise PageNotFoundError("page not found")
-                version = self._require_page_version(session, page, version_id)
-                # A DIFFERENT author's version -- editing or not -- must be
-                # opaque not-found here (P2.2/P2.6), matching
-                # submit_context_edit_for_review/discard_context_edit exactly.
-                if (
-                    version.created_by_actor_kind != actor_kind
-                    or version.created_by_actor_id != actor_id
-                ):
-                    raise PageNotFoundError("page version not found")
-                if version.version_status != "editing":
-                    disclosed_id, disclosed_hash = self._disclosable_version_fields(
-                        version, actor_kind, actor_id
-                    )
-                    raise PageConflictError(
-                        server_version_id=disclosed_id,
-                        server_content_hash=disclosed_hash,
+                version = self._own_page_version(
+                    session, page, version_id, actor_kind, actor_id
+                )
+                if version is None or version.version_status != "editing":
+                    version = self._require_named_open_edit(
+                        session, page, version_id, actor_kind, actor_id
                     )
                 if version.editing_revision != expected_editing_revision:
                     disclosed_id, disclosed_hash = self._disclosable_version_fields(
@@ -2856,6 +2879,7 @@ class PageService:
                             if disclosed_id is not None
                             else None
                         ),
+                        error_code="editing_revision_conflict",
                     )
 
                 current_body = version.body_md
@@ -2890,18 +2914,18 @@ class PageService:
                         details=list(exc.details),
                     ) from exc
 
-                prepared = self._prepare_body(
-                    BodyInput(applied.body),
-                    WriteContext(
-                        actor=self.actor_context,
-                        workspace=self._workspace_for(session, page.workspace_id),
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                        actor_provenance=actor_provenance,
-                        page=page,
-                        version=version,
-                        session=session,
-                    ),
+                prepared = self._autosave_prepare(
+                    session=session,
+                    page=page,
+                    current=version,
+                    title=None,
+                    body_md=applied.body,
+                    page_type=None,
+                    tags=None,
+                    aliases=None,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
                 )
                 new_body = prepared.body
                 next_block_map = (
@@ -2920,32 +2944,33 @@ class PageService:
                         operation_provenance=block_operation_provenance(applied.edits),
                         identity_seed=str(version.id),
                     )
-                self._rewrite_body_in_place(
-                    version,
-                    prepared,
+                baseline_patch = pending_page_metadata_patch(
+                    session, page=page, version_id=version.id
+                )
+                metadata_patch = page_metadata_delta(
+                    page,
+                    title=prepared.metadata.title,
+                    page_type=prepared.metadata.page_type,
+                    tags=prepared.metadata.tags,
+                    aliases=prepared.metadata.aliases,
+                    baseline_patch=baseline_patch,
+                )
+                payload = self._autosave_persist_editing_row(
+                    session=session,
+                    page=page,
+                    current=version,
+                    prepared=prepared,
+                    next_title=prepared.metadata.title,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    session_version_id=None,
+                    same_actor_draft=True,
+                    own_open_edit=True,
+                    baseline_patch=baseline_patch,
+                    metadata_patch=metadata_patch,
                     base_block_map=block_map,
                     prepared_block_map=next_block_map,
                 )
-                version.actor_type = actor_kind
-                version.actor_id = parse_uuid_or_none(actor_id)
-                version.actor_display_name = resolve_actor_display_name(
-                    session,
-                    actor_kind=actor_kind,
-                    actor_id=actor_id,
-                )
-                version.created_by_actor_kind = actor_kind
-                version.created_by_actor_id = actor_id
-                version.editing_revision += 1
-                session.add(version)
-                self._sync_version_usage(
-                    session,
-                    page=page,
-                    version=version,
-                    body_md=new_body,
-                )
-                page.updated_at = utc_now()
-                self._set_current_version(session, page, version)
-                self._refresh_page_links(session, page=page, version=version)
                 AuditService().emit(
                     session=session,
                     workspace_id=page.workspace_id,
@@ -2960,13 +2985,6 @@ class PageService:
                         "editing_revision": version.editing_revision,
                         "operation_count": len(operations),
                     },
-                )
-                payload = self._payload_from_page(
-                    session,
-                    page,
-                    version,
-                    current_version_id_override=version.id,
-                    prepared=prepared,
                 )
                 payload._edit_receipt = build_edit_receipt(
                     edit_mode="patch",
@@ -3007,7 +3025,6 @@ class PageService:
                 ),
                 result_model=PagePayload,
                 execute=_execute,
-                retry_only=retry_only,
             )
 
     def write_page(
@@ -4049,12 +4066,11 @@ class PageService:
                     actor_id=actor_id,
                     on_stale=on_stale,
                 )
-                next_title = title or page.title
                 prepared = self._autosave_prepare(
                     session=session,
                     page=page,
                     current=current,
-                    title=next_title,
+                    title=title,
                     body_md=body_md,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
@@ -4064,6 +4080,7 @@ class PageService:
                     actor_provenance=actor_provenance,
                     source_version=alternative_base or current,
                 )
+                next_title = prepared.metadata.title
                 receipt_base["requested"] = body_md
                 receipt_base["fixes"] = prepared.fixes
                 if alternative_base is not None:
@@ -4104,6 +4121,7 @@ class PageService:
                     destination_node_id is not None
                     and destination_node_id != effective_parent_id
                 ):
+                    receipt_base["placement_parent_node_id"] = destination_node_id
                     metadata_patch["placement_parent_node_id"] = str(
                         destination_node_id
                     )
@@ -4434,7 +4452,7 @@ class PageService:
         session: Session,
         page: ContextPage,
         current: ContextPageVersion,
-        title: str,
+        title: str | None,
         body_md: str,
         page_type: str | None,
         tags: list[str] | None,
@@ -4445,6 +4463,9 @@ class PageService:
         source_version: ContextPageVersion | None = None,
     ) -> PreparedBody:
         workspace = self._workspace_for(session, page.workspace_id)
+        effective_title, effective_type, effective_tags, effective_aliases = (
+            effective_metadata_for_payload(session, page, source_version or current)
+        )
         return self._prepare_body(
             BodyInput(
                 body_md=body_md,
@@ -4456,10 +4477,12 @@ class PageService:
                     aliases=aliases,
                 ),
                 fallback_metadata=PreparedMetadata(
-                    page_type=page.page_type,
-                    tags=list(page.tags or []),
-                    aliases=list(page.aliases or []),
+                    title=effective_title,
+                    page_type=effective_type,
+                    tags=effective_tags,
+                    aliases=effective_aliases,
                 ),
+                baseline_body_md=(source_version or current).body_md,
             ),
             WriteContext(
                 actor=self.actor_context,
@@ -4490,6 +4513,8 @@ class PageService:
         baseline_patch: dict[str, object] | None,
         metadata_patch: dict[str, object],
         restart: RejectedDraftRestart | None = None,
+        base_block_map: list[dict] | None = None,
+        prepared_block_map: list[dict] | None = None,
     ) -> PagePayload:
         body_md = prepared.body
         staged_patch = dict(baseline_patch or {})
@@ -4612,7 +4637,12 @@ class PageService:
         else:
             opened_session_ledger = False
 
-        self._rewrite_body_in_place(version, prepared)
+        self._rewrite_body_in_place(
+            version,
+            prepared,
+            base_block_map=base_block_map,
+            prepared_block_map=prepared_block_map,
+        )
         version.actor_type = actor_kind
         version.actor_id = parse_uuid_or_none(actor_id)
         version.actor_display_name = resolve_actor_display_name(
@@ -4666,6 +4696,9 @@ class PageService:
         receipt_base: dict[str, object],
         with_edit_receipt: bool,
     ) -> PagePayload:
+        if "placement_parent_node_id" in receipt_base:
+            result._placement_parent_node_id = receipt_base["placement_parent_node_id"]
+            result._placement_changed = True
         if with_edit_receipt and receipt_base:
             before_body = receipt_base["body"]
             revision_before = receipt_base["revision"]
@@ -5694,19 +5727,22 @@ class PageService:
             )
         )
 
-    @staticmethod
     def _require_named_open_edit(
+        self,
         session: Session,
         page: ContextPage,
         version_id: UUID,
         actor_kind: str,
         actor_id: str,
-    ) -> None:
-        """Refuse a save that names an editing row other than the open one.
+    ) -> ContextPageVersion:
+        """Return the caller's open edit if ``version_id`` names it, else refuse.
 
-        Only this actor's own open row is ever named back (its id and
-        revision, as every own-edit conflict does), so a caller learns
-        nothing about anyone else's work.
+        One rule for every write that names a version: the answer depends only
+        on the caller's own open edit, never on the version named, so a real
+        id and a made-up one get the same answer and nothing about anyone
+        else's work is disclosed. With an open edit the conflict names it
+        back; without one the caller has no open edit, unless the page itself
+        is not visible to the caller, which is the ordinary not-found.
         """
 
         open_edit = context_page_repo.get_open_edit_for_actor(
@@ -5716,18 +5752,49 @@ class PageService:
             actor_kind=actor_kind,
             actor_id=actor_id,
         )
+        if open_edit is not None and open_edit.id == version_id:
+            return open_edit
         if open_edit is None:
+            if self.actor_context is not None and not context_page_visible(
+                page, self.actor_context, workspace_id=page.workspace_id
+            ):
+                raise PageNotFoundError("page not found")
             raise PageConflictError(
                 server_version_id=None,
                 server_content_hash=None,
                 no_open_edit=True,
             )
-        if open_edit.id != version_id:
-            raise PageConflictError(
-                server_version_id=open_edit.id,
-                server_content_hash=open_edit.content_hash,
-                server_editing_revision=open_edit.editing_revision,
+        raise PageConflictError(
+            server_version_id=open_edit.id,
+            server_content_hash=open_edit.content_hash,
+            server_editing_revision=open_edit.editing_revision,
+            error_code="editing_revision_conflict",
+        )
+
+    @staticmethod
+    def _own_page_version(
+        session: Session,
+        page: ContextPage,
+        version_id: UUID,
+        actor_kind: str,
+        actor_id: str,
+    ) -> ContextPageVersion | None:
+        version = session.scalar(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                criteria=[
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.id == version_id,
+                ],
             )
+        )
+        if version is None or (
+            version.created_by_actor_kind != actor_kind
+            or version.created_by_actor_id != actor_id
+        ):
+            return None
+        return version
 
     def _require_page_version(
         self,
@@ -5800,6 +5867,7 @@ class PageService:
                         server_version_id=current.id,
                         server_content_hash=current.content_hash,
                         server_editing_revision=current.editing_revision,
+                        error_code="editing_revision_conflict",
                     )
                 return
             raise PageValidationError(
@@ -5850,6 +5918,7 @@ class PageService:
                 server_version_id=disclosed_version_id,
                 server_content_hash=disclosed_content_hash,
                 server_editing_revision=disclosed_revision,
+                error_code="editing_revision_conflict",
             )
 
     def _summary_from_page(
@@ -6052,6 +6121,8 @@ class PageService:
         payload._can_submit_for_review = self._can_submit_for_review(
             session, page, version, parent_visibility_actor or self.actor_context
         )
+        if prepared is not None:
+            payload._metadata_overrides = list(prepared.metadata_overrides)
         return payload
 
 

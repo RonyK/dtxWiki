@@ -25,6 +25,9 @@ from backend.services.mcp_chat_service import McpChatService
 
 
 def _call(page_service, actor, name, arguments):
+    if name == "create_context_page":
+        arguments = {"idempotency_key": str(uuid4()), **arguments}
+
     async def run():
         return await call_tool_async(
             name,
@@ -104,7 +107,7 @@ def test_traced_edit_calls_carry_previews_receipts_and_the_session_diff(
         "patch_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": page["id"],
+            "page_id": page["page_id"],
             "version_id": page["version_id"],
             "expected_editing_revision": page["editing_revision"],
             "idempotency_key": f"e2e-patch-{uuid4()}",
@@ -134,7 +137,7 @@ def test_traced_edit_calls_carry_previews_receipts_and_the_session_diff(
         "patch_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": page["id"],
+            "page_id": page["page_id"],
             "version_id": page["version_id"],
             "expected_editing_revision": after_patch["editing_revision"],
             "idempotency_key": f"e2e-fail-{uuid4()}",
@@ -156,7 +159,7 @@ def test_traced_edit_calls_carry_previews_receipts_and_the_session_diff(
         "patch_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": page["id"],
+            "page_id": page["page_id"],
             "version_id": page["version_id"],
             "expected_editing_revision": after_patch["editing_revision"],
             "idempotency_key": f"e2e-overlap-{uuid4()}",
@@ -285,7 +288,7 @@ def test_discarding_an_edit_deletes_the_previews_its_calls_kept(
         "patch_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": page["id"],
+            "page_id": page["page_id"],
             "version_id": page["version_id"],
             "expected_editing_revision": page["editing_revision"],
             "idempotency_key": f"discard-patch-{uuid4()}",
@@ -306,7 +309,7 @@ def test_discarding_an_edit_deletes_the_previews_its_calls_kept(
         "discard_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": page["id"],
+            "page_id": page["page_id"],
             "version_id": page["version_id"],
             "idempotency_key": f"discard-{uuid4()}",
             "conversation_token": token,
@@ -366,7 +369,7 @@ def test_discarding_an_edit_deletes_the_previews_its_calls_kept(
     patch_row = next(row for row in edit_rows if row.tool_name == "patch_context_edit")
     assert patch_row.edit_summary.operation_counts == {"replace_text": 1}
     serialized = owner_view.model_dump_json()
-    for secret in ("Discarded Chats Page", "Discarded", page["id"]):
+    for secret in ("Discarded Chats Page", "Discarded", page["page_id"]):
         assert secret not in serialized
 
 
@@ -438,8 +441,7 @@ def test_a_private_edit_of_a_published_page_stays_its_authors(
         "tags": ["private-tag"],
         "aliases": ["private-alias"],
         "body_md": private_body,
-        "base_version_id": editing["version_id"],
-        "base_content_hash": editing["content_hash"],
+        "version_id": editing["version_id"],
     }
     updated = call(
         "update_context_edit",

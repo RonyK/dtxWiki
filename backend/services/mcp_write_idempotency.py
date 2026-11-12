@@ -66,9 +66,7 @@ def execute_idempotent_write[ResultT: BaseModel](
         MCPWriteIdempotency.tool_name == tool_name,
         MCPWriteIdempotency.idempotency_key == idempotency_key,
     )
-    row = session.scalar(
-        select(MCPWriteIdempotency).where(*scope).with_for_update()
-    )
+    row = session.scalar(select(MCPWriteIdempotency).where(*scope).with_for_update())
     if row is not None and row.expires_at > now:
         return _replay_result(
             row,
@@ -78,10 +76,8 @@ def execute_idempotent_write[ResultT: BaseModel](
             replay_transform=replay_transform,
         )
     if retry_only:
-        # No valid receipt: answer "unknown", never fall through to a claim +
-        # execute below. This is the same answer whether an expired receipt
-        # remains or maintenance already removed it. This read path leaves
-        # receipts untouched; only a real (non-retry_only) resend may execute.
+        # REST lookup-only retries must never claim a missing or expired key.
+        # MCP exposes this recovery through its separate status tool.
         raise OperationOutcomeUnknownError()
     if row is not None:
         session.execute(
@@ -137,6 +133,15 @@ def execute_idempotent_write[ResultT: BaseModel](
             payload["_edit_receipt"] = result._edit_receipt.model_dump(mode="json")
         if isinstance(result, PagePayload) and result._can_submit_for_review:
             payload["_can_submit_for_review"] = True
+        if isinstance(result, PagePayload) and result._metadata_overrides:
+            payload["_metadata_overrides"] = result._metadata_overrides
+        if isinstance(result, PagePayload) and result._placement_changed:
+            payload["_placement_changed"] = True
+            payload["_placement_parent_node_id"] = (
+                str(result._placement_parent_node_id)
+                if result._placement_parent_node_id is not None
+                else None
+            )
         claim.result_payload = payload
         session.flush()
     except BaseException:
@@ -174,14 +179,36 @@ def _replay_result[ResultT: BaseModel](
         # transaction. If one is ever observable, fail closed instead of
         # executing a second mutation against an indeterminate first attempt.
         raise RuntimeError("idempotency claim has no committed result")
-    payload = dict(row.result_payload)
-    receipt = payload.pop("_edit_receipt", None)
-    can_submit_for_review = payload.pop("_can_submit_for_review", False) is True
-    result = result_model.model_validate(payload)
-    if isinstance(result, PagePayload) and receipt is not None:
-        result._edit_receipt = _stored_edit_receipt(receipt)
-    if isinstance(result, PagePayload):
-        result._can_submit_for_review = can_submit_for_review
+    result = restore_ledger_result(row.result_payload, result_model)
     if replay_transform is not None:
         return replay_transform(result)
+    return result
+
+
+def restore_ledger_result[ResultT: BaseModel](
+    stored: dict, result_model: type[ResultT]
+) -> ResultT:
+    """Rebuild a committed result as a replay, for resends and status lookups."""
+
+    payload = dict(stored)
+    receipt = payload.pop("_edit_receipt", None)
+    can_submit_for_review = payload.pop("_can_submit_for_review", False) is True
+    metadata_overrides = payload.pop("_metadata_overrides", [])
+    placement_changed = payload.pop("_placement_changed", False)
+    placement_parent_node_id = payload.pop("_placement_parent_node_id", None)
+    result = result_model.model_validate(payload)
+    if isinstance(result, PagePayload):
+        if receipt is not None:
+            result._edit_receipt = _stored_edit_receipt(receipt)
+        result._can_submit_for_review = can_submit_for_review
+        result._metadata_overrides = metadata_overrides
+        result._placement_changed = placement_changed
+        result._placement_parent_node_id = (
+            UUID(placement_parent_node_id)
+            if placement_parent_node_id is not None
+            else None
+        )
+        result._replayed = True
+    elif "replayed" in type(result).model_fields:
+        result = result.model_copy(update={"replayed": True})
     return result

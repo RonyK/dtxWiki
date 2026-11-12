@@ -88,6 +88,7 @@ from backend.services.actor_visible_read import (
     library_item_visible,
 )
 from backend.services.audit_service import AuditService
+from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.mcp_artifact_activity import (
     ArtifactLinkCandidate as ArtifactLinkCandidate,
 )
@@ -219,7 +220,12 @@ _SESSION_EDIT_TOOLS = frozenset(
 VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | {"submit_context_edit_for_review"}
 # Commands whose input names the editing row they act on.
 _VERSION_NAMING_EDIT_TOOLS = frozenset(
-    {"patch_context_edit", "submit_context_edit_for_review", "discard_context_edit"}
+    {
+        "update_context_edit",
+        "patch_context_edit",
+        "submit_context_edit_for_review",
+        "discard_context_edit",
+    }
 )
 _INPUT_EDIT_MODES = {
     "patch_context_edit": "patch",
@@ -1588,9 +1594,18 @@ class McpChatService:
         is audited.
         """
 
+        acquire_workspace_write_intent(session)
         chat = self._get_chat(session, workspace_id, chat_session_id)
         purged = sum(
-            1 for row in self._tool_calls_for_chat(session, chat) if _purge_row(row)
+            1
+            for row in session.scalars(
+                self._tool_call_query(session, chat, include_pending=True)
+                .order_by(None)
+                .order_by(MCPToolCall.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if _purge_row(row)
         )
         audit_event = self.audit_service.emit(
             session=session,
@@ -1610,13 +1625,20 @@ class McpChatService:
             audit_event_id=audit_event.id,
         )
 
-    def _tool_call_query(self, session: Session, chat: McpChatSession):
+    def _tool_call_query(
+        self, session: Session, chat: McpChatSession, *, include_pending: bool = False
+    ):
         """Ordered full trace rows for the detail timeline only."""
         # A conversation can continue through a second client identity.
         filters = [MCPToolCall.workspace_id == chat.workspace_id]
         filters.append(
             MCPToolCall.mcp_session_id == mcp_session_trace_uuid(chat.mcp_session_id)
         )
+        # Pending calls have not yet acquired their artifact visibility edges.
+        # Keep their input out of the timeline until final capture is atomic
+        # with those edges and the chat counters.
+        if not include_pending:
+            filters.append(MCPToolCall.result_status != "in_progress")
         return (
             select(MCPToolCall)
             .where(and_(*filters))
@@ -2282,6 +2304,7 @@ def purge_previews_for_page(
     changed.
     """
 
+    acquire_workspace_write_intent(session)
     rows = list_calls_naming_page(
         session,
         workspace_id=workspace_id,
@@ -2305,6 +2328,15 @@ def _purge_row(row: MCPToolCall) -> bool:
         row.input_summary = input_summary
         changed = True
     detail = row.result_detail
+    if (
+        row.result_status == "in_progress"
+        and row.tool_name in _INPUT_EDIT_MODES
+        and not (isinstance(detail, dict) and detail.get(_RESULT_DETAIL_PURGED_FIELD))
+    ):
+        # Completion has not captured its receipt yet. Remember the owner's
+        # purge so that first capture cannot introduce its preview afterwards.
+        row.result_detail = {**(detail or {}), _RESULT_DETAIL_PURGED_FIELD: True}
+        changed = True
     if isinstance(detail, dict) and isinstance(detail.get("edit_receipt"), dict):
         receipt, receipt_cleared = null_previews(detail["edit_receipt"])
         if receipt_cleared:
@@ -2705,8 +2737,6 @@ def _version_hidden_input(input_summary: Any) -> dict[str, Any]:
     revision = input_summary.get("expected_editing_revision")
     if type(revision) is int:
         projected["expected_editing_revision"] = revision
-    if type(input_summary.get("retry_only")) is bool:
-        projected["retry_only"] = input_summary["retry_only"]
     operations = input_summary.get("operations")
     if isinstance(operations, list):
         projected["operations"] = [

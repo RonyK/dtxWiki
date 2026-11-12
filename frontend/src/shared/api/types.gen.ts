@@ -4341,6 +4341,11 @@ export interface components {
              */
             next_action: "owner_activation_required" | "review_required";
             normalization_report?: components["schemas"]["IndexRefNormalizationReport"];
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
             /** Review Item Id */
             review_item_id?: string | null;
         };
@@ -6638,7 +6643,7 @@ export interface components {
              * @description Stable warning code; must be drawn from WARNING_CODES.
              * @enum {string}
              */
-            code: "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete" | "context_page_has_no_graph_visible_links";
+            code: "metadata_frontmatter_overridden" | "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete" | "context_page_has_no_graph_visible_links";
             /** Message */
             message: string;
         };

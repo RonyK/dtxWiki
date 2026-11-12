@@ -53,20 +53,12 @@
         "type": "object"
       },
       "idempotency_key": {
-        "anyOf": [
-          {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[A-Za-z0-9._:-]+$",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "description": "Optional 24-hour retry key scoped to actor, workspace, and tool.",
-        "title": "Idempotency Key"
+        "description": "24-hour retry key. Generate and hold it before the first send.",
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9._:-]+$",
+        "title": "Idempotency Key",
+        "type": "string"
       },
       "parent_node_id": {
         "anyOf": [
@@ -119,7 +111,8 @@
       "slug",
       "body_markdown",
       "reason",
-      "workspace_id"
+      "workspace_id",
+      "idempotency_key"
     ],
     "title": "WriteAgentPageDraftInput",
     "type": "object"
@@ -155,6 +148,11 @@
           "normalization_report": {
             "$ref": "#/$defs/IndexRefNormalizationReport"
           },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
           "review_item_id": {
             "anyOf": [
               {
@@ -185,6 +183,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",

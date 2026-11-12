@@ -1,6 +1,9 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from uuid import UUID
+
+from pydantic import BaseModel
 
 from backend.app.container import (
     DatabaseProvider,
@@ -12,6 +15,7 @@ from backend.mcp import (
     agent_tools,
     context_tools,
     maintenance_tools,
+    operation_tools,
     read_tools,
     review_tools,
     upload_tools,
@@ -47,6 +51,7 @@ from backend.services.read_errors import ReadServiceError
 logger = logging.getLogger(__name__)
 
 TOOL_HANDLERS = {
+    "get_operation_status": operation_tools.get_operation_status,
     "list_my_workspaces": read_tools.list_my_workspaces,
     "guide": read_tools.guide,
     "search": read_tools.search,
@@ -107,6 +112,7 @@ def dispatch(
     conversation_token: str | None = None,
     search_service=None,
     tool_context: ToolCallContext | None = None,
+    before_execute: Callable[[ToolCallContext], BaseModel | None] | None = None,
 ):
     """Route a tool call through one uniform ``handler(payload, ctx)`` seam.
 
@@ -114,6 +120,10 @@ def dispatch(
     conversation token (runner) and the per-app search service override the
     context's values when passed explicitly. Callers without a context (bare
     dispatch in contract tests) get one synthesized around their arguments.
+
+    ``before_execute`` runs once the call is authorized and before anything
+    executes; a response it returns is served instead. Policy and validation
+    rejections never reach it, so they keep this function's single answer.
     """
 
     if tool_context is None:
@@ -169,6 +179,10 @@ def dispatch(
             else None
         ),
     )
+    if before_execute is not None:
+        early = before_execute(ctx)
+        if early is not None:
+            return early
     with capture_served_reads() as snapshots:
         try:
             normalized_payload = _normalize_page_inputs(tool_name, payload, ctx)

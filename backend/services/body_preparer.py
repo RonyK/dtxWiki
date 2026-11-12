@@ -8,7 +8,12 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 from backend.context_media.domain import validate_markdown_media_policy
-from backend.domain.input_policy import validate_body, validate_labels, validate_title
+from backend.domain.input_policy import (
+    SHORT_TEXT_SPACES,
+    validate_body,
+    validate_labels,
+    validate_title,
+)
 from backend.domain.prepared_body import PreparedBody, PreparedMetadata
 from backend.services.lint.base import LintContext, LintPolicy, LintStage
 from backend.services.lint.registry import LintRegistry
@@ -34,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class PageMetadataInput:
-    title: str
+    title: str | None
     slug: str
     page_type: str | None = None
     tags: list[str] | None = None
@@ -46,6 +51,7 @@ class BodyInput:
     body_md: str
     metadata: PageMetadataInput | None = None
     fallback_metadata: PreparedMetadata | None = None
+    baseline_body_md: str | None = None
 
 
 @dataclass(frozen=True)
@@ -169,8 +175,9 @@ class BodyPreparer:
             validate_labels(input.metadata.aliases, field="aliases", max_length=80)
 
         metadata = PreparedMetadata()
+        metadata_overrides: tuple[dict, ...] = ()
         if input.metadata is not None:
-            body, metadata = self._sync_metadata(input)
+            body, metadata, metadata_overrides = self._sync_metadata(input)
 
         policy = self.policy_factory(ctx.workspace)
         lint_ctx = LintContext(
@@ -243,7 +250,7 @@ class BodyPreparer:
                 # Preserve managed writes' error precedence: final body budget,
                 # explicit title, then derived frontmatter/heading metadata.
                 validate_body(body)
-                validate_title(input.metadata.title)
+                validate_title(metadata.title)
                 validate_page_markdown_input(body)
             else:
                 validate_body(body)
@@ -275,23 +282,72 @@ class BodyPreparer:
             tuple(module_fix_counts.items()),
             tuple(fix_details),
             tuple(dict.fromkeys(failed_module_ids)),
+            metadata_overrides,
         )
 
     @staticmethod
-    def _sync_metadata(input: BodyInput) -> tuple[str, PreparedMetadata]:
+    def _sync_metadata(
+        input: BodyInput,
+    ) -> tuple[str, PreparedMetadata, tuple[dict, ...]]:
         authored = input.metadata
         fallback = input.fallback_metadata or PreparedMetadata()
         parsed = parse_page_frontmatter(input.body_md)
-        page_type = authored.page_type or parsed.page_type
-        tags = (
-            normalize_page_tags(authored.tags)
-            if authored.tags is not None
-            else parsed.tags
+        baseline = (
+            parse_page_frontmatter(input.baseline_body_md)
+            if input.baseline_body_md is not None
+            else None
         )
-        aliases = (
-            normalize_page_aliases(authored.aliases)
-            if authored.aliases is not None
-            else parsed.aliases
+        overrides: list[dict] = []
+
+        def resolve(field, explicit, incoming, previous, current, default, normalize):
+            explicit = normalize(explicit) if explicit is not None else None
+            incoming = normalize(incoming) if incoming is not None else None
+            previous = normalize(previous) if previous is not None else None
+            if explicit is not None:
+                if incoming is not None and incoming != explicit:
+                    overrides.append({"field": field, "value": explicit})
+                return explicit
+            # Unchanged managed frontmatter is a snapshot of the old edit,
+            # not a request to revert metadata updated elsewhere meanwhile.
+            if incoming is not None and (baseline is None or incoming != previous):
+                return incoming
+            return (normalize(current) if current is not None else None) or default
+
+        title = resolve(
+            "title",
+            authored.title,
+            parsed.title,
+            baseline.title if baseline else None,
+            fallback.title,
+            "제목 없음",
+            _normalize_title,
+        )
+        page_type = resolve(
+            "page_type",
+            authored.page_type,
+            parsed.page_type,
+            baseline.page_type if baseline else None,
+            fallback.page_type,
+            "overview",
+            lambda value: value,
+        )
+        tags = resolve(
+            "tags",
+            authored.tags,
+            parsed.tags,
+            baseline.tags if baseline else None,
+            fallback.tags,
+            [],
+            normalize_page_tags,
+        )
+        aliases = resolve(
+            "aliases",
+            authored.aliases,
+            parsed.aliases,
+            baseline.aliases if baseline else None,
+            fallback.aliases,
+            [],
+            normalize_page_aliases,
         )
         meaningful_fallback = (
             (fallback.page_type is not None and fallback.page_type != "overview")
@@ -308,18 +364,20 @@ class BodyPreparer:
         ):
             body = upsert_page_frontmatter(
                 body,
-                title=authored.title,
+                title=title,
                 slug=authored.slug,
-                page_type=page_type or fallback.page_type or "overview",
-                tags=tags if tags is not None else normalize_page_tags(fallback.tags),
-                aliases=(
-                    aliases
-                    if aliases is not None
-                    else normalize_page_aliases(fallback.aliases)
-                ),
+                page_type=page_type,
+                tags=tags,
+                aliases=aliases,
             )
             parsed = parse_page_frontmatter(body)
             page_type = page_type or parsed.page_type
             tags = tags if tags is not None else parsed.tags
             aliases = aliases if aliases is not None else parsed.aliases
-        return body, PreparedMetadata(page_type, tags, aliases)
+        return body, PreparedMetadata(page_type, tags, aliases, title), tuple(overrides)
+
+
+def _normalize_title(value: str) -> str | None:
+    # The single title policy: the value written to the managed frontmatter is
+    # the value stored as the page title, and a blank title means "not given".
+    return value.strip(SHORT_TEXT_SPACES) or None

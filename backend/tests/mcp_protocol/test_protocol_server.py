@@ -53,6 +53,7 @@ EXPECTED_TOOLS = {
     "cite",
     "fetch",
     "get_index",
+    "get_operation_status",
     "grep_wiki",
     "what_changed",
     "guide",
@@ -109,6 +110,7 @@ def test_initialize_list_tools_and_call_create_context_page(
                     "title": "MCP Protocol Smoke",
                     "page_type": "overview",
                     "body_md": "# Hello from protocol smoke",
+                    "idempotency_key": "protocol-create-smoke",
                     # Content tools must name their conversation; omitting the
                     # token used to start a new chat on every single call.
                     "conversation_token": "new",
@@ -116,7 +118,7 @@ def test_initialize_list_tools_and_call_create_context_page(
             )
             payload = json.loads(call_result.content[0].text)
             assert payload["envelope"]["result_status"] == "succeeded"
-            return payload["data"]["id"]
+            return payload["data"]["page_id"]
 
     page_id = anyio.run(run)
     with page_service.session_factory() as session:
@@ -162,6 +164,7 @@ def test_list_tools_filters_by_actor_scopes(page_service, mcp_default_actor):
                     "title": "Denied by Scope",
                     "page_type": "overview",
                     "body_md": "# Denied by Scope",
+                    "idempotency_key": "protocol-denied-create",
                     "conversation_token": "new",
                 },
             )

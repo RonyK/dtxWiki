@@ -93,6 +93,7 @@ def _create_page(
         1,
         "create_context_page",
         {
+            "idempotency_key": "p0-0-create",
             "workspace_id": workspace_id,
             "title": title,
             "page_type": "overview",
@@ -122,7 +123,7 @@ def test_mcp_write_rest_read_mcp_read_loop(page_service):
         "submit_context_edit_for_review",
         {
             "workspace_id": workspace_id,
-            "page_id": page["data"]["id"],
+            "page_id": page["data"]["page_id"],
             "version_id": page["data"]["version_id"],
             "expected_editing_revision": page["data"]["editing_revision"],
             "reason": "runtime loop acceptance test",
@@ -133,7 +134,7 @@ def test_mcp_write_rest_read_mcp_read_loop(page_service):
     assert submitted["envelope"]["result_status"] == "succeeded", submitted["envelope"]
 
     rest_read = browser_client.get(
-        f"/api/v1/workspaces/{workspace_id}/context/pages/{page['data']['id']}",
+        f"/api/v1/workspaces/{workspace_id}/context/pages/{page['data']['page_id']}",
         params={"version_id": page["data"]["version_id"]},
     )
     mcp_read = _mcp_call(
@@ -144,7 +145,7 @@ def test_mcp_write_rest_read_mcp_read_loop(page_service):
         {
             "workspace_id": workspace_id,
             "target_type": "context_page",
-            "target_id": page["data"]["id"],
+            "target_id": page["data"]["page_id"],
             "conversation_token": "new",
         },
     )
@@ -185,9 +186,8 @@ def test_rest_stale_patch_after_mcp_update_returns_conflict(page_service):
         "update_context_edit",
         {
             "workspace_id": workspace_id,
-            "page_id": v1["data"]["id"],
-            "base_version_id": v1["data"]["version_id"],
-            "base_content_hash": v1["data"]["content_hash"],
+            "page_id": v1["data"]["page_id"],
+            "version_id": v1["data"]["version_id"],
             "body_md": "# v2",
             "expected_editing_revision": v1["data"]["editing_revision"],
             "idempotency_key": "p0-0-update-v2",
@@ -206,7 +206,7 @@ def test_rest_stale_patch_after_mcp_update_returns_conflict(page_service):
     # Deliberately still pointing at v1: the page moved on through MCP, so
     # this REST write is stale and must lose rather than silently clobber.
     stale = browser_client.patch(
-        f"/api/v1/workspaces/{workspace_id}/context/pages/{v1['data']['id']}",
+        f"/api/v1/workspaces/{workspace_id}/context/pages/{v1['data']['page_id']}",
         json={
             "title": "Stale",
             "body_md": "# stale",
@@ -241,7 +241,7 @@ def test_rest_stale_patch_after_mcp_update_returns_conflict(page_service):
         {
             "workspace_id": workspace_id,
             "target_type": "context_page",
-            "target_id": v1["data"]["id"],
+            "target_id": v1["data"]["page_id"],
             "conversation_token": "new",
         },
     )

@@ -902,7 +902,7 @@ def test_replace_document_requires_expected_content_hash_to_match_the_head():
     with pytest.raises(ContextEditError) as captured:
         resolve_edit(body, parse_outline(body), operation)
 
-    assert captured.value.error_code == "stale_base_version"
+    assert captured.value.error_code == "content_hash_mismatch"
 
 
 def test_replace_document_applies_when_expected_content_hash_matches():

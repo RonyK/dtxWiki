@@ -221,12 +221,14 @@ def test_reconciliation_api_preview_commit_replay_and_server_owned_projection(
         assert len(manifest["original_operations"]) == 2
         assert not manifest["clean_operations"]
         assert len(manifest["conflict_operations"]) == 1
-        assert manifest["normalization"]["pre_normalize_body_sha256"] != (
-            manifest["normalization"]["active"]["pre_normalize_body_sha256"]
+        assert (
+            manifest["normalization"]["pre_normalize_body_sha256"]
+            != (manifest["normalization"]["active"]["pre_normalize_body_sha256"])
         )
     client = _client(page_service)
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
 
     detail_response = client.get(route)
@@ -369,7 +371,8 @@ def test_insert_after_conflict_projects_and_applies_the_complete_gap_operations(
         session.get(Workspace, workspace_id).auto_fix_enabled = False
     client = _client(page_service, email="insert-effect-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     detail_response = client.get(route)
     assert detail_response.status_code == 200, detail_response.text
@@ -428,7 +431,8 @@ def test_reconciliation_api_rejects_stale_head_client_maps_and_viewer(page_servi
     branch_id = diverged.alternative_draft_id
     owner = _client(page_service, email="cas-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     detail = owner.get(route).json()["data"]
     conflict = detail["conflicts"][0]
@@ -483,7 +487,8 @@ def test_discard_refreshes_terminal_branch_under_the_same_lock_order(page_servic
 
     client = _client(page_service, email="terminal-cas-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     conflict = client.get(route).json()["data"]["conflicts"][0]
     committed = client.post(
@@ -584,7 +589,8 @@ def test_two_reconciliation_leaves_on_one_page_resolve_independently(page_servic
 
     def detail(branch_id):
         route = (
-            f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+            f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+            f"/versions/{branch_id}/reconciliation"
         )
         response = client.get(route)
         assert response.status_code == 200, response.text
@@ -727,7 +733,8 @@ def test_reconciliation_get_recomputes_conflicts_after_head_advance(page_service
     branch_id = diverged.alternative_draft_id
     client = _client(page_service, email="advanced-head-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     detail_response = client.get(route)
     assert detail_response.status_code == 200, detail_response.text
@@ -829,7 +836,8 @@ def test_reconciliation_can_exclude_only_server_reported_clean_branch_changes(
     branch_id = diverged.alternative_draft_id
     client = _client(page_service, email="exclude-clean-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     detail = client.get(route).json()["data"]
     conflict = detail["conflicts"][0]
@@ -985,7 +993,8 @@ def test_reconciliation_convergent_change_becomes_zero_conflict_and_commits(
             )
     client = _client(page_service, email="zero-conflict-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     detail_response = client.get(route)
     assert detail_response.status_code == 200, detail_response.text
@@ -1050,7 +1059,8 @@ def test_reconciliation_api_exposes_and_keeps_current_table_row(page_service):
     branch_id = diverged.alternative_draft_id
     client = _client(page_service, email="row-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     conflict = client.get(route).json()["data"]["conflicts"][0]
     assert conflict["granularity"] == "table_row"
@@ -1094,7 +1104,8 @@ def test_reconciliation_api_accepts_custom_table_row(page_service):
     branch_id = diverged.alternative_draft_id
     client = _client(page_service, email="row-custom-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     conflict = client.get(route).json()["data"]["conflicts"][0]
     response = client.post(
@@ -1455,7 +1466,8 @@ def test_syntactically_valid_manifest_that_no_longer_recreates_branch_fails_clos
     branch_id = diverged.alternative_draft_id
     client = _client(page_service, email="semantic-manifest-owner@example.com")
     route = (
-        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}/versions/{branch_id}/reconciliation"
+        f"/api/v1/workspaces/{_workspace_id(page_service)}/context/pages/{base.id}"
+        f"/versions/{branch_id}/reconciliation"
     )
     valid_detail = client.get(route)
     assert valid_detail.status_code == 200, valid_detail.text
@@ -1524,13 +1536,10 @@ def test_syntactically_valid_manifest_that_no_longer_recreates_branch_fails_clos
 def test_reconciliation_never_discloses_a_different_authors_private_editing_head(
     page_service,
 ):
-    """`load_reconciliation_snapshot` resolves `head` from the page-global
-    `editable_context_version_id(page)` pointer, which -- since P8.1 -- can
-    durably name a DIFFERENT author's private "editing" row. The GET
-    reconciliation route is gated only by an editor+ role check (not
-    branch/head ownership), so before this fix, any editor could read
-    another author's private, unsubmitted body text through this endpoint's
-    conflict/diff projection and its `reconciliation_available` badge."""
+    """Reconciliation must hide a foreign private edit even when a legacy
+    generic current pointer names it. The published-version pointer stays
+    intact during ordinary private autosaves and in this fixture; a private
+    edit must never appear in another editor's diff or availability badge."""
 
     base, head, diverged = _create_paragraph_conflict(
         page_service,
@@ -1558,9 +1567,9 @@ def test_reconciliation_never_discloses_a_different_authors_private_editing_head
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",
         )
-        # Exactly what a real autosave by that other author would leave
-        # behind (`page_service._set_current_version`) -- the page-global
-        # pointer now durably names this private row.
+        # Recreate a legacy generic pointer to a private row without moving
+        # the published-version pointer. Current private autosaves on a
+        # published page leave both its readable base and publication intact.
         page.current_version_id = private_editing.id
 
     route = (
@@ -1593,17 +1602,10 @@ def test_reconciliation_never_discloses_a_different_authors_private_editing_head
 def test_review_item_detail_never_discloses_a_different_authors_private_editing_head(
     page_service,
 ):
-    """A SECOND leak site, same root cause as the test above but reached
-    through `ReviewService._detail` instead of the reconciliation route:
-    the `context_reconciliation` review item's own summary fields
-    (`reconciliation_available`/`reconciliation_head_advance_count`/
-    `reconciliation_conflict_count`) were built by calling
-    `load_reconciliation_snapshot` with no actor, so a page-global
-    `current_version_id` pointer that durably names a different author's
-    private "editing" row was read unmasked -- disclosing that a foreign
-    private edit exists and how far it diverges, gated only by
-    `actor_can_read_drafts` (an editor+ role check, not head ownership),
-    to any editor who opens the pending reconciliation review item."""
+    """Review-item summary fields must also hide a foreign private edit
+    referenced by a legacy generic current pointer. This fixture preserves
+    the published-version pointer, as ordinary private autosaves do; it
+    does not make the private edit a published version."""
 
     base, head, diverged = _create_paragraph_conflict(
         page_service,
@@ -1631,6 +1633,7 @@ def test_review_item_detail_never_discloses_a_different_authors_private_editing_
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",
         )
+        # Only the legacy generic pointer changes, never the published one.
         page.current_version_id = private_editing.id
 
     other_editor = _client(

@@ -255,6 +255,7 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
             "version_id": draft["version_id"],
             "expected_editing_revision": draft["editing_revision"],
             "idempotency_key": "shared-reference-add",
+            "retry_only": False,
             "add": [reference],
         },
     )
@@ -277,14 +278,36 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
     }
     removed = owner.post(f"{page_url}/references", json=removal)
     assert removed.status_code == 200, removed.text
-    replay = owner.post(f"{page_url}/references", json=removal)
+    replay = owner.post(f"{page_url}/references", json={**removal, "retry_only": True})
     assert replay.status_code == 200 and replay.json()["data"]["replayed"]
+    assert replay.json()["data"]["receipt_id"] == removed.json()["data"]["receipt_id"]
     assert (
         replay.json()["data"]["editing_revision"]
         == removed.json()["data"]["editing_revision"]
     )
     draft = editor.get(page_url).json()["data"]
     assert not draft["references"]
+
+    # This valid add would mutate the shared draft if REST lost the flag on
+    # its way to the ledger. A missing receipt must only answer unknown.
+    before_lookup = page_version_and_pointer_snapshot(page_service, UUID(draft["id"]))
+    missing = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "idempotency_key": "never-sent-reference",
+            "retry_only": True,
+            "add": [reference],
+        },
+    )
+    assert missing.status_code == 404, missing.text
+    assert missing.json()["error_code"] == "operation_outcome_unknown"
+    assert (
+        page_version_and_pointer_snapshot(page_service, UUID(draft["id"]))
+        == before_lookup
+    )
+    assert not editor.get(page_url).json()["data"]["references"]
     assert viewer.get(page_url).json()["data"]["version_id"] == published["version_id"]
     assert viewer.get(page_url).json()["data"]["references"]
 
@@ -675,7 +698,10 @@ def test_only_the_author_can_request_review_of_a_shared_browser_draft(page_servi
         "expected_editing_revision": draft["editing_revision"],
         "idempotency_key": "shared-review-request",
     }
-    assert editor.post(f"{page_url}/submit-for-review", json=review).status_code == 404
+    # Not the editor's own open edit: refused with the editor's own state.
+    refused = editor.post(f"{page_url}/submit-for-review", json=review)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error_code"] == "no_open_edit"
 
     submitted = owner.post(f"{page_url}/submit-for-review", json=review)
     assert submitted.status_code == 200, submitted.text
@@ -1206,17 +1232,16 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
     ).json()["data"]
     page_id = created["id"]
 
-    first = client.post(
-        f"{pages_url(page_service)}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-15",
-            "title": created["title"],
-            "body_md": "# First autosave\n",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    )
+    autosave_url = f"{pages_url(page_service)}/{page_id}/autosave"
+    first_request = {
+        "idempotency_key": "t-15",
+        "title": created["title"],
+        "body_md": "# First autosave\n",
+        "base_version_id": created["version_id"],
+        "base_content_hash": created["content_hash"],
+        "expected_editing_revision": created["editing_revision"],
+    }
+    first = client.post(autosave_url, json=first_request)
     assert first.status_code == 200, first.text
     first_data = first.json()["data"]
     assert first_data["version_status"] == "editing"
@@ -1235,6 +1260,42 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
     assert second.status_code == 200, second.text
     second_data = second.json()["data"]
     assert second_data["version_id"] == first_data["version_id"]
+
+    # REST receipt lookups replay the original outcome even after another
+    # save, and neither a conflicting payload nor an unknown key may write.
+    before_retry = page_version_and_pointer_snapshot(page_service, UUID(page_id))
+    replay = client.post(autosave_url, json={**first_request, "retry_only": True})
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["data"] == first_data
+
+    changed_retry = client.post(
+        autosave_url,
+        json={
+            **first_request,
+            "body_md": "# Different intent\n",
+            "retry_only": True,
+        },
+    )
+    assert changed_retry.status_code == 409, changed_retry.text
+    assert changed_retry.json()["error_code"] == "idempotency_key_conflict"
+
+    missing_retry = client.post(
+        autosave_url,
+        json={
+            **first_request,
+            "idempotency_key": "never-sent-autosave",
+            "body_md": "# Must not autosave\n",
+            "base_version_id": second_data["version_id"],
+            "base_content_hash": second_data["content_hash"],
+            "expected_editing_revision": second_data["editing_revision"],
+            "retry_only": True,
+        },
+    )
+    assert missing_retry.status_code == 404, missing_retry.text
+    assert missing_retry.json()["error_code"] == "operation_outcome_unknown"
+    assert (
+        page_version_and_pointer_snapshot(page_service, UUID(page_id)) == before_retry
+    )
 
     with page_service.session_factory() as session:
         page_versions = session.scalars(
@@ -1256,13 +1317,14 @@ def test_begin_context_edit_gives_each_author_an_independent_row_and_hides_it_fr
     exact id, or act on it by naming its version_id."""
 
     owner_client = make_client(page_service)
-    created = owner_client.post(
-        pages_url(page_service),
-        json={
-            "title": "Shared Editing Target",
-            "body_md": "# Shared Editing Target\n\nPublished body.",
-        },
-    ).json()["data"]
+    # Independent authors fork a published page, never another author's
+    # unsubmitted private-only page, even if they know its UUID.
+    created = create_published_page(
+        owner_client,
+        page_service,
+        title="Shared Editing Target",
+        body_md="# Shared Editing Target\n\nPublished body.",
+    )
     page_id = created["id"]
 
     owner_editing = owner_client.post(
@@ -1301,23 +1363,24 @@ def test_begin_context_edit_gives_each_author_an_independent_row_and_hides_it_fr
     )
     assert forbidden.status_code == 404
 
-    # Naming the owner's real editing version_id in a mutation must be
-    # opaque not-found too -- a 409 Conflict would itself confirm the id
-    # exists and is in "editing" to a non-owner (P2.2/P2.6).
-    blocked_submit = other_client.post(
-        f"{pages_url(page_service)}/{page_id}/submit-for-review",
-        json={
-            "idempotency_key": "t-19",
-            "version_id": owner_version_id,
-            "expected_editing_revision": 1,
-        },
+    # Naming the owner's real editing version_id in a mutation is refused
+    # with the caller's OWN open edit, exactly as a made-up id is, so the
+    # answer never confirms that the owner's id exists (P2.2/P2.6).
+    def _refusal(version_id, key, action, **extra):
+        response = other_client.post(
+            f"{pages_url(page_service)}/{page_id}/{action}",
+            json={"idempotency_key": key, "version_id": version_id, **extra},
+        )
+        body = response.json()
+        return response.status_code, body["error_code"], body["server_version_id"]
+
+    own = (409, "editing_revision_conflict", other_editing["version_id"])
+    submit_extra = {"expected_editing_revision": 1}
+    assert (
+        _refusal(owner_version_id, "t-19", "submit-for-review", **submit_extra) == own
     )
-    assert blocked_submit.status_code == 404
-    blocked_discard = other_client.post(
-        f"{pages_url(page_service)}/{page_id}/discard-edit",
-        json={"idempotency_key": "t-20", "version_id": owner_version_id},
-    )
-    assert blocked_discard.status_code == 404
+    assert _refusal(str(uuid4()), "t-19b", "submit-for-review", **submit_extra) == own
+    assert _refusal(owner_version_id, "t-20", "discard-edit") == own
 
     with page_service.session_factory() as session:
         untouched = session.get(ContextPageVersion, UUID(owner_version_id))
@@ -1334,13 +1397,12 @@ def test_second_editors_own_save_lands_on_their_own_row_not_the_first_drafts(
     the first author's still-open row."""
 
     owner_client = make_client(page_service)
-    created = owner_client.post(
-        pages_url(page_service),
-        json={
-            "title": "Two Editor Target",
-            "body_md": "# Two Editor Target\n\nPublished body.",
-        },
-    ).json()["data"]
+    created = create_published_page(
+        owner_client,
+        page_service,
+        title="Two Editor Target",
+        body_md="# Two Editor Target\n\nPublished body.",
+    )
     page_id = created["id"]
 
     owner_editing = owner_client.post(
@@ -1798,13 +1860,7 @@ def test_page_first_creation_defaults_title_slug_and_allows_empty_body(page_serv
 def test_page_first_creation_is_visible_to_its_own_author_and_hidden_from_others(
     page_service,
 ):
-    """A page-first-created page has never published, so its only stored
-    head (`current_version_id`) names the "editing" row directly -- unlike
-    every other scenario this session's tests exercise, where an existing
-    published page leaves `current_version_id` pointing at the published
-    version and only `latest_draft_version_id` ever names an editing row.
-    Confirms the visibility fix reaches this specific, distinct pointer
-    shape too."""
+    """An unsubmitted private-only page is invisible to other authors."""
 
     owner_client = make_client(page_service)
     created = owner_client.post(
@@ -1828,72 +1884,19 @@ def test_page_first_creation_is_visible_to_its_own_author_and_hidden_from_others
     assert forbidden_list.status_code == 200
     assert page_id not in {p["id"] for p in forbidden_list.json()["data"]}
 
+    # Removed the former "second author gets an empty edit" test. Knowing
+    # this UUID grants neither read access nor a fork of a private-only page.
+    before = page_version_and_pointer_snapshot(page_service, UUID(page_id))
+    forbidden_begin = other_client.post(
+        f"{pages_url(page_service)}/{page_id}/begin-edit",
+        json={"idempotency_key": "private-page-cannot-be-forked"},
+    )
+    assert forbidden_begin.status_code == 404, forbidden_begin.text
+    assert page_version_and_pointer_snapshot(page_service, UUID(page_id)) == before
+
     own_read = owner_client.get(f"{pages_url(page_service)}/{page_id}")
     assert own_read.status_code == 200
     assert own_read.json()["data"]["title"] == "Never Published"
-
-
-def test_begin_context_edit_never_bases_a_second_authors_row_on_a_private_editing_row(
-    page_service,
-):
-    """P8.3: on a never-published page, `current_version_id` legitimately
-    points straight at whichever editing row an ordinary autosave last
-    touched (see the page-first pointer-shape note above). `require_page_access`
-    only checks workspace role, not per-page content visibility, so any
-    editor who knows the page_id can call begin-edit on it. If that second
-    editor's `begin_context_edit` were to use the page-global pointer as its
-    base without checking who owns it, the first author's private,
-    unsubmitted body would be copied straight into the second author's new
-    editing row -- exactly the cross-author leak P8 exists to close."""
-
-    owner_client = make_client(page_service)
-    workspace_id = default_workspace_id(page_service)
-    pages_url = f"/api/v1/workspaces/{workspace_id}/context/pages"
-    created = owner_client.post(
-        pages_url,
-        json={"title": "Never Published Race"},
-    ).json()["data"]
-    page_id = created["id"]
-
-    owner_saved = owner_client.post(
-        f"{pages_url}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-32",
-            "body_md": "# Never Published Race\n\nOwner's private in-progress body.",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    )
-    assert owner_saved.status_code == 200, owner_saved.text
-    owner_version_id = owner_saved.json()["data"]["version_id"]
-
-    other_client = make_client(page_service, authenticated=False)
-    authenticate_test_client_in_workspace(
-        other_client,
-        page_service.session_factory,
-        email="private-race-other@example.com",
-        role="editor",
-    )
-
-    other_begun = other_client.post(
-        f"{pages_url}/{page_id}/begin-edit", json={"idempotency_key": "t-33"}
-    )
-    assert other_begun.status_code == 200, other_begun.text
-    other_data = other_begun.json()["data"]
-
-    assert other_data["version_id"] != owner_version_id
-    assert other_data["body_md"] == ""
-    assert other_data.get("parent_version_id") != owner_version_id
-
-    with page_service.session_factory() as session:
-        owner_row = session.get(ContextPageVersion, UUID(owner_version_id))
-        other_row = session.get(ContextPageVersion, UUID(other_data["version_id"]))
-    assert owner_row.body_md == (
-        "# Never Published Race\n\nOwner's private in-progress body."
-    )
-    assert other_row.body_md == ""
-    assert other_row.parent_version_id != owner_row.id
 
 
 def test_patch_conflict_response_never_discloses_another_authors_private_editing_row(

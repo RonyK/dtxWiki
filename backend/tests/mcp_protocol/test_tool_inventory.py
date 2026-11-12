@@ -43,6 +43,7 @@ TOOL_LIST_SNAPSHOTS = {
         "list_changes",
         "list_agent_categories",
         "read_agent_page",
+        "get_operation_status",
         "create_context_page",
         "begin_context_edit",
         "update_context_edit",
@@ -60,6 +61,7 @@ TOOL_LIST_SNAPSHOTS = {
         "read_structure_map",
     ),
     "mcp:agent": (
+        "get_operation_status",
         "write_agent_page_draft",
         "build_agent_input_bundle",
     ),
@@ -160,6 +162,11 @@ def test_patch_context_edit_permission_and_conversation_contract():
     assert TOOL_REQUIRED_SCOPES["patch_context_edit"] == ("draft-write",)
     assert TOOL_REQUIRED_ROLES["patch_context_edit"] == "editor"
     assert "patch_context_edit" in CONTENT_TOOLS
+    assert TOOL_REQUIRED_SCOPES["get_operation_status"] == (
+        "draft-write", "agent-page-draft", "review-write"
+    )
+    assert TOOL_REQUIRED_ROLES["get_operation_status"] == "editor"
+    assert "get_operation_status" not in CONTENT_TOOLS
 
 
 @pytest.mark.parametrize(

@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +30,18 @@ class MCPToolCall(UuidPrimaryKeyMixin, Base):
             "mcp_session_id",
             "started_at",
             "id",
+        ),
+        # Only keyed calls are looked up by key; unkeyed calls skip the index.
+        Index(
+            "ix_mcp_tool_call_actor_key_started",
+            "workspace_id",
+            "actor_kind",
+            "actor_id",
+            "idempotency_key",
+            "started_at",
+            "id",
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+            sqlite_where=text("idempotency_key IS NOT NULL"),
         ),
         UniqueConstraint(
             "workspace_id",
@@ -87,6 +100,12 @@ class MCPToolCall(UuidPrimaryKeyMixin, Base):
         default="llmwiki.mcp.v1",
     )
     tool_name: Mapped[str] = mapped_column(Text, nullable=False)
+    # Keyed calls record their actor and key at arrival, before dispatch, so
+    # their lifecycle can be looked up by key. Other calls leave these null.
+    actor_kind: Mapped[str | None] = mapped_column(Text)
+    actor_id: Mapped[str | None] = mapped_column(Text)
+    idempotency_key: Mapped[str | None] = mapped_column(Text)
+    retryable: Mapped[bool | None] = mapped_column(Boolean)
     input_summary: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,

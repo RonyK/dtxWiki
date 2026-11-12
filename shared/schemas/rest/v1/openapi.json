@@ -2393,6 +2393,11 @@
           "normalization_report": {
             "$ref": "#/components/schemas/IndexRefNormalizationReport"
           },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
           "review_item_id": {
             "anyOf": [
               {
@@ -8447,6 +8452,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",

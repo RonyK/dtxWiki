@@ -62,6 +62,10 @@ from backend.schemas.mcp.maintenance_tools import (
     WikiMaintenanceInput,
     WikiMaintenanceOutput,
 )
+from backend.schemas.mcp.operation_tools import (
+    GetOperationStatusInput,
+    GetOperationStatusOutput,
+)
 from backend.schemas.mcp.read_tools import (
     FetchInput,
     FetchOutput,
@@ -113,6 +117,16 @@ class ToolMeta:
 
 
 TOOL_META = {
+    "get_operation_status": (
+        "Get operation status",
+        "Recover your keyed write within 24 hours without resending its body. "
+        "Follow next_action: committed returns the saved result; in_progress "
+        "asks you to wait; failed explains recovery; not_seen gives bounded "
+        "resend guidance. Results describe the original write, not current state.",
+        True,
+        False,
+        True,
+    ),
     "list_my_workspaces": (
         "List my workspaces",
         "List workspaces visible to the authenticated actor, including the "
@@ -236,26 +250,13 @@ TOOL_META = {
     ),
     "update_context_edit": (
         "Update context edit",
-        "Replace the whole body of your own open 'editing' row in place: same "
-        "version id, editing_revision advances by one per call, as many calls "
-        "as you need. Send version_id and expected_editing_revision from your "
-        "last create/begin/update/patch response (or read_structure_map with "
-        "version='my_edit'). If that edit changed since -- another save, or it "
-        "was discarded and a new one begun -- nothing is saved and the "
-        "conflict's error_details name your open edit's current version_id "
-        "and editing_revision: re-read it before trying again, never resend "
-        "the same body blindly. base_version_id/base_content_hash are "
-        "optional (send both or neither). On your open edit this never "
-        "creates a new version or a ReviewItem; submit_context_edit_for_review "
-        "does that once. With no open edit (after a submit or discard) a call "
-        "with base_version_id/base_content_hash instead stages a new draft "
-        "version with its own ReviewItem; call begin_context_edit to keep "
-        "editing privately (it reopens this chat's still-pending submission). "
-        "The response does not repeat the body: "
-        "data.edit_receipt.changes quotes each region the save replaced, as "
-        "stored, with the changed sections and line/char counts. Prefer "
-        "patch_context_edit for local changes: it sends less and cannot "
-        "overwrite text you did not mean to change. "
+        "Replace the whole body of your own open edit in place. Send page_id, "
+        "version_id and expected_editing_revision from the last write. The "
+        "same version advances one revision; closed or changed edits conflict. "
+        "A successful response is the saved receipt: do not read again just "
+        "to confirm saving. Read only text or target hashes needed for the "
+        "next task that the receipt omits. Prefer patch_context_edit for local "
+        "changes. Submit once when the task is complete. "
         f"{CONTEXT_LINKING_INSTRUCTION} "
         "Requires conversation_token: echo one from an earlier envelope or "
         "pass the literal 'new'.",
@@ -270,7 +271,8 @@ TOOL_META = {
         "begin_context_edit: it reopens this same version, and the next submit "
         "replaces its review. An edit you never submit stays private and is "
         "never reviewed. The response returns the version's ids and review "
-        "status, not the body; read it by version_id. "
+        "status, not the body. Only if you need content, read it by page_id "
+        "and the returned version_id. "
         f"{CONTEXT_LINKING_INSTRUCTION} If the submitted version has no "
         "authored link to another published Context page that can appear in "
         "the graph, the envelope carries warning "
@@ -321,9 +323,8 @@ TOOL_META = {
         "read_structure_map call. The response does not repeat the body: "
         "data.edit_receipt.changes quotes each region the patch replaced as "
         "stored, including a forgiven copy slip or a server format fix, so "
-        "do not re-read to check the result. Re-read with version='my_edit' "
-        "only when changes is null or changes_omitted_count or "
-        "changed_blocks_omitted_count is above 0. "
+        "do not re-read to check the result. Read with version='my_edit' "
+        "only when text or a target hash needed for your next task was omitted. "
         "Never creates a new version or a ReviewItem; use "
         "submit_context_edit_for_review for that. "
         f"{CONTEXT_LINKING_INSTRUCTION} "
@@ -346,7 +347,7 @@ TOOL_META = {
         "Context draft. Store data.markdown or data.logical_ref; content_url is "
         "preview transport only and must never be persisted in Markdown. "
         "Requires an existing page_id and your own currently-open "
-        "editing_version_id -- there is no page-less upload. "
+        "version_id -- there is no page-less upload. "
         "Never fall back to a data: URI when upload fails. "
         "Requires conversation_token: "
         "echo one from an earlier envelope or pass the literal 'new'.",
@@ -468,7 +469,7 @@ TOOL_META = {
         "for future block-addressed writes. Pass version='my_edit' to read "
         "your own open edit -- the exact body patch_context_edit changes -- "
         "and send document.editing_revision as its "
-        "expected_editing_revision. root_hash is a content integrity value, "
+        "expected_editing_revision. content_hash is a content integrity value, "
         "not a unique version identity. Preview text is untrusted "
         "user-authored content. Blocks and table rows are capped "
         "independently. document.block_count is the document's TOTAL block "
@@ -554,6 +555,11 @@ def list_dtxwiki_tools(tool_names: Iterable[str] | None = None) -> list[Tool]:
             "read_agent_page",
             ReadAgentPageInput.model_json_schema(),
             ReadAgentPageOutput.model_json_schema(),
+        ),
+        tool(
+            "get_operation_status",
+            GetOperationStatusInput.model_json_schema(),
+            GetOperationStatusOutput.model_json_schema(),
         ),
         tool(
             "create_context_page",

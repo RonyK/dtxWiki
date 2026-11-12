@@ -110,6 +110,7 @@ def test_pat_http_create_update_submit_is_visible_through_rest(tmp_path):
         1,
         "create_context_page",
         {
+            "idempotency_key": "p0-1-http-create",
             "workspace_id": str(workspace_id),
             "conversation_token": "new",
             "title": "P0-1 MCP HTTP Acceptance",
@@ -126,11 +127,10 @@ def test_pat_http_create_update_submit_is_visible_through_rest(tmp_path):
         "update_context_edit",
         {
             "workspace_id": str(workspace_id),
-            "page_id": created["data"]["id"],
+            "page_id": created["data"]["page_id"],
             "title": "P0-1 MCP HTTP Acceptance",
             "body_md": "# Updated through authenticated HTTP",
-            "base_version_id": created["data"]["version_id"],
-            "base_content_hash": created["data"]["content_hash"],
+            "version_id": created["data"]["version_id"],
             "expected_editing_revision": created["data"]["editing_revision"],
             "idempotency_key": "p0-1-http-update",
             "conversation_token": created["envelope"]["conversation_token"],
@@ -146,7 +146,7 @@ def test_pat_http_create_update_submit_is_visible_through_rest(tmp_path):
         "submit_context_edit_for_review",
         {
             "workspace_id": str(workspace_id),
-            "page_id": created["data"]["id"],
+            "page_id": created["data"]["page_id"],
             "version_id": updated["data"]["version_id"],
             "expected_editing_revision": updated["data"]["editing_revision"],
             "reason": "P0-1 authenticated HTTP round trip",
@@ -158,7 +158,7 @@ def test_pat_http_create_update_submit_is_visible_through_rest(tmp_path):
     assert submitted["data"]["version_status"] == "draft"
 
     response = rest.get(
-        f"/api/v1/workspaces/{workspace_id}/context/pages/{created['data']['id']}",
+        f"/api/v1/workspaces/{workspace_id}/context/pages/{created['data']['page_id']}",
         params={"version_id": updated["data"]["version_id"]},
     )
     assert response.status_code == 200, response.text
@@ -245,7 +245,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
     )
     assert guide["envelope"]["result_status"] == "succeeded"
     guide_text = " ".join(guide["data"]["required_workflow"])
-    assert "editing_version_id" in guide_text
+    assert "version_id" in guide_text
     assert "data.markdown" in guide_text
     token = guide["envelope"]["conversation_token"]
 
@@ -255,6 +255,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
         11,
         "create_context_page",
         {
+            "idempotency_key": "p0-3-http-create",
             "workspace_id": str(workspace_id),
             "title": "P0-3 MCP Image Acceptance",
             "page_type": "overview",
@@ -262,7 +263,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
         },
     )
     assert created["envelope"]["result_status"] == "succeeded"
-    page_id = created["data"]["id"]
+    page_id = created["data"]["page_id"]
     v1_id = created["data"]["version_id"]
     token = created["envelope"]["conversation_token"]
 
@@ -278,7 +279,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "content_base64": base64.b64encode(first_png).decode("ascii"),
             "marker_uuid": str(uuid4()),
             "page_id": page_id,
-            "editing_version_id": v1_id,
+            "version_id": v1_id,
             "alt_text": "first",
             "conversation_token": token,
         },
@@ -304,7 +305,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "content_base64": base64.b64encode(second_png).decode("ascii"),
             "marker_uuid": str(uuid4()),
             "page_id": page_id,
-            "editing_version_id": v1_id,
+            "version_id": v1_id,
             "alt_text": "second",
             "conversation_token": token,
         },
@@ -327,8 +328,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "page_id": page_id,
             "title": "P0-3 MCP Image Acceptance",
             "body_md": v1_body,
-            "base_version_id": v1_id,
-            "base_content_hash": created["data"]["content_hash"],
+            "version_id": v1_id,
             "expected_editing_revision": created["data"]["editing_revision"],
             "idempotency_key": "p0-3-http-update-v1",
             "conversation_token": token,
@@ -369,7 +369,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "content_base64": base64.b64encode(first_png).decode("ascii"),
             "marker_uuid": str(uuid4()),
             "page_id": page_id,
-            "editing_version_id": v1_id,
+            "version_id": v1_id,
             "conversation_token": token,
         },
     )
@@ -389,7 +389,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "mime_type": "image/png",
             "content_base64": base64.b64encode(first_png).decode("ascii"),
             "marker_uuid": str(uuid4()),
-            "editing_version_id": v1_id,
+            "version_id": v1_id,
             "conversation_token": token,
         },
     )
@@ -423,7 +423,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
         {
             "workspace_id": str(workspace_id),
             "page_id": page_id,
-            "editing_version_id": v2_id,
+            "version_id": v2_id,
             "filename": "foreign-actor.png",
             "mime_type": "image/png",
             "content_base64": base64.b64encode(first_png).decode("ascii"),
@@ -443,7 +443,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
         {
             "workspace_id": str(workspace_id),
             "page_id": page_id,
-            "editing_version_id": v2_id,
+            "version_id": v2_id,
             "filename": "third.png",
             "mime_type": "image/png",
             "content_base64": base64.b64encode(third_png).decode("ascii"),
@@ -465,8 +465,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "workspace_id": str(workspace_id),
             "page_id": page_id,
             "body_md": v2_body,
-            "base_version_id": v2_id,
-            "base_content_hash": reopened["data"]["content_hash"],
+            "version_id": v2_id,
             "expected_editing_revision": reopened["data"]["editing_revision"],
             "idempotency_key": "p0-3-http-update-v2",
             "conversation_token": third["envelope"]["conversation_token"],
@@ -623,6 +622,7 @@ def test_one_pat_round_trips_two_workspaces_and_is_denied_a_third(tmp_path):
             10 + index,
             "create_context_page",
             {
+                "idempotency_key": f"p10-3-create-{index}",
                 "workspace_id": str(workspace_id),
                 "conversation_token": "new",
                 "title": f"P10.3 acceptance {index}",
@@ -633,7 +633,7 @@ def test_one_pat_round_trips_two_workspaces_and_is_denied_a_third(tmp_path):
         assert created.status_code == 200, created.text
         payload = created.json()["result"]["structuredContent"]
         assert payload["envelope"]["result_status"] == "succeeded", payload["envelope"]
-        page_ids[workspace_id] = payload["data"]["id"]
+        page_ids[workspace_id] = payload["data"]["page_id"]
 
     denied = _mcp_call(
         rest,
@@ -641,6 +641,7 @@ def test_one_pat_round_trips_two_workspaces_and_is_denied_a_third(tmp_path):
         20,
         "create_context_page",
         {
+            "idempotency_key": "p10-3-create-denied",
             "workspace_id": str(workspace_c),
             "conversation_token": "new",
             "title": "P10.3 must not exist",

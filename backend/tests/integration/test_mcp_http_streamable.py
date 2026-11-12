@@ -2772,6 +2772,7 @@ def test_sdk_streamable_agent_pat_can_write_agent_page_draft(page_service):
                     "slug": "sdk-agent-persona",
                     "body_markdown": "# SDK Agent Persona\n\nDraft only.",
                     "reason": "SDK streamable regression",
+                    "idempotency_key": "sdk-agent-persona",
                     # Content tools must name their conversation; omitting the
                     # token used to start a new chat on every single call.
                     "conversation_token": "new",

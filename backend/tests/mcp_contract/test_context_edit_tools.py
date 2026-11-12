@@ -59,6 +59,7 @@ def _create_page(page_service, actor, workspace_id, **overrides):
         "workspace_id": str(workspace_id),
         "title": "P8.6 Edit Tools Page",
         "body_md": "# Hello\n\nInitial body.",
+        "idempotency_key": str(uuid4()),
     }
     payload.update(overrides)
     response = dispatch(
@@ -75,13 +76,15 @@ def test_create_context_page_creates_private_editing_version(page_service, actor
     assert data.editing_revision == 1
 
 
-def test_read_only_actor_cannot_create_context_page(
-    page_service, read_only_actor
-):
+def test_read_only_actor_cannot_create_context_page(page_service, read_only_actor):
     workspace_id = _workspace(page_service)
     response = dispatch(
         "create_context_page",
-        {"workspace_id": str(workspace_id), "title": "Denied"},
+        {
+            "workspace_id": str(workspace_id),
+            "title": "Denied",
+            "idempotency_key": "denied-create",
+        },
         actor=read_only_actor,
         page_service=page_service,
     )
@@ -123,8 +126,7 @@ def test_update_then_submit_context_edit_happy_path(page_service, actor):
             "page_id": str(created.id),
             "title": created.title,
             "body_md": "# Hello\n\nUpdated body.",
-            "base_version_id": str(created.version_id),
-            "base_content_hash": created.content_hash,
+            "version_id": str(created.version_id),
             "expected_editing_revision": created.editing_revision,
             "idempotency_key": "update-happy-1",
         },
@@ -179,7 +181,7 @@ def test_cite_changes_references_on_private_edit_and_replays(page_service, actor
     assert _stored(page_service, created.version_id).version_status == "editing"
 
 
-def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor):
+def test_update_context_edit_rejects_stale_revision_as_conflict(page_service, actor):
     workspace_id = _workspace(page_service)
     created = _create_page(page_service, actor, workspace_id)
 
@@ -188,8 +190,7 @@ def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor)
         "page_id": str(created.id),
         "title": created.title,
         "body_md": "# Hello\n\nFirst update.",
-        "base_version_id": str(created.version_id),
-        "base_content_hash": created.content_hash,
+        "version_id": str(created.version_id),
         "expected_editing_revision": created.editing_revision,
     }
     first = dispatch(
@@ -200,7 +201,7 @@ def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor)
     )
     assert first.envelope.result_status == "succeeded", first.envelope
 
-    # Same (now stale) base + revision resent with a fresh key: must conflict,
+    # Same (now stale) revision resent with a fresh key: must conflict,
     # not silently clobber the save above.
     stale = dispatch(
         "update_context_edit",
@@ -209,7 +210,7 @@ def test_update_context_edit_rejects_stale_base_as_conflict(page_service, actor)
         page_service=page_service,
     )
     assert stale.envelope.result_status == "conflict"
-    assert stale.envelope.error_code == "stale_base_version"
+    assert stale.envelope.error_code == "editing_revision_conflict"
     assert stale.data is None
 
 
@@ -234,25 +235,18 @@ def test_discard_context_edit_archives_page_by_stable_url(page_service, actor):
 
 
 @pytest.mark.parametrize(
-    "tool_name", ["begin_context_edit", "submit_context_edit_for_review",
-                  "discard_context_edit", "patch_context_edit"]
+    "tool_name",
+    [
+        "begin_context_edit",
+        "submit_context_edit_for_review",
+        "discard_context_edit",
+        "patch_context_edit",
+    ],
 )
 def test_wrong_actor_gets_opaque_not_found_not_a_permission_error(
     page_service, actor, other_actor, tool_name
 ):
-    """P2.2/P2.6 convention: a different author's editing row reads as
-    not_found, never as a distinguishable permission error -- confirming it
-    holds for the new P8.6 tools too.
-
-    ``update_context_edit`` is deliberately NOT parametrized here -- see
-    ``test_update_context_edit_on_another_actors_editing_row_forks_a_draft``
-    below for why its cross-actor behavior differs (a pre-existing
-    ``autosave_page`` property, not something this wrapper introduces).
-    ``patch_context_edit`` DOES belong here (unlike ``update_context_edit``):
-    it resolves ``version_id`` explicitly and checks ownership directly,
-    exactly like ``submit_context_edit_for_review``/``discard_context_edit``,
-    never through ``autosave_page``'s page-global-pointer fork.
-    """
+    """A private-only page is opaque to every other author, even by UUID."""
 
     workspace_id = _workspace(page_service)
     created = _create_page(page_service, actor, workspace_id)
@@ -280,16 +274,8 @@ def test_wrong_actor_gets_opaque_not_found_not_a_permission_error(
     response = dispatch(
         tool_name, payload, actor=other_actor, page_service=page_service
     )
-    if tool_name == "begin_context_edit":
-        # begin_context_edit has no version_id input -- the other actor
-        # simply opens (or resumes) their OWN editing row on the same page,
-        # which is not a 404 case at all. Assert that instead, so this test
-        # documents the boundary rather than mis-asserting on a tool it does
-        # not apply to.
-        assert response.envelope.result_status == "succeeded", response.envelope
-        assert response.data.version_id != created.version_id
-        assert response.data.body_md == ""
-        return
+    # Removed the former begin-success exception: knowing the UUID must not
+    # permit an empty fork on someone else's unsubmitted private-only page.
     assert response.envelope.result_status == "failed"
     assert response.envelope.error_code == "not_found"
     assert response.data is None
@@ -316,8 +302,7 @@ def test_update_context_edit_on_another_actors_private_page_is_not_found(
             "page_id": str(created.id),
             "title": created.title,
             "body_md": "# Hello\n\nActor B's own words, not A's.",
-            "base_version_id": str(created.version_id),
-            "base_content_hash": created.content_hash,
+            "version_id": str(created.version_id),
             "expected_editing_revision": created.editing_revision,
             "idempotency_key": "wrong-actor-update-not-found",
         },
@@ -330,9 +315,7 @@ def test_update_context_edit_on_another_actors_private_page_is_not_found(
     assert "Initial body" not in response.model_dump_json()
     with page_service.session_factory() as session:
         versions = session.scalars(
-            select(ContextPageVersion).where(
-                ContextPageVersion.page_id == created.id
-            )
+            select(ContextPageVersion).where(ContextPageVersion.page_id == created.id)
         ).all()
     assert [version.id for version in versions] == [created.version_id]
 
@@ -445,7 +428,7 @@ def test_begin_context_edit_rejects_unknown_page(page_service, actor):
 def _structure_map(workspace_id, page_id, actor, page_service):
     return dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page_id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page_id)},
         actor=actor,
         page_service=page_service,
     )
@@ -592,7 +575,7 @@ def test_patch_context_edit_rejects_stale_revision_as_masked_conflict(
         page_service=page_service,
     )
     assert stale.envelope.result_status == "conflict"
-    assert stale.envelope.error_code == "stale_base_version"
+    assert stale.envelope.error_code == "editing_revision_conflict"
     assert stale.data is None
     # The conflict names the caller's OWN current version -- masking
     # (_disclosable_version_fields) must pass through real data for the

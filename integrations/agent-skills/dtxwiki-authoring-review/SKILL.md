@@ -5,6 +5,9 @@ description: Create or update grounded dtxWiki Context pages, upload images safe
 
 # dtxWiki Authoring and Review
 
+Generate and retain an idempotency_key for each write. If its response is lost, call get_operation_status with that key and follow next_action. Keep every original argument on a resend; changed content uses a new key. Successful receipts confirm saving without a read. Use page_id and version_id from the result for subsequent writes. Partial reads use top-level page_id and optional version_id.
+
+
 Read `dtxwiki-conventions` before writing. Call `guide` for the current write policy, citation policy, and effective capabilities; do not hardcode values it reports.
 
 ## Protect the base
@@ -19,7 +22,7 @@ Never write against a base you did not read. `update_context_edit` and `patch_co
    - Call `read_structure_map` for the target page to obtain block ids, row ids, and content hashes. Call `read_context_outline` when you need heading text or one section's body.
    - Call `patch_context_edit` with typed operations addressed by block or row id and hash -- this tool always applies against your own open row, never a shared reconciled head, so there is no conflict-resolution operation to send.
    - Requires the `expected_editing_revision` you last saw as a CAS input; a stale value returns a conflict rather than silently overwriting a newer save.
-   - The response does not repeat the body. Take the next `editing_revision` and the new block ids and hashes (`edit_receipt.changed_blocks`) from it, and check the result in `edit_receipt.changes`, which quotes each replaced region as stored. Do not re-read the page after a successful patch; read it with `version='my_edit'` only when `changes` is null or `changes_omitted_count` or `changed_blocks_omitted_count` is above 0.
+   - The response does not repeat the body. Take the next `editing_revision` and the new block ids and hashes (`edit_receipt.changed_blocks`) from it, and check the result in `edit_receipt.changes`, which quotes each replaced region as stored. Do not re-read the page after a successful patch; read the necessary range with `page_id` and `version='my_edit'` only when text or a target hash needed for your next task is missing from the receipt.
 4. Use `update_context_edit` for a full-document autosave -- title/body/tags/aliases/placement together, always sending the complete `body_md`. Changing tags, aliases, or placement requires the unchanged body too. Use `cite` for reference-only additions, note changes, or removals; it does not rewrite the body.
 5. Call `submit_context_edit_for_review` once, when the whole task is ready for human review ("Save draft"), not after each change. To change it again from the same chat before it is reviewed, call `begin_context_edit`: it reopens that same version (no new version), and the next submit replaces its review. An edit you never submit stays private and is never reviewed. A submission never publishes on its own; read `data.publish_blocked_reasons` to learn why human review was required.
 6. Call `discard_context_edit` to abandon your own open editing session (terminal, not a hard-delete: audit/History is preserved). A page with no prior published/submitted history is archived when its only version is discarded; a previously published/shared page keeps its existing head.
@@ -34,9 +37,9 @@ Never write against a base you did not read. `update_context_edit` and `patch_co
 
 ## Use the safe image flow
 
-Call `upload_image` first. It always requires an existing `page_id` and your own currently-open `editing_version_id` for that page -- there is no page-less upload. Verify that a successful result contains the expected `data.logical_ref` and matching `data.markdown` before storing either value. Store only `data.markdown` or `data.logical_ref` in the draft. Treat `data.content_url` and every `/api/v1/...` value as preview transport only; never persist them in Markdown.
+Call `upload_image` first. It always requires an existing `page_id` and your own currently-open `version_id` for that page -- there is no page-less upload. Verify that a successful result contains the expected `data.logical_ref` and matching `data.markdown` before storing either value. Store only `data.markdown` or `data.logical_ref` in the draft. Treat `data.content_url` and every `/api/v1/...` value as preview transport only; never persist them in Markdown.
 
-For a brand-new page, call `create_context_page` first to obtain its `page_id` and editing version, then call `upload_image` with those, then insert the returned `data.markdown` with `update_context_edit` or `patch_context_edit`. For an existing page, call `begin_context_edit` to obtain your own open editing version, pass its `page_id` and `editing_version_id` to `upload_image`, then insert the returned `data.markdown` with `patch_context_edit` or `update_context_edit`.
+For a brand-new page, call `create_context_page` first to obtain its `page_id` and editing version, then call `upload_image` with those, then insert the returned `data.markdown` with `update_context_edit` or `patch_context_edit`. For an existing page, call `begin_context_edit` to obtain your own open editing version, pass its `page_id` and `version_id` to `upload_image`, then insert the returned `data.markdown` with `patch_context_edit` or `update_context_edit`.
 
 If upload or verification fails, stop the image path and report the failure.
 

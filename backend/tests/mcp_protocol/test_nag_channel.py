@@ -64,7 +64,7 @@ def _payload(result):
 def _structure_map_args(workspace_id, page_id, conversation_token):
     return {
         "workspace_id": str(workspace_id),
-        "target": {"page_id": str(page_id)},
+        "page_id": str(page_id),
         "conversation_token": conversation_token,
     }
 

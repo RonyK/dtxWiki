@@ -10,6 +10,7 @@ class PreparedMetadata:
     page_type: str | None = None
     tags: list[str] | None = None
     aliases: list[str] | None = None
+    title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class PreparedBody:
     module_fix_counts: tuple[tuple[str, int], ...] = ()
     fix_details: tuple[dict, ...] = ()
     failed_module_ids: tuple[str, ...] = ()
+    metadata_overrides: tuple[dict, ...] = ()
 
     @property
     def lint_report(self) -> dict:

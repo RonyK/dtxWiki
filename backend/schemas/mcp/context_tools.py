@@ -6,12 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.schemas.common import MCPResultEnvelope
 from backend.schemas.context_edit import EditOperation
 from backend.schemas.context_write import (
-    CiteRequest,
-    SubmitFeedbackRequest,
-    SubmitFeedbackResult,
+    CiteResult as ReferenceCommandResult,
 )
 from backend.schemas.context_write import (
-    CiteResult as ReferenceCommandResult,
+    ReferenceCommand,
+    SubmitFeedbackRequest,
+    SubmitFeedbackResult,
 )
 from backend.schemas.edit_receipt import EditReceipt
 from backend.schemas.mcp.page_input import MCPPageInput, validate_typed_target
@@ -21,14 +21,14 @@ from backend.schemas.page import (
     PAGE_LIST_CURSOR_MAX_LENGTH,
     PAGE_LIST_CURSOR_PATTERN,
     PAGE_LIST_LIMIT_MAX,
-    BeginContextEditRequest,
-    DiscardContextEditRequest,
+    BeginContextEditCommand,
+    DiscardContextEditCommand,
     DiscardContextEditResult,
     DraftReviewReason,
     ListMyContextEditsResult,
     PagePayload,
     PrivateContextPageCreateRequest,
-    SubmitContextEditRequest,
+    SubmitContextEditCommand,
     UpdateContextEditRequest,
 )
 
@@ -43,9 +43,9 @@ CONVERSATION_TOKEN_FIELD = Field(
 )
 
 
-class CiteInput(CiteRequest):
-    workspace_id: UUID
+class CiteInput(ReferenceCommand):
     page_id: MCPPageInput
+    workspace_id: UUID
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")
@@ -99,6 +99,7 @@ class SubmitFeedbackToolOutput(BaseModel):
 
 class CreateContextPageInput(PrivateContextPageCreateRequest):
     workspace_id: UUID
+    idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")
@@ -109,16 +110,18 @@ class ContextEditResult(BaseModel):
 
     The body is not repeated. edit_receipt.changes quotes the replaced
     regions; when you need text the receipt does not show, read this version
-    by version_id (target.version_id), which still names it after a submit.
+    by page_id and version_id, which still name it after a submit.
     """
 
-    id: UUID
+    page_id: UUID
     version_id: UUID
     editing_revision: int
     content_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
     version_status: str | None = None
     title: str
     slug: str
+    replayed: bool = False
+    placement_parent_node_id: UUID | None = None
     review_item_id: UUID | None = None
     change_set_id: UUID | None = None
     publish_blocked_reasons: list[DraftReviewReason] = Field(default_factory=list)
@@ -141,6 +144,10 @@ class ContextEditResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @property
+    def id(self) -> UUID:
+        return self.page_id
+
 
 class CreateContextPageToolOutput(BaseModel):
     envelope: MCPResultEnvelope
@@ -149,7 +156,7 @@ class CreateContextPageToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class BeginContextEditInput(BeginContextEditRequest):
+class BeginContextEditInput(BeginContextEditCommand):
     workspace_id: UUID
     page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
@@ -157,9 +164,22 @@ class BeginContextEditInput(BeginContextEditRequest):
     model_config = ConfigDict(extra="forbid")
 
 
+class BeginContextEditResult(PagePayload):
+    """The complete open edit, with the MCP page identity spelling."""
+
+    id: UUID = Field(alias="page_id")
+    replayed: bool = False
+
+    model_config = ConfigDict(extra="forbid", serialize_by_alias=True)
+
+    @property
+    def page_id(self) -> UUID:
+        return self.id
+
+
 class BeginContextEditToolOutput(BaseModel):
     envelope: MCPResultEnvelope
-    data: PagePayload | None = None
+    data: BeginContextEditResult | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -179,7 +199,7 @@ class UpdateContextEditToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SubmitContextEditForReviewInput(SubmitContextEditRequest):
+class SubmitContextEditForReviewInput(SubmitContextEditCommand):
     workspace_id: UUID
     page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
@@ -194,7 +214,7 @@ class SubmitContextEditForReviewToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class DiscardContextEditInput(DiscardContextEditRequest):
+class DiscardContextEditInput(DiscardContextEditCommand):
     workspace_id: UUID
     page_id: MCPPageInput
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
@@ -287,7 +307,6 @@ class PatchContextEditInput(BaseModel):
         ),
     )
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
-    retry_only: bool = False
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")

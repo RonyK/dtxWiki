@@ -51,6 +51,7 @@ AGENT_PAGE_TAXONOMY = [
 AVAILABLE_READ_TOOLS = [
     "list_my_workspaces",
     "guide",
+    "get_operation_status",
     "get_index",
     "read_concept",
     "search",
@@ -130,12 +131,37 @@ REQUIRED_WORKFLOW = [
         "pass the chosen node_id as placement_parent_node_id (omit it for "
         "Inbox)."
     ),
+    (
+        "retry: generate and hold a new idempotency_key before each write. "
+        "If the response is lost, call get_operation_status with the same key "
+        "and the same conversation_token, and follow next_action. "
+        "A resend must keep every original argument, "
+        "including expected_editing_revision; changed content needs a new key. "
+        "Results are retained for 24 hours and describe the original commit, "
+        "not the latest state. Never create a new key just because a response "
+        "was lost."
+    ),
+    (
+        "metadata: explicit fields override changed body frontmatter, then "
+        "the current edit's effective metadata, then creation defaults. "
+        "Unchanged frontmatter does not undo newer metadata. Omitted/null "
+        "keep the fallback; [] clears tags or aliases."
+    ),
+    (
+        "hashes: read_context_outline.section_hash covers a heading and its "
+        "whole subtree; use it as expected_section_hash for section replace/"
+        "delete. read_structure_map.blocks[].hash covers one block; use it "
+        "as expected or replace_text.at.expected. rows[].hash covers one row "
+        "for insert_row.expected. document.content_hash covers the whole "
+        "document for replace_document.expected_content_hash. A heading "
+        "block hash is not a section hash. editing_revision guards all saves."
+    ),
     MCP_CONTEXT_LINK_GUIDANCE,
     (
         "for an image: upload_image first; store data.markdown or "
         "data.logical_ref, never data.content_url or an /api/v1 transport URL; "
         "upload_image always requires an existing page_id and your own open "
-        "editing_version_id, so create the page first for a new page, then "
+        "version_id, so create the page first for a new page, then "
         "upload and call update_context_edit; never fall back to data:"
     ),
 ]
@@ -219,7 +245,7 @@ RECOMMENDED_AGENT_GUIDANCE_FLOW = [
         "For images, call upload_image first and store data.markdown or "
         "data.logical_ref. Never persist data.content_url or another /api/v1 "
         "transport URL. upload_image always requires an existing page_id and "
-        "your own currently-open editing_version_id -- create the page first "
+        "your own currently-open version_id -- create the page first "
         "for a new page, then upload with page_id and call "
         "update_context_edit. If upload fails, stop and report the failure; "
         "never substitute a data: URI."

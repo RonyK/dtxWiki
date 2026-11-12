@@ -447,9 +447,10 @@ def resolve_visible_context_version(
     predicates rather than in each adapter, so MCP, REST and Resources cannot
     drift apart on which draft a reader is shown.
 
-    Returns ``(None, None)`` for every miss: not found, wrong workspace, or not
-    visible.  Callers must not distinguish these, because telling a reader that
-    a page exists but is hidden is itself a disclosure.
+    Returns ``(None, None)`` for not found, wrong workspace, or not visible.
+    Only for ``my_edit``, ``(page, None)`` means the page is visible but the
+    actor has no open edit. Callers may distinguish that state without exposing
+    a hidden page's existence.
     """
     # Deferred on purpose, not for lazy-loading. `backend.policy.auth` imports
     # this module, and `concept_resolution` imports `policy.auth`, so hoisting
@@ -471,14 +472,16 @@ def resolve_visible_context_version(
             workspace_id=workspace_id,
             resource_id=version_id,
         )
-        if explicit_version is not None:
+        if explicit_version is None:
+            return None, None
+        if page_id is None and path is None:
             page = get_in_workspace(
                 session,
                 ContextPage,
                 workspace_id=workspace_id,
                 resource_id=explicit_version.page_id,
             )
-    elif page_id is not None:
+    if page_id is not None:
         page = get_in_workspace(
             session,
             ContextPage,
@@ -510,8 +513,10 @@ def resolve_visible_context_version(
 
     if version_preference == "my_edit":
         # The caller's OWN open editing row -- the body its next
-        # patch_context_edit applies to. Read-only: a missing edit is a miss,
-        # never a reason to open one (that is begin_context_edit's job).
+        # patch_context_edit applies to -- is always readable, whoever holds
+        # the page head. Without one, page visibility decides between
+        # no-open-edit and an opaque miss. A read never opens an edit (that is
+        # begin_context_edit's job).
         if actor is None:
             return None, None
         own_edit = get_open_edit_for_actor(
@@ -521,9 +526,13 @@ def resolve_visible_context_version(
             actor_kind=actor.actor_kind,
             actor_id=actor.actor_id,
         )
-        if own_edit is None or not context_version_is_visible(own_edit, actor):
-            return None, None
-        return page, own_edit
+        if own_edit is not None and context_version_is_visible(own_edit, actor):
+            return page, own_edit
+        if own_edit is None and context_page_visible(
+            page, actor, workspace_id=workspace_id
+        ):
+            return page, None
+        return None, None
     if version_preference == "visible":
         resolved_version_id = visible_context_version_id(page, actor)[0]
     elif version_preference == "published":

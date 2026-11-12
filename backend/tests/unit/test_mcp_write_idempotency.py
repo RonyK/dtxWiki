@@ -4,13 +4,18 @@ from datetime import timedelta
 
 import pytest
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from backend.mcp.operation_tools import KEYED_TOOL_COMMANDS
 from backend.models.base import utc_now
-from backend.models.mcp_trace import MCPWriteIdempotency
+from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
 from backend.models.workspace import Workspace
 from backend.schemas.context_write import UpdateDraftResult
+from backend.services.mcp_operation_attempt import (
+    lookup_operation_status,
+    start_operation_attempt,
+)
 from backend.services.mcp_write_idempotency import (
     IDEMPOTENCY_WINDOW,
     execute_idempotent_write,
@@ -121,6 +126,9 @@ def test_existing_hit_transforms_return_value_without_rewriting_stored_result(
             )
         )
 
+    def _must_not_execute() -> _Result:
+        pytest.fail("A lookup-only retry must not execute the command")
+
     with session_factory.begin() as session:
         replay = execute_idempotent_write(
             session,
@@ -131,10 +139,11 @@ def test_existing_hit_transforms_return_value_without_rewriting_stored_result(
             idempotency_key="transform-key",
             fingerprint="transform-fingerprint",
             result_model=_Result,
-            execute=lambda: _Result(value="must-not-run"),
+            execute=_must_not_execute,
             replay_transform=lambda result: result.model_copy(
                 update={"value": f"replayed:{result.value}"}
             ),
+            retry_only=True,
         )
 
     assert replay == _Result(value="replayed:committed")
@@ -180,6 +189,29 @@ def test_expired_key_is_reclaimed_as_a_new_intent(session_factory, monkeypatch) 
         execute_count += 1
         return _Result(value="new-result")
 
+    # A receipt lookup leaves an expired intent intact; only a normal resend
+    # may reclaim its key and execute a new intent below.
+    with session_factory.begin() as session:
+        with pytest.raises(OperationOutcomeUnknownError):
+            execute_idempotent_write(
+                session,
+                workspace_id=workspace_id,
+                actor_kind="human",
+                actor_id="expired-idempotency-actor",
+                tool_name="patch_draft",
+                idempotency_key="expired-key",
+                fingerprint="new-fingerprint",
+                result_model=_Result,
+                execute=_execute_new_intent,
+                retry_only=True,
+            )
+        preserved = session.get(MCPWriteIdempotency, expired_id)
+        assert preserved is not None
+        assert preserved.request_fingerprint == "expired-fingerprint"
+        assert preserved.result_payload == {"value": "expired-result"}
+        assert preserved.expires_at == now - timedelta(seconds=1)
+    assert execute_count == 0
+
     with session_factory.begin() as session:
         result = execute_idempotent_write(
             session,
@@ -212,162 +244,140 @@ def test_expired_key_is_reclaimed_as_a_new_intent(session_factory, monkeypatch) 
         assert replacement.expires_at >= now + IDEMPOTENCY_WINDOW
 
 
-def test_retry_only_without_a_key_is_a_contract_violation() -> None:
-    with pytest.raises(ValueError, match="retry_only requires an idempotency_key"):
-        execute_idempotent_write(
-            None,  # type: ignore[arg-type]
-            workspace_id=None,  # type: ignore[arg-type]
-            actor_kind="human",
-            actor_id="retry-only-no-key-actor",
-            tool_name="patch_draft",
-            idempotency_key=None,
-            fingerprint="irrelevant",
-            result_model=_Result,
-            execute=lambda: _Result(value="must-not-run"),
-            retry_only=True,
-        )
-
-
-def test_retry_only_with_no_receipt_answers_outcome_unknown_without_executing(
-    session_factory,
-) -> None:
-    """P8.5: a caller unsure whether its own prior send landed must get a
-    read-only answer, never a fresh execution of the command it is asking
-    about."""
-
-    with session_factory.begin() as session:
-        workspace_id = session.scalar(
-            select(Workspace.id).where(Workspace.slug == "default")
-        )
-
-    execute_count = 0
-
-    def _must_not_execute() -> _Result:
-        nonlocal execute_count
-        execute_count += 1
-        return _Result(value="should-not-happen")
-
-    with session_factory.begin() as session:
-        with pytest.raises(OperationOutcomeUnknownError):
-            execute_idempotent_write(
-                session,
-                workspace_id=workspace_id,
-                actor_kind="human",
-                actor_id="retry-only-no-receipt-actor",
-                tool_name="patch_draft",
-                idempotency_key="never-sent-key",
-                fingerprint="irrelevant",
-                result_model=_Result,
-                execute=_must_not_execute,
-                retry_only=True,
-            )
-
-    assert execute_count == 0
-
-
-def test_retry_only_with_an_expired_receipt_preserves_the_row(
-    session_factory,
-    monkeypatch,
-) -> None:
-    """P8.5: an expired receipt must NOT be read as "no receipt ever
-    existed" and silently reclaimed as license to execute -- `retry_only`
-    leaves the expired row in place for the real (non-retry_only) resend to
-    reclaim, and answers unknown instead of guessing."""
-
-    # Judge the receipt against the same "now" it is backdated from; see
-    # test_expired_key_is_reclaimed_as_a_new_intent.
-    now = utc_now()
-    monkeypatch.setattr("backend.services.mcp_write_idempotency.utc_now", lambda: now)
-    with session_factory.begin() as session:
-        workspace_id = session.scalar(
-            select(Workspace.id).where(Workspace.slug == "default")
-        )
-        expired = MCPWriteIdempotency(
-            workspace_id=workspace_id,
-            actor_kind="human",
-            actor_id="retry-only-expired-actor",
-            tool_name="patch_draft",
-            idempotency_key="retry-only-expired-key",
-            request_fingerprint="expired-fingerprint",
-            result_payload={"value": "expired-result"},
-            expires_at=now - timedelta(seconds=1),
-        )
-        session.add(expired)
-        session.flush()
-        expired_id = expired.id
-
-    execute_count = 0
-
-    def _must_not_execute() -> _Result:
-        nonlocal execute_count
-        execute_count += 1
-        return _Result(value="should-not-happen")
-
-    with session_factory.begin() as session:
-        with pytest.raises(OperationOutcomeUnknownError):
-            execute_idempotent_write(
-                session,
-                workspace_id=workspace_id,
-                actor_kind="human",
-                actor_id="retry-only-expired-actor",
-                tool_name="patch_draft",
-                idempotency_key="retry-only-expired-key",
-                fingerprint="irrelevant",
-                result_model=_Result,
-                execute=_must_not_execute,
-                retry_only=True,
-            )
-
-    assert execute_count == 0
+def test_operation_lifecycle_keeps_arrival_separate_and_prefers_atomic_receipt(
+    session_factory, monkeypatch, mcp_default_actor
+):
+    # MCP status starts from the arrival; a receipt proves a commit. A late
+    # worker cannot touch a newer attempt, only a failure known to repeat asks
+    # for a fix, and a key reused by another command reports the latest call.
+    clock = [utc_now()]
+    monkeypatch.setattr(
+        "backend.services.mcp_operation_attempt.utc_now", lambda: clock[0]
+    )
     with session_factory() as session:
-        still_there = session.get(MCPWriteIdempotency, expired_id)
-        assert still_there is not None
-        assert still_there.result_payload == {"value": "expired-result"}
-
-
-def test_retry_only_with_a_valid_receipt_replays_without_executing(
-    session_factory,
-) -> None:
-    with session_factory.begin() as session:
         workspace_id = session.scalar(
             select(Workspace.id).where(Workspace.slug == "default")
         )
-        session.add(
-            MCPWriteIdempotency(
-                workspace_id=workspace_id,
-                actor_kind="human",
-                actor_id="retry-only-valid-actor",
-                tool_name="patch_draft",
-                idempotency_key="retry-only-valid-key",
-                request_fingerprint="valid-fingerprint",
-                result_payload={"value": "already-landed"},
-                expires_at=utc_now() + IDEMPOTENCY_WINDOW,
+    actor = mcp_default_actor(actor_id="operation-actor", scopes=("*",))
+    scope = dict(
+        workspace_id=workspace_id,
+        actor_kind=actor.actor_kind,
+        actor_id=actor.actor_id,
+        idempotency_key="operation-key",
+    )
+    arrival_scope = dict(
+        workspace_id=workspace_id, actor=actor, idempotency_key="operation-key"
+    )
+
+    def status(**changes):
+        with session_factory() as session:
+            return lookup_operation_status(
+                session, **{**scope, "commands": KEYED_TOOL_COMMANDS, **changes}
             )
-        )
 
-    execute_count = 0
+    def receipt(tool_name, result):
+        with session_factory.begin() as session:
+            session.add(
+                MCPWriteIdempotency(
+                    **scope,
+                    tool_name=tool_name,
+                    request_fingerprint=f"{tool_name}-fixture",
+                    result_payload=result,
+                    created_at=clock[0],
+                    expires_at=clock[0] + IDEMPOTENCY_WINDOW,
+                )
+            )
 
-    def _must_not_execute() -> _Result:
-        nonlocal execute_count
-        execute_count += 1
-        return _Result(value="should-not-happen")
+    def finalize(identity, **values):
+        # What the final capture records on the arrival row.
+        with session_factory.begin() as session:
+            session.execute(
+                update(MCPToolCall)
+                .where(MCPToolCall.id == identity.id)
+                .values(
+                    completed_at=clock[0],
+                    result_status="failed" if values.get("error_code") else "succeeded",
+                    **values,
+                )
+            )
 
-    with session_factory.begin() as session:
-        replay = execute_idempotent_write(
-            session,
-            workspace_id=workspace_id,
-            actor_kind="human",
-            actor_id="retry-only-valid-actor",
-            tool_name="patch_draft",
-            idempotency_key="retry-only-valid-key",
-            fingerprint="valid-fingerprint",
-            result_model=_Result,
-            execute=_must_not_execute,
-            retry_only=True,
-        )
+    # A receipt written outside MCP has no arrival and is never served.
+    receipt("lint_fix_page", {"value": "browser"})
+    unseen = status()
+    assert (unseen.status, unseen.next_action) == ("not_seen", "resend_same_request")
+    assert "once" in unseen.guidance and "24 hours" in unseen.guidance
+    first = start_operation_attempt(
+        session_factory, **arrival_scope, tool_name="patch_context_edit"
+    )
+    assert status().status == "in_progress"
+    assert status(actor_id="another-actor").status == "not_seen"
+    clock[0] += timedelta(seconds=121)
+    interrupted = status()
+    assert interrupted.status == "failed"
+    assert interrupted.error["code"] == "operation_interrupted"
+    assert interrupted.next_action == "resend_same_request"
 
-    assert replay == _Result(value="already-landed")
-    assert execute_count == 0
+    second = start_operation_attempt(
+        session_factory, **arrival_scope, tool_name="patch_context_edit"
+    )
+    finalize(first, error_code="old-worker-error", retryable=False)
+    assert status().status == "in_progress"
+    finalize(
+        second,
+        error_code="validation_failed",
+        result_summary="Fix the operation.",
+        retryable=False,
+    )
+    assert status().next_action == "fix_request"
+    clock[0] += timedelta(seconds=1)
+    third = start_operation_attempt(
+        session_factory, **arrival_scope, tool_name="patch_context_edit"
+    )
+    finalize(third, error_code="internal_error", retryable=None)
+    unknown = status()
+    assert (unknown.next_action, unknown.guidance) == (
+        "resend_same_request",
+        unseen.guidance,
+    )
+    clock[0] += timedelta(seconds=1)
+    fourth = start_operation_attempt(
+        session_factory, **arrival_scope, tool_name="patch_context_edit"
+    )
+    receipt("patch_context_edit", {"value": "saved"})
+    # The worker has not finalized, yet the domain transaction proves success.
+    committed = status()
+    assert (committed.status, committed.next_action) == ("committed", "use_result")
+    assert committed.receipt_payload == {"value": "saved"}
+    clock[0] += timedelta(seconds=1)
+    fifth = start_operation_attempt(
+        session_factory, **arrival_scope, tool_name="discard_context_edit"
+    )
+    assert status().status == "in_progress"  # latest tool, not the prior patch
+    receipt("discard_context_edit", {"discarded": True})
+    finalize(fifth)
+    assert status().receipt_payload == {"discarded": True}
+    with session_factory() as session:
+        rows = session.scalars(
+            select(MCPToolCall)
+            .where(MCPToolCall.idempotency_key == scope["idempotency_key"])
+            .order_by(MCPToolCall.started_at, MCPToolCall.id)
+        ).all()
+        assert [row.id for row in rows] == [
+            first.id,
+            second.id,
+            third.id,
+            fourth.id,
+            fifth.id,
+        ]
+        assert rows[0].error_code == "old-worker-error"
+        assert rows[1].error_code == "validation_failed"
+        assert rows[4].result_status == "succeeded"
+        assert rows[3].result_detail is None
+    clock[0] += IDEMPOTENCY_WINDOW + timedelta(seconds=1)
+    assert status().status == "not_seen"
+    with session_factory() as session:
+        assert session.get(MCPToolCall, first.id) is not None
+        assert session.get(MCPToolCall, fourth.id) is not None
 
 
 def test_execution_failure_rolls_back_claim_and_partial_side_effect(

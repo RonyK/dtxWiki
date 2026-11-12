@@ -1050,15 +1050,10 @@ def test_patch_draft_replace_document_rejects_a_stale_base_instead_of_clobbering
 def test_update_draft_stale_base_error_never_discloses_a_foreign_private_editing_row(
     session_factory,
 ):
-    """P2.2/P2.6, MCP analog of the REST-side `_validate_base` masking:
-    `update_draft`'s stale-base check resolves the current head via
-    `_latest_edit_base` (`editable_context_version_id`, a page-global
-    pointer that can durably name a DIFFERENT author's private "editing"
-    row created by a wholly separate write path, e.g. REST's
-    `begin_context_edit`/`autosave_page`). Before this fix, a
-    `StaleBaseVersionError` raised here disclosed that row's exact
-    `latest_version_id`/`latest_content_hash` to the calling MCP actor
-    regardless of who owns it."""
+    """A stale-base error must mask a foreign private edit referenced by
+    legacy generic current/latest pointers. Current private autosaves do
+    not replace a readable shared base or the published-version pointer;
+    this fixture deliberately recreates the older generic-pointer state."""
 
     service = ContextWriteService()
 
@@ -1095,12 +1090,9 @@ def test_update_draft_stale_base_error_never_discloses_a_foreign_private_editing
             actor_id="00000000-0000-0000-0000-0000000000ee",
             version_status="editing",
         )
-        # Exactly what a real REST autosave by that other author would leave
-        # behind (`page_service._set_current_version`) -- a wholly separate
-        # write path can advance the same page-global pointers this legacy
-        # MCP path also reads. `editable_context_version_id` prefers
-        # `latest_draft_version_id`, so both must move for `_latest_edit_base`
-        # to resolve to the private row.
+        # Simulate legacy generic pointers, not publication of a private edit.
+        # The published-version pointer remains unchanged. Both generic
+        # pointers are set because editable_context_version_id prefers latest.
         page.current_version_id = private_editing.id
         page.latest_draft_version_id = private_editing.id
 

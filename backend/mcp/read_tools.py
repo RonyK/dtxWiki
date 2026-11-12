@@ -197,7 +197,8 @@ def _outline_request_fingerprint(request: ReadContextOutlineInput, actor) -> str
     material = {
         "workspace_id": str(request.workspace_id),
         "actor_policy_revision": _outline_actor_policy_revision(actor),
-        "target": request.target.model_dump(mode="json"),
+        "page_id": str(request.page_id),
+        "version_id": str(request.version_id) if request.version_id else None,
         "version": request.version,
         "scope": (
             request.select.model_dump(mode="json")
@@ -221,7 +222,8 @@ def _structure_map_request_fingerprint(request, actor, *, content_hash: str) -> 
         "content_hash": content_hash,
         "workspace_id": str(request.workspace_id),
         "actor_policy_revision": _outline_actor_policy_revision(actor),
-        "target": request.target.model_dump(mode="json"),
+        "page_id": str(request.page_id),
+        "version_id": str(request.version_id) if request.version_id else None,
         "version": request.version,
         "max_blocks": request.max_blocks,
         "max_rows_per_block": request.max_rows_per_block,
@@ -1154,23 +1156,26 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
 def _resolve_outline_version(
     session,
     ctx: ToolCallContext,
-    request: ReadContextOutlineInput,
+    request: ReadContextOutlineInput | ReadStructureMapInput,
     actor,
 ):
-    target = request.target
-    page_id = target.page_id
-    path = target.path
-    if page_id is not None or path is not None:
-        page_id = resolve_page_input(
-            page_id or path, LinkContext(session, ctx.workspace_id, actor)
+    # Identify the page without judging access; the version resolver decides
+    # what this actor may read. Only a legacy path needs name resolution.
+    locator = parse_page_input(request.page_id)
+    if locator.workspace_id is not None and locator.workspace_id != ctx.workspace_id:
+        return None, None
+    try:
+        page_id = locator.page_id or resolve_page_input(
+            request.page_id, LinkContext(session, ctx.workspace_id, actor)
         )
-        path = None
+    except PageLocatorNotFound:
+        return None, None
     return resolve_visible_context_version(
         session,
         workspace_id=ctx.workspace_id,
         page_id=page_id,
-        version_id=target.version_id,
-        path=path,
+        version_id=request.version_id,
+        path=None,
         version_preference=request.version,
         actor=actor,
     )
@@ -1242,8 +1247,12 @@ def read_context_outline(
 
     with ctx.session_factory() as session:
         page, version = _resolve_outline_version(session, ctx, request, actor)
-        if page is None or version is None:
+        if page is None:
             return ReadContextOutlineOutput(envelope=error_envelope(actor, "not_found"))
+        if version is None:
+            return ReadContextOutlineOutput(
+                envelope=error_envelope(actor, "no_open_edit")
+            )
         body_md = version.body_md
         outline = outline_for_body(body_md)
         headings = [
@@ -1420,17 +1429,13 @@ def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapO
         )
 
     with ctx.session_factory() as session:
-        page, version = resolve_visible_context_version(
-            session,
-            workspace_id=request.workspace_id,
-            page_id=request.target.page_id,
-            version_id=request.target.version_id,
-            path=request.target.path,
-            version_preference=request.version,
-            actor=actor,
-        )
-        if page is None or version is None:
+        page, version = _resolve_outline_version(session, ctx, request, actor)
+        if page is None:
             return ReadStructureMapOutput(envelope=error_envelope(actor, "not_found"))
+        if version is None:
+            return ReadStructureMapOutput(
+                envelope=error_envelope(actor, "no_open_edit")
+            )
 
         body_md = version.body_md
         # A stored map can describe an older body (rows saved in place before
@@ -1534,7 +1539,7 @@ def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapO
             page_id=page.id,
             version_id=version.id,
             version_status=version.version_status,
-            root_hash=version.content_hash,
+            content_hash=version.content_hash,
             # The document's TOTAL, not len(blocks) as before. A client sizing
             # a loop over the returned array off this field now over-reads --
             # that is the deliberate contract change, pinned by a test.
@@ -1546,7 +1551,7 @@ def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapO
             ),
             resolved_version_source=(
                 "exact_version"
-                if request.target.version_id is not None
+                if request.version_id is not None
                 else request.version
             ),
             map_repaired=map_repaired,

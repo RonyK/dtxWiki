@@ -14,6 +14,7 @@ EXPECTED_TOOLS = {
     "cite",
     "fetch",
     "get_index",
+    "get_operation_status",
     "grep_wiki",
     "what_changed",
     "guide",
@@ -50,6 +51,8 @@ def test_lists_tools_with_input_schemas_and_no_wire_output_schema():
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
     for tool in tools:
         assert tool.inputSchema["type"] == "object"
+        # REST lookup-only retry fields must not leak through shared commands.
+        assert "retry_only" not in tool.inputSchema["properties"]
         assert "properties" in tool.inputSchema
         assert tool.inputSchema["additionalProperties"] is False
         # outputSchema is deliberately never advertised on the wire (75% of
@@ -69,6 +72,7 @@ def test_tool_descriptors_expose_required_role_metadata():
     assert tools["list_my_workspaces"].meta["required_role"] is None
     assert tools["read"].meta["required_role"] == "viewer"
     assert tools["create_context_page"].meta["required_role"] == "editor"
+    assert tools["get_operation_status"].meta["required_role"] == "editor"
 
 
 def test_tool_descriptor_roles_match_runtime_registry():
@@ -119,7 +123,9 @@ def test_upload_image_descriptor_is_idempotent_and_localized():
     assert tool.annotations.openWorldHint is False
     assert "conversation_token" in tool.inputSchema["required"]
     assert "data.logical_ref" in tool.description
-    assert "editing_version_id" in tool.description
+    assert "version_id" in tool.description
+    assert "version_id" in tool.inputSchema["required"]
+    assert "editing_version_id" not in tool.inputSchema["properties"]
     assert "content_url" in tool.description
     assert "relative same-origin URL" not in tool.description
     assert tool.meta["com.dtxwiki/localizedTitles"] == {
@@ -177,8 +183,9 @@ def test_every_advertised_input_schema_is_host_portable():
     assert len(item["properties"]["op"]["enum"]) == 11
     for field in ("old_text", "new_text", "block", "expected", "content", "at"):
         assert field in item["properties"], field
-    assert "replace_block (requires block, expected, content" in (
-        item["properties"]["op"]["description"]
+    assert (
+        "replace_block (requires block, expected, content"
+        in (item["properties"]["op"]["description"])
     )
     assert "title" in item["properties"], "a field named title must survive"
 

@@ -300,7 +300,7 @@ def test_read_context_outline_duplicate_sections_and_selected_hash(page_service,
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page.id)},
+            "page_id": f"/context/{page.slug}.md",
         },
         actor=actor,
         page_service=page_service,
@@ -317,7 +317,9 @@ def test_read_context_outline_duplicate_sections_and_selected_hash(page_service,
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page.id)},
+            "page_id": f"/p/{page.id}",
+            "version_id": str(page.version_id),
+            "version": "published",
             "select": {
                 "by": "section_id",
                 "section_id": repeats[1].section_id,
@@ -351,7 +353,7 @@ def test_read_context_outline_cursor_round_trip_and_version_binding(
     )
     request = {
         "workspace_id": str(workspace_id),
-        "target": {"page_id": str(page.id)},
+        "page_id": str(page.id),
         "select": {"by": "section_id", "section_id": "root"},
         "max_chars": 12,
     }
@@ -417,7 +419,7 @@ def test_read_context_outline_hides_frontmatter_and_separates_raw_hash(
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page.id)},
+            "page_id": str(page.id),
         },
         actor=actor,
         page_service=page_service,
@@ -428,7 +430,7 @@ def test_read_context_outline_hides_frontmatter_and_separates_raw_hash(
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page.id)},
+            "page_id": str(page.id),
             "select": {
                 "by": "anchor",
                 "anchor_text": "secret: true",
@@ -464,7 +466,7 @@ def test_read_context_outline_hides_frontmatter_and_separates_raw_hash(
                 "read_context_outline",
                 {
                     "workspace_id": str(workspace_id),
-                    "target": {"page_id": str(created.id)},
+                    "page_id": str(created.id),
                 },
                 actor=actor,
                 page_service=page_service,
@@ -474,6 +476,17 @@ def test_read_context_outline_hides_frontmatter_and_separates_raw_hash(
     assert (
         raw_pages[0].document.body_raw_sha256 != raw_pages[1].document.body_raw_sha256
     )
+    mismatched_page = dispatch(
+        "read_context_outline",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(raw_pages[0].document.page_id),
+            "version_id": str(raw_pages[1].document.version_id),
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert mismatched_page.envelope.error_code == "not_found"
 
 
 def test_mcp_grep_wiki_returns_visible_line_context(page_service, actor):

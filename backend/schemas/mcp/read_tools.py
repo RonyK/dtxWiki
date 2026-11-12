@@ -346,21 +346,6 @@ class ReadConceptOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ContextOutlineTarget(BaseModel):
-    path: MCPContextPathInput | None = None
-    page_id: MCPPageInput | None = None
-    version_id: UUID | None = None
-
-    @model_validator(mode="after")
-    def _require_one_target(self):
-        locators = (self.path, self.page_id, self.version_id)
-        if sum(value is not None for value in locators) != 1:
-            raise ValueError("target must contain exactly one locator")
-        return self
-
-    model_config = ConfigDict(extra="forbid")
-
-
 # Which stored version a context read resolves to. "my_edit" is the caller's
 # own open editing row -- the body patch_context_edit applies to -- read with no
 # side effects (no row is opened when there is none).
@@ -368,17 +353,30 @@ ContextReadVersion = Literal["visible", "draft", "published", "my_edit"]
 _CONTEXT_READ_VERSION_DESCRIPTION = (
     "Which version to read: 'visible' (default; what this caller sees), "
     "'draft', 'published', or 'my_edit' -- your own open editing row, the "
-    "exact body patch_context_edit edits (not_found when you have none; it "
-    "never opens one). An explicit target.version_id overrides this."
+    "exact body patch_context_edit edits (no_open_edit when this page is "
+    "visible but you have none; it never opens one). An explicit version_id "
+    "overrides this."
 )
 
 
-class ReadContextOutlineInput(MCPConversationInput):
+class ContextPartialReadInput(MCPConversationInput):
     workspace_id: UUID
-    target: ContextOutlineTarget
+    page_id: MCPContextPathInput
+    version_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Read this exact version of page_id, overriding version. A version "
+            "belonging to a different page returns not_found."
+        ),
+    )
     version: ContextReadVersion = Field(
         default="visible", description=_CONTEXT_READ_VERSION_DESCRIPTION
     )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReadContextOutlineInput(ContextPartialReadInput):
     select: SectionAddress | None = None
     max_chars: int = Field(default=8000, ge=1, le=40000)
     cursor: str | None = None
@@ -442,7 +440,9 @@ class ContextOutlineEntry(BaseModel):
     section_hash: str = Field(
         description=(
             "Normalized content_hash of the exact raw Markdown slice for this "
-            "section subtree."
+            "section subtree, including its heading and descendants. Pass it "
+            "as expected_section_hash; a structure-map heading block hash "
+            "covers only that block and is not interchangeable."
         )
     )
 
@@ -500,12 +500,7 @@ class ReadContextOutlineOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ReadStructureMapInput(MCPConversationInput):
-    workspace_id: UUID
-    target: ContextOutlineTarget
-    version: ContextReadVersion = Field(
-        default="visible", description=_CONTEXT_READ_VERSION_DESCRIPTION
-    )
+class ReadStructureMapInput(ContextPartialReadInput):
     max_blocks: int = Field(default=200, ge=1, le=2000)
     max_rows_per_block: int = Field(
         default=200,
@@ -528,7 +523,9 @@ class ReadStructureMapInput(MCPConversationInput):
 
 class StructureMapRow(BaseModel):
     id: str
-    hash: str
+    hash: str = Field(
+        description="This table row's normalized hash; pass as insert_row.expected."
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -536,7 +533,13 @@ class StructureMapRow(BaseModel):
 class StructureMapBlock(BaseModel):
     id: str
     kind: str
-    hash: str
+    hash: str = Field(
+        description=(
+            "This block's normalized hash; pass as block operations' expected. "
+            "A heading block excludes the following section body, so this is "
+            "not expected_section_hash."
+        )
+    )
     line_span: tuple[int, int] = Field(
         description=(
             "[start, end) 1-indexed line range, computed fresh at serve time -- "
@@ -568,7 +571,7 @@ class StructureMapDocument(BaseModel):
     page_id: UUID
     version_id: UUID
     version_status: str
-    root_hash: str = Field(
+    content_hash: str = Field(
         description=(
             "The version's content_hash. It identifies the body these block "
             "ids and hashes describe; patch_context_edit's concurrency check "
@@ -588,7 +591,7 @@ class StructureMapDocument(BaseModel):
         default="visible",
         description=(
             "How version_id was chosen: the requested `version` mode, or "
-            "exact_version when target.version_id was given."
+            "exact_version when version_id was given."
         ),
     )
     map_repaired: bool = Field(

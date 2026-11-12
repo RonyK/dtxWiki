@@ -144,11 +144,6 @@
         "title": "Remove",
         "type": "array"
       },
-      "retry_only": {
-        "default": false,
-        "title": "Retry Only",
-        "type": "boolean"
-      },
       "version_id": {
         "format": "uuid",
         "title": "Version Id",
@@ -364,6 +359,7 @@
           "code": {
             "description": "Stable warning code; must be drawn from WARNING_CODES.",
             "enum": [
+              "metadata_frontmatter_overridden",
               "stale",
               "permission_limited",
               "citation_missing",

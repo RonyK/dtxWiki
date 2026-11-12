@@ -1,6 +1,8 @@
+import asyncio
 import copy
 import json
 import logging
+import threading
 from dataclasses import replace
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -554,7 +556,7 @@ def test_missing_workspace_target_never_reads_page_directory(
                 "marker_uuid": str(uuid4()),
                 "page_id": str(page_id),
                 "workspace_slug": workspace_slug,
-                "editing_version_id": str(uuid4()),
+                "version_id": str(uuid4()),
                 "conversation_token": "new",
             },
             actor=actor,
@@ -597,7 +599,6 @@ def test_missing_workspace_target_never_reads_page_directory(
     with page_service.session_factory() as session:
         assert session.scalar(select(func.count()).select_from(MCPToolCall)) == 0
         assert session.scalar(select(func.count()).select_from(McpChatSession)) == 0
-
 
 
 def test_list_my_workspaces_cannot_bypass_disabled_runtime_client(
@@ -700,9 +701,13 @@ def test_runtime_binding_rejects_non_bearer_and_incomplete_identities(actor):
         runtime_binding_key_for_actor(actor)
 
 
-def test_call_tool_async_unexpected_dispatch_error_is_sanitized_and_traced(
+def test_keyed_worker_records_errors_and_completes_after_caller_cancellation(
     page_service, monkeypatch, mcp_default_actor
 ):
+    # Additional integration path: actual async cancellation must leave the
+    # worker's separate arrival/completion transactions durable, and a failed
+    # arrival commit must prevent execution. A pure unit test or the DB-state
+    # traversal cannot verify cancellation across asyncio.to_thread and commit.
     """An uncaught dispatch exception must not leak ``str(exc)`` to the
     client (SQLAlchemy errors carry the SQL statement + bound parameters)
     and must still land a failed tool-call trace in the MCP-chats audit
@@ -712,21 +717,30 @@ def test_call_tool_async_unexpected_dispatch_error_is_sanitized_and_traced(
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         workspace_id = workspace.id
 
+    from backend.mcp.operation_tools import KEYED_TOOL_COMMANDS
+    from backend.mcp.router import TOOL_HANDLERS
+
+    real_handler = TOOL_HANDLERS["create_context_page"]
+    actor = _pat_actor(mcp_default_actor, actor_id="trace-fault-client", scopes=("*",))
+    arguments = {
+        "workspace_id": str(workspace_id),
+        "conversation_token": "new",
+        "idempotency_key": "worker-lost-response",
+        "title": "Worker outcome",
+        "body_md": "# Worker outcome\n\nSaved after a lost response.\n",
+    }
+
     def _boom(*_args, **_kwargs):
         raise RuntimeError("INSERT INTO pages (secret) VALUES ('do-not-leak')")
 
-    original_dispatch = runner_module.dispatch
-    monkeypatch.setattr(runner_module, "dispatch", _boom)
+    # Fail after authorization, once the arrival is committed.
+    monkeypatch.setitem(TOOL_HANDLERS, "create_context_page", _boom)
 
     async def run():
         return await call_tool_async(
-            "search",
-            {"workspace_id": str(workspace_id), "query": "boom"},
-            actor=_pat_actor(
-                mcp_default_actor,
-                actor_id="trace-fault-client",
-                scopes=("*",),
-            ),
+            "create_context_page",
+            arguments,
+            actor=actor,
             page_service=page_service,
             session_factory=page_service.session_factory,
         )
@@ -746,16 +760,103 @@ def test_call_tool_async_unexpected_dispatch_error_is_sanitized_and_traced(
 
     with page_service.session_factory() as session:
         trace = session.scalar(
-            select(MCPToolCall).where(MCPToolCall.tool_name == "search")
+            select(MCPToolCall).where(MCPToolCall.tool_name == "create_context_page")
         )
     assert trace is not None
     assert trace.result_status == "failed"
     assert trace.error_code == "internal_error"
+    assert trace.request_id == UUID(payload["envelope"]["request_id"])
+    assert trace.idempotency_key == "worker-lost-response"
+    with page_service.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(MCPToolCall)) == 1
+        assert session.scalar(select(McpChatSession.tool_call_count)) == 1
+        assert session.scalar(select(McpChatSession.error_count)) == 1
+
+    from backend.services.mcp_operation_attempt import lookup_operation_status
+
+    def status(key="worker-lost-response"):
+        with page_service.session_factory() as session:
+            return lookup_operation_status(
+                session,
+                workspace_id=workspace_id,
+                actor_kind=actor.actor_kind,
+                actor_id=actor.actor_id,
+                idempotency_key=key,
+                commands=KEYED_TOOL_COMMANDS,
+            )
+
+    assert (status().status, status().next_action) == ("failed", "resend_same_request")
+    assert "do-not-leak" not in status().error["message"]
+    entered, release, completed = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    real_finish = runner_module.finish_operation_attempt
+
+    def blocked_handler(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=10)
+        return real_handler(*args, **kwargs)
+
+    def tracked_finish(*args, **kwargs):
+        try:
+            return real_finish(*args, **kwargs)
+        finally:
+            completed.set()
+
+    monkeypatch.setitem(TOOL_HANDLERS, "create_context_page", blocked_handler)
+    monkeypatch.setattr(runner_module, "finish_operation_attempt", tracked_finish)
+
+    async def cancel_after_arrival():
+        task = asyncio.create_task(run())
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            assert status().status == "in_progress"
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            release.set()
+        assert await asyncio.to_thread(completed.wait, 10)
+
+    anyio.run(cancel_after_arrival)
+    assert status().status == "committed"
+    with page_service.session_factory() as session:
+        calls = session.scalars(
+            select(MCPToolCall).where(
+                MCPToolCall.idempotency_key == "worker-lost-response"
+            )
+        ).all()
+        assert len(calls) == 2
+        assert all(call.completed_at is not None for call in calls)
+        assert {call.result_status for call in calls} == {"failed", "succeeded"}
+        assert session.scalar(select(func.sum(McpChatSession.tool_call_count))) == 2
+        assert session.scalar(select(func.sum(McpChatSession.error_count))) == 1
+
+    # A failed arrival commit must stop dispatch, even when storage is down.
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("private-database-details")
+
+    monkeypatch.setattr(runner_module, "start_operation_attempt", unavailable)
+    monkeypatch.setitem(
+        TOOL_HANDLERS,
+        "create_context_page",
+        lambda *a, **k: pytest.fail("the tool ran without a durable arrival"),
+    )
+    arguments["idempotency_key"] = "arrival-unavailable"
+    unavailable_result = anyio.run(run)
+    unavailable_payload = unavailable_result.structuredContent
+    assert (
+        unavailable_payload["envelope"]["error_code"]
+        == "operation_tracking_unavailable"
+    )
+    assert "private-database-details" not in unavailable_result.content[0].text
+    assert status("arrival-unavailable").status == "not_seen"
     assert "do-not-leak" not in str(trace.result_summary)
 
     # Known storage errors travel through dispatch's common boundary and then
     # the normal runner trace path, without retaining a partial served read.
-    monkeypatch.setattr(runner_module, "dispatch", original_dispatch)
     page_id = uuid4()
 
     def _storage_boom(_payload, _ctx):
@@ -779,7 +880,7 @@ def test_call_tool_async_unexpected_dispatch_error_is_sanitized_and_traced(
             "read_context_outline",
             {
                 "workspace_id": str(workspace_id),
-                "target": {"page_id": str(page_id)},
+                "page_id": str(page_id),
                 "conversation_token": payload["envelope"]["conversation_token"],
             },
             actor=_pat_actor(

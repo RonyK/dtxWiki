@@ -14,6 +14,8 @@ from backend.models.mcp_chat import McpChatArtifactKind, McpChatArtifactVerb
 from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
+from backend.repositories.workspace_scoped import select_in_workspace
+from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.mcp_artifact_activity import ArtifactLinkCandidate
 from backend.services.mcp_chat_service import (
     CONTEXT_EDIT_TOOLS,
@@ -26,6 +28,7 @@ from backend.services.mcp_read_projection import (
     validate_read_projection,
 )
 from backend.services.mcp_trace_redaction import (
+    null_previews,
     redact_edit_receipt,
     redact_error_details,
     redact_tool_capture,
@@ -73,13 +76,26 @@ def persist_mcp_tool_trace(
     if workspace_id is None or request_id is None:
         return None
 
+    acquire_workspace_write_intent(session)
     client = resolve_trace_mcp_client(
         session,
         workspace_id=workspace_id,
         actor=actor,
     )
     touch_mcp_client_last_used(client, used_at=completed_at)
-    tool_call = MCPToolCall(
+    tool_call = session.scalar(
+        select_in_workspace(
+            MCPToolCall,
+            workspace_id=workspace_id,
+            conditions=(MCPToolCall.request_id == request_id,),
+        ).with_for_update()
+    )
+    # A keyed call's row was inserted at arrival and is finalized here once.
+    # A finalized row already carries its counts and visibility edges, so a
+    # second capture of the same request changes nothing.
+    if tool_call is not None and tool_call.outcome is not None:
+        return tool_call
+    values = dict(
         client_id=client.id,
         workspace_id=workspace_id,
         mcp_session_id=mcp_session_trace_uuid(mcp_session_id),
@@ -96,6 +112,7 @@ def persist_mcp_tool_trace(
         ),
         warnings=_jsonable(envelope.get("warnings") or []),
         error_code=envelope.get("error_code"),
+        retryable=envelope.get("retryable"),
         audit_event_id=_uuid_or_none(envelope.get("audit_event_id")),
         change_set_id=_uuid_or_none(_data(payload).get("change_set_id")),
         agent_input_bundle_id=_uuid_or_none(_data(payload).get("bundle_id")),
@@ -109,7 +126,18 @@ def persist_mcp_tool_trace(
         completed_at=completed_at,
         latency_ms=latency_ms,
     )
-    session.add(tool_call)
+    if tool_call is not None and (tool_call.result_detail or {}).get("previews_purged"):
+        # The owner may purge while dispatch is still running, including a
+        # discard between the domain commit and this final capture.
+        values["input_summary"], _ = null_previews(values["input_summary"])
+        detail, _ = null_previews(values["result_detail"] or {})
+        values["result_detail"] = {**detail, "previews_purged": True}
+    if tool_call is None:
+        tool_call = MCPToolCall(**values)
+        session.add(tool_call)
+    else:
+        for field, value in values.items():
+            setattr(tool_call, field, value)
     session.flush()
 
     # A call the server rejected before dispatch (no conversation to attach to)
@@ -212,8 +240,8 @@ def derive_artifact_links(
                 )
             )
     elif tool_name == "create_context_page":
-        # `data` is a PagePayload (`id`/`version_id`).
-        page_id = _uuid_or_none(data.get("id"))
+        # Current responses use page_id; stored historical payloads used id.
+        page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
         if page_id is not None:
             candidates.append(
                 ArtifactLinkCandidate(
@@ -227,7 +255,7 @@ def derive_artifact_links(
     elif tool_name == "begin_context_edit":
         # Opens or resumes the caller's own editing session -- no content
         # changes yet, so this is closer to a read-like touch than a write.
-        page_id = _uuid_or_none(data.get("id"))
+        page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
         if page_id is not None:
             candidates.append(
                 ArtifactLinkCandidate(
@@ -242,7 +270,7 @@ def derive_artifact_links(
         "submit_context_edit_for_review",
         "patch_context_edit",
     }:
-        page_id = _uuid_or_none(data.get("id"))
+        page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
         if page_id is not None:
             candidates.append(
                 ArtifactLinkCandidate(
@@ -286,13 +314,10 @@ def derive_artifact_links(
     elif tool_name == "fetch":
         candidates.extend(_fetch_links(session, arguments))
     elif tool_name in {"read_context_outline", "read_structure_map"}:
-        # Resolve from the response document, not the request target: the
-        # target may be a concept path or a version id, and the document is
-        # the page the read actually landed on. The read ledger (design doc
-        # section 9) records exactly the version this read served --
-        # read_structure_map's document already names it "root_hash" (its
-        # own vocabulary); read_context_outline calls the same normalized
-        # value "content_hash".
+        # Resolve from the response document, not the request locator: a
+        # page_id may be a legacy path or stable URL. The read ledger records
+        # exactly the version served. Both partial reads expose content_hash;
+        # root_hash below only accepts historical captured response shapes.
         #
         # Unlike the write tools, these two output schemas are flat (no
         # "data" wrapper -- see ReadContextOutlineOutput/ReadStructureMapOutput
@@ -381,6 +406,8 @@ EDGE_LESS_TOOLS = frozenset(
         # P8.6: lists across many of the caller's own pages, like
         # list_changes/list_requested_changes above.
         "list_my_context_edits",
+        # Recovery reports an earlier operation; it consumes no new artifact.
+        "get_operation_status",
         # The legacy Pages tools are deregistered and their handlers are
         # gone, but these names stay: MCPToolCall rows written before the
         # removal still carry them, and this classification is applied to
@@ -432,10 +459,9 @@ def _result_detail(
         return {"error_details": error_details} if error_details else None
     data = _data(payload)
     detail: dict[str, Any] = {}
-    # Every context-edit response carries id/version_id (begin's PagePayload,
-    # the other commands' ContextEditResult) except discard's small result,
-    # which carries only version_id.
-    page_id = _uuid_or_none(data.get("id"))
+    # Context edit responses use page_id/version_id. Keep id only for traces
+    # captured before that wire rename; discard carries only version_id.
+    page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
     if page_id is not None:
         detail["page_id"] = str(page_id)
     version_id = _uuid_or_none(data.get("version_id"))

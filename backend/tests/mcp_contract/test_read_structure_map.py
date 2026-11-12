@@ -37,7 +37,7 @@ def test_read_structure_map_covers_every_block_kind_with_ids_and_hashes(
         "read_structure_map",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page.id)},
+            "page_id": f"/p/{workspace_id}/{page.id}",
         },
         actor=actor,
         page_service=page_service,
@@ -47,7 +47,7 @@ def test_read_structure_map_covers_every_block_kind_with_ids_and_hashes(
     assert result.content_trust == "untrusted_user_content"
     assert result.document.page_id == page.id
     assert result.document.version_id == page.version_id
-    assert result.document.root_hash == page.content_hash
+    assert result.document.content_hash == page.content_hash
     assert result.document.block_count == len(result.blocks) == 3
 
     kinds = [block.kind for block in result.blocks]
@@ -85,7 +85,7 @@ def test_read_structure_map_preview_uses_the_shared_raw_line_table(
         "read_structure_map",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page.id)},
+            "page_id": str(page.id),
         },
         actor=actor,
         page_service=page_service,
@@ -115,7 +115,7 @@ def test_read_structure_map_carries_ids_forward_across_an_unrelated_edit(
     )
     before = dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page.id)},
         actor=actor,
         page_service=page_service,
     )
@@ -134,7 +134,7 @@ def test_read_structure_map_carries_ids_forward_across_an_unrelated_edit(
     )
     after = dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "target": {"page_id": str(page.id)}},
+        {"workspace_id": str(workspace_id), "page_id": str(page.id)},
         actor=actor,
         page_service=page_service,
     )
@@ -159,7 +159,7 @@ def test_read_structure_map_returns_not_found_for_a_missing_page(page_service, a
         "read_structure_map",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": "00000000-0000-0000-0000-000000000099"},
+            "page_id": "00000000-0000-0000-0000-000000000099",
         },
         actor=actor,
         page_service=page_service,

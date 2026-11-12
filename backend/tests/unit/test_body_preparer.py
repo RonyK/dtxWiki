@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from backend.domain.input_policy import InputPolicyError
+from backend.domain.prepared_body import PreparedMetadata
 from backend.services.body_preparer import (
     BodyInput,
     BodyPreparer,
@@ -60,6 +61,58 @@ def test_body_preparer_is_idempotent_and_honors_injected_modules_and_policy():
     workspace.auto_fix_enabled = False
     historical = "---\ntitle: Old\ncustom: keep\n---\n" + raw
     assert preparer.prepare(BodyInput(historical), ctx).body == historical
+    # One managed-metadata traversal: frontmatter supplies omitted parameters,
+    # explicit empty lists clear values, and an unchanged stored snapshot must
+    # not revert metadata changed elsewhere while this edit remained open.
+    from_body = preparer.prepare(
+        BodyInput(
+            "---\ntitle: Authored title\ntags: [body]\naliases: [Body alias]\n"
+            "custom: keep\n---\n" + raw,
+            metadata=PageMetadataInput(None, "prepared-page"),
+        ),
+        ctx,
+    )
+    assert from_body.metadata.title == "Authored title"
+    assert from_body.metadata.tags == ["body"]
+    overridden = preparer.prepare(
+        BodyInput(
+            from_body.body,
+            metadata=PageMetadataInput(
+                "Explicit title", "prepared-page", tags=[], aliases=[]
+            ),
+            baseline_body_md=from_body.body,
+        ),
+        ctx,
+    )
+    assert overridden.metadata_overrides == (
+        {"field": "title", "value": "Explicit title"},
+        {"field": "tags", "value": []},
+        {"field": "aliases", "value": []},
+    )
+    retained = preparer.prepare(
+        BodyInput(
+            overridden.body,
+            metadata=PageMetadataInput(None, "prepared-page"),
+            fallback_metadata=PreparedMetadata(
+                title="External title", tags=["current"], aliases=[]
+            ),
+            baseline_body_md=overridden.body,
+        ),
+        ctx,
+    )
+    assert retained.metadata.title == "External title"
+    assert retained.metadata.tags == ["current"]
+    changed = preparer.prepare(
+        BodyInput(
+            retained.body.replace('title: "External title"', 'title: "Edited title"'),
+            metadata=PageMetadataInput(None, "prepared-page"),
+            fallback_metadata=retained.metadata,
+            baseline_body_md=retained.body,
+        ),
+        ctx,
+    )
+    assert changed.metadata.title == "Edited title"
+    assert "custom: keep" in changed.body
     # Context drafts retain the historical frontmatter acceptance boundary;
     # managed page writes still enforce authored metadata limits.
     legacy = "---\ntags: [" + "x" * 60 + "]\n---\n" + raw

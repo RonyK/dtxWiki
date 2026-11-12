@@ -179,7 +179,7 @@ def test_authoring_skill_uploads_and_verifies_before_image_reference():
     assert "Never fall back to a `data:` URI." in text
     assert "sanitizer strips it" in text
     assert "`data.markdown` or `data.logical_ref`" in text
-    assert "`editing_version_id`" in text
+    assert "`version_id`" in text
     assert "no page-less upload" in text
     assert "never persist them in Markdown" in text
     assert "relative same-origin URL" not in text

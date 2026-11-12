@@ -204,7 +204,7 @@ def test_body_reads_are_viewed_and_structural_reads_remain_referenced(
             }
         }
     else:
-        payload = {"data": {"id": str(page_id), "version_id": str(version_id)}}
+        payload = {"data": {"page_id": str(page_id), "version_id": str(version_id)}}
 
     with page_service.session_factory() as session:
         links = derive_artifact_links(
@@ -247,7 +247,7 @@ def test_patch_context_edit_links_the_edited_page(page_service):
             arguments={"workspace_id": str(ws.id), "page_id": str(page.id)},
             payload={
                 "data": {
-                    "id": str(page.id),
+                    "page_id": str(page.id),
                     "version_id": str(version_id),
                     "content_hash": content_hash,
                 }
@@ -277,7 +277,7 @@ def test_read_context_outline_links_the_resolved_page(page_service):
             session=session,
             tool_name="read_context_outline",
             # Addressed by path: only the response knows which page it resolved to.
-            arguments={"workspace_id": str(ws.id), "target": {"path": "context/x"}},
+            arguments={"workspace_id": str(ws.id), "page_id": "/context/x.md"},
             # ReadContextOutlineOutput is flat -- document lives at the
             # payload's top level, not under a "data" wrapper like the write
             # tools' outputs.
@@ -315,7 +315,7 @@ def test_upload_image_links_the_created_asset_page_bound(page_service):
             arguments={
                 "workspace_id": str(ws.id),
                 "page_id": str(page.id),
-                "editing_version_id": str(editing_version_id),
+                "version_id": str(editing_version_id),
                 "filename": "diagram.png",
                 "mime_type": "image/png",
                 "marker_uuid": str(asset_id),
@@ -381,7 +381,7 @@ def test_upload_image_edge_survives_the_real_response_and_redaction(page_service
     )
     arguments = {
         "page_id": str(page_id),
-        "editing_version_id": str(editing_version_id),
+        "version_id": str(editing_version_id),
         "filename": "diagram.png",
         "mime_type": "image/png",
         "content_base64": content_base64,
@@ -515,7 +515,7 @@ def test_persist_trace_stores_the_masked_edit_receipt(page_service, mcp_default_
         _edit_trace_payload(
             workspace_id,
             data={
-                "id": str(page_id),
+                "page_id": str(page_id),
                 "version_id": str(version_id),
                 "content_hash": "a" * 64,
                 "body_md": "FULL-BODY-MUST-NOT-BE-STORED",
@@ -546,6 +546,112 @@ def test_persist_trace_stores_the_masked_edit_receipt(page_service, mcp_default_
         "text": "new line",
         "truncated": False,
     }
+
+
+def test_pending_call_purge_survives_completion_and_bridge_capture(
+    page_service, mcp_default_actor
+):
+    # One DB case for the new storage lifecycle: the owner's purge must survive
+    # both first completion and async enrichment, without a second Chats count.
+    # Receipt redaction alone cannot exercise those separate transactions.
+    from backend.models.mcp_chat import McpChatSession
+    from backend.models.mcp_trace import MCPToolCall
+    from backend.services.mcp_chat_service import McpChatService
+    from backend.services.mcp_operation_attempt import (
+        finish_operation_attempt,
+        start_operation_attempt,
+    )
+
+    actor = mcp_default_actor(scopes=("*",))
+    workspace_id = actor.workspace_id
+    token = f"conv-{uuid4()}"
+    arguments = {
+        "workspace_id": str(workspace_id),
+        "page_id": str(uuid4()),
+        "version_id": str(uuid4()),
+        "idempotency_key": "purged-pending-call",
+        "expected_editing_revision": 1,
+        "operations": [
+            {"op": "replace_text", "old_text": "old", "new_text": "PRIVATE-EXCERPT"}
+        ],
+    }
+    identity = start_operation_attempt(
+        page_service.session_factory,
+        workspace_id=workspace_id,
+        actor=actor,
+        tool_name="patch_context_edit",
+        idempotency_key=arguments["idempotency_key"],
+        arguments=arguments,
+        mcp_session_id=token,
+    )
+    chats = McpChatService()
+    with page_service.session_factory.begin() as session:
+        pending = session.get(MCPToolCall, identity.id)
+        chat = McpChatSession(
+            workspace_id=workspace_id,
+            client_id=pending.client_id,
+            owner_user_id=actor.user_id,
+            mcp_session_id=token,
+        )
+        session.add(chat)
+        session.flush()
+        chat_id = chat.id
+        assert (
+            chats.read_chat(
+                session=session,
+                workspace_id=workspace_id,
+                chat_session_id=chat_id,
+                actor=actor,
+            ).timeline
+            == []
+        )
+        purged = chats.purge_chat_previews(
+            session=session,
+            workspace_id=workspace_id,
+            chat_session_id=chat_id,
+            actor=actor,
+        )
+        assert purged.purged_call_count == 1
+
+    payload = _edit_trace_payload(
+        workspace_id,
+        data={
+            "page_id": arguments["page_id"],
+            "version_id": arguments["version_id"],
+            "body_md": "FULL-RESPONSE-BODY",
+            "edit_receipt": {"edit_mode": "patch", "chars_added": 15},
+        },
+    )
+    payload["envelope"]["request_id"] = str(identity.request_id)
+    completion = dict(
+        actor=actor,
+        tool_name="patch_context_edit",
+        arguments=arguments,
+        payload=payload,
+        mcp_session_id=token,
+        latency_ms=1,
+        edit_first_change={
+            "line": 1,
+            "before_preview": "old",
+            "after_preview": "PRIVATE-EXCERPT",
+        },
+    )
+    finish_operation_attempt(page_service.session_factory, identity, **completion)
+    # A second capture of the same request (a retried final capture) is inert.
+    finish_operation_attempt(page_service.session_factory, identity, **completion)
+    with page_service.session_factory() as session:
+        stored = session.get(MCPToolCall, identity.id)
+        chat = session.get(McpChatSession, chat_id)
+        assert (stored.result_status, chat.tool_call_count, chat.write_count) == (
+            "succeeded",
+            1,
+            1,
+        )
+        assert stored.result_detail["edit_receipt"]["chars_added"] == 15
+        assert stored.result_detail["previews_purged"] is True
+        captured = json.dumps([stored.input_summary, stored.result_detail])
+        assert "PRIVATE-EXCERPT" not in captured
+        assert "FULL-RESPONSE-BODY" not in captured
 
 
 def test_persist_trace_stores_no_detail_for_a_read_or_a_failed_edit(

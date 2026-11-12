@@ -239,6 +239,7 @@ class Settings(BaseSettings):
     force_security_headers: bool = False
     mcp_http_mode: Literal["json_stateless", "streamable", "auto"] = "streamable"
     mcp_preview_2026_07_28: bool = False
+    mcp_operation_timeout_seconds: int = Field(default=120, ge=1)
     llm_provider: str = "none"
     # Epic-1 RAG embedding selection (chosen at `dtxwiki setup`):
     #   none | deterministic | local | openai_compatible

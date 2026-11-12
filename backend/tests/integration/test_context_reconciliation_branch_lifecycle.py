@@ -22,7 +22,7 @@ def _structure_map(workspace_id, page_id, actor, page_service):
         "read_structure_map",
         {
             "workspace_id": str(workspace_id),
-            "target": {"page_id": str(page_id)},
+            "page_id": str(page_id),
         },
         actor=actor,
         page_service=page_service,

@@ -1017,7 +1017,7 @@ means server-confirmed links, not permission to activate arbitrary authored
 references. An omitted or empty value confirms no additional references. This
 MCP revision does not add that metadata to read responses.
 
-- **MCP Streamable HTTP**: 29 tools are registered; the tools available to a
+- **MCP Streamable HTTP**: 30 tools are registered; the tools available to a
   particular client are determined by its permissions and returned by `tools/list`.
 
 <!-- mcp-tool-catalog:start -->
@@ -1026,6 +1026,7 @@ MCP revision does not add that metadata to read responses.
 | --- | --- |
 | Discover and read | `list_my_workspaces`, `guide`, `search`, `fetch`, `grep_wiki`, `what_changed`, `read`, `get_index`, `read_concept`, `read_context_outline`, `read_structure_map`, `list_changes` |
 | Edit Context | `create_context_page`, `begin_context_edit`, `update_context_edit`, `submit_context_edit_for_review`, `discard_context_edit`, `patch_context_edit`, `list_my_context_edits`, `upload_image`, `cite`, `submit_feedback` |
+| Recover writes | `get_operation_status` |
 | Agent workflows | `list_agent_categories`, `read_agent_page`, `write_agent_page_draft`, `build_agent_input_bundle` |
 | Review and maintenance | `list_requested_changes`, `submit_revision_for_review`, `wiki_maintenance` |
 
@@ -1037,8 +1038,37 @@ with `begin_context_edit`, and apply `patch_context_edit`. Use
 Keep one edit per task and submit it once. In the same MCP chat,
 `begin_context_edit` after a submit reopens that submission while its review is
 pending, instead of creating a new version.
-Editing commands use `editing_version_id`, `expected_editing_revision`, and an
-operation key to detect conflicting updates. Use `cite` with the owning page
+MCP editing commands use `page_id`, `version_id`, `expected_editing_revision`,
+and `idempotency_key` to detect conflicting updates. Partial reads require a
+top-level `page_id` (UUID, stable URL, or legacy Context path); optional
+`version_id` selects an exact version of that same page. The former `target`
+object is no longer accepted. MCP update requires `version_id`, removes the
+`base_version_id`/`base_content_hash` inputs, and uses `placement_parent_node_id`.
+MCP image upload also uses `version_id`; edit responses use `page_id`, and
+structure maps expose the document's hash as `content_hash`.
+
+MCP keyed writes require `idempotency_key` before their first send, including page
+creation, review resubmission, and AgentPage drafts. After a lost response, call
+`get_operation_status` with that key and follow its `next_action`; the former
+MCP `retry_only` input is removed. REST editing requests retain `retry_only`:
+they replay an existing unexpired receipt or return `operation_outcome_unknown`
+without executing a missing or expired operation. A successful edit's receipt
+provides its saved changes and next revision, so confirmation alone does not
+require another read.
+Read only any omitted content needed for further work.
+
+Keyed calls insert an `mcp_tool_call` row once `dispatch` has authorized them
+and update that same row when the worker finishes, including after the caller
+disconnects. Each retry keeps its own call row. Status starts from the latest
+row for the actor and idempotency key within a 24-hour window, then reads the
+receipt in `mcp_write_idempotency` committed with the document change; expiry
+does not delete the call history. Only keyed rows carry the actor and key, and
+account deletion clears that actor. Resends and status lookups re-check only
+the call's authentication, workspace, scope, role and connection; permissions
+on the target are checked when the request actually runs. Chats aggregates a
+call once, when final capture also records its artifact visibility links.
+
+Use `cite` with the owning page
 and editing version, `expected_editing_revision`, `idempotency_key`, and explicit
 `add`/`remove` document references. Targets use `target_kind` and document UUID,
 not a target version. Search and read the selected sources before registration.
