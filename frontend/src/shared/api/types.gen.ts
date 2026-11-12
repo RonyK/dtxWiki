@@ -10514,6 +10514,11 @@ export interface components {
             /** Remove */
             remove?: components["schemas"]["DocumentReferenceRemoveInput"][];
             /**
+             * Retry Only
+             * @default false
+             */
+            retry_only: boolean;
+            /**
              * Version Id
              * Format: uuid
              */

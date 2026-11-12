@@ -1,11 +1,13 @@
 """The bibliography write is one atomic, retryable editing command."""
 
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
+from backend.models.base import utc_now
 from backend.models.context import (
     ContextCitation,
     ContextPage,
@@ -16,6 +18,7 @@ from backend.models.document_reference import (
     ContextDocumentReference,
     ContextPublishedCitation,
 )
+from backend.models.mcp_trace import MCPWriteIdempotency
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.context_write import CiteRequest
@@ -29,6 +32,8 @@ from backend.services.document_references import (
 from backend.services.mcp_trace_capture import derive_artifact_links
 from backend.services.page_service import PageConflictError
 from backend.services.read_errors import (
+    IdempotencyKeyConflictError,
+    OperationOutcomeUnknownError,
     ReadNotFoundError,
     ReadValidationError,
     RejectedByPolicyError,
@@ -134,7 +139,8 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(
         # Owning a citation editing version does not prove its body was read.
         assert all(link.version_id is None and link.root_hash is None for link in links)
     with session_factory.begin() as session:
-        replay = service.cite(session, ws_id, command, actor=ACTOR)
+        lookup = command.model_copy(update={"retry_only": True})
+        replay = service.cite(session, ws_id, lookup, actor=ACTOR)
         assert replay.replayed and replay.receipt_id == first.receipt_id
         assert replay.editing_revision == 2
         assert (
@@ -147,6 +153,17 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(
             == []
         )
         assert len(list(session.scalars(select(ContextDocumentReference)))) == 1
+        with pytest.raises(IdempotencyKeyConflictError):
+            service.cite(
+                session,
+                ws_id,
+                lookup.model_copy(
+                    update={
+                        "add": [command.add[0].model_copy(update={"note": "Changed"})]
+                    }
+                ),
+                actor=ACTOR,
+            )
         with pytest.raises(PageConflictError):
             service.cite(
                 session,
@@ -164,6 +181,29 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(
         )
         with pytest.raises(ReadNotFoundError):
             service.cite(session, ws_id, invalid, actor=ACTOR)
+        assert session.get(ContextPageVersion, edit_id).editing_revision == 2
+        assert len(list(session.scalars(select(ContextDocumentReference)))) == 1
+
+        # A lookup cannot reclaim an expired receipt or execute the old CAS.
+        receipt = session.scalar(
+            select(MCPWriteIdempotency).where(
+                MCPWriteIdempotency.workspace_id == ws_id,
+                MCPWriteIdempotency.actor_id == ACTOR.actor_id,
+                MCPWriteIdempotency.tool_name == "cite",
+                MCPWriteIdempotency.idempotency_key == command.idempotency_key,
+            )
+        )
+        assert receipt is not None
+        receipt_id, receipt_payload = receipt.id, dict(receipt.result_payload)
+        expired_at = utc_now() - timedelta(days=1)
+        receipt.expires_at = expired_at
+        session.flush()
+        with pytest.raises(OperationOutcomeUnknownError):
+            service.cite(session, ws_id, lookup, actor=ACTOR)
+        preserved = session.get(MCPWriteIdempotency, receipt_id)
+        assert preserved is not None
+        assert preserved.result_payload == receipt_payload
+        assert preserved.expires_at == expired_at
         assert session.get(ContextPageVersion, edit_id).editing_revision == 2
         assert len(list(session.scalars(select(ContextDocumentReference)))) == 1
     with session_factory.begin() as session:

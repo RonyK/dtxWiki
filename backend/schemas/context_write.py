@@ -469,7 +469,7 @@ class PublishContextPageResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ReferenceCommandRequest(BaseModel):
+class ReferenceCommand(BaseModel):
     """Change only the caller's explicit bibliography on an open Context edit."""
 
     version_id: UUID
@@ -500,6 +500,13 @@ class ReferenceCommandRequest(BaseModel):
         return self
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ReferenceCommandRequest(ReferenceCommand):
+    __doc__ = ReferenceCommand.__doc__
+
+    # Keep lookup-only retries on REST without adding them to the MCP input.
+    retry_only: bool = False
 
 
 class CiteRequest(ReferenceCommandRequest):

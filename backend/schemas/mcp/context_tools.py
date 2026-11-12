@@ -6,12 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.schemas.common import MCPResultEnvelope
 from backend.schemas.context_edit import EditOperation
 from backend.schemas.context_write import (
-    CiteRequest,
-    SubmitFeedbackRequest,
-    SubmitFeedbackResult,
+    CiteResult as ReferenceCommandResult,
 )
 from backend.schemas.context_write import (
-    CiteResult as ReferenceCommandResult,
+    ReferenceCommand,
+    SubmitFeedbackRequest,
+    SubmitFeedbackResult,
 )
 from backend.schemas.edit_receipt import EditReceipt
 from backend.schemas.mcp.page_input import MCPPageInput, validate_typed_target
@@ -43,9 +43,9 @@ CONVERSATION_TOKEN_FIELD = Field(
 )
 
 
-class CiteInput(CiteRequest):
-    workspace_id: UUID
+class CiteInput(ReferenceCommand):
     page_id: MCPPageInput
+    workspace_id: UUID
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")

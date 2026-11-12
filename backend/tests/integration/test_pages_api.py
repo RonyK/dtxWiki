@@ -255,6 +255,7 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
             "version_id": draft["version_id"],
             "expected_editing_revision": draft["editing_revision"],
             "idempotency_key": "shared-reference-add",
+            "retry_only": False,
             "add": [reference],
         },
     )
@@ -277,14 +278,36 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
     }
     removed = owner.post(f"{page_url}/references", json=removal)
     assert removed.status_code == 200, removed.text
-    replay = owner.post(f"{page_url}/references", json=removal)
+    replay = owner.post(f"{page_url}/references", json={**removal, "retry_only": True})
     assert replay.status_code == 200 and replay.json()["data"]["replayed"]
+    assert replay.json()["data"]["receipt_id"] == removed.json()["data"]["receipt_id"]
     assert (
         replay.json()["data"]["editing_revision"]
         == removed.json()["data"]["editing_revision"]
     )
     draft = editor.get(page_url).json()["data"]
     assert not draft["references"]
+
+    # This valid add would mutate the shared draft if REST lost the flag on
+    # its way to the ledger. A missing receipt must only answer unknown.
+    before_lookup = page_version_and_pointer_snapshot(page_service, UUID(draft["id"]))
+    missing = owner.post(
+        f"{page_url}/references",
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "idempotency_key": "never-sent-reference",
+            "retry_only": True,
+            "add": [reference],
+        },
+    )
+    assert missing.status_code == 404, missing.text
+    assert missing.json()["error_code"] == "operation_outcome_unknown"
+    assert (
+        page_version_and_pointer_snapshot(page_service, UUID(draft["id"]))
+        == before_lookup
+    )
+    assert not editor.get(page_url).json()["data"]["references"]
     assert viewer.get(page_url).json()["data"]["version_id"] == published["version_id"]
     assert viewer.get(page_url).json()["data"]["references"]
 

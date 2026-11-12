@@ -19435,6 +19435,11 @@
             "title": "Remove",
             "type": "array"
           },
+          "retry_only": {
+            "default": false,
+            "title": "Retry Only",
+            "type": "boolean"
+          },
           "version_id": {
             "format": "uuid",
             "title": "Version Id",
