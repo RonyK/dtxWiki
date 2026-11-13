@@ -22,6 +22,7 @@ COPY scripts/cosmos-point-picker-patch.mjs ./scripts/
 COPY scripts/cosmos-link-pattern-patch.mjs ./scripts/
 COPY scripts/cosmos-point-ring-patch.mjs ./scripts/
 COPY scripts/cosmos-point-image-sdf-patch.mjs ./scripts/
+COPY scripts/cosmos-link-endpoint-patch.mjs ./scripts/
 COPY scripts/write-if-changed.mjs ./scripts/
 RUN npm ci
 RUN npm --workspace frontend run build
