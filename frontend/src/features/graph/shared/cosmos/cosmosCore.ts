@@ -5,7 +5,7 @@ import type { CosmosRendererBinding, CosmosLayoutSeedOutcome, CosmosRenderBudget
 import { NativeGraph, type GraphConfig } from "../../workspace/cosmosNative";
 
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../hoverChip";
-import { GRAPH_EDGE_ENDPOINT_SIZE_PX, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, readGraphTokens } from "../graphTokens";
+import { GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, readGraphTokens } from "../graphTokens";
 import { FORCED_OUTLINE_INSETS, GRAPH_RING_BAND_PX, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, outlinePathData } from "../nodeShapes";
 import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../rendererTypes";
 import {
@@ -445,19 +445,8 @@ export function createCosmosRenderer(
     linkDefaultWidth: GRAPH_EDGE_WIDTH_PX,
     hoveredLinkWidthIncrease: binding.interactionWidthIncrease ?? 0.6,
     focusedLinkWidthIncrease: binding.interactionWidthIncrease ?? 0.6,
-    // Shared legend strokes: citation dash-dot on style 1, long-dash containment on style 2.
-    linkDashLength: GRAPH_EDGE_PATTERN.citation[0],
-    linkDashGap: GRAPH_EDGE_PATTERN.citation[1],
-    linkDashDotLength: GRAPH_EDGE_PATTERN.citation[2],
-    linkDashDotGap: GRAPH_EDGE_PATTERN.citation[3],
-    linkDottedDashLength: GRAPH_EDGE_PATTERN.membership[0],
-    linkDottedDashGap: GRAPH_EDGE_PATTERN.membership[1],
-    linkEndpointMarkers: binding.linkEndpointMarkers ?? false,
-    linkEndpointArrowLength: GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowLength,
-    linkEndpointArrowHalfWidth: GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowHalfWidth,
-    linkEndpointDiamondLength: GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondLength,
-    linkEndpointDiamondHalfWidth: GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondHalfWidth,
-    linkEndpointNodeGap: GRAPH_EDGE_ENDPOINT_SIZE_PX.nodeGap,
+    // Patterns and endpoint markers come from each line's row of the native
+    // line table (graphTokens.ts GRAPH_LINE_STYLE_ROWS), not from config.
     // Legend folder/grouping ring: the native ring shape's band, CSS px.
     pointRingWidth: GRAPH_RING_BAND_PX,
     // Cluster counts and the Agent outline are distance-field images.
@@ -680,6 +669,15 @@ export function createCosmosRenderer(
     solver.afterPositionEdit(() => { positionLayout?.setPositions(buffers.positions, [...pinned]); syncRelationPhysics(.15); },
       () => reheatRelationPhysics(.15));
     options.callbacks.onPin(columns.nodeIds[index], position);
+  }
+
+  /** A drag whose node or scene goes away ends in the layout and native Cosmos too. */
+  function abandonDrag() {
+    const drag = draggedPoint;
+    draggedPoint = null; dragLabelPoint = null; dragGesture = false;
+    if (!drag?.moved) return;
+    positionLayout?.endDrag?.(drag.index);
+    if (ready && !destroyed && !contextLost) graph.remapDraggingPoint(null);
   }
 
   function finishLabelDrag(last: typeof dragLabelPoint, event: Parameters<NonNullable<GraphConfig["onDragEnd"]>>[0]) {
@@ -1535,7 +1533,9 @@ export function createCosmosRenderer(
           points[index * 2] = point[0]; points[index * 2 + 1] = point[1];
           diameters[index] = renderedPointDiameter(index);
         }
+        const star = interactionStar();
         binding.renderOverlay({ columns, points, diameters, selectedId, focusedId, showLabels,
+          star: star && new Set(star.points),
           zoom: canonicalZoom(), forcedColors: options.forcedColors, tokens,
           width: container.clientWidth, height: container.clientHeight });
       }
@@ -1933,8 +1933,8 @@ export function createCosmosRenderer(
       highlightedLinkIndices: searchLinks === null ? star?.links
         : [...new Set([...searchLinks, ...(star?.links ?? [])])],
       pointGreyoutColor: searchPoints !== null || keepOverviewContext() ? tokens.node.folder : undefined,
-      pointGreyoutOpacity: binding.customLabels ? .14 : keepOverviewContext() && star ? 0.3
-        : searchPoints !== null ? 0.55 : keepOverviewContext() ? 0.3 : undefined,
+      pointGreyoutOpacity: binding.quietPointShare ?? (keepOverviewContext() && star ? 0.3
+        : searchPoints !== null ? 0.55 : keepOverviewContext() ? 0.3 : undefined),
       linkGreyoutOpacity: binding.customRelationColors ? 1
         : keepOverviewContext() ? GRAPH_LINE_OPACITY.overview.dimmed : GRAPH_LINE_OPACITY.dimmed,
       // GRAPH_LINE_OPACITY.emphasis lifts the active star's ink; dimmed lines
@@ -2008,7 +2008,7 @@ export function createCosmosRenderer(
     cachedLabelPositions = null;
     initialCamera?.cancel(false);
     cancelReveal();
-    draggedPoint = null; dragLabelPoint = null; dragGesture = false;
+    abandonDrag();
     nativeHoveredIndex = null;
     graph.pause();
     for (const resolve of positionReadyWaiters) resolve();
@@ -2147,7 +2147,7 @@ export function createCosmosRenderer(
       retireInitialFitIntent();
       cancelReveal();
       communityJob.destroy();
-      draggedPoint = null; dragLabelPoint = null; dragGesture = false;
+      abandonDrag();
       nativeHoveredIndex = null;
       container.removeEventListener("pointerdown", markCameraInteraction, true);
       container.removeEventListener("wheel", markCameraInteraction, true);
@@ -2334,17 +2334,28 @@ export function createCosmosRenderer(
       const sameSelection = sameScope && columns.identity.surface === nextColumns.identity.surface
         && columns.identity.selectionKey === nextColumns.identity.selectionKey;
       if (sameSelection && positionLayout?.update && ready && !contextLost) {
+        // Every index held here follows its stable key into the new rows.
+        // Whatever left the scene ends exactly as it would anywhere else.
         const current = solver.positions(buffers.positions, readPositions);
-        const previousKeys = new Map(columns.nodeKeys.map((key, index) => [key, index]));
-        const previousPinOwners = new Map([...pinOwners].map(([index, owner]) => [columns.nodeKeys[index], owner]));
-        const dragKey = draggedPoint?.nodeKey;
-        const hoveredKey = nativeHoveredIndex === null ? null : columns.nodeKeys[nativeHoveredIndex];
-        for (let index = 0; index < nextColumns.nodeKeys.length; index++) {
-          const previous = previousKeys.get(nextColumns.nodeKeys[index]);
-          if (previous === undefined) continue;
-          next.positions[index * 2] = current[previous * 2];
-          next.positions[index * 2 + 1] = current[previous * 2 + 1];
-        }
+        const nextNode = new Map(nextColumns.nodeKeys.map((key, index) => [key, index]));
+        const nextEdge = new Map(nextColumns.edgeIds.map((id, index) => [id, index]));
+        const carry = (index: number | null) => index === null ? null : nextNode.get(columns.nodeKeys[index]) ?? null;
+        const carryEdge = (index: number | null) => index === null ? null : nextEdge.get(columns.edgeIds[index]) ?? null;
+        columns.nodeKeys.forEach((key, index) => {
+          const to = nextNode.get(key);
+          if (to === undefined) return;
+          next.positions[to * 2] = current[index * 2];
+          next.positions[to * 2 + 1] = current[index * 2 + 1];
+        });
+        const carriedPins = [...pinOwners].flatMap(([index, owner]) => {
+          const to = carry(index);
+          return to === null ? [] : [[to, owner] as const];
+        });
+        if (draggedPoint && carry(draggedPoint.index) === null) abandonDrag();
+        const drag = draggedPoint && carry(draggedPoint.index);
+        const hover = carry(hoveredIndex), hoverEdge = carryEdge(hoveredEdge);
+        const hoverLeft = hover === null && hoveredIndex !== null || hoverEdge === null && hoveredEdge !== null;
+        nativeHoveredIndex = carry(nativeHoveredIndex);
         const nextIds = new Set(nextColumns.nodeIds);
         for (const id of pendingArrivalIds) if (nodeById.has(id) && !nextIds.has(id)) pendingArrivalIds.delete(id);
         columns = nextColumns; buffers = next;
@@ -2353,25 +2364,24 @@ export function createCosmosRenderer(
         nodeById = new Map(columns.nodeIds.map((id, index) => [id, index]));
         edgeById = new Map(columns.edgeIds.map((id, index) => [id, index]));
         pinned.clear(); pinOwners.clear(); retiredPinIds.clear();
-        columns.nodeKeys.forEach((key, index) => {
-          const owner = previousPinOwners.get(key);
-          if (owner === undefined) return;
+        for (const [index, owner] of carriedPins) {
           pinned.add(index); pinOwners.set(index, owner);
           if (columns.nodeIds[index] !== owner) retiredPinIds.set(owner, index);
-        });
-        const nextDrag = dragKey === undefined ? -1 : columns.nodeKeys.indexOf(dragKey);
-        if (draggedPoint && nextDrag >= 0) {
-          draggedPoint.index = nextDrag; draggedPoint.identityKey = cosmosSceneIdentityKey(columns);
-          if (dragLabelPoint) dragLabelPoint.index = nextDrag;
-        } else { draggedPoint = null; dragLabelPoint = null; dragGesture = false; }
-        nativeHoveredIndex = hoveredKey === null ? null : columns.nodeKeys.indexOf(hoveredKey);
-        if (nativeHoveredIndex === -1) nativeHoveredIndex = null;
+        }
+        if (draggedPoint && drag !== null) {
+          draggedPoint.index = drag; draggedPoint.identityKey = cosmosSceneIdentityKey(columns);
+          if (dragLabelPoint) dragLabelPoint.index = drag;
+        }
         appliedLinkColorSource = null;
         publishedPositionFitPending = false;
         cancelReveal();
         applyData(buffers);
+        // Native hover, its click and an active drag are index-based as well:
+        // each follows its own carried key, so the next pick compares like with like.
+        graph.remapPointer(nativeHoveredIndex, hoverLeft ? null : hoverEdge);
         if (draggedPoint?.moved) graph.remapDraggingPoint(draggedPoint.index);
-        else if (dragKey !== undefined) graph.remapDraggingPoint(null);
+        if (hoverLeft) clearHover();
+        else { hoveredIndex = hover; hoveredEdge = hoverEdge; }
         graph.setPinnedPoints([...pinned]);
         resetLabelCandidates();
         acceptingStaticLayout = paused || reducedMotion;
@@ -2387,6 +2397,11 @@ export function createCosmosRenderer(
           const index = nodeById.get(id);
           if (index !== undefined) positionLayout.pinWhenSettled?.(index);
         }
+        // As after any edit: communities follow the new rows, which keep the
+        // reader's coordinates, and physics runs as currently permitted.
+        preservesSessionCoordinates = true;
+        startCommunity(columns);
+        syncRelationPhysics(.15);
         applyHighlight();
         return "topology";
       }
@@ -2411,7 +2426,7 @@ export function createCosmosRenderer(
           next.positions[index * 2 + 1] = current[previous * 2 + 1];
         });
       }
-      draggedPoint = null; dragLabelPoint = null; dragGesture = false;
+      abandonDrag();
       nativeHoveredIndex = null;
       preservesSessionCoordinates = false;
       appliedCommunity = null;
@@ -2464,13 +2479,18 @@ export function createCosmosRenderer(
     },
     reset() {
       if (destroyed || simulationFailed) return;
-      draggedPoint = null; dragLabelPoint = null; dragGesture = false;
+      abandonDrag();
       // Reset does not replace indexed geometry or SDK native hover. A later
       // same-index pick emits no MouseOver, so retain that public pick owner.
       selectedId = null;
       focusedId = null;
       clearHover();
       const releasedPins = pinned.size > 0;
+      // As one unpin does, Reset also ends every wait to pin an arrival.
+      for (const id of pendingArrivalIds) {
+        const index = nodeById.get(id);
+        if (index !== undefined) positionLayout?.unpin?.(index, false);
+      }
       pinned.clear();
       pinOwners.clear();
       retiredPinIds.clear();

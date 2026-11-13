@@ -39,13 +39,18 @@ export const GRAPH_EDGE_ENDPOINTS = {
   action: { source: "none", target: "filled-triangle" },
 } as const satisfies Record<GraphEdgeVisualKind, { source: GraphEdgeEndpointSource; target: GraphEdgeEndpointTarget }>;
 
-/** Endpoint sizes and the gap from the node's visible boundary, in CSS pixels. */
+/**
+ * Endpoint sizes and the gap from the node's visible boundary, in CSS pixels.
+ * A line too short for its markers scales them down to keep `markerShaft` of
+ * line between them.
+ */
 export const GRAPH_EDGE_ENDPOINT_SIZE_PX = {
   arrowLength: 6,
   arrowHalfWidth: 4,
   diamondLength: 10,
   diamondHalfWidth: 4,
   nodeGap: 1.5,
+  markerShaft: 2,
 } as const;
 
 /** Compact filled target head for a generic activity, in CSS pixels. */
@@ -144,6 +149,22 @@ export function graphLineFade(fitLengthPx: number, relations: number): number {
 /** A relationship that was removed in the replayed history. */
 export const GRAPH_REMOVED_EDGE_COLOR = "#dc2626";
 export const GRAPH_REMOVED_EDGE_PATTERN = [10, 3] as const;
+
+/**
+ * The line table both graphs draw from, one row per line kind in this order.
+ * A row's pattern and endpoints are the tokens above (a removed line has
+ * no endpoints); the native renderer is generated from this table.
+ */
+export const GRAPH_LINE_STYLE_ROWS = [
+  "link", "citation", "membership", "coAccess", "actionWrite",
+  "actionCite", "actionRead", "actionReference", "action", "removed",
+] as const satisfies readonly (GraphEdgeVisualKind | "removed")[];
+export type GraphLineStyleRow = typeof GRAPH_LINE_STYLE_ROWS[number];
+
+/** A line's style value: its row, past the table when it is emphasized. */
+export function graphLineStyle(row: GraphLineStyleRow, emphasized = false): number {
+  return GRAPH_LINE_STYLE_ROWS.indexOf(row) + (emphasized ? GRAPH_LINE_STYLE_ROWS.length : 0);
+}
 
 export const GRAPH_NODE_RADIUS_PX = {
   local: { min: 3, max: 13 },

@@ -11,6 +11,8 @@ export type CosmosOverlayFrame = {
   diameters: Float32Array;
   selectedId: string | null;
   focusedId: string | null;
+  /** Points of the active star behind the GPU greyout; null emphasizes nothing. */
+  star: ReadonlySet<number> | null;
   showLabels: boolean;
   zoom: number;
   forcedColors: boolean;
@@ -46,10 +48,10 @@ export type CosmosRendererBinding = {
   /** Map's indexed geometry includes every input to glyph/collision sizes.
    * Other bindings retain the additional prepared-glyph snapshot comparison. */
   snapshotGeometryIncludesGlyphs?: true;
-  /** Map styles encode directed links/citations and source-side containment. */
-  linkEndpointMarkers?: true;
   /** A surface with priority canvas labels owns its label/ring layers. */
   customLabels?: true;
+  /** Share of its colour a point outside the active star keeps; otherwise the Map's overview/search rule. */
+  quietPointShare?: number;
   customRelationColors?: true;
   /** Added CSS-pixel width for hovered/focused lines; Local uses fixed strokes. */
   interactionWidthIncrease?: number;

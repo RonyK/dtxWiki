@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { COSMOS_COLLISION_RADII_PATCH_HUNKS } from "./cosmos-collision-radii-patch.mjs";
-import { COSMOS_LINK_PATTERN_PATCH_HUNKS } from "./cosmos-link-pattern-patch.mjs";
 import { COSMOS_POINT_PICKER_PATCH_HUNKS } from "./cosmos-point-picker-patch.mjs";
 import { COSMOS_SOURCE_SHA256, COSMOS_VERSION, sha256 } from "./cosmos-source.mjs";
 
@@ -84,7 +83,7 @@ export const COSMOS_POINT_RING_PATCH_HUNKS = Object.freeze([
 export function patchCosmosPointRing(source, version) {
   assert.equal(version, COSMOS_VERSION, "Review the ring and triangle geometry before upgrading Cosmos");
   let original = source;
-  for (const hunks of [COSMOS_LINK_PATTERN_PATCH_HUNKS, COSMOS_POINT_PICKER_PATCH_HUNKS, COSMOS_COLLISION_RADII_PATCH_HUNKS]) {
+  for (const hunks of [COSMOS_POINT_PICKER_PATCH_HUNKS, COSMOS_COLLISION_RADII_PATCH_HUNKS]) {
     for (const { id, before, after } of [...hunks].reverse()) {
       assert.equal(original.split(after).length, 2, `Expected exactly one reviewed ${id} seam`);
       original = original.replace(after, before);

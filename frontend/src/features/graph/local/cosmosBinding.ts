@@ -1,16 +1,10 @@
-import { GRAPH_LINE_OPACITY, GRAPH_REMOVED_EDGE_COLOR, type GraphVisualTokens } from "../shared/graphTokens";
+import { GRAPH_LINE_OPACITY, GRAPH_REMOVED_EDGE_COLOR, graphLineStyle, type GraphVisualTokens } from "../shared/graphTokens";
 import type { CosmosLayoutSolver } from "../shared/cosmos/layoutTypes";
 import type { CosmosRendererBinding } from "../shared/cosmos/renderBinding";
 import { buildCosmosPresentationBuffers } from "../shared/cosmos/sceneBuffers";
 import { cosmosSceneIdentityKey, type CosmosSceneColumns } from "../shared/cosmos/sceneTypes";
 import { rgb } from "../workspace/cosmosColor";
-import { createLocalCosmosOverlay } from "./cosmosOverlay";
-
-/** Styles 10–19 carry only the Local lines already drawn by the existing legend. */
-export const LOCAL_COSMOS_EDGE_STYLES = {
-  link: 10, citation: 11, membership: 12, coAccess: 13, actionWrite: 14,
-  actionCite: 15, actionRead: 16, actionReference: 17, action: 18,
-} as const;
+import { createLocalCosmosOverlay, LOCAL_QUIET_SHARE } from "./cosmosOverlay";
 
 function mix(foreground: string, background: string, share: number) {
   const front = rgb(foreground), back = rgb(background);
@@ -33,7 +27,7 @@ export function createLocalCosmosBinding(solver: CosmosLayoutSolver, container: 
     admissionCounts: columns => ({ nodeCount: columns.nodeIds.length, edgeCount: columns.edgeIds.length }),
     withinBudget: () => true, overview: () => false, canAnimate: () => true,
     sameGeometry: (a, b) => a.localGeometryKey != null && a.localGeometryKey === b.localGeometryKey,
-    linkEndpointMarkers: true, customLabels: true, customRelationColors: true,
+    customLabels: true, customRelationColors: true, quietPointShare: LOCAL_QUIET_SHARE,
     // The previous Context line shader used a fixed 1.5px uniform, including
     // emphasis; the old adapter's size metadata did not alter that shader.
     interactionWidthIncrease: 0,
@@ -59,14 +53,16 @@ export function createLocalCosmosBinding(solver: CosmosLayoutSolver, container: 
         }
         if (columns.nodeMuted?.[index] && !columns.nodeIsCurrent?.[index]) {
           const color = buffers.pointColors.slice(index * 4, index * 4 + 3), surface = rgb(tokens.surface);
-          color.forEach((value, channel) => { buffers.pointColors[index * 4 + channel] = value * .14 + surface[channel] * .86; });
+          color.forEach((value, channel) => {
+            buffers.pointColors[index * 4 + channel] = value * LOCAL_QUIET_SHARE + surface[channel] * (1 - LOCAL_QUIET_SHARE);
+          });
         }
       });
       columns.edgeVisualKinds!.forEach((kind, index) => {
-        const style = columns.edgeRemoved?.[index] ? 19 : LOCAL_COSMOS_EDGE_STYLES[kind];
-        // The existing history emphasis has its own no-fade state, independent
-        // of selection. Forced colours deliberately keep plain opacity.
-        buffers.linkStyles[index] = style + (columns.edgeHighlighted?.[index] && !forcedColors ? 32 : 0);
+        // The history emphasis keeps its own no-fade state, independent of
+        // selection. Forced colours deliberately keep plain opacity.
+        buffers.linkStyles[index] = graphLineStyle(columns.edgeRemoved?.[index] ? "removed" : kind,
+          Boolean(columns.edgeHighlighted?.[index]) && !forcedColors);
         const color = columns.edgeRemoved?.[index] ? GRAPH_REMOVED_EDGE_COLOR
           : columns.edgeHighlighted?.[index] ? tokens.highlight : tokens.edge[kind];
         const quiet = columns.edgeMuted?.[index] && !columns.edgeHighlighted?.[index] && !columns.edgeRemoved?.[index];

@@ -1,4 +1,4 @@
-import { buildLocalScene } from "../../local/sceneInput";
+import { buildLocalScene, type LocalScene } from "../../local/sceneInput";
 import { localNodeVisualKind } from "../../local/nodeVisual";
 import { localEdgeVisualKind, LOCAL_EDGE_VISUAL_KIND_ORDER } from "../../local/edgeKinds";
 import type { GraphNodeVisualKind } from "../graphTokens";
@@ -18,8 +18,8 @@ const LOCAL_NODE_VISUAL_KINDS: readonly GraphNodeVisualKind[] = [
 export function buildLocalCosmosColumns(
   scene: GraphRenderScene,
   identity: GraphVisibleIdentity,
+  local: LocalScene = buildLocalScene(scene),
 ): CosmosSceneColumns {
-  const local = buildLocalScene(scene);
   const nodeIndex = new Map(local.nodes.map((node, index) => [node.key, index]));
   const wireNodes = new Map<string, GraphRenderNode>();
   for (const node of scene.nodes.filter((node) => !node.hidden).sort((left, right) => left.id.localeCompare(right.id))) {

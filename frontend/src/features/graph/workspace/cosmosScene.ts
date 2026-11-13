@@ -1,15 +1,20 @@
 import { buildCosmosAdjacency } from "../shared/cosmos/sceneBuffers";
 import { workspaceBaseBodyDiameterCss } from "../shared/workspaceGlyphGeometry";
-import { GRAPH_LINE_OPACITY, type GraphVisualTokens } from "../shared/graphTokens";
+import { GRAPH_LINE_OPACITY, graphLineStyle, type GraphVisualTokens } from "../shared/graphTokens";
 import { rgb } from "./cosmosColor";
 import { estimateWorkspaceCountWidthCss, workspaceClusterCountText, workspaceClusterDiameterCss, type WorkspaceCountMeasure } from "./pointImages";
-import { WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, type WorkspaceMapColumns } from "../map/sceneColumns";
+import { WORKSPACE_MAP_EDGE_KIND, WORKSPACE_MAP_NODE_KIND, workspaceMapAdmissionCounts, type WorkspaceMapColumns } from "../map/sceneColumns";
 import { isWorkspaceMapWithinBudget, WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
 import { buildWorkspaceRelationLinkStrength } from "./relationPhysics";
 
 export type { CosmosSceneBuffers } from "../shared/cosmos/buffers";
 import type { CosmosSceneBuffers } from "../shared/cosmos/buffers";
 export { incidentStar } from "../shared/cosmos/buffers";
+
+/** Each Map edge kind draws with the shared line-table row of the same name. */
+const MAP_EDGE_LINE_STYLES: Readonly<Record<number, number>> = Object.fromEntries(
+  (Object.keys(WORKSPACE_MAP_EDGE_KIND) as (keyof typeof WORKSPACE_MAP_EDGE_KIND)[])
+    .map(row => [WORKSPACE_MAP_EDGE_KIND[row], graphLineStyle(row)]));
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
@@ -216,8 +221,7 @@ export function buildCosmosSceneBuffers(
     const target = columns.edgeTargets[edge];
     const kind = columns.edgeKinds[edge];
     if (source >= count || target >= count || kind > 2) throw new Error("Invalid Workspace Map edge");
-    // Shared legend strokes: solid link, dash-dot citation, long-dash containment.
-    linkStyles[edge] = kind;
+    linkStyles[edge] = MAP_EDGE_LINE_STYLES[kind];
     const ink = GRAPH_LINE_OPACITY, { overview, unadmitted } = ink;
     const alpha = denseOverview ? (kind === 1 ? overview.citation : overview.line)
       : kind === 1 ? (readableScene ? ink.citation : unadmitted.citation) : (readableScene ? ink.line : unadmitted.line);

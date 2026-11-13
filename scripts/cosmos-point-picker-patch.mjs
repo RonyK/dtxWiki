@@ -15,19 +15,38 @@ const hostMethods = `  /** Apply an explicit camera synchronously through the ex
     const transform = this.zoomInstance.getTransform(position, zoom, 0);
     this.canvasD3Selection?.call(this.zoomInstance.behavior.transform, transform);
   }
-  /** Start, remap or clear the pressed pointer's drag on the current indexed rows. */
+  /** Start or remap (an index) or clear (null) the pressed pointer's native drag. */
   remapDraggingPoint(index) {
     if (this._isDestroyed) return;
-    const count = this.graph.inputPointPositions ? this.graph.inputPointPositions.length / 2 : this.graph.pointsNumber;
-    if (index !== null && (!Number.isInteger(count) || !Number.isInteger(index) || index < 0 || index >= count)) {
-      throw new RangeError("Dragging point must belong to the current indexed rows");
-    }
+    this._dtxAssertPointRow(index, "Dragging point");
     this.store.draggingPointIndex = index === null ? void 0 : index;
     if (this.dragInstance) this.dragInstance.isActive = index !== null;
-    // Clearing the drag at pointer-down still permits a stationary click.
-    // A started drag or a topology replacement retires the press.
+    // Clearing the drag at pointer-down still permits a stationary click;
+    // a started drag retires the press.
     if (index !== null) this._dtxCancelPointPress();
     this.requestRender();
+  }
+  /** Indexed rows changed: the hovered point and link are now these rows (null:
+   * gone). Hover and its click follow them; no callback fires. A drag keeps its
+   * own owner, remapped through remapDraggingPoint. */
+  remapPointer(point, link) {
+    if (this._isDestroyed) return;
+    this._dtxAssertPointRow(point, "Hovered point");
+    const links = this.graph.inputLinks ? this.graph.inputLinks.length / 2 : this.graph.linksNumber;
+    this._dtxAssertRow(link, links, "Hovered link");
+    const hovered = this.store.hoveredPoint;
+    this.store.hoveredPoint = hovered && point !== null ? { ...hovered, index: point } : void 0;
+    this.store.hoveredLinkIndex = this.store.hoveredLinkIndex === void 0 || link === null ? void 0 : link;
+    this.requestRender();
+  }
+  _dtxAssertPointRow(index, name) {
+    const count = this.graph.inputPointPositions ? this.graph.inputPointPositions.length / 2 : this.graph.pointsNumber;
+    this._dtxAssertRow(index, count, name);
+  }
+  _dtxAssertRow(index, count, name) {
+    if (index !== null && (!Number.isInteger(count) || !Number.isInteger(index) || index < 0 || index >= count)) {
+      throw new RangeError(name + " must belong to the current indexed rows");
+    }
   }
   /** Optional point picking only; native rendering, forces and drag stay owned here. */
   attachPointPicker(picker) {

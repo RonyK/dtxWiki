@@ -19,7 +19,6 @@ COPY scripts/generate-cosmos-native.mjs ./scripts/
 COPY scripts/cosmos-source.mjs ./scripts/
 COPY scripts/cosmos-collision-radii-patch.mjs ./scripts/
 COPY scripts/cosmos-point-picker-patch.mjs ./scripts/
-COPY scripts/cosmos-link-pattern-patch.mjs ./scripts/
 COPY scripts/cosmos-point-ring-patch.mjs ./scripts/
 COPY scripts/cosmos-point-image-sdf-patch.mjs ./scripts/
 COPY scripts/cosmos-link-endpoint-patch.mjs ./scripts/

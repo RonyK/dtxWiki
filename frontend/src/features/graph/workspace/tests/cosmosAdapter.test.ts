@@ -60,7 +60,7 @@ const { graph, community, createGraph, createNativeGraph } = vi.hoisted(() => {
       // recorded camera model. The SDK host regression covers double precision.
       graph.setZoomTransformByPointPositions(Float32Array.from(position), 0, zoom, 0, false);
     }),
-    remapDraggingPoint: vi.fn(),
+    remapDraggingPoint: vi.fn(), remapPointer: vi.fn(),
     spaceToScreenPosition: vi.fn((_position: [number, number]) => [10, 10]),
     start: vi.fn(),
     stop: vi.fn(),
@@ -759,6 +759,32 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
     expect(worker.stop).not.toHaveBeenCalled(); expect(worker.start).not.toHaveBeenCalled();
     expect(graph.remapDraggingPoint).toHaveBeenCalledExactlyOnceWith(null);
     expect(worker.setPositions).not.toHaveBeenCalled();
+  });
+
+  it("carries a same-request topology update by stable keys and ends hover, drag and waits that left", async () => {
+    const onHover = vi.fn();
+    const { adapter } = await mountCpu(columns(), {
+      callbacks: { onHover, onSelect: vi.fn(), onPin: vi.fn(), onRuntimeError: vi.fn() } });
+    const worker = Object.assign(cpu.instances[0], { update: vi.fn(), unpin: vi.fn(), pinWhenSettled: vi.fn() });
+    const config = createGraph.mock.calls.at(-1)![1];
+    config.onPointMouseOver?.(2, [0, 0], undefined, false, false);
+    const drag = installedSdkDrag(config, 2); drag.start(); drag.move(30, 50);
+    expect(worker.isRunning()).toBe(false);
+    community.compute.mockClear();
+    const input = columns(), withoutC: WorkspaceMapColumns = { ...input,
+      identity: { ...input.identity, visibleFingerprint: "visible-without-c" },
+      nodeIds: ["a", "b"], nodeKeys: ["context:a", "context:b"], nodeLabels: ["Alpha", "Beta"], nodeFolderKeys: [null, null],
+      nodeKinds: new Uint8Array(2), nodeSizes: Float32Array.from([3, 3]), edgeIds: ["ab"], edgeSources: Uint32Array.from([0]),
+      edgeTargets: Uint32Array.from([1]), edgeKinds: new Uint8Array(1), edgeCounts: Uint32Array.from([1]),
+      edgeWeights: Float64Array.from([1]), edgeCrossFolder: new Uint8Array(1) };
+    expect(adapter.replaceColumns(withoutC)).toBe("topology");
+    expect(onHover).toHaveBeenLastCalledWith(null);
+    expect(graph.remapDraggingPoint).toHaveBeenLastCalledWith(null);
+    expect(graph.remapPointer).toHaveBeenLastCalledWith(null, null);
+    expect(worker.isRunning()).toBe(true);
+    expect(community.compute).toHaveBeenCalledWith(withoutC, expect.anything());
+    adapter.pinWhenSettled("b"); adapter.reset();
+    expect(worker.unpin).toHaveBeenCalledWith(1, false);
   });
 
   it("keeps the current Worker through metadata updates but rejects old output after authority replacement", async () => {
@@ -3239,11 +3265,7 @@ describe("Cosmos Map interaction contracts", () => {
     const config = createGraph.mock.calls[0][1];
     // Every line is the legend's one width; no scene-size scale.
     expect(config).toMatchObject({ linkDefaultWidth: 1.5, linkVisibilityMinTransparency: GRAPH_LINE_OPACITY.fade.small.floor,
-      hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6,
-      linkDashLength: 8, linkDashGap: 3, linkDashDotLength: 1.5, linkDashDotGap: 3,
-      linkDottedDashLength: 10, linkDottedDashGap: 4,
-      linkEndpointMarkers: true, linkEndpointArrowLength: 6, linkEndpointArrowHalfWidth: 4,
-      linkEndpointDiamondLength: 10, linkEndpointDiamondHalfWidth: 4, linkEndpointNodeGap: 1.5 });
+      hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6 });
     graph.setConfigPartial.mockClear();
     config.onZoom?.({ transform: { k: 0.02 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ pointSizeScale: 1 }));

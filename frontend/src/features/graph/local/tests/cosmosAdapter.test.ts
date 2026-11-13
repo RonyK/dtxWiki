@@ -7,6 +7,7 @@ import { createLocalGraphAdapter, type LocalGraphAdapter } from "../cosmosAdapte
 
 const state = vi.hoisted(() => {
   const positions = new Map<string, { x: number; y: number }>();
+  let rendered: CosmosSceneColumns | null = null;
   const core = {
     captureCoordinates: vi.fn(() => null),
     centerOn: vi.fn(), destroy: vi.fn(), fit: vi.fn(), focus: vi.fn(),
@@ -18,11 +19,18 @@ const state = vi.hoisted(() => {
       if (pinned) positions.set(id, { ...next }); else positions.delete(id);
       return next;
     }),
-    pinWhenSettled: vi.fn(), replaceColumns: vi.fn((_columns: CosmosSceneColumns) => undefined), reset: vi.fn(), resize: vi.fn(),
+    pinWhenSettled: vi.fn(), reset: vi.fn(), resize: vi.fn(),
+    // A ready renderer: the same selection keeps its live layout.
+    replaceColumns: vi.fn((columns: CosmosSceneColumns): "metadata" | "topology" | "rebuild" => {
+      const previous = rendered; rendered = columns;
+      return previous?.identity.selectionKey !== columns.identity.selectionKey ? "rebuild"
+        : previous.localGeometryKey === columns.localGeometryKey ? "metadata" : "topology";
+    }),
     resumeLayout: vi.fn(), select: vi.fn(), setLabelsVisible: vi.fn(),
     setViewport: vi.fn(), stopLayout: vi.fn(), whenSettled: vi.fn(() => Promise.resolve()), zoomBy: vi.fn(),
   };
-  return { core, positions, createRenderer: vi.fn((_container: HTMLElement, _columns: CosmosSceneColumns, _options: unknown) => core), setTracing: vi.fn() };
+  return { core, positions, setTracing: vi.fn(),
+    createRenderer: vi.fn((_container: HTMLElement, columns: CosmosSceneColumns, _options: unknown) => { rendered = columns; return core; }) };
 });
 
 vi.mock("../../shared/cosmos/cosmosCore", () => ({ createCosmosRenderer: state.createRenderer }));
@@ -70,7 +78,7 @@ describe("Local Cosmos scene and interaction ownership", () => {
     expect(columns.nodeIds[columns.edgeTargets[0]]).toBe("seed");
   });
 
-  it("retains live pins and camera ownership through metadata and same-query topology changes", async () => {
+  it("retains live pins and camera ownership through metadata and same-query topology changes, and restores pins after a renderer rebuild", async () => {
     adapter.pin("neighbor", true, { x: 31, y: 37 });
     const next = initialScene(); next.nodes[1].label = "Localized neighbor";
     state.core.pin.mockClear();
@@ -84,6 +92,13 @@ describe("Local Cosmos scene and interaction ownership", () => {
     expect(state.core.reset).not.toHaveBeenCalled();
     expect(state.core.setViewport).not.toHaveBeenCalled();
     expect(state.createRenderer).toHaveBeenCalledOnce();
+    // Before its GPU or Worker is ready the renderer rebuilds the same query;
+    // the adapter reports that and restores the pin it cleared. The renderer
+    // alone frames the rebuilt scene.
+    state.core.replaceColumns.mockReturnValueOnce("rebuild");
+    expect(adapter.replaceScene(next)).toBe("rebuild");
+    expect(state.core.pin).toHaveBeenCalledWith("neighbor", true, { x: 31, y: 37 }, { reconcile: true });
+    expect(state.core.setViewport).not.toHaveBeenCalled();
   });
 
   it("rebuilds a changed selection or ambiguous semantic aliases instead of reusing a layout", () => {

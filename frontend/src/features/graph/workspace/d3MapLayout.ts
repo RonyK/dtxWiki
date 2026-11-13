@@ -1,4 +1,5 @@
 import { WORKSPACE_MAP_EDGE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
+import { createD3RowOrder } from "../shared/physics/d3RowOrder";
 import { createD3WorkerLayout, type D3WorkerLayoutState } from "../shared/physics/d3WorkerLayout";
 import type { LocalLayoutInput, LocalLayoutPositions } from "../shared/physics/layoutTypes";
 import { directoryStartIsStructured, workspaceContainerIndices } from "./directoryStartPositions";
@@ -65,10 +66,8 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
   let requestedRunning = false;
   let requestedReheat = false;
   let reducedMotion = input.reducedMotion;
-  let indexedOrder: readonly number[] | null = null;
-  let directOrder = true;
   let fixedIndices = new Set(input.pins);
-  let catalog: readonly string[] | null = null;
+  const rowOrder = createD3RowOrder();
   let calibrationPasses = 0;
   const scene = (): LocalLayoutInput => ({
     primarySeedKey: null,
@@ -102,17 +101,7 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
     onIndexedTick(positions, workerKeys) {
       if (destroyed) return;
       try {
-        if (catalog !== workerKeys) {
-          catalog = workerKeys;
-          const source = new Map(workerKeys.map((key, index) => [key, index]));
-          indexedOrder = keys.map(key => source.get(key) ?? -1);
-          if (indexedOrder.some(index => index < 0)) { fail(new Error("D3 Map received a different visible catalog")); return; }
-          directOrder = indexedOrder.every((source, index) => source === index);
-        }
-        const ordered = directOrder ? positions : new Float32Array(positions.length);
-        if (!directOrder) indexedOrder!.forEach((source, index) => {
-          ordered[index * 2] = positions[source * 2]; ordered[index * 2 + 1] = positions[source * 2 + 1];
-        });
+        const ordered = rowOrder(positions, workerKeys, keys);
         if (!acceptedSolved) {
           // A hidden/user-paused initial scene retains displayed rows. Resume
           // asks for another bounded Worker frame instead of copying phyllotaxis.
@@ -158,7 +147,6 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
       if (destroyed) return;
       currentInput = next; keys = next.columns.nodeKeys;
       fixedIndices = new Set(next.pins);
-      catalog = null; indexedOrder = null;
       // The original CSS/world reference remains owned by this scene. A
       // topology edit is neither another cold solve nor a new camera Fit.
       basis = buildWorkspaceD3UnitBasis({ ...next, viewport: basis.referenceViewport,

@@ -2,14 +2,80 @@ import { GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, type GraphNodeShape } fro
 import { GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, traceOutline } from "../shared/nodeShapes";
 import { nativeGlyphOutline, nativeGlyphShape } from "../shared/workspaceGlyphGeometry";
 import type { CosmosOverlayFrame } from "../shared/cosmos/renderBinding";
+import { rgb } from "../workspace/cosmosColor";
+
+/** A quiet glyph keeps this share of its colour over the surface. */
+export const LOCAL_QUIET_SHARE = .14;
+export function quietColor(color: string, surface: string): string {
+  const front = rgb(color), back = rgb(surface);
+  return `rgb(${front.map((value, channel) =>
+    Math.round((value * LOCAL_QUIET_SHARE + back[channel] * (1 - LOCAL_QUIET_SHARE)) * 255)).join(", ")})`;
+}
 
 type Bounds = { left: number; right: number; top: number; bottom: number };
 const overlaps = (a: Bounds, b: Bounds) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
+/** Placed label boxes by screen cell, so a candidate meets only its neighbours. */
+function createLabelGrid(cell = 64) {
+  const cells = new Map<string, Bounds[]>();
+  const each = (bounds: Bounds, visit: (key: string) => boolean | void) => {
+    for (let column = Math.floor(bounds.left / cell); column <= Math.floor(bounds.right / cell); column++) {
+      for (let row = Math.floor(bounds.top / cell); row <= Math.floor(bounds.bottom / cell); row++) {
+        if (visit(`${column},${row}`)) return true;
+      }
+    }
+    return false;
+  };
+  return {
+    fits: (bounds: Bounds) => !each(bounds, key => cells.get(key)?.some(placed => overlaps(bounds, placed))),
+    add: (bounds: Bounds) => {
+      each(bounds, key => { const placed = cells.get(key); if (placed) placed.push(bounds); else cells.set(key, [bounds]); });
+    },
+  };
+}
+
+/**
+ * Text fitting measured once per font and text. Candidates drop one grapheme
+ * at a time behind an ellipsis, down to `minGraphemes`; each is built and
+ * measured only when every longer one is too wide, then reused by later frames.
+ */
+function createTextFitter() {
+  const fits = new Map<string, { graphemes: string[]; candidates: string[]; widths: number[] }>();
+  const widths = new Map<string, number>();
+  const width = (context: CanvasRenderingContext2D, font: string, text: string) => {
+    const key = `${font}\u0000${text}`;
+    let value = widths.get(key);
+    if (value === undefined) { context.font = font; value = context.measureText(text).width; widths.set(key, value); }
+    return value;
+  };
+  return {
+    width,
+    fit(context: CanvasRenderingContext2D, font: string, text: string, room: number, minGraphemes: number) {
+      const key = `${font}\u0000${minGraphemes}\u0000${text}`;
+      let entry = fits.get(key);
+      if (!entry) { entry = { graphemes: Array.from(text), candidates: [text], widths: [] }; fits.set(key, entry); }
+      for (let index = 0; ; index++) {
+        if (index === entry.candidates.length) {
+          const count = entry.graphemes.length - index;
+          if (count < minGraphemes) return entry.candidates[index - 1];
+          entry.candidates.push(`${entry.graphemes.slice(0, count).join("")}…`);
+        }
+        entry.widths[index] ??= width(context, font, entry.candidates[index]);
+        if (entry.widths[index] <= room) return entry.candidates[index];
+      }
+    },
+    clear() { fits.clear(); widths.clear(); },
+  };
+}
 
 /** Local's priority labels and history rings use Cosmos's displayed CSS geometry. */
 export function createLocalCosmosOverlay(container: HTMLDivElement) {
   let tracingId: string | null = null;
   let lastFrame: CosmosOverlayFrame | null = null;
+  // Per-scene work, reused by every frame of that scene and reset with it.
+  const textCache = createTextFitter();
+  let scene: CosmosOverlayFrame["columns"] | null = null;
+  let order: { selectedId: string | null; focusedId: string | null; rows: number[] } | null = null;
   const rings = document.createElement("canvas"), labels = document.createElement("canvas");
   rings.dataset.localGraphRings = "";
   labels.dataset.localGraphLabels = "";
@@ -37,16 +103,13 @@ export function createLocalCosmosOverlay(container: HTMLDivElement) {
       const { columns: c, points, diameters, width, height, tokens } = frame;
       const ring = prepare(rings, width, height), context = prepare(labels, width, height);
       if (!context || !ring || width <= 0 || height <= 0) return;
+      if (scene !== c) { scene = c; order = null; textCache.clear(); }
       const activeId = frame.focusedId ?? frame.selectedId;
       const active = activeId ? c.nodeIds.indexOf(activeId) : -1;
-      const activeEdge = activeId ? c.edgeIds.indexOf(activeId) : -1;
-      const relatedNodes = activeId ? new Set<number>() : null;
-      if (active >= 0) relatedNodes!.add(active);
-      c.edgeIds.forEach((_, index) => {
-        if (index === activeEdge || active >= 0 && (c.edgeSources[index] === active || c.edgeTargets[index] === active)) {
-          relatedNodes!.add(c.edgeSources[index]); relatedNodes!.add(c.edgeTargets[index]);
-        }
-      });
+      // One quiet rule, as the GPU greyout: muted, or outside the active star.
+      const quiet = (index: number) => !c.nodeIsCurrent?.[index]
+        && Boolean(c.nodeMuted?.[index] || frame.star !== null && !frame.star.has(index));
+      const quietInk = quietColor(tokens.ink, tokens.surface);
       const shapeFor = (index: number): GraphNodeShape => c.nodeSeedGlyph?.[index] ? "circle"
         : GRAPH_NODE_VISUALS[c.nodeVisualKinds![index]].shape;
       const band = (index: number, ink: string, offset = 0) => {
@@ -67,25 +130,27 @@ export function createLocalCosmosOverlay(container: HTMLDivElement) {
         if (c.nodeSeedGlyph?.[index] && c.nodeIds[index] !== tracingId) {
           // The seed's ink ring occupies the same 24% of its disc as before.
           const radius = diameter / 2, stroke = radius * .24;
-          ring.save(); ring.strokeStyle = tokens.ink; ring.lineWidth = stroke;
+          ring.save(); ring.strokeStyle = quiet(index) ? quietInk : tokens.ink; ring.lineWidth = stroke;
           ring.beginPath(); ring.arc(x, y, radius - stroke / 2, 0, 2 * Math.PI); ring.stroke(); ring.restore();
         }
         if (c.nodeHighlighted?.[index]) band(index, tokens.highlight);
         if (index === active) band(index, tokens.selection,
           c.nodeHighlighted?.[index] ? GRAPH_RING_GAP_PX + GRAPH_RING_WIDTH_PX : 0);
       });
-      const bounds: Bounds[] = [];
-      const rows = Array.from({ length: c.nodeIds.length }, (_, index) => index);
+      const placed = createLabelGrid();
       const priority = (index: number) => c.nodeIsCurrent?.[index] ? 0 : c.nodeIsSeed?.[index] ? 1
         : c.nodeIds[index] === frame.selectedId ? 2 : c.nodeIds[index] === frame.focusedId ? 3 : 4;
-      rows.sort((a, b) => priority(a) - priority(b) || c.nodeKeys[a].localeCompare(c.nodeKeys[b]));
-      for (const index of rows) {
+      if (order?.selectedId !== frame.selectedId || order.focusedId !== frame.focusedId) {
+        const rows = Array.from({ length: c.nodeIds.length }, (_, index) => index);
+        rows.sort((a, b) => priority(a) - priority(b) || c.nodeKeys[a].localeCompare(c.nodeKeys[b]));
+        order = { selectedId: frame.selectedId, focusedId: frame.focusedId, rows };
+      }
+      for (const index of order.rows) {
         const x = points[index * 2], y = points[index * 2 + 1], radius = diameters[index] / 2;
         if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > width || y < 0 || y > height) continue;
         const forced = priority(index) < 4;
         const current = Boolean(c.nodeIsCurrent?.[index]);
-        const quiet = !current && Boolean(c.nodeMuted?.[index] || relatedNodes !== null && !relatedNodes.has(index));
-        if (!forced && (!frame.showLabels || quiet || c.nodeSessions?.[index] && width <= 440)) continue;
+        if (!forced && (!frame.showLabels || quiet(index) || c.nodeSessions?.[index] && width <= 440)) continue;
         const text = c.nodeLabels[index];
         if (!text) continue;
         const cap = current ? 40 : 24;
@@ -101,17 +166,13 @@ export function createLocalCosmosOverlay(container: HTMLDivElement) {
         context.save();
         const badge = c.nodeBadges?.[index];
         const badgeFont = `600 ${Math.max(8, fontSize - 2)}px sans-serif`;
-        context.font = badgeFont;
-        const badgeWidth = badge && room - context.measureText(badge).width - 12 >= 24
-          ? context.measureText(badge).width + 12 : 0;
-        context.font = `${current ? 700 : c.nodeVisualKinds?.[index] === "folder" ? 600 : 400} ${fontSize}px sans-serif`;
-        context.textAlign = right ? "left" : "right"; context.textBaseline = "middle";
-        const textRoom = room - badgeWidth, graphemes = Array.from(shortened);
-        let visible = shortened;
-        while (graphemes.length > 1 && context.measureText(visible).width > textRoom) {
-          graphemes.pop(); visible = `${graphemes.join("")}…`;
-        }
-        const textWidth = Math.min(textRoom, context.measureText(visible).width), labelWidth = textWidth + badgeWidth;
+        const badgeText = badge ? textCache.width(context, badgeFont, badge) : 0;
+        const badgeWidth = badge && room - badgeText - 12 >= 24 ? badgeText + 12 : 0;
+        const font = `${current ? 700 : c.nodeVisualKinds?.[index] === "folder" ? 600 : 400} ${fontSize}px sans-serif`;
+        const textRoom = room - badgeWidth;
+        const visible = textCache.fit(context, font, shortened, textRoom, 1);
+        context.font = font; context.textAlign = right ? "left" : "right"; context.textBaseline = "middle";
+        const textWidth = Math.min(textRoom, textCache.width(context, font, visible)), labelWidth = textWidth + badgeWidth;
         const anchorX = x + (right ? offset : -offset);
         const labelX = forced ? Math.max(right ? margin : margin + labelWidth,
           Math.min(right ? width - margin - labelWidth : width - margin, anchorX)) : anchorX;
@@ -127,18 +188,18 @@ export function createLocalCosmosOverlay(container: HTMLDivElement) {
             right: right ? labelX + labelWidth + 2 : labelX + 2, top: y - insetY, bottom: y + insetY };
         });
         const chosen = candidates.find(candidate => candidate.top >= 0 && candidate.bottom <= height
-          && !bounds.some(bound => overlaps(candidate, bound))) ?? (forced ? candidates[0] : undefined);
+          && placed.fits(candidate)) ?? (forced ? candidates[0] : undefined);
         if (!chosen) { context.restore(); continue; }
         if (current) {
           const left = right ? labelX - 7 : labelX - labelWidth - 7, half = fontSize / 2 + 5;
-          bounds.push({ left: left - 2, right: left + labelWidth + 16,
+          placed.add({ left: left - 2, right: left + labelWidth + 16,
             top: chosen.y - half - 2, bottom: chosen.y + half + 2 });
           context.fillStyle = tokens.ink; context.beginPath();
           context.roundRect(left, chosen.y - half, labelWidth + 14, half * 2, 6); context.fill();
           context.fillStyle = tokens.surface; context.fillText(visible, labelX, chosen.y, room);
           context.restore(); continue;
         }
-        bounds.push(chosen);
+        placed.add(chosen);
         const textX = right ? labelX + badgeWidth : labelX;
         if (badgeWidth && badge) {
           const pillX = right ? labelX : labelX - textWidth - badgeWidth, pillHeight = Math.max(10, fontSize + 1);
@@ -156,10 +217,9 @@ export function createLocalCosmosOverlay(container: HTMLDivElement) {
         const from = c.edgeSources[index], to = c.edgeTargets[index];
         const x = (points[from * 2] + points[to * 2]) / 2, y = (points[from * 2 + 1] + points[to * 2 + 1]) / 2;
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-        context.save(); context.font = "600 11px sans-serif";
-        const width = Math.min(180, context.measureText(caption).width + 16), chars = Array.from(caption);
-        let visible = caption;
-        while (chars.length && context.measureText(visible).width > width - 12) { chars.pop(); visible = `${chars.join("")}…`; }
+        const font = "600 11px sans-serif", width = Math.min(180, textCache.width(context, font, caption) + 16);
+        const visible = textCache.fit(context, font, caption, width - 12, 0);
+        context.save(); context.font = font;
         context.fillStyle = c.edgeRemoved?.[index] ? GRAPH_REMOVED_EDGE_COLOR : tokens.highlight;
         context.beginPath(); context.roundRect(x - width / 2, y - 11, width, 22, 7); context.fill();
         context.fillStyle = tokens.surface; context.textAlign = "center"; context.textBaseline = "middle";

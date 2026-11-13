@@ -1,3 +1,4 @@
+import { createD3RowOrder } from "../shared/physics/d3RowOrder";
 import { createD3WorkerLayout, createInitialD3Positions } from "../shared/physics/d3WorkerLayout";
 import type { LocalLayoutInput, LocalLayoutPositions } from "../shared/physics/layoutTypes";
 import type { CosmosLayoutSolver, CosmosPositionLayout, CosmosPositionLayoutInput, CosmosPositionLayoutOptions } from "../shared/cosmos/layoutTypes";
@@ -20,6 +21,7 @@ function createLocalPositionLayout(input: CosmosPositionLayoutInput, options: Co
   let paused = true;
   let reducedMotion = input.reducedMotion;
   let keyIndices = new Map(keys.map((key, index) => [key, index]));
+  const rowOrder = createD3RowOrder();
   const points = record(keys, input.positions);
   const fixed = Object.fromEntries(input.pins.map(index => [keys[index], points[keys[index]]]));
   const fail = (error: unknown) => {
@@ -33,16 +35,7 @@ function createLocalPositionLayout(input: CosmosPositionLayoutInput, options: Co
     reducedMotion, initialPositionsAreSolved: input.restoredSolved,
     onIndexedTick(rows, workerKeys) {
       if (destroyed) return;
-      try {
-        const source = new Map(workerKeys.map((key, index) => [key, index]));
-        const ordered = new Float32Array(keys.length * 2);
-        for (let index = 0; index < keys.length; index++) {
-          const from = source.get(keys[index]);
-          if (from === undefined) throw new Error("Context Worker returned a different visible catalog");
-          ordered[index * 2] = rows[from * 2]; ordered[index * 2 + 1] = rows[from * 2 + 1];
-        }
-        options.onPositions(ordered);
-      } catch (error) { fail(error); }
+      try { options.onPositions(rowOrder(rows, workerKeys, keys)); } catch (error) { fail(error); }
     },
     onState: state => {
       if (!destroyed) { try { options.onState(state); } catch (error) { fail(error); } }
@@ -69,9 +62,11 @@ function createLocalPositionLayout(input: CosmosPositionLayoutInput, options: Co
         paused ? { settle: true, settleTicks: 0, settleAtCurrentAlpha: true }
           : reducedMotion ? { settle: true } : {});
     },
+    // The Worker owns every unpinned row; pins and drags reach it as commands.
+    // A row sync therefore declares pins only, never overwriting its rows.
     setPositions(rows, pins = current.pins, reconcile = {}) {
       if (!destroyed) layout.setPositions(record(keys, rows), pins.map(index => key(index)),
-        { reheat: reconcile.reheat ?? !paused, pinsOnly: false });
+        { reheat: reconcile.reheat ?? !paused, pinsOnly: true });
     },
     setReducedMotion(enabled) {
       if (!destroyed && reducedMotion !== enabled) { reducedMotion = enabled; layout.setReducedMotion(enabled); }

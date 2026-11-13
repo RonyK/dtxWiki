@@ -1,7 +1,7 @@
 import { NativeGraph } from "../../frontend/src/features/graph/workspace/cosmosNative";
 import { buildLocalCosmosColumns } from "../../frontend/src/features/graph/shared/cosmos/localScene";
 import { createLocalCosmosBinding } from "../../frontend/src/features/graph/local/cosmosBinding";
-import { GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_EDGE_ENDPOINT_SIZE_PX, GRAPH_LINE_OPACITY, readGraphTokens } from "../../frontend/src/features/graph/shared/graphTokens";
+import { GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, readGraphTokens } from "../../frontend/src/features/graph/shared/graphTokens";
 import type { CosmosLayoutSolver } from "../../frontend/src/features/graph/shared/cosmos/layoutTypes";
 import type { GraphRenderScene } from "../../frontend/src/features/graph/shared/rendererTypes";
 
@@ -95,15 +95,8 @@ const native = new NativeGraph(container, {
   enableSimulation: false, transitionDuration: 0, pointSizeScale: 1, scalePointsOnZoom: false,
   // As in the production core, a link listener enables the SDK picking pass.
   onLinkClick: () => undefined,
-  linkDefaultWidth: GRAPH_EDGE_WIDTH_PX, linkEndpointMarkers: true,
-  linkDashLength: GRAPH_EDGE_PATTERN.citation[0], linkDashGap: GRAPH_EDGE_PATTERN.citation[1],
-  linkDashDotLength: GRAPH_EDGE_PATTERN.citation[2], linkDashDotGap: GRAPH_EDGE_PATTERN.citation[3],
-  linkDottedDashLength: GRAPH_EDGE_PATTERN.membership[0], linkDottedDashGap: GRAPH_EDGE_PATTERN.membership[1],
-  linkEndpointArrowLength: GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowLength,
-  linkEndpointArrowHalfWidth: GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowHalfWidth,
-  linkEndpointDiamondLength: GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondLength,
-  linkEndpointDiamondHalfWidth: GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondHalfWidth,
-  linkEndpointNodeGap: GRAPH_EDGE_ENDPOINT_SIZE_PX.nodeGap,
+  // Patterns and endpoint markers are each line's row of the native line table.
+  linkDefaultWidth: GRAPH_EDGE_WIDTH_PX,
   linkVisibilityDistanceRange: [40, 350], linkVisibilityMinTransparency: GRAPH_LINE_OPACITY.fade.small.floor,
 });
 const graph = { getNodeAttributes: (id: string) => rows.get(id)! };

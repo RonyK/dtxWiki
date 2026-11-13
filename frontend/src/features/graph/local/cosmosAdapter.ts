@@ -75,6 +75,8 @@ export function createLocalGraphAdapter(
   let lost = false;
   let ready = false;
   let revision = 0;
+  // An ambiguous scene never shares renderer state: each gets its own selection.
+  let ambiguousScene = 0;
   let navigation = 0;
   let tracingId: string | null = null;
   let renderer: CosmosRenderer | undefined;
@@ -85,7 +87,7 @@ export function createLocalGraphAdapter(
   const binding = createLocalCosmosBinding(createLocalCosmosLayoutSolver(), container);
   const identity = (): GraphVisibleIdentity => ({
     workspaceId: owner, actorId: owner, surface: "local",
-    selectionKey: local.geometryKey === null ? JSON.stringify(["ambiguous", scope, revision])
+    selectionKey: local.geometryKey === null ? JSON.stringify(["ambiguous", scope, ambiguousScene])
       : scope ?? local.geometryKey,
     visibleFingerprint: local.geometryKey ?? JSON.stringify([
       local.nodes.map(node => [node.key, node.graphId]),
@@ -135,7 +137,7 @@ export function createLocalGraphAdapter(
     }
   };
   try {
-    renderer = createCosmosRenderer(container, buildLocalCosmosColumns(scene, identity()), {
+    renderer = createCosmosRenderer(container, buildLocalCosmosColumns(scene, identity(), local), {
     forcedColors: options.forcedColors, reducedMotion: options.reducedMotion,
     initialPaused: options.initialPaused, initialViewport: options.initialViewport,
     initialCoordinates: options.initialCoordinates,
@@ -234,28 +236,22 @@ export function createLocalGraphAdapter(
     },
     replaceScene(nextScene) {
       if (!active()) return;
-      const next = buildLocalScene(nextScene);
       const previousVisible = new Set(local.keyByGraphId.keys());
-      const nextScope = nextScene.scopeKey ?? null;
-      const update: LocalSceneUpdate = nextScope === scope && next.geometryKey !== null
-        && next.geometryKey === local.geometryKey ? "metadata"
-        : nextScope !== null && nextScope === scope && local.geometryKey !== null && next.geometryKey !== null
-          ? "topology" : "rebuild";
-      const viewport = update === "rebuild" ? renderer!.getViewport() : null;
-      scene = nextScene; local = next; scope = nextScope;
+      scene = nextScene; local = buildLocalScene(nextScene); scope = nextScene.scopeKey ?? null;
+      if (local.geometryKey === null) ambiguousScene++;
+      // The renderer alone decides, as for the Map, whether this is metadata,
+      // a live topology update or a rebuild (also before its GPU or Worker is
+      // ready), and it owns the camera. Everything below follows its answer.
+      const update: LocalSceneUpdate | void = renderer!.replaceColumns(buildLocalCosmosColumns(scene, identity(), local));
+      if (!update) return;
+      if (update === "metadata") { renderTrace(); return update; }
+      cancelTrace(); ready = false; revision++;
       if (update === "rebuild") requestedArrivals.clear();
       else for (const id of requestedArrivals) if (!local.keyByGraphId.has(id)) requestedArrivals.delete(id);
-      if (update !== "metadata") { cancelTrace(); ready = false; revision++; }
-      renderer!.replaceColumns(buildLocalCosmosColumns(scene, identity()));
-      // A new Local force input replaces the layout, as before; its live
-      // camera stays reader-owned. Authority changes create a new adapter.
-      if (viewport) renderer!.setViewport(viewport);
       // Retained pins belong to the live Worker, including a drag currently
       // in progress. Replaying their last external coordinates would rewind it.
-      if (update !== "metadata") reconcilePins(new Set([...positions.keys()]
-        .filter(id => update === "rebuild" || !previousVisible.has(id))));
-      if (update !== "metadata") completion = watchReady();
-      else renderTrace();
+      reconcilePins(new Set([...positions.keys()].filter(id => update === "rebuild" || !previousVisible.has(id))));
+      completion = watchReady();
       return update;
     },
     reset() {

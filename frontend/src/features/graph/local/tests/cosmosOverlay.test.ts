@@ -40,7 +40,7 @@ function frame(input: GraphRenderScene, options: Partial<CosmosOverlayFrame> = {
   const columns = buildLocalCosmosColumns(input, { actorId: "owner", workspaceId: "workspace", surface: "local",
     selectionKey: "query", visibleFingerprint: "visible" });
   return { columns, points: Float32Array.from(columns.nodeIds.flatMap(() => [300, 200])),
-    diameters: new Float32Array(columns.nodeIds.length).fill(10), selectedId: null, focusedId: null,
+    diameters: new Float32Array(columns.nodeIds.length).fill(10), selectedId: null, focusedId: null, star: null,
     showLabels: false, zoom: 1, forcedColors: false, tokens: readGraphTokens(container, "light"),
     width: 860, height: 640, ...options };
 }
@@ -80,6 +80,29 @@ describe("Local Cosmos priority and history labels", () => {
     context.fillText.mockClear();
     overlay.render({ ...current, selectedId: null, focusedId: null });
     expect(context.fillText.mock.calls.map(call => call[0])).toEqual(["seed"]);
+  });
+
+  it("quiets ordinary titles and an expanded seed's ring only outside the renderer's active star", () => {
+    const input = scene(); input.currentId = undefined;
+    const spread = (current: CosmosOverlayFrame) => {
+      current.points = Float32Array.from(current.columns.nodeIds.flatMap((_, index) => [150 + index * 250, 150 + index * 150]));
+      return current;
+    };
+    const rings = () => contexts.get(container.querySelector<HTMLCanvasElement>("[data-local-graph-rings]")!)!;
+    // A selected id outside this frame has no star, so nothing is quiet.
+    const absent = spread(frame(input, { showLabels: true, selectedId: "absent" }));
+    overlay.render(absent);
+    const arcs: string[] = [];
+    rings().arc.mockImplementation(() => { arcs.push(rings().strokeStyle); });
+    labels().fillText.mockClear(); overlay.render(absent);
+    expect(labels().fillText.mock.calls.map(call => call[0]).sort()).toEqual(["neighbor", "other", "seed"]);
+    expect(arcs).toContain(absent.tokens.ink);
+    const neighbor = absent.columns.nodeIds.indexOf("neighbor");
+    arcs.length = 0; labels().fillText.mockClear();
+    // The star alone (no selection band) quiets every point outside it.
+    overlay.render({ ...absent, selectedId: null, star: new Set([neighbor]) });
+    expect(labels().fillText.mock.calls.map(call => call[0]).sort()).toEqual(["neighbor", "seed"]);
+    expect(arcs).not.toContain(absent.tokens.ink);
   });
 
   it("keeps all priority titles in a tiny viewport instead of dropping them when collision-free placement is impossible", () => {

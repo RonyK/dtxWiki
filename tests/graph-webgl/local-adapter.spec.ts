@@ -98,7 +98,9 @@ test("Local pin state releases restored coordinates without reviving them on sce
   expect(after.positions["context_page:linked"]).not.toEqual(before.positions["context_page:linked"]);
   expect(after.positions["library_item_version:cited"]).toEqual(before.positions["library_item_version:cited"]);
   expect(after.positions["context_page:seed"]).toEqual({ x: 0, y: 0 });
-  expect(after.camera).toEqual(before.camera);
+  // As on the Map, the renderer frames a rebuilt scene by Fit: the reader's
+  // earlier zoom does not carry over to the new layout.
+  expect(after.camera).not.toEqual(before.camera);
   expect(errors).toEqual([]);
 });
 

@@ -58,15 +58,24 @@ export type CosmosSceneColumns = {
 };
 
 /** The same authority fence is used by layout, picking and deferred scene work. */
+// Identities are immutable once a scene's columns are built; a scene's key is
+// derived once and reused by every later check, however large the scene.
+const identityKeys = new WeakMap<CosmosSceneColumns["identity"], string>();
+
 export function cosmosSceneIdentityKey(columns: Pick<CosmosSceneColumns, "identity">): string {
   const identity = columns.identity;
-  return JSON.stringify([
-    identity.workspaceId,
-    identity.actorId,
-    identity.surface,
-    identity.selectionKey,
-    identity.visibleFingerprint,
-  ]);
+  let key = identityKeys.get(identity);
+  if (key === undefined) {
+    key = JSON.stringify([
+      identity.workspaceId,
+      identity.actorId,
+      identity.surface,
+      identity.selectionKey,
+      identity.visibleFingerprint,
+    ]);
+    identityKeys.set(identity, key);
+  }
+  return key;
 }
 
 /** A transient snapshot owns its columns, including any presentation metadata. */
