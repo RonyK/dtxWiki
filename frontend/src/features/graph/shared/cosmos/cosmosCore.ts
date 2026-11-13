@@ -22,8 +22,11 @@ import { createWorkspaceTrackedPositions } from "../../workspace/gpuTrackedPosit
 
 /** Layout progress is separate from GPU readiness and never promises convergence. */
 export type CosmosLayoutStatus = "arranging" | "live" | "paused" | "motion-off";
+export type CosmosSceneUpdate = "metadata" | "topology" | "rebuild";
 
 export type CosmosRendererCallbacks = {
+  /** A surface overlay follows the same published coordinate/camera frame. */
+  onRender?(): void;
   onHover(id: string | null): void;
   onSelect(id: string | null): void;
   onPin?(id: string, position: GraphPoint): void;
@@ -83,10 +86,14 @@ export interface CosmosRenderer {
   fit(): void;
   focus(id: string | null): void;
   getViewport(): GraphViewport | null;
+  getNodePosition(id: string): GraphPoint | null;
+  getNodeDisplayData(id: string): { x: number; y: number; radius: number; shape: number } | null;
+  getEdgeDisplayData(id: string): { source: GraphPoint; target: GraphPoint } | null;
   pin(id: string, pinned: boolean, position?: GraphPoint, intent?: { reconcile?: boolean }): GraphPoint | null;
+  pinWhenSettled(id: string): void;
   /** Explicit navigation only; host ownership is checked again at paint time. */
   revealAfterLayout(id: string, signal: AbortSignal, isCurrent: () => boolean, onFinished?: () => void): void;
-  replaceColumns(columns: CosmosSceneColumns): void;
+  replaceColumns(columns: CosmosSceneColumns): CosmosSceneUpdate | void;
   reset(): void;
   resize(): void;
   resumeLayout(reheat?: boolean): void;
@@ -173,6 +180,11 @@ export function createCosmosRenderer(
   binding.assertColumns(initialColumns);
   const support = detectWorkspaceMapWebGL();
   if (!support.supported) throw (binding.createWebGLError?.(support.reason) ?? new CosmosWebGLError(support.reason));
+  // Every absolute canvas/overlay belongs to this renderer's supplied frame,
+  // including a plain div used outside the application chrome.
+  const previousPosition = container.style.position;
+  const ownsPosition = getComputedStyle(container).position === "static";
+  if (ownsPosition) container.style.position = "relative";
   const mode = options.forcedColors ? "forced"
     : document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
   const tokens = readGraphTokens(container, mode);
@@ -228,6 +240,7 @@ export function createCosmosRenderer(
   let preservesSessionCoordinates = initialCoordinates !== null;
   let layoutPhase = "arranging";
   let positionLayoutReady = initialCoordinates !== null && options.initialCoordinates?.layoutReady === true;
+  let positionFrameAccepted = positionLayoutReady;
   let positionUnitBasis = initialCoordinates ? options.initialCoordinates?.unitBasis : undefined;
   let nodeById = new Map(columns.nodeIds.map((id, index) => [id, index]));
   let edgeById = new Map(columns.edgeIds.map((id, index) => [id, index]));
@@ -337,6 +350,9 @@ export function createCosmosRenderer(
   let positionLayout: CosmosPositionLayout | null = null;
   let positionLayoutEpoch = 0;
   let positionLayoutTicks = 0;
+  let acceptingStaticLayout = false;
+  const pendingArrivalIds = new Set<string>();
+  const positionReadyWaiters = new Set<() => void>();
   let publishedLayoutStatus: { status: CosmosLayoutStatus | null; identity: GraphVisibleIdentity } | null = null;
 
   function baseLinkDistanceRange(): [number, number] {
@@ -427,8 +443,8 @@ export function createCosmosRenderer(
     simulationCluster: 0,
     // Every link has the legend's one width, at every scene size.
     linkDefaultWidth: GRAPH_EDGE_WIDTH_PX,
-    hoveredLinkWidthIncrease: 0.6,
-    focusedLinkWidthIncrease: 0.6,
+    hoveredLinkWidthIncrease: binding.interactionWidthIncrease ?? 0.6,
+    focusedLinkWidthIncrease: binding.interactionWidthIncrease ?? 0.6,
     // Shared legend strokes: citation dash-dot on style 1, long-dash containment on style 2.
     linkDashLength: GRAPH_EDGE_PATTERN.citation[0],
     linkDashGap: GRAPH_EDGE_PATTERN.citation[1],
@@ -483,25 +499,35 @@ export function createCosmosRenderer(
       if (alpha < 0.02 && admitted().nodeCount <= binding.smallSceneLimit) reheatRelationPhysics(0.04);
     },
     onDragStart(event) {
-      draggedPoint = nativeHoveredIndex !== null && columns.nodeKeys[nativeHoveredIndex] && !destroyed && !contextLost
-        && Number.isFinite(event.x) && Number.isFinite(event.y)
-        ? { index: nativeHoveredIndex, nodeKey: columns.nodeKeys[nativeHoveredIndex], identityKey: cosmosSceneIdentityKey(columns),
+      // A press is a click until it moves: the native drag stays off, so a
+      // stationary press neither moves the point nor touches the layout.
+      graph.remapDraggingPoint(null);
+      const index = nativeHoveredIndex;
+      draggedPoint = index !== null && columns.nodeKeys[index] && binding.canDrag?.(columns, index) !== false
+        && !destroyed && !contextLost && Number.isFinite(event.x) && Number.isFinite(event.y)
+        ? { index, nodeKey: columns.nodeKeys[index], identityKey: cosmosSceneIdentityKey(columns),
           startX: event.x, startY: event.y, moved: false } : null;
-      if (draggedPoint) { dragGesture = true; stopPositionLayout(); }
     },
     onDrag(event) {
       const drag = draggedPoint;
       if (!drag || destroyed || contextLost || drag.identityKey !== cosmosSceneIdentityKey(columns)
         || columns.nodeKeys[drag.index] !== drag.nodeKey || !Number.isFinite(event.x) || !Number.isFinite(event.y)) return;
-      if (!drag.moved && Math.hypot(event.x - drag.startX, event.y - drag.startY) >= 1) {
-        drag.moved = true;
+      const point = graph.screenToSpacePosition([event.x, event.y]);
+      if (!drag.moved) {
+        if (Math.hypot(event.x - drag.startX, event.y - drag.startY) < 1) return;
+        drag.moved = true; dragGesture = true; stopPositionLayout();
+        graph.remapDraggingPoint(drag.index);
+        if (point.every(Number.isFinite)) {
+          const [x, y] = nativeSpace.fromNativePoint(point);
+          positionLayout?.beginDrag?.(drag.index, { x, y });
+        }
         reheatRelationPhysics(0.15);
       }
       // Native Drag writes the pointer position into the GPU row this frame;
       // CPU rows and GPU reads only catch up after the gesture.
-      const point = graph.screenToSpacePosition([event.x, event.y]);
       if (point.every(Number.isFinite)) {
         dragLabelPoint = { index: drag.index, point: nativeSpace.fromNativePoint(point) };
+        positionLayout?.moveDrag?.(drag.index, { x: dragLabelPoint.point[0], y: dragLabelPoint.point[1] });
         updateLabels(undefined, true);
       }
     },
@@ -599,15 +625,12 @@ export function createCosmosRenderer(
   function endPointDrag(drag: typeof draggedPoint, event: Parameters<NonNullable<GraphConfig["onDragEnd"]>>[0]) {
     if (!drag || destroyed || contextLost || drag.identityKey !== cosmosSceneIdentityKey(columns)
       || columns.nodeKeys[drag.index] !== drag.nodeKey) return;
+    // A stationary tap is selection only: its drag never began.
+    if (!drag.moved) return;
+    positionLayout?.endDrag?.(drag.index);
     if (typeof event.sourceEvent?.type === "string" && event.sourceEvent.type.endsWith("cancel")) {
       solver.afterPositionEdit(() => { synchronizeDraggedPositions(); syncRelationPhysics(.15); });
       return;
-    }
-    const moved = drag.moved || (Number.isFinite(event.x) && Number.isFinite(event.y)
-      && Math.hypot(event.x - drag.startX, event.y - drag.startY) >= 1);
-    if (!moved) {
-      solver.afterPositionEdit(() => syncRelationPhysics(.15));
-      return; // A stationary tap is selection, never a saved pin or native reheat.
     }
     // Native Drag clears its owner before the callback; its last texture
     // update happens in a later RAF. Commit the final event position rather
@@ -641,9 +664,16 @@ export function createCosmosRenderer(
     const index = drag.index;
     // One explicit readback per completed drag; never per frame or hover.
     const positions = solver.positions(buffers.positions, readPositions);
-    const position = { x: positions[index * 2], y: positions[index * 2 + 1] };
+    let position = { x: positions[index * 2], y: positions[index * 2 + 1] };
+    const fixed = positionLayout?.pin?.(index, position);
+    if (fixed) {
+      position = fixed;
+      buffers.positions[index * 2] = fixed.x; buffers.positions[index * 2 + 1] = fixed.y;
+      writePositions(buffers.positions); graph.render(undefined, 0);
+    }
     if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return;
     pinned.add(index);
+    pendingArrivalIds.delete(columns.nodeIds[index]);
     pinOwners.set(index, columns.nodeIds[index]);
     for (const [id, owner] of retiredPinIds) if (owner === index) retiredPinIds.delete(id);
     graph.setPinnedPoints([...pinned]);
@@ -756,7 +786,8 @@ export function createCosmosRenderer(
     const pixel = nativePixelVectors(frame, nativeZoom);
     const center = [point[0] - dx * pixel.x[0] - dy * pixel.y[0], point[1] - dx * pixel.x[1] - dy * pixel.y[1]];
     if (!center.every(Number.isFinite)) return false;
-    graph.setZoomTransformByPointPositions(new Float32Array(center), duration, nativeZoom, 0, simulate);
+    if (duration === 0 && !simulate) graph.setCameraCenter(center, nativeZoom);
+    else graph.setZoomTransformByPointPositions(center, duration, nativeZoom, 0, simulate);
     return true;
   }
 
@@ -803,6 +834,7 @@ export function createCosmosRenderer(
 
   function retirePositionLayout() {
     positionLayoutEpoch++;
+    positionFrameAccepted = false;
     positionLayout?.destroy();
     positionLayout = null;
     binding.diagnose("layoutRunning", "false");
@@ -821,6 +853,8 @@ export function createCosmosRenderer(
     retirePositionLayout();
     initialCamera?.cancel(false); cancelReveal(); communityJob.cancel();
     pendingCommunity = null;
+    for (const resolve of positionReadyWaiters) resolve();
+    positionReadyWaiters.clear();
     binding.diagnose("physics", "failed");
     options.callbacks.onRuntimeError?.(error);
   }
@@ -828,11 +862,9 @@ export function createCosmosRenderer(
   function ensurePositionLayout() {
     if (positionLayout || !columns.nodeIds.length || simulationFailed) return;
     const epoch = ++positionLayoutEpoch;
-    const identityKey = cosmosSceneIdentityKey(columns);
     try {
       const canvas = container.querySelector<HTMLCanvasElement>("canvas");
       if (!canvas || canvas.clientWidth <= 0 || canvas.clientHeight <= 0) return;
-      let acceptedFrame = false;
       const availableFrame = uncoveredFrame();
       const layoutViewport = availableFrame ? {
         width: availableFrame.width - availableFrame.left - availableFrame.right,
@@ -844,26 +876,32 @@ export function createCosmosRenderer(
         unitBasis: positionUnitBasis, viewport: layoutViewport,
         maxDiameterCss: maxPointDiameterCss() }, {
         onUnitBasis(basis) {
-          if (epoch === positionLayoutEpoch && identityKey === cosmosSceneIdentityKey(columns)
+          if (epoch === positionLayoutEpoch
             && !destroyed && !contextLost && !simulationFailed) positionUnitBasis = basis;
         },
         onPositions(positions) {
-          if (epoch !== positionLayoutEpoch || identityKey !== cosmosSceneIdentityKey(columns)
-            || !ready || destroyed || contextLost || simulationFailed || paused || draggedPoint
-            || document.visibilityState === "hidden" || positionLayoutReady && reducedMotion) return;
-          acceptedFrame = true;
+          if (epoch !== positionLayoutEpoch || positions.length !== columns.nodeIds.length * 2
+            || !ready || destroyed || contextLost || simulationFailed || draggedPoint?.moved
+            || document.visibilityState === "hidden" || !acceptingStaticLayout && (paused && (positionLayoutReady || !solver.awaitInitialPositions)
+            || positionLayoutReady && reducedMotion)) return;
+          positionFrameAccepted = true;
           const changed = positions.length !== buffers.positions.length
             || positions.some((value, index) => value !== buffers.positions[index]);
           buffers.positions = positions;
+          acceptingStaticLayout = false;
           binding.diagnose("layoutTicks", String(++positionLayoutTicks));
           if (changed) { writePositions(positions); graph.render(undefined, 0); }
           updateLabels(undefined, true);
           scheduleReveal();
         },
         onState(state) {
-          if (epoch !== positionLayoutEpoch || identityKey !== cosmosSceneIdentityKey(columns)
+          if (epoch !== positionLayoutEpoch
             || destroyed || contextLost || simulationFailed) return;
-          if (state.ready && acceptedFrame) positionLayoutReady = true;
+          if (state.ready && positionFrameAccepted) {
+            positionLayoutReady = true;
+            for (const resolve of positionReadyWaiters) resolve();
+            positionReadyWaiters.clear();
+          }
           layoutPhase = !state.ready ? "arranging" : state.phase === "cooled" ? "cooled" : "live";
           binding.diagnose("layoutPhase", layoutPhase);
           binding.diagnose("layoutRunning", String(state.running));
@@ -872,11 +910,24 @@ export function createCosmosRenderer(
           scheduleReveal();
         },
         onError(error) {
-          if (epoch === positionLayoutEpoch && identityKey === cosmosSceneIdentityKey(columns)) {
+          if (epoch === positionLayoutEpoch) {
             failRelationSimulation(error);
           }
         },
+        onSettledPin(index, position) {
+          if (epoch !== positionLayoutEpoch || destroyed || contextLost || simulationFailed) return;
+          const id = columns.nodeIds[index];
+          if (!id || !pendingArrivalIds.delete(id)) return;
+          pinned.add(index); pinOwners.set(index, id);
+          buffers.positions[index * 2] = position.x; buffers.positions[index * 2 + 1] = position.y;
+          if (ready) graph.setPinnedPoints([...pinned]);
+          options.callbacks.onPin?.(id, position);
+        },
       });
+      for (const id of pendingArrivalIds) {
+        const index = nodeById.get(id);
+        if (index !== undefined) positionLayout?.pinWhenSettled?.(index);
+      }
     } catch (error) { failRelationSimulation(error); }
   }
 
@@ -889,7 +940,7 @@ export function createCosmosRenderer(
   function syncRelationPhysics(alpha: number, reheat = false) {
     if (!ready || destroyed || contextLost || simulationFailed) { stopPositionLayout(); return; }
     const running = solver.syncPhysics({ permitted: shouldRunRelationPhysics(), paused, reducedMotion,
-      hidden: document.visibilityState === "hidden", dragging: draggedPoint !== null, alpha,
+      hidden: document.visibilityState === "hidden", dragging: draggedPoint?.moved === true, alpha,
       canInitialize: canInitializeRelationPhysics(), reheat }, {
       enableNative: enabled => graph.setConfigPartial({ enableSimulation: enabled }),
       startNative: amount => graph.start(amount), pauseNative: () => graph.pause(),
@@ -1015,7 +1066,7 @@ export function createCosmosRenderer(
 
   function schedulePublishedPositionFit() {
     const eligible = () => publishedPositionFitPending && positionLayoutReady && ready && firstFitCompleted
-      && !destroyed && !contextLost && !simulationFailed && !paused && !draggedPoint && !pendingReveal
+      && !destroyed && !contextLost && !simulationFailed && (!paused || solver.awaitInitialPositions) && !draggedPoint?.moved && !pendingReveal
       && document.visibilityState !== "hidden";
     if (!eligible() || publishedPositionFitFrame !== null) return;
     const canvas = container.querySelector<HTMLCanvasElement>("canvas");
@@ -1079,7 +1130,9 @@ export function createCosmosRenderer(
       || outcome.identityKey !== cosmosSceneIdentityKey(columns)) return;
     // Initial pre-ready static layout may initialize; an explicit post-ready
     // pause freezes coordinates and camera, not just the native force flag.
-    if (paused && firstFitCompleted) return;
+    // A rebuilt Local catalog still needs its first authoritative static
+    // Worker frame; this grants initialization, never live motion or refitting.
+    if (paused && firstFitCompleted && !(solver.awaitInitialPositions && !positionLayoutReady)) return;
     if (appliedCommunity === outcome) {
       // Starting hints never become persistent constraints or weaken bridges.
       // Resume must not replay old worker coordinates.
@@ -1164,7 +1217,8 @@ export function createCosmosRenderer(
     const [near, far] = baseLinkDistanceRange();
     // Native's fixed-size shader still grows at k>100. Preserve canonical
     // CSS bodies when a smaller native space needs a larger SDK zoom.
-    appliedPointSizeScale = Math.min(4, Math.max(1, Math.sqrt(scale)))
+    appliedPointSizeScale = (binding.pointSizeScale?.(zoom, initialFadeZoom)
+      ?? Math.min(4, Math.max(1, Math.sqrt(scale))))
       * Math.min(5, Math.max(1, zoom * .01))
       / Math.min(5, Math.max(1, nativeSpace.toNativeZoom(zoom) * .01));
     graph.setConfigPartial({
@@ -1296,6 +1350,7 @@ export function createCosmosRenderer(
   }
 
   function resetLabelCandidates() {
+    if (binding.customLabels) return;
     rankedLabelIndices = binding.rankLabels(columns);
     syncLabelCandidates(true);
   }
@@ -1391,6 +1446,7 @@ export function createCosmosRenderer(
   }
 
   function syncLabelCandidates(force = false, star = interactionStar()): boolean {
+    if (binding.customLabels) return false;
     // A selected/focused node must not disappear merely because it falls
     // outside the scene's top-40 labels. Reserve the first slots for the
     // explicit interaction while retaining the 40-label DOM cap. Hover tracks
@@ -1467,6 +1523,25 @@ export function createCosmosRenderer(
   }
 
   function updateLabels(positions?: Float32Array, reprojectOnly = false) {
+    if (ready && !destroyed && !contextLost) {
+      if (binding.renderOverlay) {
+        const rows = positions ?? solver.knownPositions(buffers.positions) ?? buffers.positions;
+        const points = new Float32Array(rows.length);
+        const diameters = new Float32Array(columns.nodeIds.length);
+        for (let index = 0; index < columns.nodeIds.length; index++) {
+          const row: [number, number] = dragLabelPoint?.index === index ? dragLabelPoint.point
+            : [rows[index * 2], rows[index * 2 + 1]];
+          const point = projectPoint(row);
+          points[index * 2] = point[0]; points[index * 2 + 1] = point[1];
+          diameters[index] = renderedPointDiameter(index);
+        }
+        binding.renderOverlay({ columns, points, diameters, selectedId, focusedId, showLabels,
+          zoom: canonicalZoom(), forcedColors: options.forcedColors, tokens,
+          width: container.clientWidth, height: container.clientHeight });
+      }
+      options.callbacks.onRender?.();
+    }
+    if (binding.customLabels) return;
     if (!ready || destroyed || contextLost || !labelLayer
       || (!showLabels && hoveredIndex === null && hoveredEdge === null && activeIndex() === null)) return;
     // Rows already in JS cost no read: the CPU layout's published frame, or
@@ -1665,6 +1740,7 @@ export function createCosmosRenderer(
   }
 
   function attachSelectionRing() {
+    if (binding.customLabels) return;
     const namespace = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(namespace, "svg");
     svg.setAttribute("aria-hidden", "true");
@@ -1692,7 +1768,7 @@ export function createCosmosRenderer(
     labelLayer.setAttribute("aria-hidden", "true");
     binding.decorateLabelLayer?.(labelLayer);
     Object.assign(labelLayer.style, { position: "absolute", inset: "0", zIndex: "2", pointerEvents: "none", overflow: "hidden" });
-    labelElements = Array.from({ length: 40 }, () => {
+    labelElements = Array.from({ length: binding.customLabels ? 0 : 40 }, () => {
       const label = document.createElement("span");
       Object.assign(label.style, {
         position: "absolute", left: "0", top: "0", display: "none",
@@ -1793,7 +1869,7 @@ export function createCosmosRenderer(
       }
     } else if (hoveredEdge !== null && showEdges) {
       const source = point(columns.edgeSources[hoveredEdge]), target = point(columns.edgeTargets[hoveredEdge]);
-      const label = options.relationLabel?.(columns.edgeKinds[hoveredEdge]);
+      const label = columns.edgeLabels?.[hoveredEdge] ?? options.relationLabel?.(columns.edgeKinds[hoveredEdge]);
       if (source && target && label) {
         const [sourceX, sourceY] = projectPoint(source), [targetX, targetY] = projectPoint(target);
         const bounds = pointerClient ? container.getBoundingClientRect() : null;
@@ -1852,14 +1928,15 @@ export function createCosmosRenderer(
           && searchPoints.has(columns.edgeTargets[edge]));
     graph.setConfigPartial({
       focusedLinkIndex: selectedId === null ? undefined : edgeById.get(selectedId),
-      highlightedPointIndices: searchPoints === null ? star?.points
-        : [...new Set([...searchPoints, ...(star?.points ?? [])])],
+      highlightedPointIndices: searchPoints === null && !star ? undefined
+        : [...new Set([...(searchPoints ?? []), ...(star?.points ?? []), ...(binding.alwaysVisiblePoints?.(columns) ?? [])])],
       highlightedLinkIndices: searchLinks === null ? star?.links
         : [...new Set([...searchLinks, ...(star?.links ?? [])])],
       pointGreyoutColor: searchPoints !== null || keepOverviewContext() ? tokens.node.folder : undefined,
-      pointGreyoutOpacity: keepOverviewContext() && star ? 0.3
+      pointGreyoutOpacity: binding.customLabels ? .14 : keepOverviewContext() && star ? 0.3
         : searchPoints !== null ? 0.55 : keepOverviewContext() ? 0.3 : undefined,
-      linkGreyoutOpacity: keepOverviewContext() ? GRAPH_LINE_OPACITY.overview.dimmed : GRAPH_LINE_OPACITY.dimmed,
+      linkGreyoutOpacity: binding.customRelationColors ? 1
+        : keepOverviewContext() ? GRAPH_LINE_OPACITY.overview.dimmed : GRAPH_LINE_OPACITY.dimmed,
       // GRAPH_LINE_OPACITY.emphasis lifts the active star's ink; dimmed lines
       // keep their share of that. Config-only emphasis preserves any native
       // position transition.
@@ -1867,10 +1944,12 @@ export function createCosmosRenderer(
       linkVisibilityMinTransparency: star && !options.forcedColors
         ? keepOverviewContext() ? GRAPH_LINE_OPACITY.overview.selectedFloor : 1 : linkTransparencyFloor(),
     });
-    if (keepOverviewContext() && !options.forcedColors) {
+    if (binding.customRelationColors || keepOverviewContext() && !options.forcedColors) {
       const communities = appliedCommunity?.identityKey === cosmosSceneIdentityKey(columns)
         ? appliedCommunity.communityIds : undefined;
-      const starKey = star?.links.join(",") ?? "";
+      // An isolated selected node has an empty star, which still dims every
+      // original relationship. It is different from having no selection.
+      const starKey = star === null ? "none" : JSON.stringify(star.links);
       if (appliedLinkColorSource !== buffers.linkColors || appliedLinkColorCommunity !== communities
         || appliedLinkColorStar !== starKey) {
         graph.setLinkColors(binding.relationColors(columns, buffers.linkColors, communities, star?.links));
@@ -1885,6 +1964,7 @@ export function createCosmosRenderer(
       const active = activeIndex();
       if (active === null || !cachedLabelPositions?.has(active)) updateLabels();
     }
+    if (binding.customLabels) updateLabels(undefined, true);
     const selected = selectedId === null ? undefined : nodeById.get(selectedId);
     if (selectionRing && selected !== undefined) selectionRing.svg.dataset.selectedPoint = String(selected);
     else if (selectionRing) delete selectionRing.svg.dataset.selectedPoint;
@@ -1911,9 +1991,9 @@ export function createCosmosRenderer(
     restoredCameraIntent = true;
     if (!ready) { pendingViewport = viewport; return; }
     if (!firstFitCompleted) { cameraInteractedBeforeFit = true; pendingViewport = null; }
-    fitPositions(
-      new Float32Array([viewport.pan.x, viewport.pan.y]), 0, viewport.zoom, 0, false,
-    );
+    // Camera centers are CPU doubles, not a GPU position texture. Passing a
+    // Float32 row here would quantize pan on every renderer recreation.
+    graph.setCameraCenter(nativeSpace.toNativePoint([viewport.pan.x, viewport.pan.y]), nativeSpace.toNativeZoom(viewport.zoom));
   }
 
   function onContextLost(event: Event) {
@@ -1931,6 +2011,8 @@ export function createCosmosRenderer(
     draggedPoint = null; dragLabelPoint = null; dragGesture = false;
     nativeHoveredIndex = null;
     graph.pause();
+    for (const resolve of positionReadyWaiters) resolve();
+    positionReadyWaiters.clear();
     options.callbacks.onContextStatus?.("lost");
   }
 
@@ -2086,6 +2168,11 @@ export function createCosmosRenderer(
       pinned.clear();
       pinOwners.clear();
       retiredPinIds.clear();
+      pendingArrivalIds.clear();
+      binding.destroyOverlay?.();
+      for (const resolve of positionReadyWaiters) resolve();
+      positionReadyWaiters.clear();
+      if (ownsPosition && container.style.position === "relative") container.style.position = previousPosition;
       nodeById.clear();
       edgeById.clear();
     },
@@ -2105,7 +2192,43 @@ export function createCosmosRenderer(
       applyHighlight();
     },
     getViewport,
+    getNodePosition(id) {
+      if (!ready || destroyed || contextLost || simulationFailed) return null;
+      const index = nodeById.get(id);
+      if (index === undefined) return null;
+      const rows = solver.knownPositions(buffers.positions) ?? buffers.positions;
+      const point = dragLabelPoint?.index === index ? dragLabelPoint.point : [rows[index * 2], rows[index * 2 + 1]];
+      return point.every(Number.isFinite) ? { x: point[0], y: point[1] } : null;
+    },
+    getNodeDisplayData(id) {
+      if (!ready || destroyed || contextLost || simulationFailed) return null;
+      const index = nodeById.get(id);
+      if (index === undefined) return null;
+      const rows = solver.knownPositions(buffers.positions) ?? buffers.positions;
+      const point: [number, number] = dragLabelPoint?.index === index ? dragLabelPoint.point
+        : [rows[index * 2], rows[index * 2 + 1]];
+      if (!point.every(Number.isFinite)) return null;
+      const [x, y] = projectPoint(point);
+      return { x, y, radius: renderedPointDiameter(index) / 2, shape: buffers.pointShapes[index] };
+    },
+    getEdgeDisplayData(id) {
+      if (!ready || destroyed || contextLost || simulationFailed) return null;
+      const index = edgeById.get(id);
+      if (index === undefined) return null;
+      const rows = solver.knownPositions(buffers.positions) ?? buffers.positions;
+      const source = columns.edgeSources[index], target = columns.edgeTargets[index];
+      const from = projectPoint([rows[source * 2], rows[source * 2 + 1]]);
+      const to = projectPoint([rows[target * 2], rows[target * 2 + 1]]);
+      return { source: { x: from[0], y: from[1] }, target: { x: to[0], y: to[1] } };
+    },
+    pinWhenSettled(id) {
+      if (destroyed || simulationFailed || pendingArrivalIds.has(id)) return;
+      pendingArrivalIds.add(id);
+      const index = nodeById.get(id);
+      if (index !== undefined) positionLayout?.pinWhenSettled?.(index);
+    },
     pin(id, shouldPin, position, intent) {
+      pendingArrivalIds.delete(id);
       const index = shouldPin ? nodeById.get(id) : retiredPinIds.get(id) ?? nodeById.get(id);
       if (index === undefined || destroyed || simulationFailed) return null;
       const synchronizePins = () => {
@@ -2119,6 +2242,7 @@ export function createCosmosRenderer(
         pinOwners.delete(index);
         for (const [ownerId, owner] of retiredPinIds) if (owner === index) retiredPinIds.delete(ownerId);
         if (ready && !contextLost) graph.setPinnedPoints([...pinned]);
+        positionLayout?.unpin?.(index, !intent?.reconcile);
         solver.afterPositionEdit(synchronizePins,
           // Retired projection IDs are host reconciliation, not a new user edit.
           () => wakeReleasedNativePins(released && nodeById.get(id) === index));
@@ -2127,10 +2251,11 @@ export function createCosmosRenderer(
       pinned.add(index);
       pinOwners.set(index, id);
       for (const [ownerId, owner] of retiredPinIds) if (owner === index) retiredPinIds.delete(ownerId);
-      if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+      const fixedPosition = positionLayout?.pin?.(index, position, !intent?.reconcile) ?? position;
+      if (fixedPosition && Number.isFinite(fixedPosition.x) && Number.isFinite(fixedPosition.y)) {
         const positions = ready && !contextLost ? solver.positions(buffers.positions, readPositions).slice() : buffers.positions.slice();
-        positions[index * 2] = position.x;
-        positions[index * 2 + 1] = position.y;
+        positions[index * 2] = fixedPosition.x;
+        positions[index * 2 + 1] = fixedPosition.y;
         buffers.positions = positions;
         if (ready && !contextLost) {
           writePositions(positions);
@@ -2204,7 +2329,66 @@ export function createCosmosRenderer(
         }
         resetLabelCandidates();
         applyHighlight();
-        return;
+        return "metadata";
+      }
+      const sameSelection = sameScope && columns.identity.surface === nextColumns.identity.surface
+        && columns.identity.selectionKey === nextColumns.identity.selectionKey;
+      if (sameSelection && positionLayout?.update && ready && !contextLost) {
+        const current = solver.positions(buffers.positions, readPositions);
+        const previousKeys = new Map(columns.nodeKeys.map((key, index) => [key, index]));
+        const previousPinOwners = new Map([...pinOwners].map(([index, owner]) => [columns.nodeKeys[index], owner]));
+        const dragKey = draggedPoint?.nodeKey;
+        const hoveredKey = nativeHoveredIndex === null ? null : columns.nodeKeys[nativeHoveredIndex];
+        for (let index = 0; index < nextColumns.nodeKeys.length; index++) {
+          const previous = previousKeys.get(nextColumns.nodeKeys[index]);
+          if (previous === undefined) continue;
+          next.positions[index * 2] = current[previous * 2];
+          next.positions[index * 2 + 1] = current[previous * 2 + 1];
+        }
+        const nextIds = new Set(nextColumns.nodeIds);
+        for (const id of pendingArrivalIds) if (nodeById.has(id) && !nextIds.has(id)) pendingArrivalIds.delete(id);
+        columns = nextColumns; buffers = next;
+        sparseScene = admitted().edgeCount <= GRAPH_LINE_OPACITY.fade.small.maxRelations;
+        readableScene = binding.withinBudget(columns);
+        nodeById = new Map(columns.nodeIds.map((id, index) => [id, index]));
+        edgeById = new Map(columns.edgeIds.map((id, index) => [id, index]));
+        pinned.clear(); pinOwners.clear(); retiredPinIds.clear();
+        columns.nodeKeys.forEach((key, index) => {
+          const owner = previousPinOwners.get(key);
+          if (owner === undefined) return;
+          pinned.add(index); pinOwners.set(index, owner);
+          if (columns.nodeIds[index] !== owner) retiredPinIds.set(owner, index);
+        });
+        const nextDrag = dragKey === undefined ? -1 : columns.nodeKeys.indexOf(dragKey);
+        if (draggedPoint && nextDrag >= 0) {
+          draggedPoint.index = nextDrag; draggedPoint.identityKey = cosmosSceneIdentityKey(columns);
+          if (dragLabelPoint) dragLabelPoint.index = nextDrag;
+        } else { draggedPoint = null; dragLabelPoint = null; dragGesture = false; }
+        nativeHoveredIndex = hoveredKey === null ? null : columns.nodeKeys.indexOf(hoveredKey);
+        if (nativeHoveredIndex === -1) nativeHoveredIndex = null;
+        appliedLinkColorSource = null;
+        publishedPositionFitPending = false;
+        cancelReveal();
+        applyData(buffers);
+        if (draggedPoint?.moved) graph.remapDraggingPoint(draggedPoint.index);
+        else if (dragKey !== undefined) graph.remapDraggingPoint(null);
+        graph.setPinnedPoints([...pinned]);
+        resetLabelCandidates();
+        acceptingStaticLayout = paused || reducedMotion;
+        positionLayoutReady = false;
+        positionFrameAccepted = false;
+        const canvas = container.querySelector<HTMLCanvasElement>("canvas");
+        positionLayout.update({ columns, positions: buffers.positions, diameters: buffers.collisionPointSizes,
+          shapes: buffers.pointShapes, pins: [...pinned], reducedMotion, restoredSolved: positionLayoutReady,
+          unitBasis: positionUnitBasis,
+          viewport: { width: canvas?.clientWidth || container.clientWidth, height: canvas?.clientHeight || container.clientHeight },
+          maxDiameterCss: maxPointDiameterCss() });
+        for (const id of pendingArrivalIds) {
+          const index = nodeById.get(id);
+          if (index !== undefined) positionLayout.pinWhenSettled?.(index);
+        }
+        applyHighlight();
+        return "topology";
       }
       forceSeed = next.positions.slice();
       collisionSeed = forceSeed;
@@ -2242,6 +2426,7 @@ export function createCosmosRenderer(
       pinned.clear();
       pinOwners.clear();
       retiredPinIds.clear();
+      pendingArrivalIds.clear();
       attachRelationSimulation();
       if (!sameIdentity) rearmSceneCamera();
       if (ready && !contextLost) {
@@ -2275,6 +2460,7 @@ export function createCosmosRenderer(
         applyHighlight();
       }
       startCommunity(nextColumns);
+      return "rebuild";
     },
     reset() {
       if (destroyed || simulationFailed) return;
@@ -2288,6 +2474,7 @@ export function createCosmosRenderer(
       pinned.clear();
       pinOwners.clear();
       retiredPinIds.clear();
+      pendingArrivalIds.clear();
       if (!ready || contextLost) return;
       markCameraInteraction();
       graph.setPinnedPoints([]);
@@ -2345,7 +2532,7 @@ export function createCosmosRenderer(
       labelPublicationStale = true;
       if (!enabled) trackedPositions?.invalidate();
       if (labelLayer) labelLayer.style.display = enabled ? "block" : "none";
-      if (enabled) updateLabels();
+      if (enabled || binding.customLabels) updateLabels();
     },
     setReducedMotion(enabled) {
       if (destroyed || simulationFailed) return;
@@ -2366,7 +2553,13 @@ export function createCosmosRenderer(
       stopPositionLayout();
       if (ready && !destroyed && !contextLost) graph.pause();
     },
-    whenSettled() { return settle; },
+    whenSettled() {
+      return settle.then(() => {
+        if (!solver.awaitInitialPositions || positionLayoutReady || !columns.nodeIds.length
+          || destroyed || contextLost || simulationFailed) return;
+        return new Promise<void>(resolve => positionReadyWaiters.add(resolve));
+      });
+    },
     zoomBy(factor) {
       if (!ready || destroyed || contextLost || simulationFailed || !Number.isFinite(factor) || factor <= 0) return;
       markCameraInteraction();

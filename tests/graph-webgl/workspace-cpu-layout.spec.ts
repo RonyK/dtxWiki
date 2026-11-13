@@ -51,10 +51,11 @@ test("shared D3 layout preserves an actual pointer drag pin through a Worker res
   await page.mouse.move(start[0], start[1]);
   await page.waitForFunction(id => window.__workspaceMapSmoke?.hoveredId === id, target.id);
   await page.mouse.down();
-  await page.waitForFunction(index => window.__workspaceMapInteraction!.snapshot().draggingIndex === index, target.index);
-  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-running", "false");
   const destination = [start[0] + 48, start[1] + 24];
   await page.mouse.move(destination[0], destination[1], { steps: 4 });
+  // The drag, and its Worker stop, begin with the move rather than the press.
+  await page.waitForFunction(index => window.__workspaceMapInteraction!.snapshot().draggingIndex === index, target.index);
+  await expect(page.locator("#stage")).toHaveAttribute("data-map-layout-running", "false");
   await page.mouse.up();
   await page.waitForFunction(index => window.__workspaceMapInteraction!.snapshot().pinned.includes(index), target.index);
   const pinned = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());

@@ -278,8 +278,9 @@ test("native 2k Cosmos pointer drag saves its canonical position through Resume,
   await page.mouse.move(pointerStart[0], pointerStart[1]);
   await page.waitForFunction((id) => window.__workspaceMapSmoke?.hoveredId === id, target.id, { timeout: 3000 });
   await page.mouse.down();
-  await page.waitForFunction((index) => window.__workspaceMapInteraction!.snapshot().draggingIndex === index,
-    target.index, { timeout: 3000 });
+  // A press is a click until it moves: the native drag starts with the move.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(await page.evaluate(() => window.__workspaceMapInteraction!.snapshot().draggingIndex)).toBeNull();
   const destination: [number, number] = [pointerStart[0] + 48, pointerStart[1] + 24];
   await page.mouse.move(destination[0], destination[1], { steps: 4 });
   const deliveredMouseCoordinates: number[] = await page.evaluate(() => JSON.parse(

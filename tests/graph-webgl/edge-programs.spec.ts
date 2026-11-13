@@ -8,7 +8,7 @@ import type { ProbeResult } from "./browser-entry";
 
 declare global {
   interface Window {
-    __graphWebglProbe: (ratio: number, membershipCenterPhase?: 0 | 0.5) => ProbeResult;
+    __graphWebglProbe: (ratio: number, membershipCenterPhase?: 0 | 0.5) => Promise<ProbeResult>;
     __graphWebglPick: (x: number, y: number) => string | null;
   }
 }
@@ -33,7 +33,7 @@ test.beforeAll(async () => {
   bundle = output.outputFiles[0].text;
 });
 
-async function openWebgl1Fixture(browser: Browser, deviceScaleFactor: number, forcedColors: "active" | "none" = "none"): Promise<Page> {
+async function openNativeFixture(browser: Browser, deviceScaleFactor: number, forcedColors: "active" | "none" = "none"): Promise<Page> {
   const context = await browser.newContext({
     viewport: { width: 720, height: 480 },
     deviceScaleFactor,
@@ -50,22 +50,8 @@ async function openWebgl1Fixture(browser: Browser, deviceScaleFactor: number, fo
     </style>
     <div id="graph" aria-label="Graph shader fixture"></div>
   `);
-  await page.evaluate(() => {
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type, ...args) {
-      // Sigma prefers WebGL2. Force its documented WebGL1 fallback path.
-      if (type === "webgl2") return null;
-      return getContext.call(this, type, ...args);
-    } as typeof getContext;
-
-    const getExtension = WebGLRenderingContext.prototype.getExtension;
-    WebGLRenderingContext.prototype.getExtension = function (name) {
-      // The custom Local edge programs must render without this extension.
-      if (name === "ANGLE_instanced_arrays") return null;
-      return getExtension.call(this, name);
-    };
-  });
   await page.addScriptTag({ content: bundle });
+  await page.waitForFunction(() => typeof window.__graphWebglProbe === "function");
   return page;
 }
 
@@ -94,11 +80,21 @@ function assertRepeatingRuns(actual: number[], expected: readonly number[], labe
 }
 
 function assertPatterns(result: ProbeResult): void {
-  expect(result.webglVersion).toContain("WebGL 1.0");
-  expect(result.angleAvailable).toBe(false);
+  expect(result.webglVersion).toContain("WebGL 2.0");
   expect(result.edges.map((edge) => edge.kind)).toEqual([
     "link", "citation", "coAccess", "membership", "action",
   ]);
+  if (result.cameraRatio >= 1) expect(result.geometry.triangle).not.toBeNull();
+  if (result.cameraRatio === 1) expect(result.geometry.shortAction).not.toBeNull();
+  if (result.geometry.triangle) {
+    expect(result.geometry.triangle.sourceInterior, "Outgoing line must clear the triangle's upper tip").toBeLessThan(8);
+    expect(result.geometry.triangle.targetTip, "Incoming arrow uses the triangle's lower boundary").toBeGreaterThan(32);
+    expect(result.geometry.triangle.targetInterior, "Incoming arrow must stop before the target triangle").toBeLessThan(8);
+  }
+  if (result.geometry.shortAction) {
+    expect(result.geometry.shortAction.upper, "A full activity head fits this short corridor").toBeGreaterThan(32);
+    expect(result.geometry.shortAction.lower).toBeGreaterThan(32);
+  }
 
   const link = result.edges[0];
   expect(link.alpha.filter((value) => value >= 32).length).toBeGreaterThan(link.lengthCssPx * 0.95);
@@ -126,6 +122,9 @@ function assertPatterns(result: ProbeResult): void {
       if (edge.kind === "action") {
         expect(target.hollow, "Action triangle interior is filled").toBeGreaterThan(60);
         expect(target.outsideSmallHead, "Action triangle is smaller than the open arrows").toBeLessThan(8);
+        if (result.pixelRatio >= 2) {
+          expect(target.tipShoulder, "Action shaft must not blunt the narrowing triangle tip").toBeLessThan(8);
+        }
       } else {
         expect(target.hollow, `${edge.kind} open arrow must stay hollow`)
           .toBeLessThan(Math.max(target.upper, target.lower) * 0.3);
@@ -147,7 +146,7 @@ function assertPatterns(result: ProbeResult): void {
 
 test("all five Local edge shaders compile and keep dash periods in CSS pixels across zoom and DPR", async ({ browser }, testInfo) => {
   for (const dpr of [1, 2]) {
-    const page = await openWebgl1Fixture(browser, dpr);
+    const page = await openNativeFixture(browser, dpr);
     try {
       for (const ratio of [0.5, 1, 2]) {
         let linkPeak = 0, linkExpected = 0;
@@ -189,7 +188,7 @@ test("all five Local edge shaders compile and keep dash periods in CSS pixels ac
 });
 
 test("the reduced-resolution picking buffer covers intentional citation and action gaps", async ({ browser }) => {
-  const page = await openWebgl1Fixture(browser, 1);
+  const page = await openNativeFixture(browser, 1);
   try {
     const result = await page.evaluate(() => window.__graphWebglProbe(1, 0));
     for (const kind of ["citation", "action"] as const) {
@@ -217,12 +216,12 @@ test("the reduced-resolution picking buffer covers intentional citation and acti
 });
 
 test("monochrome forced-colors retains relationship and distinct action dash topology", async ({ browser }) => {
-  const page = await openWebgl1Fixture(browser, 1, "active");
+  const page = await openNativeFixture(browser, 1, "active");
   try {
     const result = await page.evaluate(() => window.__graphWebglProbe(1));
     expect(result.forcedColorsActive).toBe(true);
     expect(result.tokenInk).not.toBe(result.tokenSurface);
-    // The fixture passes readGraphTokens(forced) ink to Graphology, so the
+    // The fixture passes readGraphTokens(forced) ink through the Context binding, so the
     // rendered WebGL stroke must actually use the resolved system color.
     const expectedRgb = await page.evaluate((ink) => {
       const color = document.createElement("span");

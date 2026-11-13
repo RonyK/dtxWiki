@@ -156,8 +156,9 @@ export function GraphView({
   const [showLabels, setShowLabels] = useState(true);
   const [layoutPaused, setLayoutPaused] = useState(false);
   // As on the Map, a new scene clears the reader's pause: a new query (depth,
-  // scope, history view, expand, refresh) or a changed filter. Timeline steps
-  // and the locale replay the same data and keep it.
+  // scope, history view, expand, refresh) or a changed filter. A timeline
+  // click (seek, step, play) clears it too; playback's own steps and the
+  // locale keep it.
   const pauseSourceRef = useRef({ wirePayload, filters, historyVisibility });
   useEffect(() => {
     const source = pauseSourceRef.current;
@@ -605,6 +606,7 @@ export function GraphView({
 
   function stepTimeline(direction: -1 | 1) {
     setPlaying(false);
+    setLayoutPaused(false);
     const next = Math.max(
       -1,
       Math.min(timeline.length - 1, visibleCursor + direction),
@@ -627,6 +629,7 @@ export function GraphView({
 
   function startPlayback() {
     if (timeline.length === 0) return;
+    setLayoutPaused(false);
     if (reducedMotion) {
       if (visibleCursor >= timeline.length - 1) setTimelineCursor(0);
       else stepTimeline(1);
@@ -690,6 +693,7 @@ export function GraphView({
 
   function seekEvent(index: number) {
     setPlaying(false);
+    setLayoutPaused(false);
     setHoveredEventId(null);
     setTimelineCursor(index);
   }

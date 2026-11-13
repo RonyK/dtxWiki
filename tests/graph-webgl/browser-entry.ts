@@ -1,14 +1,12 @@
-import Graph from "graphology";
-import Sigma from "sigma";
-
-import { LOCAL_EDGE_PROGRAMS } from "../../frontend/src/features/graph/local/edgePrograms";
-import { readGraphTokens } from "../../frontend/src/features/graph/shared/graphTokens";
+import { NativeGraph } from "../../frontend/src/features/graph/workspace/cosmosNative";
+import { buildLocalCosmosColumns } from "../../frontend/src/features/graph/shared/cosmos/localScene";
+import { createLocalCosmosBinding } from "../../frontend/src/features/graph/local/cosmosBinding";
+import { GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_EDGE_ENDPOINT_SIZE_PX, GRAPH_LINE_OPACITY, readGraphTokens } from "../../frontend/src/features/graph/shared/graphTokens";
+import type { CosmosLayoutSolver } from "../../frontend/src/features/graph/shared/cosmos/layoutTypes";
+import type { GraphRenderScene } from "../../frontend/src/features/graph/shared/rendererTypes";
 
 const KINDS = ["link", "citation", "coAccess", "membership", "action"] as const;
 type Kind = (typeof KINDS)[number];
-type FixtureNode = { x: number; y: number; size: number; color: string };
-type FixtureEdge = { type: Kind; size: number; color: string };
-
 export type EdgePixels = {
   kind: Kind;
   lengthCssPx: number;
@@ -18,11 +16,12 @@ export type EdgePixels = {
   peakRgb: [number, number, number];
   endpoints: null | {
     source: { near: number; upper: number; lower: number; hollow: number; insideNode: number };
-    target: { tip: number; upper: number; lower: number; hollow: number; outsideSmallHead: number; insideNode: number };
+    target: { tip: number; upper: number; lower: number; hollow: number; outsideSmallHead: number; tipShoulder: number; insideNode: number };
   };
 };
 
 export type ProbeResult = {
+  cameraRatio: number;
   webglVersion: string;
   pixelRatio: number;
   angleAvailable: boolean;
@@ -41,44 +40,91 @@ export type ProbeResult = {
     shaders: Array<{ type: number; compiled: boolean }>;
   };
   edges: EdgePixels[];
+  geometry: {
+    triangle: null | { sourceInterior: number; targetTip: number; targetInterior: number };
+    shortAction: null | { freeCssPx: number; upper: number; lower: number };
+  };
 };
 
-const container = document.querySelector<HTMLElement>("#graph");
+const container = document.querySelector<HTMLDivElement>("#graph");
 if (!container) throw new Error("Missing graph fixture container");
 const forcedColorsActive = matchMedia("(forced-colors: active)").matches;
 const tokens = readGraphTokens(container, forcedColorsActive ? "forced" : "light");
-// Canvas pixels cannot be recolored by forced-colors CSS after they are drawn.
-// Resolve the system ink/surface first, then retain those explicit colors.
 container.style.setProperty("forced-color-adjust", "none");
 container.style.backgroundColor = tokens.surface;
 
-const graph = new Graph<FixtureNode, FixtureEdge>();
-for (const [index, kind] of KINDS.entries()) {
-  // Keep all rows in frame even when the camera is zoomed to ratio 0.5.
-  const y = 0.37 + index * 0.065;
-  graph.addNode(`${kind}:left`, { x: 0.08, y, size: 1, color: "#000000" });
-  graph.addNode(`${kind}:right`, { x: 0.92, y, size: 1, color: "#000000" });
-  graph.addEdgeWithKey(kind, `${kind}:left`, `${kind}:right`, {
-    type: kind,
-    size: 2,
-    color: tokens.edge[kind],
-  });
-}
-
-const renderer = new Sigma(graph, container, {
-  edgeProgramClasses: LOCAL_EDGE_PROGRAMS,
-  renderLabels: false,
-  renderEdgeLabels: false,
-  // Also compile and draw the PICKING_MODE variant of every edge shader.
-  enableEdgeEvents: true,
-  minEdgeThickness: 0,
+// Exercise the production Context buffer/style binding and pinned native shader.
+// No layout is needed for a five-horizontal-line raster/picking fixture.
+const rows = new Map<string, { x: number; y: number; size: number; color: string }>();
+const wireKinds = ["wikilink", "citation_page", "co_access", "tree", "searched"];
+const scene: GraphRenderScene = { nodes: [], edges: [] };
+KINDS.forEach((kind, index) => {
+  // Preserve the empty corridor sampled 30 CSS px below each line, including
+  // at ratio 1, while all five rows still fit the ratio .5 viewport.
+  const y = 128 - index * 64;
+  for (const [side, x] of [["left", -250], ["right", 250]] as const) {
+    const id = kind + ":" + side;
+    // The action's final dash reaches its head at ratio 1, exposing a shaft
+    // that incorrectly continues under the narrowing filled triangle.
+    rows.set(id, { x: kind === "action" && side === "right" ? x + 4 : x, y, size: 1, color: "#000000" });
+    scene.nodes.push({ id, entity_kind: "context_page", entity_id: id, family: "document", label: id });
+  }
+  scene.edges.push({ id: kind, source: kind + ":left", target: kind + ":right", edge_kind: wireKinds[index],
+    layer: "knowledge", label: kind, direction: kind === "coAccess" ? "undirected" : "directed" });
 });
-const initialCamera = renderer.getCamera().getState();
-
-function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): ProbeResult {
+// The horizontal circle rows cannot expose the triangle's asymmetric ray
+// intersections or a filled head that already fits a short free corridor.
+for (const [id, x, y, size, entity_kind] of [
+  ["ray:source", -320, -70, 20, "context_page_version"],
+  ["ray:target", -320, 70, 20, "context_page_version"],
+  ["short:source", 280, 80, 1, "context_page"],
+  ["short:target", 280 + 10 / .9, 80, 1, "context_page"],
+] as const) {
+  rows.set(id, { x, y, size, color: "#000000" });
+  scene.nodes.push({ id, entity_kind, entity_id: id, family: "document", label: id });
+}
+scene.edges.push(
+  { id: "ray", source: "ray:source", target: "ray:target", edge_kind: "wikilink", layer: "knowledge", label: "ray", direction: "directed" },
+  { id: "short", source: "short:source", target: "short:target", edge_kind: "searched", layer: "knowledge", label: "short", direction: "directed" },
+);
+const columns = buildLocalCosmosColumns(scene, { workspaceId: "shader", actorId: "shader", surface: "local", selectionKey: "shader", visibleFingerprint: "shader" });
+const binding = createLocalCosmosBinding({} as CosmosLayoutSolver, container);
+const prepared = binding.prepareScene(columns, tokens, { forcedColors: forcedColorsActive, countText: String, measureCount: () => 0 });
+const native = new NativeGraph(container, {
+  backgroundColor: [0, 0, 0, 0], spaceSize: 4096, fitViewOnInit: false, rescalePositions: false,
+  enableSimulation: false, transitionDuration: 0, pointSizeScale: 1, scalePointsOnZoom: false,
+  // As in the production core, a link listener enables the SDK picking pass.
+  onLinkClick: () => undefined,
+  linkDefaultWidth: GRAPH_EDGE_WIDTH_PX, linkEndpointMarkers: true,
+  linkDashLength: GRAPH_EDGE_PATTERN.citation[0], linkDashGap: GRAPH_EDGE_PATTERN.citation[1],
+  linkDashDotLength: GRAPH_EDGE_PATTERN.citation[2], linkDashDotGap: GRAPH_EDGE_PATTERN.citation[3],
+  linkDottedDashLength: GRAPH_EDGE_PATTERN.membership[0], linkDottedDashGap: GRAPH_EDGE_PATTERN.membership[1],
+  linkEndpointArrowLength: GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowLength,
+  linkEndpointArrowHalfWidth: GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowHalfWidth,
+  linkEndpointDiamondLength: GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondLength,
+  linkEndpointDiamondHalfWidth: GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondHalfWidth,
+  linkEndpointNodeGap: GRAPH_EDGE_ENDPOINT_SIZE_PX.nodeGap,
+  linkVisibilityDistanceRange: [40, 350], linkVisibilityMinTransparency: GRAPH_LINE_OPACITY.fade.small.floor,
+});
+const graph = { getNodeAttributes: (id: string) => rows.get(id)! };
+const initialCamera = { x: 0, y: 0, ratio: 1 };
+let cameraState = { ...initialCamera };
+const renderer = {
+  getCamera: () => ({ getState: () => cameraState, setState: (next: typeof cameraState) => {
+    cameraState = { ...next };
+    native.setZoomTransformByPointPositions(new Float32Array([next.x, next.y]), 0, .9 / next.ratio, 0, false);
+  } }),
+  refresh: () => native.render(undefined, 0),
+  getCanvases: () => ({ edges: container!.querySelector<HTMLCanvasElement>("canvas")! }),
+  getDimensions: () => ({ width: container!.clientWidth, height: container!.clientHeight }),
+  graphToViewport: (point: { x: number; y: number }) => { const projected = native.spaceToScreenPosition([point.x, point.y]); return { x: projected[0], y: projected[1] }; },
+  scaleSize: (size: number) => size,
+};
+async function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): Promise<ProbeResult> {
   const camera = renderer.getCamera();
   camera.setState({ ...initialCamera, ratio });
   renderer.refresh();
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 
   // Exercise the rasterizer at both integer and half-integer CSS-pixel centers.
   // The old 0.9px membership line vanished at one of these alignments.
@@ -87,6 +133,7 @@ function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): ProbeResult {
   const cameraStep = 0.01;
   camera.setState({ ...initialCamera, ratio, y: initialCamera.y + cameraStep });
   renderer.refresh();
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
   const shiftedY = renderer.graphToViewport(membership).y;
   const pixelsPerCameraY = (shiftedY - firstY) / cameraStep;
   if (Math.abs(pixelsPerCameraY) < 0.001) throw new Error("Camera phase calibration failed");
@@ -97,10 +144,11 @@ function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): ProbeResult {
     y: initialCamera.y + deltaPx / pixelsPerCameraY,
   });
   renderer.refresh();
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 
   const canvas = renderer.getCanvases().edges;
-  const gl = canvas.getContext("webgl");
-  if (!gl) throw new Error("The edge canvas did not use WebGL1");
+  const gl = canvas.getContext("webgl2");
+  if (!gl) throw new Error("The edge canvas did not use WebGL2");
   gl.finish();
   const program = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
   const diagnostics: ProbeResult["diagnostics"] = {
@@ -199,6 +247,8 @@ function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): ProbeResult {
           hollow: kind === "action" ? readNear(targetTip - 2.5, start.y + 0.4, 0.2)
             : readNear(targetTip - 5, start.y + 1.8, 0.45, true),
           outsideSmallHead: readNear(targetTip - 5, start.y + 3.5, 0.2),
+          tipShoulder: Math.max(readNear(targetTip - 0.25, start.y - 0.75, 0.01),
+            readNear(targetTip - 0.25, start.y + 0.75, 0.01)),
           insideNode: readNear(end.x - renderer.scaleSize(right.size) + 0.75, start.y, 0.2),
         },
       };
@@ -214,25 +264,65 @@ function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): ProbeResult {
     };
   });
 
+  const readPoint = (x: number, y: number, radius = .2) => {
+    const x0 = Math.max(0, Math.floor((x - radius) * xScale)), x1 = Math.min(canvas.width - 1, Math.floor((x + radius) * xScale));
+    const y0 = Math.max(0, Math.floor((height - y - radius) * yScale)), y1 = Math.min(canvas.height - 1, Math.floor((height - y + radius) * yScale));
+    const pixels = new Uint8Array((x1 - x0 + 1) * (y1 - y0 + 1) * 4);
+    gl.readPixels(x0, y0, x1 - x0 + 1, y1 - y0 + 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let alpha = 0;
+    for (let index = 3; index < pixels.length; index += 4) alpha = Math.max(alpha, pixels[index]);
+    return alpha;
+  };
+  const visible = (point: { x: number; y: number }) => point.x > 24 && point.x < width - 24 && point.y > 24 && point.y < height - 24;
+  const raySource = renderer.graphToViewport(rows.get("ray:source")!), rayTarget = renderer.graphToViewport(rows.get("ray:target")!);
+  const shortSource = renderer.graphToViewport(rows.get("short:source")!), shortTarget = renderer.graphToViewport(rows.get("short:target")!);
+  const shortTip = shortTarget.x - 2.5;
+  const freeCssPx = shortTarget.x - shortSource.x - 5;
+  const geometry: ProbeResult["geometry"] = {
+    triangle: visible(raySource) && visible(rayTarget) ? {
+      sourceInterior: readPoint(raySource.x, raySource.y - 16),
+      targetTip: readPoint(rayTarget.x, rayTarget.y + 11.5, .65),
+      targetInterior: readPoint(rayTarget.x, rayTarget.y + 9.25),
+    } : null,
+    shortAction: visible(shortSource) && visible(shortTarget) && freeCssPx >= 4 ? {
+      freeCssPx,
+      upper: readPoint(shortTip - 3.25, shortSource.y - 1.5),
+      lower: readPoint(shortTip - 3.25, shortSource.y + 1.5),
+    } : null,
+  };
+
   return {
+    cameraRatio: ratio,
     webglVersion: gl.getParameter(gl.VERSION) as string,
     pixelRatio: xScale,
-    angleAvailable: gl.getExtension("ANGLE_instanced_arrays") !== null,
+    angleAvailable: true,
     forcedColorsActive,
     tokenInk: tokens.edge.link,
     tokenSurface: tokens.surface,
     diagnostics,
     edges,
+    geometry,
   };
 }
 
-// Sigma's own lookup samples its reduced-resolution edge-picking framebuffer.
-// A gap should remain a usable pointer target even when the visible layer
-// discards its fragments there.
+// Read the native link picking framebuffer directly, as the prior shader
+// fixture did. A visible dash gap must remain a usable native link target.
 function pick(x: number, y: number): string | null {
-  return (renderer as unknown as {
-    getEdgeAtPoint: (x: number, y: number) => string | null;
-  }).getEdgeAtPoint(x, y);
+  const engine = native as unknown as { store: { screenMousePosition: number[]; mousePosition: number[] }; lines: { pickLinkSync(): number | undefined } };
+  // The SDK stores link-picking coordinates with a bottom-left origin.
+  engine.store.screenMousePosition = [x, container!.clientHeight - y];
+  engine.store.mousePosition = native.screenToSpacePosition([x, y]);
+  const index = engine.lines.pickLinkSync();
+  return index === undefined ? null : columns.edgeIds[index] ?? null;
 }
-
-Object.assign(window, { __graphWebglProbe: probe, __graphWebglPick: pick });
+void native.ready.then(() => {
+  native.setPointPositions(Float32Array.from(columns.nodeIds.flatMap(id => { const p = rows.get(id)!; return [p.x, p.y]; })));
+  // Keep node footprints for clipping but leave the combined framebuffer's
+  // glyph pixels transparent, so samples isolate the relationship stroke.
+  native.setPointSizes(Float32Array.from(columns.nodeIds, id => rows.get(id)!.size * 2));
+  native.setPointShapes(prepared.pointShapes);
+  native.setPointColors(new Float32Array(columns.nodeIds.length * 4));
+  native.setLinks(prepared.links); native.setLinkColors(prepared.linkColors); native.setLinkStyles(prepared.linkStyles);
+  renderer.getCamera().setState(initialCamera); native.render(undefined, 0);
+  Object.assign(window, { __graphWebglProbe: probe, __graphWebglPick: pick });
+});

@@ -1,7 +1,7 @@
 import { createElement, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import Sigma from "sigma";
+import { observeLocalNative } from "./local-native-observer";
 
 import { GraphView } from "../../frontend/src/features/graph/GraphView";
 import { buildLocalScene } from "../../frontend/src/features/graph/local/sceneInput";
@@ -12,7 +12,7 @@ import { Dialog } from "../../frontend/src/shared/components/Dialog";
 import { readGraphTokens } from "../../frontend/src/features/graph/shared/graphTokens";
 import "../../frontend/src/styles/index.css";
 
-// Actual GraphView, translations, styles and Sigma renderer, with a synthetic
+// Actual GraphView, translations, styles and Cosmos renderer, with a synthetic
 // public response. No authentication, database or application API is involved.
 const parameters = new URLSearchParams(window.location.search);
 const payload = graphFixture();
@@ -173,7 +173,9 @@ if (scenario === "folder" || scenario === "folder-long") {
 setLocale(parameters.get("locale") === "ko" ? "ko" : "en", { persist: false });
 const host = document.querySelector("#fixture");
 if (!host) throw new Error("Missing GraphView coverage fixture host");
-const renderers: Sigma[] = [];
+let observedPayload = payload;
+const observation = observeLocalNative(() => observedPayload, () => recordCameraDiagnostic("cosmos-created"));
+const renderers = observation.renderers;
 type CameraDiagnosticEvent = {
   atMs: number;
   kind: string;
@@ -239,18 +241,6 @@ if (scenario === "camera-rebuild") {
   window.addEventListener("pagehide", () => { ancestorObserver.disconnect(); stylesheetObserver.disconnect(); }, { once: true });
 }
 let lostContext: WEBGL_lose_context | null = null;
-let hoveredKey: string | null = null;
-const originalRefresh = Sigma.prototype.refresh;
-Sigma.prototype.refresh = function (...args: Parameters<Sigma["refresh"]>) {
-  if (!renderers.includes(this)) {
-    renderers.push(this);
-    recordCameraDiagnostic("sigma-created");
-    // Observe real native picking; never synthesize renderer input events.
-    this.on("enterNode", ({ node }) => { hoveredKey = node; });
-    this.on("leaveNode", ({ node }) => { if (hoveredKey === node) hoveredKey = null; });
-  }
-  return originalRefresh.apply(this, args);
-};
 let graphActions = 0;
 const graphAction = async () => { graphActions += 1; };
 const expandedNodes: Array<{ id: string; entityKind: string; entityId: string }> = [];
@@ -262,6 +252,7 @@ declare global {
   interface Window {
     __localCoverageFixture: {
       activate(active: boolean): void;
+      instances(): number;
       replacePayload(): void;
       projectionRevision(): number;
       cameraAnimated(): boolean;
@@ -289,6 +280,7 @@ declare global {
 function Fixture() {
   const [active, setActive] = useState(true);
   const [currentPayload, setPayload] = useState(payload);
+  observedPayload = currentPayload;
   const staticPayload = useMemo<GraphQueryPayload>(() => ({
     ...currentPayload,
     query: { ...currentPayload.query, time: { mode: "current" }, relation_scope: "direct", depth: 1 },
@@ -300,6 +292,7 @@ function Fixture() {
   const [dialogOpen, setDialogOpen] = useState(false);
   Object.assign(window, { __localCoverageFixture: {
     activate: setActive,
+    instances: () => renderers.length,
     replacePayload: () => setPayload((current) => ({ ...current, projection_revision: current.projection_revision + 1 })),
     projectionRevision: () => currentPayload.projection_revision,
     cameraAnimated: () => renderers.at(-1)?.getCamera().isAnimated() ?? false,
@@ -331,7 +324,7 @@ function Fixture() {
       return { key, raw, displayed: { x: displayed.x, y: displayed.y },
         point: { x: bounds.left + viewportPoint.x, y: bounds.top + viewportPoint.y },
         paintedPoint: { x: bounds.left + paintedPoint.x, y: bounds.top + paintedPoint.y },
-        hoveredId: hoveredKey ? localScene.graphIdByKey.get(hoveredKey) ?? null : null,
+        hoveredId: renderer.hoveredKey ? localScene.graphIdByKey.get(renderer.hoveredKey) ?? null : null,
         camera: renderer.getCamera().getState(), bbox: renderer.getBBox(), customBBox: renderer.getCustomBBox() };
     },
     // Read-only native coordinates for real mouse/touch input. Do not call

@@ -274,7 +274,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
       const graphPanel = page.getByRole("tabpanel", { name: /^Graph/ });
       const localCanvas = graphPanel.getByTestId("graph-canvas");
       await expect(localCanvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
-      await expect(localCanvas.locator("canvas.sigma-nodes")).toBeVisible();
+      await expect(localCanvas.locator("canvas[data-local-graph-canvas]")).toBeVisible();
       const expandedRead = page.waitForResponse((response) => response.url().endsWith(`/workspaces/${workspaceId}/graph/query`)
         && response.request().method() === "POST" && response.request().postDataJSON().depth === 2);
       await graphPanel.getByRole("radio", { name: "Two-step expansion", exact: true }).click();
@@ -370,7 +370,7 @@ test.describe("Workspace Knowledge Map real-API 2k (opt-in)", () => {
     const panel = page.getByRole("tabpanel", { name: /^그래프/ });
     const canvas = panel.getByTestId("graph-canvas");
     await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
-    await expect(canvas.locator("canvas.sigma-nodes")).toBeVisible();
+    await expect(canvas.locator("canvas[data-local-graph-canvas]")).toBeVisible();
     expect(await page.evaluate(() => matchMedia("(forced-colors: active)").matches)).toBe(true);
     expect(await page.evaluate(() => localStorage.getItem("dtxwiki.uiLanguage"))).toBe("ko");
     await expectLocalSceneNavigation(page, panel, local, workspace.id, testInfo, "ko");

@@ -4,6 +4,21 @@ import type { WorkspaceCountMeasure } from "./glyphImages";
 import type { CosmosSceneColumns } from "./sceneTypes";
 import type { CosmosSceneBuffers } from "./buffers";
 
+/** Surface overlay input in CSS pixels, using the exact rows shown by Cosmos. */
+export type CosmosOverlayFrame = {
+  columns: CosmosSceneColumns;
+  points: Float32Array;
+  diameters: Float32Array;
+  selectedId: string | null;
+  focusedId: string | null;
+  showLabels: boolean;
+  zoom: number;
+  forcedColors: boolean;
+  tokens: GraphVisualTokens;
+  width: number;
+  height: number;
+};
+
 export type CosmosRenderBudget = { documents: number; relations: number };
 export type CosmosLayoutSeedOutcome =
   | { kind: "complete"; identityKey: string; communityIds: Uint32Array;
@@ -33,6 +48,16 @@ export type CosmosRendererBinding = {
   snapshotGeometryIncludesGlyphs?: true;
   /** Map styles encode directed links/citations and source-side containment. */
   linkEndpointMarkers?: true;
+  /** A surface with priority canvas labels owns its label/ring layers. */
+  customLabels?: true;
+  customRelationColors?: true;
+  /** Added CSS-pixel width for hovered/focused lines; Local uses fixed strokes. */
+  interactionWidthIncrease?: number;
+  pointSizeScale?(zoom: number, fitZoom: number): number;
+  canDrag?(columns: CosmosSceneColumns, index: number): boolean;
+  alwaysVisiblePoints?(columns: CosmosSceneColumns): number[];
+  renderOverlay?(frame: CosmosOverlayFrame): void;
+  destroyOverlay?(): void;
   prepareScene(columns: CosmosSceneColumns, tokens: GraphVisualTokens,
     options: { forcedColors: boolean; countText(count: number): string; measureCount: WorkspaceCountMeasure }): CosmosSceneBuffers;
   relationColors(columns: CosmosSceneColumns, colors: Float32Array,

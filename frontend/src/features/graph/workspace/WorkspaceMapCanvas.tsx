@@ -65,8 +65,8 @@ function preservesAppliedPins(previous: WorkspaceMapColumns | null, next: Worksp
 }
 
 /**
- * The Map's render lifecycle is deliberately separate from Local Graph's
- * Sigma lifecycle. Probe first, then import the much larger Cosmos engine.
+ * Each surface owns its lifecycle around the shared Cosmos renderer.
+ * Probe first, then import the much larger Cosmos engine.
  * The caller's document list stays mounted when WebGL is unavailable.
  */
 export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanvasProps>(
@@ -490,14 +490,13 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
       }
       if (appliedColumnsRef.current === columns) return;
       try {
-        const preservePins = preservesAppliedPins(appliedColumnsRef.current, columns);
-        adapter.replaceColumns(columns);
+        const update = adapter.replaceColumns(columns);
         appliedColumnsRef.current = columns;
         pendingColumnsRef.current = null;
-        // Metadata rebinding does not replace native coordinates or springs.
-        // Keep the applied owners so unchanged React pin echoes stay inert;
+        // The renderer reports whether its live position owner was retained.
+        // Keep applied owners so unchanged React pin echoes stay inert;
         // reconcilePins still retires removed/renamed projection IDs safely.
-        if (!preservePins) appliedPinsRef.current = new Map();
+        if (update !== "metadata" && update !== "topology") appliedPinsRef.current = new Map();
         reconcilePins(adapter);
         adapter.select(selectedIdRef.current);
         adapter.focus(focusedIdRef.current);
@@ -516,11 +515,10 @@ export const WorkspaceMapCanvas = forwardRef<GraphCanvasHandle, WorkspaceMapCanv
       const pending = pendingColumnsRef.current;
       try {
         if (pending && pending !== appliedColumnsRef.current) {
-          const preservePins = preservesAppliedPins(appliedColumnsRef.current, pending);
-          adapter.replaceColumns(pending);
+          const update = adapter.replaceColumns(pending);
           appliedColumnsRef.current = pending;
           pendingColumnsRef.current = null;
-          if (!preservePins) appliedPinsRef.current = new Map();
+          if (update !== "metadata" && update !== "topology") appliedPinsRef.current = new Map();
           reconcilePins(adapter);
           adapter.select(selectedIdRef.current);
           adapter.focus(focusedIdRef.current);

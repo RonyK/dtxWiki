@@ -2,9 +2,8 @@ import type { GraphNodeFamily } from "../../../shared/api/graph";
 
 export type GraphPoint = { x: number; y: number };
 
-// This common shape is a transport envelope only. Local (Sigma) stores a
-// normalized camera; Workspace Map (Cosmos) stores a graph-space center. Never
-// restore one engine's `pan` into another without an engine-version tag.
+// Both interactive surfaces use canonical graph-space camera centers. This
+// envelope is not interchangeable with a legacy renderer's normalized camera.
 export type GraphViewport = {
   zoom: number;
   pan: GraphPoint;

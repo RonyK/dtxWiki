@@ -8,6 +8,7 @@ import type { GraphRenderScene, GraphViewport } from "../shared/rendererTypes";
 
 const { adapter, createAdapter } = vi.hoisted(() => {
   const adapter = {
+    captureCoordinates: vi.fn<() => unknown>(() => null),
     destroy: vi.fn(),
     fit: vi.fn(),
     focus: vi.fn(),
@@ -29,8 +30,8 @@ const { adapter, createAdapter } = vi.hoisted(() => {
   };
 });
 
-vi.mock("../local/sigmaAdapter", () => ({
-  createSigmaGraphAdapter: createAdapter,
+vi.mock("../local/cosmosAdapter", () => ({
+  createLocalGraphAdapter: createAdapter,
 }));
 
 const reconciliationProps = () => ({
@@ -51,6 +52,7 @@ describe("GraphCanvas reconciliation", () => {
   beforeEach(() => {
     for (const value of Object.values(adapter)) value.mockClear();
     adapter.replaceScene.mockReset();
+    adapter.captureCoordinates.mockReturnValue(null);
     createAdapter.mockClear();
     createAdapter.mockImplementation(() => adapter);
     document.documentElement.removeAttribute("data-theme");
@@ -406,8 +408,12 @@ describe("GraphCanvas reconciliation", () => {
     expect(onViewport).toHaveBeenCalledExactlyOnceWith(camera);
     // A consumer owns its callback value, not the internal restore snapshot.
     camera.pan.x = 99;
+    const healthyRows = { positions: new Float32Array([1, 2]) };
+    adapter.captureCoordinates.mockReturnValueOnce(healthyRows);
     view.rerender(<GraphCanvas {...common} scene={scene} forcedColors />);
     await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(2));
+    expect(createAdapter).toHaveBeenLastCalledWith(expect.any(HTMLElement), scene,
+      expect.objectContaining({ initialCoordinates: healthyRows }));
     act(() => oldOptions.callbacks.onViewport({ zoom: 7, pan: { x: 7, y: 7 } }));
     // A late pin report from a replaced renderer is as stale as its camera.
     act(() => oldOptions.callbacks.onPin("node:related", { x: 7, y: 7 }));
@@ -419,7 +425,7 @@ describe("GraphCanvas reconciliation", () => {
     await waitFor(() => expect(createAdapter).toHaveBeenCalledTimes(3));
     expect(onViewport).toHaveBeenCalledOnce();
     expect(createAdapter).toHaveBeenLastCalledWith(expect.any(HTMLElement), scene,
-      expect.objectContaining({ initialViewport: { zoom: 1.44, pan: { x: 0.23, y: 0.72 } } }));
+      expect.objectContaining({ initialViewport: { zoom: 1.44, pan: { x: 0.23, y: 0.72 } }, initialCoordinates: null }));
   });
 
   it("reports renderer lifecycle, exposes retry, and recovers from an initialization error", async () => {

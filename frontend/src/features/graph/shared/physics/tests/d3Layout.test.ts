@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { advanceArrival, createLocalLayout, type ArrivalWatch, type LocalLayout } from "../layout";
+import { advanceArrival, createD3Layout as createLocalLayout, type ArrivalWatch, type LocalLayout } from "../d3Layout";
 import type { LocalLayoutInput } from "../layoutTypes";
 
 const layouts: LocalLayout[] = [];
@@ -31,7 +31,8 @@ const seedAndNeighbors: LocalLayoutInput = {
 describe("Local d3-force layout", () => {
   it("delivers a finite 300-tick first frame with the seed fixed at the origin", () => {
     const frames: number[] = [];
-    const layout = create(seedAndNeighbors, {
+    const layout = create({ ...seedAndNeighbors, primarySeedKey: "page:seed",
+      nodes: seedAndNeighbors.nodes.map(node => ({ ...node, isSeed: true })) }, {
       autoStart: false,
       onTick: (positions) => frames.push(Object.keys(positions).length),
     });
@@ -39,6 +40,8 @@ describe("Local d3-force layout", () => {
 
     expect(frames).toEqual([3]);
     expect(positions["page:seed"]).toEqual({ x: 0, y: 0 });
+    // Expanded seeds sort ahead of the primary document but cannot take its anchor.
+    expect(positions["page:a"]).not.toEqual({ x: 0, y: 0 });
     expect(Object.values(positions).every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))).toBe(true);
   });
 
@@ -271,6 +274,11 @@ describe("Local d3-force layout", () => {
     expect(layout.getPositions()["page:new"]).toEqual(fixedAt);
     await vi.waitFor(() => expect(cooledPin).toHaveBeenCalledOnce(), { timeout: 10_000, interval: 50 });
     expect(cooledPin).toHaveBeenCalledWith("page:late", cooling.getPositions()["page:late"]);
+    // A paused membership change runs zero ticks: retained rows stay exactly put.
+    cooling.pause();
+    const { "page:late": _departed, ...retained } = cooling.getPositions();
+    cooling.update(seedAndNeighbors, undefined, { settle: true, settleTicks: 0, settleAtCurrentAlpha: true });
+    expect(cooling.getPositions()).toEqual(retained);
 
     layout.pause();
     const settled = layout.getPositions();

@@ -32,8 +32,6 @@
     "@codemirror/view": "^6.43.0",
     "@cosmos.gl/graph": "3.4.2",
     "@floating-ui/dom": "^1.7.6",
-    "@sigma/node-border": "3.0.0",
-    "@sigma/node-square": "3.0.0",
     "@uiw/react-codemirror": "^4.25.3",
     "d3-force": "3.0.0",
     "dompurify": "^3.4.16",
@@ -62,7 +60,6 @@
     "remark-github-blockquote-alert": "^2.1.0",
     "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
-    "sigma": "3.0.3",
     "unified": "^11.0.5"
   },
   "devDependencies": {

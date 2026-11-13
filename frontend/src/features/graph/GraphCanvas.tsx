@@ -2,12 +2,13 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useId,
   useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { SigmaGraphAdapter } from "./local/sigmaAdapter";
+import type { LocalGraphAdapter } from "./local/cosmosAdapter";
 import type {
   GraphRenderScene,
   GraphViewport,
@@ -88,9 +89,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     ref,
   ) {
     const { t } = useTranslation("graph");
+    const ownerKey = useId();
     const hoverChipRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
-    const adapterRef = useRef<SigmaGraphAdapter | null>(null);
+    const adapterRef = useRef<LocalGraphAdapter | null>(null);
     const sceneRef = useRef(scene);
     const callbacksRef = useRef({
       onHover,
@@ -109,7 +111,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const layoutPausedRef = useRef(layoutPaused);
     layoutPausedRef.current = layoutPaused;
     // A hidden tab or a paused reader keeps the layout still; otherwise it runs.
-    const reconcileLayout = (adapter: SigmaGraphAdapter) => {
+    const reconcileLayout = (adapter: LocalGraphAdapter) => {
       if (!activeRef.current || layoutPausedRef.current) adapter.stopLayout();
       else adapter.resumeLayout();
     };
@@ -120,6 +122,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     // the current view without making pan/zoom recreate the adapter.
     const viewportRef = useRef(viewport);
     const previousViewportHintRef = useRef(viewport);
+    // A healthy same-scene remount keeps solved rows in memory. The adapter
+    // rejects a snapshot whose visibility/selection or geometry no longer fits.
+    const coordinatesRef = useRef<ReturnType<LocalGraphAdapter["captureCoordinates"]>>(null);
     const paletteRef = useRef<string | null>(null);
     const [status, setStatus] = useState<RendererStatus>("loading");
     const [rendererRevision, setRendererRevision] = useState(0);
@@ -128,10 +133,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     // Pins as last delivered to the CURRENT adapter. Prop changes send only
     // the pins that changed: one pin's reported coordinate must never re-pin
     // another point (a dragged one would jump back to its saved coordinate).
-    const deliveredPinsRef = useRef<{ adapter: SigmaGraphAdapter | null; pins: Map<string, PinPoint> }>({
+    const deliveredPinsRef = useRef<{ adapter: LocalGraphAdapter | null; pins: Map<string, PinPoint> }>({
       adapter: null, pins: new Map(),
     });
-    const replayPins = (adapter: SigmaGraphAdapter) => {
+    const replayPins = (adapter: LocalGraphAdapter) => {
       const pins = new Map<string, PinPoint>();
       for (const id of pinnedIdsRef.current) {
         const position = positionsRef.current[id];
@@ -181,7 +186,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       generationRef.current = generation;
       let cancelled = false;
       let rendererFailed = false;
-      let createdAdapter: SigmaGraphAdapter | null = null;
+      let createdAdapter: LocalGraphAdapter | null = null;
       const publishStatus = (nextStatus: RendererStatus) => {
         if (cancelled || generation !== generationRef.current) return;
         setStatus(nextStatus);
@@ -192,16 +197,19 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         return;
       }
       publishStatus("loading");
-      void import("./local/sigmaAdapter")
-        .then(async ({ createSigmaGraphAdapter }) => {
+      void import("./local/cosmosAdapter")
+        .then(async ({ createLocalGraphAdapter }) => {
           if (cancelled || generation !== generationRef.current) return;
-          const adapter = createSigmaGraphAdapter(
+          const adapter = createLocalGraphAdapter(
             container,
             sceneRef.current,
             {
               hoverChip: hoverChipRef.current,
+              ownerKey,
               forcedColors,
               initialViewport: viewportRef.current,
+              initialCoordinates: coordinatesRef.current,
+              initialPaused: !activeRef.current || layoutPausedRef.current,
               positions: positionsRef.current,
               reducedMotion,
               ...(callbacksRef.current.viewportInsets ? { viewportInsets: () => callbacksRef.current.viewportInsets!() } : {}),
@@ -224,6 +232,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
                   if (cancelled || generation !== generationRef.current) return;
                   if (contextStatus === "lost") {
                     rendererFailed = true;
+                    coordinatesRef.current = null;
                     adapterRef.current = null;
                     publishStatus("error");
                   } else if (rendererFailed) {
@@ -265,10 +274,11 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         });
       return () => {
         cancelled = true;
+        if (!rendererFailed && createdAdapter) coordinatesRef.current = createdAdapter.captureCoordinates();
         createdAdapter?.destroy();
         if (adapterRef.current === createdAdapter) adapterRef.current = null;
       };
-    }, [forcedColors, reducedMotion, rendererRevision, themeRevision]);
+    }, [forcedColors, ownerKey, reducedMotion, rendererRevision, themeRevision]);
 
     useEffect(() => {
       if (typeof MutationObserver === "undefined") return undefined;

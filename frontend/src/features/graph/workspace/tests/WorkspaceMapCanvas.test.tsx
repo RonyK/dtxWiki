@@ -20,6 +20,10 @@ const { detectSupport, createAdapter, adapter } = vi.hoisted(() => {
     fit: vi.fn(),
     focus: vi.fn(),
     getViewport: vi.fn(() => null),
+    getNodePosition: vi.fn(() => null),
+    getNodeDisplayData: vi.fn(() => null),
+    getEdgeDisplayData: vi.fn(() => null),
+    pinWhenSettled: vi.fn(),
     captureCoordinates: vi.fn(() => null),
     pin: vi.fn((_id: string, _pinned: boolean, position?: { x: number; y: number }) => position ?? { x: 2, y: 3 }),
     replaceColumns: vi.fn(),
@@ -113,6 +117,7 @@ beforeEach(() => {
   adapter.whenSettled.mockReset().mockResolvedValue(undefined);
   adapter.pin.mockImplementation((_id, _pinned, position) => position ?? { x: 2, y: 3 });
   adapter.captureCoordinates.mockReturnValue(null);
+  adapter.replaceColumns.mockReset();
   document.documentElement.removeAttribute("data-theme");
 });
 afterEach(() => {
@@ -843,7 +848,7 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     expect(adapter.pin).toHaveBeenCalledExactlyOnceWith("node-1", false, undefined, { reconcile: true });
   });
 
-  it.each([true, false])("does not re-upload native pinned positions on a metadata-only columns object refresh (active=%s)", async (active) => {
+  it.each([true, false])("does not re-upload live pinned positions when the renderer retains metadata or topology (active=%s)", async (active) => {
     let nativePositionUploads = 0;
     adapter.pin.mockImplementation((_id, pinned, position) => {
       if (pinned && position) nativePositionUploads += 1;
@@ -861,6 +866,7 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     refreshed.edgeCrossFolder[0] = 1;
     expect(refreshed).not.toBe(input);
     adapter.pin.mockClear();
+    adapter.replaceColumns.mockReturnValue("metadata");
     nativePositionUploads = 0;
     view.rerender(<WorkspaceMapCanvas {...props} active={active} columns={refreshed} />);
     if (!active) view.rerender(<WorkspaceMapCanvas {...props} active columns={refreshed} />);
@@ -869,6 +875,19 @@ describe("WorkspaceMapCanvas lifecycle", () => {
     expect(nativePositionUploads).toBe(0);
     expect(createAdapter).toHaveBeenCalledOnce();
     expect(adapter.fit).not.toHaveBeenCalled();
+
+    // A retained CPU topology update owns the same live rows. Host pin echoes
+    // must stay inert even though geometry/fingerprint are now different.
+    const topology = columns("new-visible-topology");
+    topology.edgeWeights[0] = 2;
+    adapter.replaceColumns.mockClear(); adapter.pin.mockClear();
+    adapter.replaceColumns.mockReturnValue("topology");
+    view.rerender(<WorkspaceMapCanvas {...props} active={active} columns={topology} />);
+    if (!active) view.rerender(<WorkspaceMapCanvas {...props} active columns={topology} />);
+    expect(adapter.replaceColumns).toHaveBeenCalledExactlyOnceWith(topology);
+    expect(adapter.pin).not.toHaveBeenCalled();
+    expect(nativePositionUploads).toBe(0);
+    expect(createAdapter).toHaveBeenCalledOnce();
   });
 
   it.each(["actor", "workspace", "fingerprint", "geometry", "semantic-owner"])("replays pins for a changed %s even if the positions themselves are unchanged", async (change) => {
@@ -888,6 +907,7 @@ describe("WorkspaceMapCanvas lifecycle", () => {
   });
 
   it("reconciles removed and renamed projection pin IDs on a metadata refresh without retaining stale owners", async () => {
+    adapter.replaceColumns.mockReturnValue("metadata");
     const props = { ...common(), pinnedIds: ["node-1"], pinnedPositions: { "node-1": { x: 12, y: 25 } } };
     const view = render(<WorkspaceMapCanvas {...props} columns={columns()} />);
     await waitFor(() => expect(screen.getByTestId("graph-canvas").closest(".graph-canvas-frame"))

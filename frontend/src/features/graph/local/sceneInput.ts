@@ -3,7 +3,7 @@ import { GRAPH_NODE_RADIUS_PX } from "../shared/graphTokens";
 import type { GraphRenderEdge, GraphRenderNode, GraphRenderScene } from "../shared/rendererTypes";
 import { isSessionNode, sessionBadge } from "../shared/sessionNodes";
 import { localEdgeVisualKind } from "./edgeKinds";
-import type { LocalLayoutInput } from "./layoutTypes";
+import type { LocalLayoutInput } from "../shared/physics/layoutTypes";
 
 export type LocalSceneNode = {
   key: string;
@@ -156,6 +156,7 @@ export function buildLocalScene(scene: GraphRenderScene): LocalScene {
     keyByGraphId,
     graphIdByKey,
     layout: {
+      primarySeedKey: currentKey ?? (scene.currentId === undefined ? nodes.find(node => node.isSeed)?.key ?? null : null),
       nodes: nodes.map((node) => ({
         key: node.key,
         radiusPx: node.radiusPx,

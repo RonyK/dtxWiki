@@ -49,6 +49,13 @@ describe("visible Local scene input", () => {
       count: 1,
     }]);
     expect(JSON.stringify(result.layout)).not.toContain("ephemeral-edge-id");
+    // Expanding a lexically earlier seed cannot replace the current document's
+    // primary anchor; the display seed glyph and Worker input agree.
+    const expanded = buildLocalScene({
+      ...scene([node("primary", "z", true), node("expanded", "a", true)], []), currentId: "primary",
+    });
+    expect(expanded.layout.primarySeedKey).toBe("context_page:z");
+    expect(expanded.nodes.find(node => node.isCurrent)?.key).toBe(expanded.layout.primarySeedKey);
   });
 
   it("excludes hidden items, absent endpoints and unknown relationships from geometry and forces", () => {

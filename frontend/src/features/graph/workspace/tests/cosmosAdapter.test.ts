@@ -55,6 +55,12 @@ const { graph, community, createGraph, createNativeGraph } = vi.hoisted(() => {
     setPointImageSizes: vi.fn(),
     setZoomLevel: vi.fn(),
     setZoomTransformByPointPositions: vi.fn(),
+    setCameraCenter: vi.fn((position: readonly number[], zoom: number) => {
+      // This existing fake routes both SDK camera entry points through its
+      // recorded camera model. The SDK host regression covers double precision.
+      graph.setZoomTransformByPointPositions(Float32Array.from(position), 0, zoom, 0, false);
+    }),
+    remapDraggingPoint: vi.fn(),
     spaceToScreenPosition: vi.fn((_position: [number, number]) => [10, 10]),
     start: vi.fn(),
     stop: vi.fn(),
@@ -726,11 +732,13 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
     expect(graph.setPinnedPoints).toHaveBeenLastCalledWith([0]); expect(graph.start).not.toHaveBeenCalled();
   });
 
-  it("stops CPU at native drag start, rejects frames during drag, commits the final event and exact pin", async () => {
+  it("stops CPU once a native drag moves, rejects frames during drag, commits the final event and exact pin", async () => {
     const { adapter, onPin } = await mountCpu(); const worker = cpu.instances[0];
     const config = createGraph.mock.calls.at(-1)![1]; config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
     const drag = installedSdkDrag(config, 0); drag.start();
+    expect(worker.isRunning()).toBe(true); drag.move(25, 40);
     expect(worker.isRunning()).toBe(false); graph.setPointPositions.mockClear();
+    expect(graph.remapDraggingPoint).toHaveBeenLastCalledWith(0);
     worker.options.onPositions(new Float32Array(6).fill(999));
     expect(graph.setPointPositions).not.toHaveBeenCalled();
     graph.screenToSpacePosition.mockReturnValue([1234, 2345]); drag.move(30, 50); drag.end();
@@ -742,12 +750,14 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
       .toEqual(Float32Array.from([1234, 2345]));
   });
 
-  it("stationary touch is not a pin and restarting after a tap preserves the current CPU scene", async () => {
+  it("stationary touch is not a pin and leaves the native drag, CPU layout and scene untouched", async () => {
     const { onPin } = await mountCpu(); const worker = cpu.instances[0];
     const config = createGraph.mock.calls.at(-1)![1]; config.onPointMouseOver?.(1, [0, 0], undefined, false, false);
+    worker.start.mockClear(); worker.stop.mockClear(); graph.remapDraggingPoint.mockClear();
     const drag = installedSdkDrag(config, 1); drag.start("touchstart"); drag.end("touchend");
     expect(onPin).not.toHaveBeenCalled(); expect(worker.isRunning()).toBe(true);
-    expect(worker.start).toHaveBeenLastCalledWith(false);
+    expect(worker.stop).not.toHaveBeenCalled(); expect(worker.start).not.toHaveBeenCalled();
+    expect(graph.remapDraggingPoint).toHaveBeenCalledExactlyOnceWith(null);
     expect(worker.setPositions).not.toHaveBeenCalled();
   });
 

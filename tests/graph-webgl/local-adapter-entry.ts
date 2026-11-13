@@ -1,8 +1,8 @@
-import { createSigmaGraphAdapter } from "../../frontend/src/features/graph/local/sigmaAdapter";
+import { createLocalGraphAdapter } from "../../frontend/src/features/graph/local/cosmosAdapter";
 import type { GraphRenderScene } from "../../frontend/src/features/graph/shared/rendererTypes";
-import Sigma from "sigma";
+import { observeLocalNative } from "./local-native-observer";
 
-const container = document.querySelector<HTMLElement>("#graph");
+const container = document.querySelector<HTMLDivElement>("#graph");
 if (!container) throw new Error("Missing Local Graph fixture container");
 
 let scene: GraphRenderScene = {
@@ -23,16 +23,8 @@ let scene: GraphRenderScene = {
 };
 
 const events: Array<{ type: string; id: string | null }> = [];
-const rawPicks: Array<{ kind: "node" | "edge" | "stage"; id: string | null }> = [];
-// Capture the real renderer for read-only fixture observations, without adding
-// test APIs to the production adapter or mocking Sigma's input/rendering paths.
-let renderer: Sigma | undefined;
-const originalRefresh = Sigma.prototype.refresh;
-Sigma.prototype.refresh = function (...args: Parameters<Sigma["refresh"]>) {
-  renderer = this;
-  return originalRefresh.apply(this, args);
-};
-const adapter = createSigmaGraphAdapter(container, scene, {
+const observation = observeLocalNative(() => scene);
+const adapter = createLocalGraphAdapter(container, scene, {
   forcedColors: matchMedia("(forced-colors: active)").matches,
   positions: {
     "context:seed": { x: 0, y: 0 },
@@ -55,22 +47,7 @@ const adapter = createSigmaGraphAdapter(container, scene, {
     onContextStatus: (status) => events.push({ type: `context:${status}`, id: null }),
   },
 });
-Sigma.prototype.refresh = originalRefresh;
-
-function sigma(): Sigma {
-  if (!renderer) throw new Error("Local fixture did not observe the Sigma renderer");
-  return renderer;
-}
-
-// Observe actual native 2D paint calls, not only Sigma's forceLabel flags.
-const labelDraws: Array<{ text: string; x: number; y: number }> = [];
-const labelContext = sigma().getCanvases().labels.getContext("2d")!;
-const originalLabelFill = labelContext.fillText;
-labelContext.fillText = function (...args: Parameters<CanvasRenderingContext2D["fillText"]>) {
-  labelDraws.push({ text: args[0], x: args[1], y: args[2] });
-  return originalLabelFill.apply(this, args);
-};
-sigma().on("beforeRender", () => { labelDraws.length = 0; });
+function native() { return observation.current(); }
 
 function nodeKey(id: string): string {
   const node = scene.nodes.find((entry) => entry.id === id);
@@ -78,19 +55,14 @@ function nodeKey(id: string): string {
   return `${node.entity_kind}:${node.entity_id}`;
 }
 
-for (const prefix of ["click", "doubleClick"] as const) {
-  sigma().on(`${prefix}Node`, ({ node }) => rawPicks.push({ kind: "node", id: node }));
-  sigma().on(`${prefix}Edge`, ({ edge }) => rawPicks.push({ kind: "edge", id: edge }));
-  sigma().on(`${prefix}Stage`, () => rawPicks.push({ kind: "stage", id: null }));
-}
-
-function replaceScene(next: GraphRenderScene): void {
+function replaceScene(next: GraphRenderScene): Promise<void> {
   scene = next;
   adapter.replaceScene(next);
+  return adapter.whenSettled();
 }
 
 function labelPixels(bounds = { x: 0, y: 0, width: container!.clientWidth, height: container!.clientHeight }) {
-  const canvas = sigma().getCanvases().labels;
+  const canvas = native().getCanvases().labels;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Local fixture label canvas unavailable");
   const scale = canvas.width / container!.clientWidth;
@@ -109,28 +81,41 @@ function labelPixels(bounds = { x: 0, y: 0, width: container!.clientWidth, heigh
 Object.assign(window, {
   __graphLocalFixture: {
     events,
-    rawPicks,
-    camera: () => ({ ...sigma().getCamera().getState() }),
-    counts: () => ({ nodes: sigma().getGraph().order, relations: sigma().getGraph().size }),
-    edges: () => sigma().getGraph().edges().map((id) => ({ id,
-      color: sigma().getEdgeDisplayData(id)?.color, hidden: sigma().getEdgeDisplayData(id)?.hidden })),
+    get rawPicks() { return native().picks; },
+    camera: () => ({ ...native().getCamera().getState() }),
+    counts: () => ({ nodes: native().getGraph().order, relations: native().getGraph().size }),
+    edges: () => native().getGraph().edges().map((id) => ({ id,
+      color: native().getEdgeDisplayData(id)?.color, hidden: native().getEdgeDisplayData(id)?.hidden })),
     labelPixels,
-    labelDraws: () => labelDraws.map((draw) => ({ ...draw })),
+    labelDraws: () => native().labelDraws(),
     labels: (enabled: boolean) => adapter.setLabelsVisible(enabled),
     labelState: () => ({
       ...labelPixels(),
-      displayed: Array.from(sigma().getNodeDisplayedLabels()).map((key) =>
+      displayed: Array.from(native().getNodeDisplayedLabels()).map((key) =>
         scene.nodes.find((node) => `${node.entity_kind}:${node.entity_id}` === key)?.id ?? key).sort(),
     }),
-    detail: (id: string) => new Promise<void>((resolve) => {
-      sigma().once("afterRender", () => resolve());
-      adapter.setViewport({ zoom: 6, pan: { x: 0.5, y: 0.5 } });
+    detail: async (id: string) => {
+      await adapter.whenSettled();
+      adapter.setLabelsVisible(false);
+      // A detail zoom large enough to distinguish a balanced square corner
+      // from a circle in actual framebuffer pixels, independent of Fit units.
+      adapter.setViewport({ zoom: 64, pan: { x: 0, y: 0 } });
       adapter.centerOn(id);
-      const camera = sigma().getCamera().getState();
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const camera = native().getCamera().getState();
       if (!Number.isFinite(camera.x) || !Number.isFinite(camera.y)) {
         throw new Error("Reduced-motion centering emitted NaN camera coordinates");
       }
-    }),
+    },
+    rightBoundary: async (id: string) => {
+      await adapter.whenSettled();
+      const camera = native().getCamera().getState();
+      const point = native().graphToViewport(native().getGraph().getNodeAttributes(nodeKey(id)));
+      // Keep the original boundary regression at x=825 CSS px despite the
+      // renderer's graph-space camera replacing Sigma's normalized Fit ratio.
+      adapter.setViewport({ zoom: 1 / camera.ratio,
+        pan: { x: camera.x + (point.x - 825) * camera.ratio, y: camera.y } });
+    },
     kinds: () => {
       const kinds = [
         ["context_page", "Context"], ["context_page_version", "Context version"],
@@ -154,22 +139,24 @@ Object.assign(window, {
       adapter.fit();
     },
     node: (id: string) => {
-      const attributes = sigma().getGraph().getNodeAttributes(nodeKey(id));
-      const display = sigma().getNodeDisplayData(nodeKey(id));
+      const attributes = native().getGraph().getNodeAttributes(nodeKey(id));
+      const display = native().getNodeDisplayData(nodeKey(id));
       return {
-        point: sigma().graphToViewport({ x: Number(attributes.x), y: Number(attributes.y) }),
+        point: native().graphToViewport({ x: Number(attributes.x), y: Number(attributes.y) }),
         graphPoint: { x: Number(attributes.x), y: Number(attributes.y) },
         color: display?.color,
         hidden: display?.hidden,
+        radius: display?.size,
       };
     },
     focus: (id: string | null) => adapter.focus(id),
     pin: (id: string, pinned = true, position?: { x: number; y: number }) => adapter.pin(id, pinned, position),
-    positions: () => Object.fromEntries(sigma().getGraph().nodes().map((key) => {
-      const attributes = sigma().getGraph().getNodeAttributes(key);
+    positions: () => Object.fromEntries(native().getGraph().nodes().map((key) => {
+      const attributes = native().getGraph().getNodeAttributes(key);
       return [key, { x: Number(attributes.x), y: Number(attributes.y) }];
     })),
     replaceScene,
+    settled: () => adapter.whenSettled(),
     reset: () => adapter.reset(),
     get scene() { return scene; },
     select: (id: string | null) => adapter.select(id),
