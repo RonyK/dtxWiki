@@ -25,8 +25,8 @@
 - Select a graph node on click without moving it or waking the layout; a
   drag starts once the pointer moves.
 - Frame a Context graph to fit after a filter, query or history-view change,
-  and zoom in to a readable level when locating a node, as the Knowledge Map
-  does.
+  and when locating a node from far zoomed out, zoom back in to a readable
+  level, as the Knowledge Map does.
 
 ### Graph legends
 
