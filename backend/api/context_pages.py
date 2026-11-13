@@ -102,6 +102,7 @@ from backend.services.page_service import (
     WorkspacePublicSharingDisabledError,
 )
 from backend.services.read_errors import ReadServiceError, RejectedByPolicyError
+from backend.utils.request_markdown_memo import with_request_markdown_memo
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/context/pages", tags=["context-pages"]
@@ -300,6 +301,7 @@ def update_context_references(
     response_model=ContextPageDetailResponse,
     responses=REST_ERROR_RESPONSES,
 )
+@with_request_markdown_memo
 def get_context_page(
     request: Request,
     workspace_id: UUID,
@@ -328,6 +330,7 @@ def get_context_page(
                 include_warnings=False,
                 include_pending_review=True,
                 include_inspector_counts=False,
+                include_references=False,
             )
             latest_draft_version_id = services.domain_read._context_page_summary(
                 page, actor=actor
@@ -352,6 +355,7 @@ def get_context_page(
     response_model=ContextPageInspectorResponse,
     responses=REST_ERROR_RESPONSES,
 )
+@with_request_markdown_memo
 def get_context_page_inspector(
     request: Request,
     workspace_id: UUID,

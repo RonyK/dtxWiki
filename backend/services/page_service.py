@@ -6036,6 +6036,7 @@ class PageService:
         prepared: PreparedBody | None = None,
     ) -> PagePayload:
         from backend.services.document_references import (
+            deleted_document_references,
             document_references_hash,
             read_document_references,
         )
@@ -6078,6 +6079,7 @@ class PageService:
                 parent,
                 parent_visibility_actor,
             )[1]
+        deleted_references = deleted_document_references(session, version)
         payload = PagePayload(
             id=page.id,
             workspace_id=page.workspace_id,
@@ -6115,8 +6117,11 @@ class PageService:
                 version=version,
                 actor=parent_visibility_actor or self.actor_context,
                 self_origins=self.body_preparer.self_origins,
+                _deleted=deleted_references,
             ),
-            references_hash=document_references_hash(session, version),
+            references_hash=document_references_hash(
+                session, version, _deleted=deleted_references
+            ),
             version_id=version.id,
             editing_revision=version.editing_revision,
             parent_version_id=parent_version_id,

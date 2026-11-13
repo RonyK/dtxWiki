@@ -10,13 +10,14 @@ from __future__ import annotations
 import html
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
+from markdown_it.token import Token
 from sqlalchemy.orm import Session
 
 from backend.context_media.domain.markdown_media import SourceSpan
@@ -34,6 +35,7 @@ from backend.services.index_refs import (
     looks_like_index_ref,
     parse_index_ref,
 )
+from backend.utils.request_markdown_memo import memoize_markdown_analysis
 
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 MCP_PAGE_INPUT_PATTERN = rf"^(?:{_UUID}|/p/{_UUID}(?:/{_UUID})?(?:#[^\s]*)?)$"
@@ -888,9 +890,11 @@ def _rendered_destinations(body: str) -> list[str]:
     ]
 
 
-def _plain_text_nodes(body: str) -> list[str]:
+def _plain_text_nodes(body: str, *, tokens: Sequence[Token] | None = None) -> list[str]:
+    if tokens is None:
+        tokens = _markdown_parser().parse(body)
     result = []
-    for token in _markdown_parser().parse(body):
+    for token in tokens:
         link_depth = 0
         for child in token.children or ():
             if child.type == "link_open":
@@ -902,6 +906,7 @@ def _plain_text_nodes(body: str) -> list[str]:
     return result
 
 
+@memoize_markdown_analysis
 def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
     """Verify exact source destinations against the original rendered structure.
 
@@ -929,18 +934,18 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
     )
 
     rendered, offset = _rendered_page_body(body)
-    masked = _code_mask(rendered)
+    # These helpers share the CommonMark/HTML/table profile on the same source.
+    # Marker and destination probes below still parse their own changed source.
+    tokens = _markdown_parser().parse(rendered)
+    code_mask = _code_mask(rendered, tokens=tokens)
+    math_mask = _math_mask(rendered, tokens=tokens, code_mask=code_mask)
+    masked = bytearray(math_mask)
     # Citation addresses are owned by the citation parser, including malformed
     # historical tokens. Rewriting an inner autolink would corrupt the marker.
     from backend.services.citation_parser import citation_token_spans
 
     citation_spans = citation_token_spans(rendered)
-    math_mask = _math_mask(rendered)
-    for index, value in enumerate(math_mask):
-        if value:
-            masked[index] = 1
     line_offsets = _line_offsets(rendered)
-    tokens = _markdown_parser().parse(rendered)
     for token in tokens:
         if token.type == "html_block" and token.map:
             start, end = line_offsets[token.map[0]], line_offsets[token.map[1]]
@@ -1008,7 +1013,7 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
     candidates = []
     uses = Counter()
     reference_uses = []
-    original_text = _plain_text_nodes(rendered)
+    original_text = _plain_text_nodes(rendered, tokens=tokens)
     eligible_wikis = {
         match[0] for node in original_text for match in _WIKI.finditer(node)
     }
@@ -1160,7 +1165,10 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
             continue
         literals.append((match.start(), end, href))
     visible_literals = _gfm_literal_source_spans_visible(
-        rendered, tuple((start, end) for start, end, _ in literals)
+        rendered,
+        tuple((start, end) for start, end, _ in literals),
+        tokens=tokens,
+        math_mask=math_mask,
     )
     candidates.extend(
         (start, end, href, "literal_autolink", None, href)

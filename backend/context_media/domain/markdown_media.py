@@ -17,7 +17,7 @@ import ipaddress
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Literal, cast
@@ -26,6 +26,7 @@ from uuid import UUID
 
 import idna
 from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
 from .models import InvalidLogicalReferenceError, parse_logical_asset_reference
 
@@ -1971,10 +1972,18 @@ def _gfm_literal_url_candidates(literal: str) -> tuple[str, ...]:
 def _gfm_literal_source_spans_visible(
     markdown: str,
     spans: tuple[tuple[int, int], ...],
+    *,
+    tokens: Sequence[Token] | None = None,
+    math_mask: bytes | bytearray | None = None,
 ) -> frozenset[int]:
     """Batch-probe exact GFM literal spans outside code, math, and links."""
 
-    math_mask = _math_mask(markdown)
+    if math_mask is None:
+        if tokens is None:
+            tokens = (
+                MarkdownIt("commonmark", {"html": True}).enable("table").parse(markdown)
+            )
+        math_mask = _math_mask(markdown, tokens=tokens)
     eligible = tuple(
         (ordinal, start, end)
         for ordinal, (start, end) in enumerate(spans)
@@ -1982,10 +1991,13 @@ def _gfm_literal_source_spans_visible(
     )
     if not eligible:
         return frozenset()
-    gfm_parser = MarkdownIt("commonmark", {"html": True}).enable("table")
+    if tokens is None:
+        tokens = (
+            MarkdownIt("commonmark", {"html": True}).enable("table").parse(markdown)
+        )
     decoded_text = tuple(
         child.content
-        for token in gfm_parser.parse(markdown)
+        for token in tokens
         if token.type == "inline"
         for child in token.children or ()
         if child.type == "text"
@@ -2083,12 +2095,22 @@ def _batch_visible_source_spans(
     return frozenset(visible)
 
 
-def _math_mask(markdown: str) -> bytearray:
+def _math_mask(
+    markdown: str,
+    *,
+    tokens: Sequence[Token] | None = None,
+    code_mask: bytes | bytearray | None = None,
+) -> bytearray:
     """Mask remark-math dollar-delimited source before destination parsing."""
 
-    masked = _code_mask(markdown)
+    if tokens is None:
+        tokens = MarkdownIt("commonmark").enable("table").parse(markdown)
+    masked = (
+        _code_mask(markdown, tokens=tokens)
+        if code_mask is None
+        else bytearray(code_mask)
+    )
     line_offsets = _line_offsets(markdown)
-    tokens = MarkdownIt("commonmark").enable("table").parse(markdown)
     container_ranges = tuple(
         (token.type, token.map[0], token.map[1])
         for token in tokens
@@ -2591,10 +2613,11 @@ def _crlf_lines_keepends(source: str) -> list[str]:
     return lines
 
 
-def _code_mask(markdown: str) -> bytearray:
+def _code_mask(markdown: str, *, tokens: Sequence[Token] | None = None) -> bytearray:
     masked = bytearray(len(markdown))
     line_offsets = _line_offsets(markdown)
-    tokens = MarkdownIt("commonmark").enable("table").parse(markdown)
+    if tokens is None:
+        tokens = MarkdownIt("commonmark").enable("table").parse(markdown)
     for token in tokens:
         if token.type not in {"code_block", "fence"} or token.map is None:
             continue

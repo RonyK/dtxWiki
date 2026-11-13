@@ -9,6 +9,7 @@ from backend.domain.document_reference import CitationOccurrence
 from backend.domain.input_policy import InputPolicyError
 from backend.services.context_links import _plain_text_nodes, extract_links
 from backend.services.read_errors import ReadValidationError
+from backend.utils.request_markdown_memo import memoize_markdown_analysis
 
 _MARKER = re.compile(r"@cite\{([^}\n]*)(\}|$)", re.MULTILINE)
 MAX_CITATION_OCCURRENCES = 5000
@@ -55,6 +56,7 @@ def incomplete_inline_citations(body: str) -> tuple[CitationOccurrence, ...]:
     return _scan_inline_citations(body)[1]
 
 
+@memoize_markdown_analysis
 def _scan_inline_citations(
     body: str,
 ) -> tuple[tuple[CitationOccurrence, ...], tuple[CitationOccurrence, ...]]:

@@ -133,6 +133,7 @@ from backend.utils.actor_display import (
     resolve_actor_display_name,
     resolve_actor_display_names,
 )
+from backend.utils.request_markdown_memo import with_request_markdown_memo
 
 _RECONCILIATION_SUMMARY_SCAN_LIMIT = 20
 
@@ -845,6 +846,7 @@ class DomainReadService:
             has_more=has_more,
         )
 
+    @with_request_markdown_memo
     def read_context_page(
         self,
         session: Session,
@@ -916,6 +918,7 @@ class DomainReadService:
         include_warnings: bool = True,
         include_pending_review: bool = True,
         include_inspector_counts: bool = True,
+        include_references: bool = True,
     ) -> dict[str, Any]:
         """Read-only projection fields for a Context page's canonical detail
         response: tree placement, backlinks/wikilinks, lint warnings, the
@@ -1077,23 +1080,29 @@ class DomainReadService:
                     risk_level=review_item.risk_level,
                 )
                 pending_draft_version_id = page.latest_draft_version_id
-        from backend.services.document_references import (
-            document_references_hash,
-            read_document_references,
-        )
+        reference_fields = {}
+        if include_references:
+            from backend.services.document_references import (
+                document_references_hash,
+                read_document_references,
+            )
+
+            reference_fields = {
+                "references": read_document_references(
+                    session,
+                    version=version,
+                    actor=actor,
+                    self_origins=self.context_link_origins,
+                )
+                if version
+                else [],
+                "references_hash": document_references_hash(session, version)
+                if version
+                else "",
+            }
 
         return {
-            "references": read_document_references(
-                session,
-                version=version,
-                actor=actor,
-                self_origins=self.context_link_origins,
-            )
-            if version
-            else [],
-            "references_hash": document_references_hash(session, version)
-            if version
-            else "",
+            **reference_fields,
             "published_version_info": (
                 PublishedVersionInfo(
                     version_id=published_version.id,
