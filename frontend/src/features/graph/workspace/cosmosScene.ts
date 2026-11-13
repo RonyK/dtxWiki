@@ -216,7 +216,7 @@ export function buildCosmosSceneBuffers(
     const target = columns.edgeTargets[edge];
     const kind = columns.edgeKinds[edge];
     if (source >= count || target >= count || kind > 2) throw new Error("Invalid Workspace Map edge");
-    // Legend strokes: solid link, dashed citation, short-dash containment (Cosmos style per kind).
+    // Shared legend strokes: solid link, dash-dot citation, long-dash containment.
     linkStyles[edge] = kind;
     const ink = GRAPH_LINE_OPACITY, { overview, unadmitted } = ink;
     const alpha = denseOverview ? (kind === 1 ? overview.citation : overview.line)

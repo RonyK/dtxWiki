@@ -1,7 +1,8 @@
 import { stableEdges, stableNodes, type GraphScene } from "../graphModel";
 import { GRAPH_CUE_SIZE, GRAPH_SEED_CUE, graphNodeCueParts, type GraphCuePart } from "../shared/GraphCues";
 import {
-  GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_NODE_VISUALS,
+  GRAPH_EDGE_ENDPOINTS, GRAPH_EDGE_ENDPOINT_SIZE_PX, GRAPH_EDGE_PATTERN, GRAPH_EDGE_TRIANGLE_SIZE_PX,
+  GRAPH_EDGE_WIDTH_PX, GRAPH_NODE_VISUALS,
   type GraphEdgeVisualKind, type GraphNodeVisualKind, type GraphVisualTokens,
 } from "../shared/graphTokens";
 import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeVisualKind } from "./edgeKinds";
@@ -14,11 +15,14 @@ export type StaticDiagramVisuals = {
 };
 
 export type StaticDiagramNode = { kind: GraphNodeVisualKind; seed: boolean };
+/** A null visual kind keeps Mermaid's original relationship endpoints. */
+export type StaticDiagramEdge = { id: string; kind: GraphEdgeVisualKind | null; directed: boolean };
 
 export type StaticDiagram = {
   source: string;
   /** Mermaid node `n<i>` is `nodes[i]`. */
   nodes: StaticDiagramNode[];
+  edges: StaticDiagramEdge[];
 };
 
 // Mermaid trims and collapses whitespace in labels, so a word reserves the
@@ -61,6 +65,7 @@ export function graphSceneToMermaid(
     lines.push(`  n${index}("${iconSlot ? `${SLOT_WORD} ` : ""}${mermaidText(node.label)}")`);
   });
   const linesByKind = new Map<GraphEdgeVisualKind, number[]>();
+  const edges: StaticDiagramEdge[] = [];
   let drawn = 0;
   for (const edge of stableEdges(scene.edges)) {
     const source = names.get(edge.source);
@@ -68,9 +73,12 @@ export function graphSceneToMermaid(
     if (!source || !target) {
       continue;
     }
-    const connector = edge.direction === "undirected" ? "---" : "-->";
-    lines.push(`  ${source} ${connector}|${mermaidText(edge.label)}| ${target}`);
     const kind = localEdgeVisualKind(edge.edge_kind);
+    const directed = edge.direction !== "undirected";
+    const id = `graphEdge${drawn}`;
+    const connector = directed ? "-->" : "---";
+    lines.push(`  ${source} ${iconSlot ? `${id}@` : ""}${connector}|${mermaidText(edge.label)}| ${target}`);
+    edges.push({ id, kind, directed });
     if (kind) {
       linesByKind.set(kind, [...(linesByKind.get(kind) ?? []), drawn]);
     }
@@ -97,7 +105,7 @@ export function graphSceneToMermaid(
       lines.push(`  linkStyle ${indices.join(",")} ${style}`);
     }
   }
-  return { source: lines.join("\n"), nodes };
+  return { source: lines.join("\n"), nodes, edges };
 }
 
 /**
@@ -113,6 +121,7 @@ export function decorateStaticDiagramSvg(
   svg: string,
   nodes: StaticDiagramNode[],
   visuals: StaticDiagramVisuals,
+  edges: readonly StaticDiagramEdge[] = [],
 ): string {
   const host = document.createElement("div");
   host.setAttribute("aria-hidden", "true");
@@ -124,6 +133,7 @@ export function decorateStaticDiagramSvg(
     // The cards and labels are coloured for the graph surface; the SVG
     // carries it, so the zoom viewer shows them on the same ground.
     host.querySelector("svg")?.style.setProperty("background-color", visuals.tokens.surface);
+    decorateEdges(host, edges, visuals);
     for (const group of Array.from(host.querySelectorAll<SVGGElement>("svg g.node"))) {
       const index = /-flowchart-n(\d+)-/.exec(group.id)?.[1];
       const node = index === undefined ? undefined : nodes[Number(index)];
@@ -135,6 +145,66 @@ export function decorateStaticDiagramSvg(
   } finally {
     host.remove();
   }
+}
+
+/** Override only endpoints with a shared visual definition; preserve all others. */
+function decorateEdges(host: HTMLElement, edges: readonly StaticDiagramEdge[], visuals: StaticDiagramVisuals) {
+  const svg = host.querySelector("svg");
+  if (!svg || !edges.length) return;
+  const defs = document.createElementNS(SVG_NS, "defs");
+  const prefix = `${svg.id.replace(/[^a-zA-Z0-9_-]/g, "_")}-graph-endpoint`;
+  const paths = Array.from(svg.querySelectorAll<SVGPathElement>("path.flowchart-link"));
+  const size = GRAPH_EDGE_ENDPOINT_SIZE_PX;
+  for (const edge of edges) {
+    if (!edge.kind) continue;
+    const path = paths.find((candidate) => candidate.id === edge.id || candidate.dataset.id === edge.id);
+    if (!path) continue;
+    const endpoints = edge.directed ? GRAPH_EDGE_ENDPOINTS[edge.kind] : { source: "none", target: "none" };
+    const filled = endpoints.target === "filled-triangle";
+    const arrowLength = filled ? GRAPH_EDGE_TRIANGLE_SIZE_PX.length : size.arrowLength;
+    const ink = visuals.tokens.edge[edge.kind];
+    const marker = (end: "source" | "target", d: string, fill: string, stroke = ink) => {
+      const id = `${prefix}-${edge.id}-${end}`;
+      const element = document.createElementNS(SVG_NS, "marker");
+      element.id = id;
+      element.setAttribute("markerUnits", "userSpaceOnUse");
+      element.setAttribute("markerWidth", String(size.diamondLength + size.nodeGap + 2));
+      element.setAttribute("markerHeight", String(2 * size.arrowHalfWidth + 2));
+      element.setAttribute("refX", end === "target" ? String(arrowLength + size.nodeGap) : "0");
+      element.setAttribute("refY", String(size.arrowHalfWidth + 1));
+      element.setAttribute("orient", "auto");
+      element.setAttribute("overflow", "visible");
+      const shape = document.createElementNS(SVG_NS, "path");
+      shape.setAttribute("d", d);
+      shape.style.setProperty("fill", fill);
+      shape.style.setProperty("stroke", stroke);
+      shape.style.setProperty("stroke-width", String(GRAPH_EDGE_WIDTH_PX));
+      shape.style.setProperty("stroke-linecap", "round");
+      shape.style.setProperty("stroke-linejoin", "round");
+      element.append(shape);
+      defs.append(element);
+      const attribute = end === "source" ? "marker-start" : "marker-end";
+      path.setAttribute(attribute, `url(#${id})`);
+      path.style.setProperty(attribute, `url(#${id})`);
+    };
+    const cy = size.arrowHalfWidth + 1;
+    if (endpoints.target === "open-arrow") {
+      marker("target", `M0 ${cy - size.arrowHalfWidth}L${size.arrowLength} ${cy}L0 ${cy + size.arrowHalfWidth}`, "none");
+    } else if (filled) {
+      marker("target", `M0 ${cy - GRAPH_EDGE_TRIANGLE_SIZE_PX.halfWidth}L${arrowLength} ${cy}L0 ${cy + GRAPH_EDGE_TRIANGLE_SIZE_PX.halfWidth}Z`, ink, "none");
+    } else if (endpoints.target === "none") {
+      path.setAttribute("marker-end", "none");
+      path.style.setProperty("marker-end", "none");
+    }
+    if (endpoints.source === "open-diamond") {
+      const start = size.nodeGap;
+      marker("source", `M${start} ${cy}L${start + size.diamondLength / 2} ${cy - size.diamondHalfWidth}L${start + size.diamondLength} ${cy}L${start + size.diamondLength / 2} ${cy + size.diamondHalfWidth}Z`, visuals.tokens.surface);
+    } else if (endpoints.source === "none") {
+      path.setAttribute("marker-start", "none");
+      path.style.setProperty("marker-start", "none");
+    }
+  }
+  svg.prepend(defs);
 }
 
 function decorateNode(group: SVGGElement, node: StaticDiagramNode, visuals: StaticDiagramVisuals) {

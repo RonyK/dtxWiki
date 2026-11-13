@@ -31,6 +31,8 @@ export type CosmosRendererBinding = {
   /** Map's indexed geometry includes every input to glyph/collision sizes.
    * Other bindings retain the additional prepared-glyph snapshot comparison. */
   snapshotGeometryIncludesGlyphs?: true;
+  /** Map styles encode directed links/citations and source-side containment. */
+  linkEndpointMarkers?: true;
   prepareScene(columns: CosmosSceneColumns, tokens: GraphVisualTokens,
     options: { forcedColors: boolean; countText(count: number): string; measureCount: WorkspaceCountMeasure }): CosmosSceneBuffers;
   relationColors(columns: CosmosSceneColumns, colors: Float32Array,

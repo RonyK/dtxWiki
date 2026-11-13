@@ -1,7 +1,8 @@
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties, type ReactNode } from "react";
 
 import {
-  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR,
+  GRAPH_EDGE_ENDPOINTS, GRAPH_EDGE_ENDPOINT_SIZE_PX, GRAPH_EDGE_PATTERN, GRAPH_EDGE_TRIANGLE_SIZE_PX, GRAPH_EDGE_WIDTH_PX,
+  GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, GRAPH_REMOVED_EDGE_PATTERN,
   type GraphEdgeVisualKind, type GraphNodeColorKey, type GraphNodeVisualKind,
 } from "./graphTokens";
 import {
@@ -21,11 +22,11 @@ const EDGE_COLOR_VARIABLE: Record<GraphEdgeVisualKind, string> = {
   citation: "var(--graph-edge-citation, #0f9f8f)",
   coAccess: "var(--graph-edge-co-access, #0284c7)",
   membership: "var(--graph-edge-membership, #8391a7)",
-  actionWrite: "var(--graph-edge-action, #475569)",
-  actionCite: "var(--graph-edge-action, #475569)",
-  actionRead: "var(--graph-edge-action, #475569)",
-  actionReference: "var(--graph-edge-action, #475569)",
-  action: "var(--graph-edge-action, #475569)",
+  actionWrite: "var(--graph-edge-action, #94a3b8)",
+  actionCite: "var(--graph-edge-action, #94a3b8)",
+  actionRead: "var(--graph-edge-action, #94a3b8)",
+  actionReference: "var(--graph-edge-action, #94a3b8)",
+  action: "var(--graph-edge-action, #94a3b8)",
 };
 const SURFACE_VARIABLE = "var(--graph-surface, #ffffff)";
 
@@ -37,8 +38,12 @@ function paint(property: "fill" | "stroke", color: string): { style?: CSSPropert
 export const GRAPH_CUE_SIZE = 16;
 const CUE_SIZE = GRAPH_CUE_SIZE;
 const CUE_CENTER = CUE_SIZE / 2;
-// Largest extent (the diamond, √2·r) stays inside the 16px box.
 const CUE_RADIUS = 5.2;
+/** Balance solid glyphs against the disc: similar square area and diamond width. */
+function nodeCueRadius(kind: GraphNodeVisualKind): number {
+  const shape = GRAPH_NODE_VISUALS[kind].shape;
+  return CUE_RADIUS * (shape === "square" ? 0.9 : shape === "diamond" ? 0.8 : 1);
+}
 /** The current-document seed cue: a node-coloured disc in an ink ring. */
 export const GRAPH_SEED_CUE = { radius: 5.5, ringWidth: 2.64 } as const;
 
@@ -64,13 +69,14 @@ export function graphNodeCueParts(kind: GraphNodeVisualKind, cx: number, cy: num
   body: GraphCuePart; forcedOutline: GraphCuePart[]; count?: GraphCueCount;
 } {
   const visual = GRAPH_NODE_VISUALS[kind];
+  const radius = nodeCueRadius(kind);
   // The ring's outer edge stays at CUE_RADIUS + 0.9; its band is the canvases' constant pixel band.
   const body: GraphCuePart = visual.shape === "ring"
     ? { element: "circle", cx, cy, r: CUE_RADIUS + 0.9 - GRAPH_RING_BAND_PX / 2,
       strokeWidth: GRAPH_RING_BAND_PX, tone: "ink" }
     : visual.shape === "countDisc"
       ? { element: "path", d: outlinePathData(shapeOutline("circle", cx, cy, CUE_RADIUS + 0.9)), tone: "ink" }
-      : { element: "path", d: outlinePathData(shapeOutline(visual.shape, cx, cy, CUE_RADIUS)), tone: "ink" };
+      : { element: "path", d: outlinePathData(shapeOutline(visual.shape, cx, cy, radius)), tone: "ink" };
   const insets = visual.forcedOutline
     ? FORCED_OUTLINE_INSETS[visual.shape === "triangle" ? "triangle" : "circle"] : null;
   const count = visual.shape === "countDisc"
@@ -80,8 +86,8 @@ export function graphNodeCueParts(kind: GraphNodeVisualKind, cx: number, cy: num
     body,
     ...count ? { count } : {},
     forcedOutline: insets ? [
-      { element: "path", d: outlinePathData(insetOutline(visual.shape, cx, cy, CUE_RADIUS, insets[0])), tone: "surface" },
-      { element: "path", d: outlinePathData(insetOutline(visual.shape, cx, cy, CUE_RADIUS, insets[1])), tone: "ink" },
+      { element: "path", d: outlinePathData(insetOutline(visual.shape, cx, cy, radius, insets[0])), tone: "surface" },
+      { element: "path", d: outlinePathData(insetOutline(visual.shape, cx, cy, radius, insets[1])), tone: "ink" },
     ] : [],
   };
 }
@@ -94,7 +100,7 @@ function CuePart({ part, ink, surface }: { part: GraphCuePart; ink: string; surf
 }
 
 /**
- * A node's legend/list glyph, drawn with the same geometry as the canvases.
+ * A node's legend/list glyph, with the canvas shape balanced for icon size.
  * Without explicit colours it follows the --graph-* theme tokens.
  */
 export function GraphNodeCue({
@@ -128,7 +134,7 @@ export function GraphNodeCue({
       {outline.length ? <g className={forcedColors ? undefined : "graph-node-cue-forced-outline"}>
         {outline.map((part, index) => <CuePart ink={ink} key={index} part={part} surface={background} />)}
       </g> : null}
-      {ring ? <path d={outlinePathData(shapeOutline(visual.shape, center, center, CUE_RADIUS, GRAPH_RING_GAP_PX + GRAPH_RING_WIDTH_PX / 2))}
+      {ring ? <path d={outlinePathData(shapeOutline(visual.shape, center, center, nodeCueRadius(kind), GRAPH_RING_GAP_PX + GRAPH_RING_WIDTH_PX / 2))}
         fill="none" strokeWidth={GRAPH_RING_WIDTH_PX} {...paint("stroke", ring)} /> : null}
     </svg>
   );
@@ -147,26 +153,74 @@ export function GraphSeedCue({ color, ink = "currentColor" }: { color?: string; 
 }
 
 export type GraphEdgeCueKind = GraphEdgeVisualKind | "removed" | "other";
+export type GraphEndpointKind = "link" | "citation" | "membership" | "coAccess" | "action";
+
+/** A wider relationship sample for callers that need room for both endpoints. */
+export function GraphEndpointCue({ kind }: { kind: GraphEndpointKind }) {
+  return <GraphEdgeCue className="graph-endpoint-cue" kind={kind} width={56} />;
+}
 
 /** A relationship line sample: the canvas dash pattern, colour and weight. */
-export function GraphEdgeCue({ kind, color, width = 34, className }: {
+export function GraphEdgeCue({ kind, color, width = 28, className }: {
   kind: GraphEdgeCueKind; color?: string; width?: number; className?: string;
 }) {
-  const pattern = kind === "removed" ? GRAPH_EDGE_PATTERN.action
+  const pattern = kind === "removed" ? GRAPH_REMOVED_EDGE_PATTERN
     : kind === "other" ? [2, 2] : GRAPH_EDGE_PATTERN[kind];
   const strokeWidth = GRAPH_EDGE_WIDTH_PX;
   const stroke = color ?? (kind === "removed" ? GRAPH_REMOVED_EDGE_COLOR
     : kind === "other" ? "var(--ink-muted, #475569)" : EDGE_COLOR_VARIABLE[kind]);
-  const arrow = kind !== "removed" && kind !== "other" && GRAPH_EDGE_ARROW[kind];
-  // The arrowhead ends the sample where the canvas line meets its target.
-  const lineEnd = arrow ? width - 6 : width - 1;
+  const endpoints = kind !== "removed" && kind !== "other" ? GRAPH_EDGE_ENDPOINTS[kind] : null;
+  const filled = endpoints?.target === "filled-triangle";
+  const arrow = endpoints !== null && endpoints.target !== "none";
+  const contains = endpoints?.source === "open-diamond";
+  const geometry = GRAPH_EDGE_ENDPOINT_SIZE_PX;
+  const { nodeGap } = geometry;
+  const targetLength = filled ? GRAPH_EDGE_TRIANGLE_SIZE_PX.length : geometry.arrowLength;
+  const targetHalfWidth = filled ? GRAPH_EDGE_TRIANGLE_SIZE_PX.halfWidth : geometry.arrowHalfWidth;
+  // Compact relation-list cues keep both endpoint symbols separate. The
+  // standard 28px legend sample draws the shared geometry at full size.
+  const endpointSpan = (contains ? geometry.diamondLength : 0) + (arrow ? targetLength : 0);
+  const scale = Math.min(1, (width - 2 * nodeGap) / (endpointSpan + 4));
+  const arrowLength = targetLength * scale;
+  const arrowHalfWidth = targetHalfWidth * scale;
+  const diamondLength = geometry.diamondLength * scale;
+  const diamondHalfWidth = geometry.diamondHalfWidth * scale;
+  const center = 5;
+  const lineStart = nodeGap + (contains ? diamondLength : 0);
+  const targetTip = width - nodeGap;
+  const lineEnd = targetTip - (filled ? arrowLength : 0);
+  // Horizontal dots use full ink pixels, matching the arrow's solid core.
+  const dotted = pattern?.length === 2 && pattern[0] === strokeWidth;
   return (
     <svg aria-hidden="true" className={["graph-edge-cue", className].filter(Boolean).join(" ")}
       data-edge-arrow={arrow ? "target" : undefined}
+      data-endpoint-source={contains ? "open-diamond" : undefined}
+      data-endpoint-target={arrow ? endpoints?.target : undefined}
       data-edge-visual-kind={kind} height="10" viewBox={`0 0 ${width} 10`} width={width}>
-      <line strokeDasharray={pattern?.join(" ")} strokeWidth={strokeWidth} x1="1" x2={lineEnd} y1="5" y2="5"
+      <line shapeRendering={dotted ? "crispEdges" : undefined} strokeDasharray={pattern?.join(" ")} strokeWidth={strokeWidth} x1={lineStart} x2={lineEnd} y1={center} y2={center}
         {...paint("stroke", stroke)} />
-      {arrow ? <path d={`M${width - 7} 1.5 L${width - 0.5} 5 L${width - 7} 8.5 Z`} {...paint("fill", stroke)} /> : null}
+      {contains ? <path d={`M${nodeGap} ${center} L${nodeGap + diamondLength / 2} ${center - diamondHalfWidth} L${lineStart} ${center} L${nodeGap + diamondLength / 2} ${center + diamondHalfWidth} Z`}
+        fill="none" strokeWidth={strokeWidth} {...paint("stroke", stroke)} /> : null}
+      {filled ? <path d={`M${lineEnd} ${center - arrowHalfWidth} L${targetTip} ${center} L${lineEnd} ${center + arrowHalfWidth} Z`}
+        stroke="none" {...paint("fill", stroke)} /> : arrow ? <path d={`M${targetTip - arrowLength} ${center - arrowHalfWidth} L${targetTip} ${center} L${targetTip - arrowLength} ${center + arrowHalfWidth}`}
+        fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth={strokeWidth} {...paint("stroke", stroke)} /> : null}
     </svg>
+  );
+}
+
+/**
+ * One legend group in either graph view: a visible title over a two-column
+ * list whose rows are a cue and its name.
+ */
+export function GraphLegendGroup({ children, title, className, footer }: {
+  children: ReactNode; title: string; className?: string; footer?: ReactNode;
+}) {
+  const titleId = useId();
+  return (
+    <div className={["graph-legend-group", className].filter(Boolean).join(" ")}>
+      <p className="graph-legend-group-title" id={titleId}>{title}</p>
+      <ul aria-labelledby={titleId}>{children}</ul>
+      {footer}
+    </div>
   );
 }

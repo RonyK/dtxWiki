@@ -3229,7 +3229,11 @@ describe("Cosmos Map interaction contracts", () => {
     const config = createGraph.mock.calls[0][1];
     // Every line is the legend's one width; no scene-size scale.
     expect(config).toMatchObject({ linkDefaultWidth: 1.5, linkVisibilityMinTransparency: GRAPH_LINE_OPACITY.fade.small.floor,
-      hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6 });
+      hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6,
+      linkDashLength: 8, linkDashGap: 3, linkDashDotLength: 1.5, linkDashDotGap: 3,
+      linkDottedDashLength: 10, linkDottedDashGap: 4,
+      linkEndpointMarkers: true, linkEndpointArrowLength: 6, linkEndpointArrowHalfWidth: 4,
+      linkEndpointDiamondLength: 10, linkEndpointDiamondHalfWidth: 4, linkEndpointNodeGap: 1.5 });
     graph.setConfigPartial.mockClear();
     config.onZoom?.({ transform: { k: 0.02 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ pointSizeScale: 1 }));

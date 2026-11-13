@@ -367,9 +367,9 @@ test("Local Sigma adapter paints point nodes and all four visible relationship k
   expect(colors.purple, "Context point should be painted").toBeGreaterThan(5);
   expect(colors.teal, "Library square should be painted").toBeGreaterThan(5);
   expect(colors.link, "Link solid should be painted").toBeGreaterThan(5);
-  expect(colors.citation, "Citation long dashes should be painted").toBeGreaterThan(5);
-  expect(colors.coAccess, "Read-together dots should be painted").toBeGreaterThan(5);
-  expect(colors.membership, "Membership thin dashes should be painted").toBeGreaterThan(5);
+  expect(colors.citation, "Citation dash-dot strokes should be painted").toBeGreaterThan(5);
+  expect(colors.coAccess, "Read-together dashes should be painted").toBeGreaterThan(5);
+  expect(colors.membership, "Membership long dashes should be painted").toBeGreaterThan(5);
   expect(await page.evaluate(() => window.__graphLocalFixture.pin("context:seed"))).toEqual({ x: 0, y: 0 });
   const unrelated = await nodePixels(page, "context:unrelated");
   await page.evaluate(() => window.__graphLocalFixture.focus("context:seed"));

@@ -79,6 +79,7 @@ export function createWorkspaceCosmosAdapter(
     canAnimate: input => canAnimateWorkspaceRelationLayout(admissionCounts(input).nodeCount, budget),
     sameGeometry: sameCosmosIndexedGeometry,
     snapshotGeometryIncludesGlyphs: true,
+    linkEndpointMarkers: true,
     prepareScene: (input, tokens, presentation) => buildCosmosSceneBuffers(input, tokens, budget, presentation, admissionCounts(input)),
     relationColors: (input, colors, groups, incident) => buildCosmosRelationColors(input, colors, groups, incident, budget, admissionCounts(input)),
     rankLabels: input => rankMapLabels(input, admissionCounts(input).nodeCount),

@@ -17,6 +17,7 @@ describe("Graph visual tokens", () => {
       agent: "#d97706",
       conversation: "#0284c7",
     });
+    expect(readGraphTokens(element, "light").edge).toMatchObject({ action: "#94a3b8", actionWrite: "#94a3b8" });
     // Canvases, legends and list cues outside them all inherit the theme from
     // the document root, rather than from a canvas-only rule.
     const graphCss = readFileSync("src/styles/03-editor.css", "utf8");
@@ -28,6 +29,7 @@ describe("Graph visual tokens", () => {
       agent: "#f59e0b",
       conversation: "#38bdf8",
     });
+    expect(readGraphTokens(element, "dark").edge).toMatchObject({ action: "#cbd5e1", actionWrite: "#cbd5e1" });
   });
 
   it("accepts explicit CSS graph tokens and falls back on blank values", () => {
@@ -64,6 +66,7 @@ describe("Graph visual tokens", () => {
       // Cosmos snapshots this computed color for its document-label spans;
       // checking palette-token text alone would miss the dark foreground bug.
       expect(readGraphTokens(canvas, "dark").surface).toBe("#0f172a");
+      expect(readGraphTokens(canvas, "dark").edge.action).toBe("#cbd5e1");
       // The static diagram writes its titles in this ink, not the page's --ink.
       expect(readGraphTokens(canvas, "dark").ink).toBe("#e5e7eb");
       expect(getComputedStyle(canvas).color).toBe("rgb(229, 231, 235)");
@@ -76,6 +79,7 @@ describe("Graph visual tokens", () => {
       document.documentElement.removeAttribute("data-theme");
       canvas.style.removeProperty("color");
       expect(getComputedStyle(canvas).color).toBe("rgb(15, 23, 42)");
+      expect(readGraphTokens(canvas, "light").edge.action).toBe("#94a3b8");
     } finally {
       stylesheet.remove();
       host.remove();
@@ -101,18 +105,18 @@ describe("Graph visual tokens", () => {
     expect(readGraphTokens(orphan, "forced").surface).toBe("#000000");
     expect(GRAPH_EDGE_PATTERN).toEqual({
       link: null,
-      citation: [7, 4],
-      coAccess: [2, 3.5],
-      membership: [3, 3],
+      citation: [8, 3, 1.5, 3],
+      coAccess: [5, 3.5],
+      membership: [10, 4],
       actionWrite: null,
       actionCite: [6, 3],
       actionRead: [10, 5],
       actionReference: [1.5, 3.5],
-      action: [10, 3],
+      action: [1.5, 3.5],
     });
-    // Without colour, a write still differs from a link by its arrowhead.
+    // Direction remains visible when colour is unavailable.
     expect(Object.entries(GRAPH_EDGE_ARROW).filter(([, arrow]) => arrow).map(([kind]) => kind))
-      .toEqual(["actionWrite", "actionCite"]);
+      .toEqual(["link", "citation", "membership", "actionWrite", "actionCite", "actionRead", "actionReference", "action"]);
   });
 
   it("keeps separate Local and Workspace dot-size limits", () => {

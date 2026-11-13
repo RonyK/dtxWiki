@@ -256,11 +256,20 @@
         "actionOther": "Other activity",
         "other": "Other relationships"
       },
-      "edgeNote": {
-        "action": "Recorded activity such as creating, editing, reviewing, searching and citing",
-        "actionOther": "Review, publish, search and other records"
-      },
       "history": "History marks",
+      "endpoints": {
+        "link": "Source → linked doc",
+        "citation": "Content → source",
+        "membership": "Parent ◇ → child",
+        "coAccess": "Related · undirected",
+        "action": "Activity → target",
+        "actionWrite": "Activity → document",
+        "actionCite": "Activity → source",
+        "actionRead": "Activity → document",
+        "actionReference": "Activity → structure",
+        "removed": "Removed · no direction",
+        "other": "Other relation"
+      },
       "eventTarget": "Current event target",
       "size": "Node size",
       "sizeRelations": "Relationships shown",

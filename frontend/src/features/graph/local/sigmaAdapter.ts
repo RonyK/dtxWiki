@@ -711,7 +711,7 @@ export function createSigmaGraphAdapter(
       return {
         ...data,
         size: presentation?.highlighted ? 2.5 : hoveredId === key ? Number(data.size) * 1.5 : data.size,
-        type: presentation?.removed ? "action" : data.type,
+        type: presentation?.removed ? "removed" : data.type,
         color: presentation?.removed ? GRAPH_REMOVED_EDGE_COLOR : presentation?.highlighted ? tokens.highlight : quiet ? data.quietColor : data.color,
         // The Map's line rules: no fade while a selection is shown, none in forced colours.
         lineState: (mode === "forced" ? "forced"

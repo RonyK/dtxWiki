@@ -1,6 +1,4 @@
 import {
-  createEdgeArrowHeadProgram,
-  createEdgeCompoundProgram,
   EdgeProgram,
   type ProgramDefinition,
   type ProgramInfo,
@@ -10,8 +8,10 @@ import type { EdgeDisplayData, NodeDisplayData, RenderParams } from "sigma/types
 import { parseColor, rgbaToFloat } from "sigma/utils";
 
 import {
-  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, graphLineFade, type GraphEdgeVisualKind,
+  GRAPH_EDGE_ENDPOINTS, GRAPH_EDGE_ENDPOINT_SIZE_PX, GRAPH_EDGE_PATTERN, GRAPH_EDGE_TRIANGLE_SIZE_PX, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, GRAPH_REMOVED_EDGE_PATTERN,
+  graphLineFade, type GraphEdgeVisualKind,
 } from "../shared/graphTokens";
+import { TRIANGLE_RADIUS_FACTOR } from "../shared/nodeShapes";
 
 // Every line has the legend's one CSS-pixel width; half of it on each side.
 export const LOCAL_EDGE_HALF_WIDTH_PX = GRAPH_EDGE_WIDTH_PX / 2;
@@ -53,39 +53,6 @@ function fadedAlpha(color: string, opacity: number): { ink: ReturnType<typeof pa
   return { ink, alpha: (ink.a * opacity * 255) | 0 };
 }
 
-// Sigma sizes an arrowhead from the edge's `size`, which hover and history
-// emphasis change. The head keeps one size; only its line is emphasised.
-const ARROW_HEAD_THICKNESS = 1.6;
-const LocalArrowHeadProgram = createEdgeArrowHeadProgram({
-  extremity: "target",
-  lengthToThicknessRatio: 3,
-  widenessToThicknessRatio: 2.2,
-});
-type ProcessVisibleItem = (
-  this: unknown,
-  edgeIndex: number,
-  startIndex: number,
-  sourceData: NodeDisplayData,
-  targetData: NodeDisplayData,
-  data: EdgeDisplayData,
-) => void;
-// This class is created above for Local lines only; Sigma's default arrow
-// program is a different class and keeps its own behaviour.
-const arrowHead = LocalArrowHeadProgram.prototype as unknown as { processVisibleItem: ProcessVisibleItem };
-const processArrowHead = arrowHead.processVisibleItem;
-arrowHead.processVisibleItem = function (edgeIndex, startIndex, sourceData, targetData, data) {
-  // The head fades with its line. Sigma packs the head's colour from a string;
-  // its shader passes the colour through, so premultiply it here as the line does.
-  const { ink, alpha } = fadedAlpha(data.color,
-    lineOpacity((this as { renderer: Sigma }).renderer, sourceData, targetData, data));
-  const share = alpha / 255;
-  processArrowHead.call(this, edgeIndex, startIndex, sourceData, targetData, {
-    ...data,
-    color: `rgba(${Math.round(ink.r * share)}, ${Math.round(ink.g * share)}, ${Math.round(ink.b * share)}, ${share})`,
-    size: ARROW_HEAD_THICKNESS,
-  });
-};
-
 // WebGL1 enum values. Keeping these as literals also avoids reading a browser
 // global while this module is imported by build-time tooling.
 const GL_FLOAT = 0x1406;
@@ -97,8 +64,11 @@ const UNIFORMS = [
   "u_matrix",
   "u_viewportPx",
   "u_halfWidthPx",
-  "u_dashOnPx",
-  "u_dashOffPx",
+  "u_dashPatternPx",
+  "u_endpoints",
+  "u_endpointGeometryPx",
+  "u_nodeGapPx",
+  "u_sizeRatio",
   "u_rampPx",
 ] as const;
 type EdgeUniform = (typeof UNIFORMS)[number];
@@ -121,32 +91,63 @@ attribute vec4 a_color;
 attribute vec4 a_id;
 attribute float a_positionCoef;
 attribute float a_normalCoef;
+// Raw Sigma radii, followed by source/target shape codes.
+attribute vec4 a_nodeGeometry;
 
 uniform mat3 u_matrix;
 uniform vec2 u_viewportPx;
 uniform float u_halfWidthPx;
 uniform float u_rampPx;
+uniform float u_sizeRatio;
+uniform vec2 u_endpoints;
+uniform vec4 u_endpointGeometryPx;
+uniform float u_nodeGapPx;
 
 varying vec4 v_color;
-varying float v_alongPx;
-varying float v_across;
+varying vec2 v_pointPx;
+varying vec3 v_endpointFrame;
+
+// Ray/shape intersections match the native node glyphs. Squares and diamonds
+// keep their screen orientation, as Sigma's node programs do.
+float boundaryRadius(float radius, float shape, vec2 direction) {
+  if (shape < 0.5) return radius;
+  if (shape < 1.5) return radius / max(max(abs(direction.x), abs(direction.y)), 0.0001);
+  if (shape < 2.5) return 1.41421356237 * radius / max(abs(direction.x) + abs(direction.y), 0.0001);
+  float normal = max(-direction.y, max(0.86602540378 * direction.x + 0.5 * direction.y,
+    -0.86602540378 * direction.x + 0.5 * direction.y));
+  return ${TRIANGLE_RADIUS_FACTOR / 2} * radius / max(normal, 0.0001);
+}
 
 void main(void) {
   vec2 startClip = (u_matrix * vec3(a_positionStart, 1.0)).xy;
   vec2 endClip = (u_matrix * vec3(a_positionEnd, 1.0)).xy;
   vec2 edgePx = (endClip - startClip) * (u_viewportPx * 0.5);
   float edgeLengthPx = length(edgePx);
-  vec2 perpendicularPx = edgeLengthPx > 0.0001
-    ? vec2(-edgePx.y, edgePx.x) / edgeLengthPx
-    : vec2(0.0, 1.0);
-  // The quad also holds half a ramp outside the stroke, as the Map's line does.
-  vec2 offsetClip = perpendicularPx * a_normalCoef
-    * (u_halfWidthPx + 0.5 * u_rampPx) * (2.0 / u_viewportPx);
-
+  vec2 direction = edgeLengthPx > 0.0001 ? edgePx / edgeLengthPx : vec2(1.0, 0.0);
+  vec2 perpendicularPx = vec2(-direction.y, direction.x);
+  float sizeRatio = max(u_sizeRatio, 0.0001);
+  float sourceRadius = boundaryRadius(a_nodeGeometry.x / sizeRatio, a_nodeGeometry.z, direction);
+  float targetRadius = boundaryRadius(a_nodeGeometry.y / sizeRatio, a_nodeGeometry.w, -direction);
+  float startPx = min(sourceRadius + u_nodeGapPx, edgeLengthPx);
+  float endPx = max(startPx, edgeLengthPx - targetRadius - u_nodeGapPx);
+  float room = max(edgeLengthPx - sourceRadius - targetRadius - 2.0 * u_nodeGapPx, 0.0);
+  float targetPresent = min(u_endpoints.y, 1.0);
+  float requested = u_endpoints.x * u_endpointGeometryPx.z + targetPresent * u_endpointGeometryPx.x;
+  // Very short relations retain their direction without letting heads cross
+  // each other or cover either node.
+  float headScale = min(1.0, room / max(requested, 0.0001));
+  float endpointExtent = max(u_endpoints.x * u_endpointGeometryPx.w,
+    targetPresent * u_endpointGeometryPx.y) * headScale;
+  float halfExtent = max(u_halfWidthPx, endpointExtent);
+#ifndef PICKING_MODE
+  // The path's extreme vertex also needs its half-stroke and antialias ramp.
+  halfExtent = max(u_halfWidthPx, endpointExtent + u_halfWidthPx) + 0.5 * u_rampPx;
+#endif
+  float acrossPx = a_normalCoef * halfExtent;
+  vec2 offsetClip = perpendicularPx * acrossPx * (2.0 / u_viewportPx);
   gl_Position = vec4(mix(startClip, endClip, a_positionCoef) + offsetClip, 0.0, 1.0);
-  v_alongPx = a_positionCoef * edgeLengthPx;
-  v_across = a_normalCoef;
-
+  v_pointPx = vec2(a_positionCoef * edgeLengthPx, acrossPx);
+  v_endpointFrame = vec3(startPx, endPx, headScale);
 #ifdef PICKING_MODE
   v_color = a_id;
 #else
@@ -164,37 +165,89 @@ precision mediump float;
 #endif
 
 uniform float u_halfWidthPx;
-uniform float u_dashOnPx;
-uniform float u_dashOffPx;
+uniform vec4 u_dashPatternPx;
 uniform float u_rampPx;
+uniform vec2 u_endpoints;
+uniform vec4 u_endpointGeometryPx;
 
 varying vec4 v_color;
-varying float v_alongPx;
-varying float v_across;
+varying vec2 v_pointPx;
+varying vec3 v_endpointFrame;
+
+float segmentDistance(vec2 point, vec2 start, vec2 end) {
+  vec2 segment = end - start;
+  float t = clamp(dot(point - start, segment) / max(dot(segment, segment), 0.0001), 0.0, 1.0);
+  return length(point - start - t * segment);
+}
+
+float strokeCoverage(float distancePx) {
+  return 1.0 - smoothstep(u_halfWidthPx - 0.5 * u_rampPx,
+    u_halfWidthPx + 0.5 * u_rampPx, distancePx);
+}
 
 void main(void) {
 #ifdef PICKING_MODE
-  // A continuous hit corridor makes short dots usable with Sigma's reduced
-  // resolution picking buffer. Visible gaps remain gaps on the drawing layer.
+  // Keep the whole corridor selectable, including dash and hollow-head gaps.
   gl_FragColor = v_color;
 #else
-  if (u_dashOffPx > 0.0 && mod(v_alongPx, u_dashOnPx + u_dashOffPx) >= u_dashOnPx) {
-    discard;
+  float scale = v_endpointFrame.z;
+  float startPx = v_endpointFrame.x;
+  float endPx = v_endpointFrame.y;
+  float sourceLength = u_endpoints.x * u_endpointGeometryPx.z * scale;
+  float lineStart = startPx + sourceLength;
+  // A filled arrow's shaft stops at its base so the stroke cannot blunt its tip.
+  float lineEnd = endPx - (u_endpoints.y > 1.5 ? u_endpointGeometryPx.x * scale : 0.0);
+  float coverage = 0.0;
+  if (lineEnd > lineStart && v_pointPx.x >= lineStart && v_pointPx.x <= lineEnd) {
+    float dashPeriod = dot(u_dashPatternPx, vec4(1.0));
+    float phase = dashPeriod > 0.0 ? mod(v_pointPx.x, dashPeriod) : 0.0;
+    float secondStroke = u_dashPatternPx.x + u_dashPatternPx.y;
+    bool firstInk = phase < u_dashPatternPx.x;
+    bool secondInk = phase >= secondStroke && phase < secondStroke + u_dashPatternPx.z;
+    if (dashPeriod <= 0.0 || firstInk || secondInk) coverage = strokeCoverage(abs(v_pointPx.y));
   }
-  // The Map line's anti-aliasing: a one-device-pixel ramp centred on the stroke edge.
-  float distancePx = abs(v_across) * (u_halfWidthPx + 0.5 * u_rampPx);
-  float alpha = 1.0 - smoothstep(u_halfWidthPx - 0.5 * u_rampPx, u_halfWidthPx + 0.5 * u_rampPx, distancePx);
-  // Sigma blends premultiplied (ONE, ONE_MINUS_SRC_ALPHA): a translucent line
-  // must scale its colour by its alpha, or the browser composites it too light.
-  float opacity = v_color.a * alpha;
+  if (scale > 0.0 && u_endpoints.y > 0.5) {
+    vec2 tip = vec2(endPx, 0.0);
+    vec2 upper = tip + vec2(-u_endpointGeometryPx.x, u_endpointGeometryPx.y) * scale;
+    vec2 lower = tip + vec2(-u_endpointGeometryPx.x, -u_endpointGeometryPx.y) * scale;
+    float distancePx = min(segmentDistance(v_pointPx, tip, upper), segmentDistance(v_pointPx, tip, lower));
+    if (u_endpoints.y > 1.5) {
+      distancePx = min(distancePx, segmentDistance(v_pointPx, upper, lower));
+      float along = (endPx - v_pointPx.x) / max(u_endpointGeometryPx.x * scale, 0.0001);
+      bool inside = along >= 0.0 && along <= 1.0 && abs(v_pointPx.y) <= along * u_endpointGeometryPx.y * scale;
+      float signedDistance = inside ? -distancePx : distancePx;
+      coverage = max(coverage, 1.0 - smoothstep(-0.5 * u_rampPx, 0.5 * u_rampPx, signedDistance));
+    } else {
+      coverage = max(coverage, strokeCoverage(distancePx));
+    }
+  }
+  if (scale > 0.0 && u_endpoints.x > 0.5) {
+    vec2 near = vec2(startPx, 0.0);
+    vec2 far = near + vec2(sourceLength, 0.0);
+    vec2 upper = near + vec2(sourceLength * 0.5, u_endpointGeometryPx.w * scale);
+    vec2 lower = near + vec2(sourceLength * 0.5, -u_endpointGeometryPx.w * scale);
+    float distancePx = min(min(segmentDistance(v_pointPx, near, upper), segmentDistance(v_pointPx, upper, far)),
+      min(segmentDistance(v_pointPx, far, lower), segmentDistance(v_pointPx, lower, near)));
+    coverage = max(coverage, strokeCoverage(distancePx));
+  }
+  // Union the line and endpoint masks before premultiplication: their joins
+  // have exactly the line's opacity rather than accumulating a second stroke.
+  float opacity = v_color.a * coverage;
   gl_FragColor = vec4(v_color.rgb * opacity, opacity);
 #endif
 }
 `;
 
-function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
-  const dash = GRAPH_EDGE_PATTERN[kind];
+function nodeShapeCode(data: NodeDisplayData): number {
+  const shape = (data as NodeDisplayData & { shape?: string }).shape ?? data.type;
+  return shape === "square" ? 1 : shape === "diamond" ? 2
+    : shape === "triangle" || shape === "outlinedTriangle" ? 3 : 0;
+}
+
+function createLocalEdgeProgram(kind: GraphEdgeVisualKind, dash: readonly number[] | null = GRAPH_EDGE_PATTERN[kind], removed = false) {
   const halfWidthPx = LOCAL_EDGE_HALF_WIDTH_PX;
+  const endpoints = GRAPH_EDGE_ENDPOINTS[kind];
+  const filledTriangle = endpoints.target === "filled-triangle";
 
   return class LocalEdgeProgram extends EdgeProgram<EdgeUniform> {
     getDefinition(): ProgramDefinition<EdgeUniform> {
@@ -211,6 +264,7 @@ function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
           { name: "a_id", size: 4, type: GL_UNSIGNED_BYTE, normalized: true },
           { name: "a_positionCoef", size: 1, type: GL_FLOAT },
           { name: "a_normalCoef", size: 1, type: GL_FLOAT },
+          { name: "a_nodeGeometry", size: 4, type: GL_FLOAT },
         ],
       };
     }
@@ -233,12 +287,24 @@ function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
         this.array[startIndex++] = edgeIndex;
         this.array[startIndex++] = along;
         this.array[startIndex++] = across;
+        this.array[startIndex++] = sourceData.size;
+        this.array[startIndex++] = targetData.size;
+        this.array[startIndex++] = nodeShapeCode(sourceData);
+        this.array[startIndex++] = nodeShapeCode(targetData);
       }
     }
 
     setUniforms(params: RenderParams, { gl, uniformLocations, isPicking }: ProgramInfo<EdgeUniform>): void {
       gl.uniformMatrix3fv(uniformLocations.u_matrix, false, params.matrix);
       gl.uniform2f(uniformLocations.u_viewportPx, params.width, params.height);
+      gl.uniform1f(uniformLocations.u_sizeRatio, params.sizeRatio);
+      gl.uniform2f(uniformLocations.u_endpoints, !removed && endpoints.source === "open-diamond" ? 1 : 0,
+        removed || endpoints.target === "none" ? 0 : filledTriangle ? 2 : 1);
+      gl.uniform4f(uniformLocations.u_endpointGeometryPx,
+        filledTriangle ? GRAPH_EDGE_TRIANGLE_SIZE_PX.length : GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowLength,
+        filledTriangle ? GRAPH_EDGE_TRIANGLE_SIZE_PX.halfWidth : GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowHalfWidth, GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondLength,
+        GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondHalfWidth);
+      gl.uniform1f(uniformLocations.u_nodeGapPx, GRAPH_EDGE_ENDPOINT_SIZE_PX.nodeGap);
       // Sigma downsizes its picking framebuffer, so visual-width hit targets
       // can disappear even while the visible edge is present.
       gl.uniform1f(uniformLocations.u_halfWidthPx, isPicking
@@ -247,29 +313,23 @@ function createLocalEdgeProgram(kind: GraphEdgeVisualKind) {
       // One device pixel in CSS px: the same ramp as the Map's line shader.
       gl.uniform1f(uniformLocations.u_rampPx, isPicking ? 0 : 1 / Math.max(1, params.pixelRatio));
       // The picking shader removes dash uniforms at compile time.
-      if (uniformLocations.u_dashOnPx) {
-        gl.uniform1f(uniformLocations.u_dashOnPx, dash?.[0] ?? 0);
-      }
-      if (uniformLocations.u_dashOffPx) {
-        gl.uniform1f(uniformLocations.u_dashOffPx, dash?.[1] ?? 0);
+      if (uniformLocations.u_dashPatternPx) {
+        gl.uniform4f(uniformLocations.u_dashPatternPx, dash?.[0] ?? 0, dash?.[1] ?? 0,
+          dash?.[2] ?? 0, dash?.[3] ?? 0);
       }
     }
   };
 }
 
-function localEdgeProgram(kind: GraphEdgeVisualKind) {
-  const line = createLocalEdgeProgram(kind);
-  return GRAPH_EDGE_ARROW[kind] ? createEdgeCompoundProgram([line, LocalArrowHeadProgram]) : line;
-}
-
 export const LOCAL_EDGE_PROGRAMS = {
-  link: localEdgeProgram("link"),
-  citation: localEdgeProgram("citation"),
-  coAccess: localEdgeProgram("coAccess"),
-  membership: localEdgeProgram("membership"),
-  actionWrite: localEdgeProgram("actionWrite"),
-  actionCite: localEdgeProgram("actionCite"),
-  actionRead: localEdgeProgram("actionRead"),
-  actionReference: localEdgeProgram("actionReference"),
-  action: localEdgeProgram("action"),
-} as const satisfies Record<GraphEdgeVisualKind, ReturnType<typeof localEdgeProgram>>;
+  link: createLocalEdgeProgram("link"),
+  citation: createLocalEdgeProgram("citation"),
+  coAccess: createLocalEdgeProgram("coAccess"),
+  membership: createLocalEdgeProgram("membership"),
+  actionWrite: createLocalEdgeProgram("actionWrite"),
+  actionCite: createLocalEdgeProgram("actionCite"),
+  actionRead: createLocalEdgeProgram("actionRead"),
+  actionReference: createLocalEdgeProgram("actionReference"),
+  action: createLocalEdgeProgram("action"),
+  removed: createLocalEdgeProgram("action", GRAPH_REMOVED_EDGE_PATTERN, true),
+} as const satisfies Record<GraphEdgeVisualKind | "removed", ReturnType<typeof createLocalEdgeProgram>>;

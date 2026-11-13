@@ -5,7 +5,7 @@ import type { CosmosRendererBinding, CosmosLayoutSeedOutcome, CosmosRenderBudget
 import { NativeGraph, type GraphConfig } from "../../workspace/cosmosNative";
 
 import { createGraphHoverChip, GRAPH_EDGE_CHIP_OFFSET_PX, graphEdgeChipAnchor } from "../hoverChip";
-import { GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, readGraphTokens } from "../graphTokens";
+import { GRAPH_EDGE_ENDPOINT_SIZE_PX, GRAPH_EDGE_PATTERN, GRAPH_EDGE_WIDTH_PX, GRAPH_LINE_OPACITY, readGraphTokens } from "../graphTokens";
 import { FORCED_OUTLINE_INSETS, GRAPH_RING_BAND_PX, GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, outlinePathData } from "../nodeShapes";
 import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../rendererTypes";
 import {
@@ -429,11 +429,19 @@ export function createCosmosRenderer(
     linkDefaultWidth: GRAPH_EDGE_WIDTH_PX,
     hoveredLinkWidthIncrease: 0.6,
     focusedLinkWidthIncrease: 0.6,
-    // Preserve the Map's existing global citation and containment patterns.
+    // Shared legend strokes: citation dash-dot on style 1, long-dash containment on style 2.
     linkDashLength: GRAPH_EDGE_PATTERN.citation[0],
     linkDashGap: GRAPH_EDGE_PATTERN.citation[1],
+    linkDashDotLength: GRAPH_EDGE_PATTERN.citation[2],
+    linkDashDotGap: GRAPH_EDGE_PATTERN.citation[3],
     linkDottedDashLength: GRAPH_EDGE_PATTERN.membership[0],
     linkDottedDashGap: GRAPH_EDGE_PATTERN.membership[1],
+    linkEndpointMarkers: binding.linkEndpointMarkers ?? false,
+    linkEndpointArrowLength: GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowLength,
+    linkEndpointArrowHalfWidth: GRAPH_EDGE_ENDPOINT_SIZE_PX.arrowHalfWidth,
+    linkEndpointDiamondLength: GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondLength,
+    linkEndpointDiamondHalfWidth: GRAPH_EDGE_ENDPOINT_SIZE_PX.diamondHalfWidth,
+    linkEndpointNodeGap: GRAPH_EDGE_ENDPOINT_SIZE_PX.nodeGap,
     // Legend folder/grouping ring: the native ring shape's band, CSS px.
     pointRingWidth: GRAPH_RING_BAND_PX,
     // Cluster counts and the Agent outline are distance-field images.

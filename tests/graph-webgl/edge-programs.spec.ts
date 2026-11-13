@@ -14,10 +14,10 @@ declare global {
 }
 
 const EXPECTED_DASH_PX = {
-  citation: [7, 4],
-  coAccess: [2, 3.5],
-  membership: [3, 3],
-  action: [10, 3],
+  citation: [8, 3, 1.5, 3],
+  coAccess: [5, 3.5],
+  membership: [10, 4],
+  action: [1.5, 3.5],
 } as const;
 
 let bundle = "";
@@ -85,10 +85,12 @@ function runs(alpha: number[]): { on: number[]; off: number[] } {
   };
 }
 
-function median(values: number[]): number {
-  const sorted = [...values].sort((left, right) => left - right);
-  if (!sorted.length) throw new Error("No complete dash segments were rendered");
-  return sorted[Math.floor(sorted.length / 2)];
+function assertRepeatingRuns(actual: number[], expected: readonly number[], label: string): void {
+  // A clipped sample can begin at either stroke of a dash-dot cycle. Prove
+  // the complete alternating sequence, including the short dots.
+  const matches = expected.some((_, phase) => actual.every((length, index) =>
+    Math.abs(length - expected[(index + phase) % expected.length]) <= 1.5));
+  expect(matches, `${label}: expected repeating ${expected}, measured ${actual}`).toBe(true);
 }
 
 function assertPatterns(result: ProbeResult): void {
@@ -102,14 +104,44 @@ function assertPatterns(result: ProbeResult): void {
   expect(link.alpha.filter((value) => value >= 32).length).toBeGreaterThan(link.lengthCssPx * 0.95);
 
   for (const edge of result.edges.slice(1)) {
-    const [expectedOn, expectedOff] = EXPECTED_DASH_PX[edge.kind as keyof typeof EXPECTED_DASH_PX];
+    const pattern = EXPECTED_DASH_PX[edge.kind as keyof typeof EXPECTED_DASH_PX];
+    const expectedOn = pattern.filter((_, index) => index % 2 === 0);
+    const expectedOff = pattern.filter((_, index) => index % 2 === 1);
     const measured = runs(edge.alpha);
     expect(measured.on.length, `${edge.kind} needs several visible dashes (max alpha ${Math.max(...edge.alpha)})`).toBeGreaterThan(5);
     expect(measured.off.length, `${edge.kind} needs several visible gaps`).toBeGreaterThan(5);
-    expect(median(measured.on), `${edge.kind} on CSS-px length`).toBeGreaterThanOrEqual(expectedOn - 1.5);
-    expect(median(measured.on), `${edge.kind} on CSS-px length`).toBeLessThanOrEqual(expectedOn + 1.5);
-    expect(median(measured.off), `${edge.kind} off CSS-px length`).toBeGreaterThanOrEqual(expectedOff - 1.5);
-    expect(median(measured.off), `${edge.kind} off CSS-px length`).toBeLessThanOrEqual(expectedOff + 1.5);
+    assertRepeatingRuns(measured.on, expectedOn, `${edge.kind} on CSS-px lengths`);
+    assertRepeatingRuns(measured.off, expectedOff, `${edge.kind} off CSS-px lengths`);
+  }
+  for (const edge of result.edges) {
+    if (!edge.endpoints) continue; // Zoomed-in endpoints may be outside the viewport.
+    const { source, target } = edge.endpoints;
+    if (edge.kind === "coAccess") {
+      expect(target.upper, "Undirected co-access has no target wings").toBeLessThan(8);
+      expect(target.lower).toBeLessThan(8);
+    } else {
+      expect(target.tip, `${edge.kind} target tip follows the node boundary`).toBeGreaterThan(32);
+      expect(target.upper, `${edge.kind} upper arrow edge keeps CSS size`).toBeGreaterThan(32);
+      expect(target.lower, `${edge.kind} lower arrow edge keeps CSS size`).toBeGreaterThan(32);
+      if (edge.kind === "action") {
+        expect(target.hollow, "Action triangle interior is filled").toBeGreaterThan(60);
+        expect(target.outsideSmallHead, "Action triangle is smaller than the open arrows").toBeLessThan(8);
+      } else {
+        expect(target.hollow, `${edge.kind} open arrow must stay hollow`)
+          .toBeLessThan(Math.max(target.upper, target.lower) * 0.3);
+      }
+    }
+    expect(target.insideNode, `${edge.kind} arrow must stop before the target glyph`).toBeLessThan(8);
+    expect(source.insideNode, `${edge.kind} line must stop before the source glyph`).toBeLessThan(8);
+    if (edge.kind === "membership") {
+      expect(source.near, "Containment diamond begins at its container").toBeGreaterThan(32);
+      expect(source.upper, "Containment diamond upper outline").toBeGreaterThan(32);
+      expect(source.lower, "Containment diamond lower outline").toBeGreaterThan(32);
+      expect(source.hollow, "Containment source diamond must stay hollow").toBeLessThan(8);
+    } else {
+      expect(source.upper, `${edge.kind} has no source diamond`).toBeLessThan(8);
+      expect(source.lower).toBeLessThan(8);
+    }
   }
 }
 

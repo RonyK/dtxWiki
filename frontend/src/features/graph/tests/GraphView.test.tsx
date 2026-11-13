@@ -462,13 +462,15 @@ describe("GraphView", () => {
     // A fixed list per mode, not only what this scene happens to contain.
     expect(kinds("li[data-node-visual-kind]", "data-node-visual-kind"))
       .toEqual(["seed", "context", "version", "agent", "library", "conversation", "folder"]);
-    // History splits activity by verb: writes and citations point at what
-    // they changed or cited; reads and structure-only looks do not.
+    // Every directed relation points at its target; shared reading is
+    // undirected and the removed-history stroke keeps no endpoint marker.
     expect(kinds("li[data-edge-visual-kind]", "data-edge-visual-kind"))
       .toEqual(["link", "citation", "coAccess", "membership", "actionWrite", "actionCite",
         "actionRead", "actionReference", "action", "removed"]);
     expect([...legend.querySelectorAll('svg[data-edge-arrow="target"]')]
-      .map((cue) => cue.getAttribute("data-edge-visual-kind"))).toEqual(["actionWrite", "actionCite"]);
+      .map((cue) => cue.getAttribute("data-edge-visual-kind"))).toEqual([
+        "link", "citation", "membership", "actionWrite", "actionCite", "actionRead", "actionReference", "action",
+      ]);
     expect(legend.querySelector('[data-legend-mark="event-target"] svg path[fill="none"]')).toHaveAttribute("stroke", "#7c3aed");
     expect(legend.querySelector('svg[data-node-visual-kind="version"] path')).toHaveAttribute("fill", "#7c3aed");
     expect(legend.querySelector('svg[data-node-visual-kind="context"] path')).toHaveAttribute("fill", "#7c3aed");
@@ -476,7 +478,13 @@ describe("GraphView", () => {
     expect(legend.querySelector('svg[data-node-visual-kind="library"] path')).toHaveAttribute("fill", "#0f9f8f");
     expect(legend.querySelector('svg[data-node-visual-kind="conversation"] path')).toHaveAttribute("fill", "#0284c7");
     expect(legend.querySelector('svg[data-node-visual-kind="folder"] circle')).toHaveAttribute("fill", "none");
-    expect(legend.querySelector('li[data-edge-visual-kind="action"] line')).toHaveAttribute("stroke-dasharray", "10 3");
+    expect(legend.querySelector('li[data-edge-visual-kind="action"] line')).toHaveAttribute("stroke-dasharray", "1.5 3.5");
+    const actionCue = legend.querySelector('li[data-edge-visual-kind="action"] svg')!;
+    expect(actionCue).toHaveAttribute("data-endpoint-target", "filled-triangle");
+    expect(actionCue.querySelector("path")).toHaveAttribute("fill", "#94a3b8");
+    expect(actionCue.querySelector("path")).toHaveAttribute("stroke", "none");
+    expect(actionCue.querySelector("path")?.getAttribute("d")).toMatch(/Z$/);
+    expect(legend.querySelector('li[data-edge-visual-kind="actionWrite"] svg')).toHaveAttribute("data-endpoint-target", "open-arrow");
     expect(legend.querySelector('li[data-edge-visual-kind="link"] line')).not.toHaveAttribute("stroke-dasharray");
     expect(legend.querySelector(".graph-action-cue,.graph-kind-cue")).toBeNull();
     history.unmount();
@@ -721,11 +729,6 @@ describe("GraphView", () => {
     expect(canvas).toHaveAttribute("data-rendered-edge-ids", "action:created|action:published");
     expect(listRows()).toHaveLength(2);
     expect(screen.getByText("4 nodes · 2 edges")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Legend" }));
-    // Each activity line names the verbs it draws; the plain one the rest.
-    const legend = screen.getByTestId("graph-view").querySelector(".graph-legend")!;
-    expect(legend.querySelector('li[data-edge-visual-kind="actionWrite"]')).toHaveTextContent("Created · Edited");
-    expect(screen.getByText("Review, publish, search and other records")).toBeVisible();
   });
 
   it("requests depth changes from the main toolbar without optimistically relabeling the scene", async () => {
