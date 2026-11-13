@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 from uuid import UUID
 
+from markdown_it import MarkdownIt
+
 from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.context_links import (
     LinkContext,
@@ -10,8 +12,13 @@ from backend.services.context_links import (
     extract_links,
     rewrite_links_with_report,
 )
+from backend.utils.request_markdown_memo import (
+    request_markdown_memo_scope,
+    with_request_markdown_memo,
+)
 
 
+@with_request_markdown_memo
 def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypatch):
     # Budget exception: encoded relative and absolute /edit inputs. Read links
     # cannot catch lost editor navigation or a retained host/query/fragment.
@@ -35,7 +42,21 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
         "[s]: /context/shared.md\n"
     )
 
+    original_parse = MarkdownIt.parse
+    original_body_parses = 0
+
+    def counted_parse(parser, source, env=None):
+        nonlocal original_body_parses
+        if source == body:
+            original_body_parses += 1
+        return original_parse(parser, source, env)
+
+    monkeypatch.setattr(MarkdownIt, "parse", counted_parse)
     occurrences = extract_links(body)
+    assert original_body_parses == 1
+    assert extract_links(body) is occurrences
+    with request_markdown_memo_scope():
+        assert extract_links(body) is occurrences
 
     assert [item.href for item in occurrences] == [
         "/context/normal.md#part",

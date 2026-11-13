@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from unittest.mock import Mock
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -112,7 +114,9 @@ def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypat
 def test_context_inspector_defers_work_and_checks_the_displayed_version(
     page_service, monkeypatch
 ):
+    from backend.services import document_references as references_module
     from backend.services import domain_read as read_module
+    from backend.utils import request_markdown_memo as memo_module
 
     owner = make_client(page_service)
     workspace_id = _workspace_id(owner)
@@ -153,12 +157,26 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
     submitted = submitted_response.json()["data"]
 
     real_lint = read_module.page_format_warnings_for_body
+    real_scope = memo_module.request_markdown_memo_scope
+    read_memos = []
     linted_versions = []
     counts = []
     allow_lint = False
 
+    @contextmanager
+    def track_scope():
+        assert memo_module._request_memo.get() is None
+        try:
+            with real_scope() as memo:
+                read_memos.append(memo)
+                assert memo_module._request_memo.get() is memo
+                yield memo
+        finally:
+            assert memo_module._request_memo.get() is None
+
     def track_lint(*args, **kwargs):
         assert allow_lint, "default detail must not run inspector lint"
+        assert memo_module._request_memo.get() is read_memos[-1]
         linted_versions.append(kwargs["version"].id)
         return real_lint(*args, **kwargs)
 
@@ -170,6 +188,15 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
         counts.append("children")
         return 2
 
+    reference_read = Mock(wraps=references_module.read_document_references)
+    reference_hash = Mock(wraps=references_module.document_references_hash)
+    deleted_references = Mock(wraps=references_module.deleted_document_references)
+    monkeypatch.setattr(references_module, "read_document_references", reference_read)
+    monkeypatch.setattr(references_module, "document_references_hash", reference_hash)
+    monkeypatch.setattr(
+        references_module, "deleted_document_references", deleted_references
+    )
+    monkeypatch.setattr(memo_module, "request_markdown_memo_scope", track_scope)
     monkeypatch.setattr(read_module, "page_format_warnings_for_body", track_lint)
     monkeypatch.setattr(
         DomainReadService, "_context_page_backlink_count", count_backlinks
@@ -186,6 +213,16 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
     assert detail["pending_draft_version_id"] == submitted["version_id"]
     assert detail["backlink_count"] is detail["children_count"] is None
     assert counts == linted_versions == []
+    assert detail["references"] == published["references"]
+    assert detail["references_hash"] == published["references_hash"]
+    reference_read.assert_called_once()
+    reference_hash.assert_called_once()
+    deleted_references.assert_called_once()
+    assert reference_read.call_args.kwargs["version"].id == UUID(
+        published["version_id"]
+    )
+    assert reference_hash.call_args.args[1].id == UUID(published["version_id"])
+    assert deleted_references.call_args.args[1].id == UUID(published["version_id"])
 
     allow_lint = True
     clean = owner.get(
@@ -247,6 +284,8 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
     )
     assert wrong_workspace.status_code == 404, wrong_workspace.text
     assert counts == ["backlinks", "children"]
+    # Every existing HTTP read owns a separate memo, including denied reads.
+    assert len(read_memos) == len({id(memo) for memo in read_memos}) == 6
 
 
 def test_workspace_publish_route_requires_expected_content_hash(page_service):
