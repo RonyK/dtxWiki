@@ -7,8 +7,8 @@ export type GraphLegendNodeRow = { cue: ReactNode; key: string; label: string };
 export type GraphLegendLineRow = { cue: ReactNode; key: string; label: string };
 
 /**
- * One legend for both graphs: node glyphs, line styles, then what node size
- * means. A view lists what it can draw; the Context graph adds its history
+ * One legend for both graphs: node glyphs with their size meaning, and line
+ * styles with endpoint roles. A view lists what it can draw; Context adds history
  * marks alongside the node and line groups.
  */
 export function GraphLegendGroups({ children, lines, nodes, size }: {
@@ -21,21 +21,23 @@ export function GraphLegendGroups({ children, lines, nodes, size }: {
   const { t } = useTranslation("graph");
   return (
     <div className="graph-legend-groups">
-      <GraphLegendGroup title={t("graph.legend.nodes")}>
+      <GraphLegendGroup title={t("graph.legend.nodes")} footer={size.length ? (
+        <p className="graph-legend-note graph-node-size-note" data-legend-size="">
+          {t("graph.legend.size")}: {size.join(" · ")}
+        </p>
+      ) : undefined}>
         {nodes.map((node) => <li data-node-visual-kind={node.key} key={node.key}>{node.cue}{node.label}</li>)}
       </GraphLegendGroup>
-      <GraphLegendGroup title={t("graph.legend.edges")}>
+      <GraphLegendGroup className="graph-legend-lines" title={t("graph.legend.edges")}>
         {lines.map((line) => (
           <li data-edge-visual-kind={line.key} key={line.key}>
             {line.cue}
-            <span>{line.label}</span>
+            <span className="graph-legend-line-label">{line.label}</span>
+            <small className="graph-legend-line-description">{t(`graph.legend.endpoints.${line.key}`)}</small>
           </li>
         ))}
       </GraphLegendGroup>
       {children}
-      {size.length ? <p className="graph-legend-note" data-legend-size="">
-        {t("graph.legend.size")}: {size.join(" · ")}
-      </p> : null}
     </div>
   );
 }

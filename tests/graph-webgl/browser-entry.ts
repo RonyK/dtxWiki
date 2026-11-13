@@ -16,6 +16,10 @@ export type EdgePixels = {
   centerCssY: number;
   alpha: number[];
   peakRgb: [number, number, number];
+  endpoints: null | {
+    source: { near: number; upper: number; lower: number; hollow: number; insideNode: number };
+    target: { tip: number; upper: number; lower: number; hollow: number; outsideSmallHead: number; insideNode: number };
+  };
 };
 
 export type ProbeResult = {
@@ -158,6 +162,47 @@ function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): ProbeResult {
       }
       alpha.push(strongest);
     }
+    // Read native endpoint pixels at the expected CSS-pixel size. Action has
+    // a smaller filled triangle; the other directed kinds have open wings.
+    const sourceNear = start.x + renderer.scaleSize(left.size) + 1.5;
+    const targetTip = end.x - renderer.scaleSize(right.size) - 1.5;
+    let endpoints: EdgePixels["endpoints"] = null;
+    if (sourceNear >= 8 && targetTip < width - 8 && start.y >= 8 && start.y < height - 8) {
+      const readNear = (x: number, y: number, radius = 0.65, minimum = false) => {
+        const x0 = Math.max(0, Math.floor((x - radius) * xScale));
+        const x1 = Math.min(canvas.width - 1, Math.floor((x + radius) * xScale));
+        const y0 = Math.max(0, Math.floor((height - y - radius) * yScale));
+        const y1 = Math.min(canvas.height - 1, Math.floor((height - y + radius) * yScale));
+        const pixels = new Uint8Array((x1 - x0 + 1) * (y1 - y0 + 1) * 4);
+        gl.readPixels(x0, y0, x1 - x0 + 1, y1 - y0 + 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        let value = minimum ? 255 : 0;
+        for (let index = 3; index < pixels.length; index += 4) value = minimum
+          ? Math.min(value, pixels[index]) : Math.max(value, pixels[index]);
+        return value;
+      };
+      endpoints = {
+        source: {
+          near: readNear(sourceNear, start.y),
+          upper: readNear(sourceNear + 5, start.y - 4),
+          lower: readNear(sourceNear + 5, start.y + 4),
+          hollow: readNear(sourceNear + 5, start.y, 0.2),
+          insideNode: readNear(start.x + renderer.scaleSize(left.size) - 0.75, start.y, 0.2),
+        },
+        target: {
+          tip: readNear(targetTip, start.y),
+          upper: kind === "action" ? readNear(targetTip - 3.2, start.y - 1.2)
+            : readNear(targetTip - 4, start.y - 8 / 3),
+          lower: kind === "action" ? readNear(targetTip - 3.2, start.y + 1.2)
+            : readNear(targetTip - 4, start.y + 8 / 3),
+          // Off the shaft, inside the triangle: filled for Action, clear
+          // between the larger open wings on the other directed kinds.
+          hollow: kind === "action" ? readNear(targetTip - 2.5, start.y + 0.4, 0.2)
+            : readNear(targetTip - 5, start.y + 1.8, 0.45, true),
+          outsideSmallHead: readNear(targetTip - 5, start.y + 3.5, 0.2),
+          insideNode: readNear(end.x - renderer.scaleSize(right.size) + 0.75, start.y, 0.2),
+        },
+      };
+    }
     return {
       kind,
       lengthCssPx: alpha.length,
@@ -165,6 +210,7 @@ function probe(ratio: number, membershipCenterPhase: 0 | 0.5 = 0): ProbeResult {
       centerCssY: start.y,
       alpha,
       peakRgb,
+      endpoints,
     };
   });
 

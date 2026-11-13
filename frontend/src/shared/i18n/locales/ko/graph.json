@@ -257,6 +257,19 @@
         "other": "기타 관계"
       },
       "history": "이력 표시",
+      "endpoints": {
+        "link": "출발 → 연결 문서",
+        "citation": "본문 → 출처",
+        "membership": "상위 ◇ → 하위",
+        "coAccess": "연관 · 무방향",
+        "action": "활동 → 대상",
+        "actionWrite": "활동 → 문서",
+        "actionCite": "활동 → 출처",
+        "actionRead": "활동 → 문서",
+        "actionReference": "활동 → 구조",
+        "removed": "삭제 · 방향 없음",
+        "other": "기타 연관"
+      },
       "eventTarget": "현재 이벤트 대상",
       "size": "노드 크기",
       "sizeRelations": "표시된 관계 수",

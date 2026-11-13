@@ -12,8 +12,8 @@ export type GraphEdgeVisualKind =
 /**
  * Activity lines: what a chat, a person or an event did to a document. They
  * share one colour; the stroke says the verb (solid write, dashed cite, long
- * dash read, dots structure-only look) and an arrowhead marks the verbs that
- * change or cite their target. `action` is every other recorded event.
+ * dash read, dots structure-only look). Each activity points at its target;
+ * `action` is every other recorded event.
  */
 export const GRAPH_ACTION_EDGE_KINDS = [
   "actionWrite", "actionCite", "actionRead", "actionReference", "action",
@@ -23,11 +23,37 @@ export function isActionEdgeVisualKind(kind: GraphEdgeVisualKind | null | undefi
   return (GRAPH_ACTION_EDGE_KINDS as readonly string[]).includes(kind ?? "");
 }
 
-/** Lines that end in an arrowhead at their target. */
-export const GRAPH_EDGE_ARROW = {
-  link: false, citation: false, coAccess: false, membership: false,
-  actionWrite: true, actionCite: true, actionRead: false, actionReference: false, action: false,
-} as const satisfies Record<GraphEdgeVisualKind, boolean>;
+export type GraphEdgeEndpointSource = "none" | "open-diamond";
+export type GraphEdgeEndpointTarget = "none" | "open-arrow" | "filled-triangle";
+
+/** Endpoint meaning shared by canvas lines, legends and relation-list cues. */
+export const GRAPH_EDGE_ENDPOINTS = {
+  link: { source: "none", target: "open-arrow" },
+  citation: { source: "none", target: "open-arrow" },
+  coAccess: { source: "none", target: "none" },
+  membership: { source: "open-diamond", target: "open-arrow" },
+  actionWrite: { source: "none", target: "open-arrow" },
+  actionCite: { source: "none", target: "open-arrow" },
+  actionRead: { source: "none", target: "open-arrow" },
+  actionReference: { source: "none", target: "open-arrow" },
+  action: { source: "none", target: "filled-triangle" },
+} as const satisfies Record<GraphEdgeVisualKind, { source: GraphEdgeEndpointSource; target: GraphEdgeEndpointTarget }>;
+
+/** Endpoint sizes and the gap from the node's visible boundary, in CSS pixels. */
+export const GRAPH_EDGE_ENDPOINT_SIZE_PX = {
+  arrowLength: 6,
+  arrowHalfWidth: 4,
+  diamondLength: 10,
+  diamondHalfWidth: 4,
+  nodeGap: 1.5,
+} as const;
+
+/** Compact filled target head for a generic activity, in CSS pixels. */
+export const GRAPH_EDGE_TRIANGLE_SIZE_PX = { length: 4, halfWidth: 2.5 } as const;
+
+/** Compatibility view for callers that only need target-arrow presence. */
+export const GRAPH_EDGE_ARROW = Object.fromEntries(Object.entries(GRAPH_EDGE_ENDPOINTS)
+  .map(([kind, endpoints]) => [kind, endpoints.target !== "none"])) as Readonly<Record<GraphEdgeVisualKind, boolean>>;
 
 /**
  * The one node vocabulary for both graph views, their legends and lists.
@@ -67,14 +93,14 @@ export type GraphVisualTokens = {
 // colors mode.
 export const GRAPH_EDGE_PATTERN = {
   link: null,
-  citation: [7, 4],
-  coAccess: [2, 3.5],
-  membership: [3, 3],
+  citation: [8, 3, 1.5, 3],
+  coAccess: [5, 3.5],
+  membership: [10, 4],
   actionWrite: null,
   actionCite: [6, 3],
   actionRead: [10, 5],
   actionReference: [1.5, 3.5],
-  action: [10, 3],
+  action: [1.5, 3.5],
 } as const satisfies Record<GraphEdgeVisualKind, readonly number[] | null>;
 
 /** Every relationship line, in both graphs and their legends, is this wide (CSS px). */
@@ -117,6 +143,7 @@ export function graphLineFade(fitLengthPx: number, relations: number): number {
 
 /** A relationship that was removed in the replayed history. */
 export const GRAPH_REMOVED_EDGE_COLOR = "#dc2626";
+export const GRAPH_REMOVED_EDGE_PATTERN = [10, 3] as const;
 
 export const GRAPH_NODE_RADIUS_PX = {
   local: { min: 3, max: 13 },
@@ -153,7 +180,7 @@ const DEFAULT_COLORS = {
       citation: "#0f9f8f",
       coAccess: "#0284c7",
       membership: "#8391a7",
-      action: "#475569",
+      action: "#94a3b8",
     }),
     highlight: "#7c3aed",
     selection: "#0f172a",
@@ -173,7 +200,7 @@ const DEFAULT_COLORS = {
       citation: "#0d9488",
       coAccess: "#38bdf8",
       membership: "#64748b",
-      action: "#94a3b8",
+      action: "#cbd5e1",
     }),
     highlight: "#a78bfa",
     selection: "#f8fafc",

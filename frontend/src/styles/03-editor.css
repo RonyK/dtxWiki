@@ -681,6 +681,15 @@ body[data-focus-mode="true"] .main-surface {
   overflow-wrap: anywhere;
 }
 
+.graph-legend-lines li { row-gap: 2px; }
+.graph-legend-line-description {
+  grid-column: 1 / -1;
+  color: var(--ink-muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.graph-legend-line-label { min-width: 0; }
+
 .graph-local-node-cue {
   display: inline-block;
   flex: 0 0 auto;
@@ -782,7 +791,7 @@ body[data-focus-mode="true"] .main-surface {
   --graph-edge-citation: #0f9f8f;
   --graph-edge-co-access: #0284c7;
   --graph-edge-membership: #8391a7;
-  --graph-edge-action: #475569;
+  --graph-edge-action: #94a3b8;
   --graph-highlight: #7c3aed;
   --graph-selection: #0f172a;
   --graph-ink: #0f172a;
@@ -800,7 +809,7 @@ body[data-focus-mode="true"] .main-surface {
   --graph-edge-citation: #0d9488;
   --graph-edge-co-access: #38bdf8;
   --graph-edge-membership: #64748b;
-  --graph-edge-action: #94a3b8;
+  --graph-edge-action: #cbd5e1;
   --graph-highlight: #a78bfa;
   --graph-selection: #f8fafc;
   --graph-ink: #e5e7eb;
@@ -2117,7 +2126,7 @@ p.workspace-graph-list-window-hint {
 .relation-list-chip[data-tone="citation"] { --chip-ink: var(--graph-edge-citation, #0f9f8f); }
 .relation-list-chip[data-tone="coAccess"] { --chip-ink: var(--graph-edge-co-access, #0284c7); }
 .relation-list-chip[data-tone="membership"] { --chip-ink: var(--graph-edge-membership, #8391a7); }
-.relation-list-chip[data-tone="action"] { --chip-ink: var(--graph-edge-action, #475569); }
+.relation-list-chip[data-tone="action"] { --chip-ink: var(--graph-edge-action, #94a3b8); }
 .relation-list-chip > svg { flex: none; }
 .relation-list-chip :is(.workspace-graph-node-cue.is-inline, .graph-local-node-cue) { width: 10px; height: 10px; }
 .relation-list-chip .relation-list-stroke-cue { width: 12px; }
@@ -2327,7 +2336,7 @@ span.graph-local-relation-chip:hover { border-color: var(--border); }
 }
 
 .relation-list-map-stroke[data-visual="action"] {
-  --edge-ink: var(--graph-edge-action, #475569);
+  --edge-ink: var(--graph-edge-action, #94a3b8);
   background: repeating-linear-gradient(to bottom, var(--edge-ink) 0 7px, transparent 7px 9px);
 }
 
@@ -2483,7 +2492,7 @@ span.graph-local-relation-chip:hover { border-color: var(--border); }
 }
 
 .relation-list-flow-stroke[data-visual="action"] {
-  stroke: var(--graph-edge-action, #475569);
+  stroke: var(--graph-edge-action, #94a3b8);
   stroke-dasharray: 7 2;
 }
 
@@ -2498,7 +2507,7 @@ span.graph-local-relation-chip:hover { border-color: var(--border); }
 .relation-list-flow-arrow[data-visual="other"] { fill: var(--ink-muted); }
 .relation-list-flow-arrow[data-visual="coAccess"] { fill: var(--graph-edge-co-access, #0284c7); }
 .relation-list-flow-arrow[data-visual="membership"] { fill: var(--graph-edge-membership, #8391a7); }
-.relation-list-flow-arrow[data-visual="action"] { fill: var(--graph-edge-action, #475569); }
+.relation-list-flow-arrow[data-visual="action"] { fill: var(--graph-edge-action, #94a3b8); }
 
 .relation-list-flow-row {
   display: grid;
@@ -7284,7 +7293,7 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 .graph-list-bowtie-stroke[data-visual="citation"] { --edge-ink: var(--graph-edge-citation, #0f9f8f); background: repeating-linear-gradient(to right, var(--edge-ink) 0 4px, transparent 4px 7px); }
 .graph-list-bowtie-stroke[data-visual="coAccess"] { --edge-ink: var(--graph-edge-co-access, #0284c7); background: repeating-linear-gradient(to right, var(--edge-ink) 0 2px, transparent 2px 4px); }
 .graph-list-bowtie-stroke[data-visual="membership"] { --edge-ink: var(--graph-edge-membership, #8391a7); background: repeating-linear-gradient(to right, var(--edge-ink) 0 3px, transparent 3px 6px); }
-.graph-list-bowtie-stroke[data-visual="action"] { --edge-ink: var(--graph-edge-action, #475569); background: repeating-linear-gradient(to right, var(--edge-ink) 0 7px, transparent 7px 9px); }
+.graph-list-bowtie-stroke[data-visual="action"] { --edge-ink: var(--graph-edge-action, #94a3b8); background: repeating-linear-gradient(to right, var(--edge-ink) 0 7px, transparent 7px 9px); }
 .graph-list-bowtie-stroke[data-visual="other"] { --edge-ink: var(--ink-muted); background: repeating-linear-gradient(to right, var(--edge-ink) 0 2px, transparent 2px 4px); }
 .graph-list-bowtie-stroke[data-directed="true"]::after { content: ""; position: absolute; top: -4px; right: -4px; border-left: 7px solid var(--edge-ink); border-block: 5px solid transparent; }
 

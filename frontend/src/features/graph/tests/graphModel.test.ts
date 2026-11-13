@@ -236,11 +236,16 @@ describe("graphModel", () => {
       { kind: "context", seed: true }, { kind: "conversation", seed: false }, { kind: "context", seed: false },
     ]);
     expect(diagram.source).toContain('n0("Mm unsafe');
+    expect(diagram.source).toContain("graphEdge0@-->");
+    expect(diagram.edges).toEqual([
+      { id: "graphEdge0", kind: "citation", directed: true },
+      { id: "graphEdge1", kind: "link", directed: true },
+    ]);
     expect(diagram.source).toContain(".contextSeed .text-inner-tspan { font-weight: bold; }");
     expect(diagram.source).toContain("classDef contextSeed fill:#7c3aed,stroke:#7c3aed,stroke-width:1.5px,color:#ffffff");
     expect(diagram.source).toContain("classDef conversation fill:#e6f3f9,stroke:#0284c7,stroke-width:1.5px,color:#0f172a");
     expect(diagram.source).toMatch(/^ {2}linkStyle \d+ stroke:#64748b,stroke-width:1.5px$/m);
-    expect(diagram.source).toMatch(/^ {2}linkStyle \d+ stroke:#0f9f8f,stroke-width:1.5px,stroke-dasharray:7 4$/m);
+    expect(diagram.source).toMatch(/^ {2}linkStyle \d+ stroke:#0f9f8f,stroke-width:1.5px,stroke-dasharray:8 3 1.5 3$/m);
     // In the dark graph theme, titles and relationship labels take the graph ink.
     const dark = graphSceneToMermaid(
       scene, { tokens: readGraphTokens(document.documentElement, "dark"), forcedColors: false }, { iconSlot: true },

@@ -279,7 +279,7 @@ export function GraphView({
     [staticScene, staticOpen, staticVisuals],
   );
   const decorateStaticSvg = useCallback(
-    (svg: string) => staticDiagram ? decorateStaticDiagramSvg(svg, staticDiagram.nodes, staticVisuals) : svg,
+    (svg: string) => staticDiagram ? decorateStaticDiagramSvg(svg, staticDiagram.nodes, staticVisuals, staticDiagram.edges) : svg,
     [staticDiagram, staticVisuals],
   );
   const selectedNode = scene.nodes.find((node) => node.id === selectedId)

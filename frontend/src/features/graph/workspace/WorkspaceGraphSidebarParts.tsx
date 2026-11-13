@@ -182,7 +182,7 @@ export function WorkspaceGraphNodeSummary({ nodes }: { nodes: readonly Workspace
 
 /**
  * One chip per map line style, as the Context graph's relation chips: line,
- * legend name, count. The map draws every citation kind with the same dashed stroke.
+ * legend name, count. Every citation kind shares the map's dash-dot stroke.
  */
 export function WorkspaceGraphLineSummary({ edges }: { edges: readonly WorkspaceGraphEdge[] }) {
   const { t } = useTranslation("graph");

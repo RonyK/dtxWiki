@@ -1333,7 +1333,7 @@ for (const { locale, mode } of [
 
     // Check the composited row SVG screenshots, not only attributes: a square
     // has filled corners, a folder has a hole, and a chat/activity diamond
-    // reaches past the disc along its axes in every colour mode.
+    // is inset along diagonals where a disc is filled in every colour mode.
     const silhouettes: Array<{ region: string; kind: CueKind } & Awaited<ReturnType<typeof inspectCuePixels>>> = [];
     const proveSilhouettes = async (region: "main" | "neighbors", buttons: Locator) => {
       for (const kind of ["context", "library", "conversation", "folder"] as const) {
@@ -1354,8 +1354,8 @@ for (const { locale, mode } of [
         if (kind === "library") expect(pixels.corner, `${region} Library must paint square corners`).toBe(true);
         if (kind === "context" || kind === "conversation") expect(pixels.corner, `${region} ${kind} must not paint square corners`).toBe(false);
         if (kind === "folder") expect(pixels.rim, `${region} folder must have a visible rim`).toBe(true);
-        if (kind === "context") expect(pixels.axis, `${region} Context must remain a disc`).toBe(false);
-        if (kind === "conversation") expect(pixels.axis, `${region} chat/activity must be a diamond`).toBe(true);
+        if (kind === "context") expect(pixels.diagonal, `${region} Context must remain a disc`).toBe(true);
+        if (kind === "conversation") expect(pixels.diagonal, `${region} chat/activity must be a diamond`).toBe(false);
         silhouettes.push({ region, kind, ...pixels });
         await testInfo.attach(`local-${locale}-${mode}-${region}-${kind}-cue.png`, { body: screenshot, contentType: "image/png" });
       }
@@ -1475,9 +1475,14 @@ async function inspectCuePixels(page: Page, screenshot: Buffer) {
       return [data[index], data[index + 1], data[index + 2]];
     };
     const background = pixel(0, 0);
-    const painted = (x: number, y: number) => pixel(x, y).some((value, index) => Math.abs(value - background[index]) > 25);
-    // `axis` lies past a disc's antialiased edge but inside a diamond's vertex.
-    return { center: painted(8, 8), corner: painted(3, 3), rim: painted(2, 8), axis: painted(1.5, 8) };
+    const contrast = (x: number, y: number) => Math.max(...pixel(x, y).map((value, index) => Math.abs(value - background[index])));
+    const painted = (x: number, y: number) => contrast(x, y) > 25;
+    // The corner probe stays inside the balanced square, outside the disc;
+    // the diagonal lies inside the disc but beyond the balanced diamond.
+    // Fractional SVG crops add an antialiased fringe: require majority ink
+    // coverage there, relative to the solid centre, in every palette.
+    return { center: painted(8, 8), corner: painted(3, 4), rim: painted(2, 8),
+      diagonal: contrast(11, 11) > contrast(8, 8) * 0.5 };
   }, screenshot.toString("base64"));
 }
 
