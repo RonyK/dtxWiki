@@ -90,7 +90,7 @@ export function analyzeLocalScene(
     // Relations with a seed come first; then by the other end's name.
     const compare = (left: GraphEdge, right: GraphEdge) =>
       Number(seedSet.has(other(right))) - Number(seedSet.has(other(left)))
-      || label(other(left)).localeCompare(label(other(right)))
+      || label(other(left)).localeCompare(label(other(right)), undefined, { numeric: true })
       || left.id.localeCompare(right.id);
     for (const list of Object.values(relations) as GraphEdge[][]) list.sort(compare);
   }
