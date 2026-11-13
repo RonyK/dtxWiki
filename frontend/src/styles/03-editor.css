@@ -7246,7 +7246,7 @@ button.graph-seed-pill:focus-visible { outline: 2px solid var(--context); outlin
 .graph-list-notice > .graph-canvas-loading { padding: 6px 10px; font-size: 12px; }
 /* Title and counts wrap rather than widen the head (long locales, large counts). */
 .graph-list-title { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
-.graph-list-title h4 { margin: 0; font-size: 14px; white-space: nowrap; }
+.graph-list-title h4 { margin: 0; font-size: 14px; font-weight: 700; white-space: nowrap; }
 .graph-list-counts { min-width: 0; max-width: 100%; overflow: hidden; color: var(--ink-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .graph-list-search { margin-top: 0; }
 .graph-list-status, .graph-list-empty { margin: 0; font-size: 12px; }
@@ -7356,7 +7356,7 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
   .graph-status-actions .graph-view-switch button[aria-pressed="true"] { outline: 2px solid Highlight; }
 }
 .graph-details-title-row { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; margin-inline: calc(-1 * var(--graph-details-padding)); padding: 4px 8px 4px var(--graph-details-padding); border-bottom: 1px solid var(--border); background: var(--surface); }
-.graph-details-title-row h4 { flex: 1; margin: 0; font-size: 13px; }
+.graph-details-title-row h4 { flex: 1; margin: 0; font-size: 13px; font-weight: 700; }
 .graph-details-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; margin: 0; font-size: 15px; }
 .graph-details-close { display: grid; place-items: center; flex-shrink: 0; min-width: 36px; min-height: 36px; padding: 0; border: 0; background: transparent; color: var(--ink-muted); cursor: pointer; }
 .graph-frame .graph-details { padding-top: 0; padding-bottom: 0; overflow-wrap: anywhere; }
