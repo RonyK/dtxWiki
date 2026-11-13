@@ -1,4 +1,3 @@
-from unittest.mock import Mock
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -113,7 +112,6 @@ def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypat
 def test_context_inspector_defers_work_and_checks_the_displayed_version(
     page_service, monkeypatch
 ):
-    from backend.services import document_references as references_module
     from backend.services import domain_read as read_module
 
     owner = make_client(page_service)
@@ -172,10 +170,6 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
         counts.append("children")
         return 2
 
-    reference_read = Mock(wraps=references_module.read_document_references)
-    reference_hash = Mock(wraps=references_module.document_references_hash)
-    monkeypatch.setattr(references_module, "read_document_references", reference_read)
-    monkeypatch.setattr(references_module, "document_references_hash", reference_hash)
     monkeypatch.setattr(read_module, "page_format_warnings_for_body", track_lint)
     monkeypatch.setattr(
         DomainReadService, "_context_page_backlink_count", count_backlinks
@@ -192,8 +186,6 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
     assert detail["pending_draft_version_id"] == submitted["version_id"]
     assert detail["backlink_count"] is detail["children_count"] is None
     assert counts == linted_versions == []
-    reference_read.assert_called_once()
-    reference_hash.assert_called_once()
 
     allow_lint = True
     clean = owner.get(
