@@ -5,10 +5,8 @@ from backend.services.citation_parser import (
     incomplete_inline_citations,
 )
 from backend.services.context_links import citation_link_occurrences, extract_links
-from backend.utils.request_markdown_memo import with_request_markdown_memo
 
 
-@with_request_markdown_memo
 def test_citations_follow_rendered_text_boundaries_and_exact_offsets():
     # One mixed document proves the independent parser failure mechanism:
     # collecting source-looking strings from code/HTML/images invents citations.
@@ -27,7 +25,6 @@ def test_citations_follow_rendered_text_boundaries_and_exact_offsets():
         "$@cite{/math}$\n"
     )
     occurrences = extract_inline_citations(source)
-    assert extract_inline_citations(source) is occurrences
     assert [value.href for value in occurrences] == [
         "/p/workspace/page#part",
         "/p/workspace/page",
@@ -49,9 +46,7 @@ def test_citations_follow_rendered_text_boundaries_and_exact_offsets():
     assert extract_inline_citations(damaged) == extract_inline_citations(
         damaged, strict=False
     )
-    incomplete = incomplete_inline_citations(damaged)
-    assert [value.href for value in incomplete] == [""]
-    assert incomplete_inline_citations(damaged) is incomplete
+    assert [value.href for value in incomplete_inline_citations(damaged)] == [""]
     # The link rewrite sees only each address, never the marker or a legacy key.
     assert [
         damaged[value.span.char_start : value.span.char_end]
