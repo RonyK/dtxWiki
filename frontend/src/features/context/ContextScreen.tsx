@@ -112,6 +112,7 @@ import {
   FolderSummaryCard,
   nodeIdForPage,
 } from "../../shared/components/FolderSummaryCard";
+import { TreeIndexPreview } from "../../shared/components/TreeIndexPreview";
 import type {
   TreeNodePayload,
   TreeSectionPolicy,
@@ -3198,7 +3199,12 @@ function ContextReader({
           aria-labelledby="context-reader-tab-children"
           tabIndex={0}
         >
-          <ContextChildrenIndex node={node} nodes={nodes} onSelectNode={onSelectNode} />
+          <ContextChildrenIndex
+            node={node}
+            nodes={nodes}
+            onSelectNode={onSelectNode}
+            workspaceId={workspaceId}
+          />
         </div>
       ) : null}
       {tab === "history" ? (
@@ -4015,10 +4021,12 @@ export function ContextChildrenIndex({
   node,
   nodes,
   onSelectNode,
+  workspaceId,
 }: {
   node: TreeNodePayload;
   nodes: TreeNodePayload[];
   onSelectNode: (node: TreeNodePayload) => void;
+  workspaceId: string | null;
 }) {
   const { t } = useTranslation("context");
   const children = useMemo(
@@ -4064,6 +4072,14 @@ export function ContextChildrenIndex({
             "Open a direct child page or folder from this page's index.",
         })}
       </p>
+      {workspaceId ? (
+        <TreeIndexPreview
+          loadIndexPreview={() => fetchTreeNodeIndexPreview(workspaceId, node.id)}
+          nodeId={node.id}
+          nodes={nodes}
+          workspaceId={workspaceId}
+        />
+      ) : null}
       <div className="folder-child-list">
         {visibleChildren.map((child) => (
           <button

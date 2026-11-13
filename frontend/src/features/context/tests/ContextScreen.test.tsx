@@ -276,6 +276,21 @@ describe("ContextScreen", () => {
           is_public: true,
         },
       },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/node-1/index-preview`]: {
+        data: {
+          markdown: `- [Child 01](dtxwiki://index/context/${SECOND_PAGE_ID}) — Summary: Child routing summary.`,
+          entries: [{
+            kind: "context",
+            id: SECOND_PAGE_ID,
+            title: "Child 01",
+            href: `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`,
+            summary: "Child routing summary.",
+            count: null,
+            draft: false,
+          }],
+          overflow: 0,
+        },
+      },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`]:
         {
           data: {
@@ -846,9 +861,9 @@ describe("ContextScreen", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps a conditional Children deep link URL-safe and clears its page when leaving", async () => {
+  it("loads the page's index preview independently of its Children list page and clears the page when leaving", async () => {
     const searches: string[] = [];
-    mockDecisionLogRoutes({ decisionLogChildCount: 6 });
+    const fetchMock = mockDecisionLogRoutes({ decisionLogChildCount: 6 });
     render(
       <MemoryRouter
         initialEntries={[
@@ -872,6 +887,25 @@ describe("ContextScreen", () => {
     expect(searches.at(-1)).toBe(
       `?tab=children&page=2`,
     );
+
+    const previewRequests = () => fetchMock.mock.calls.filter(
+      ([input]) => input.toString().endsWith("/index-preview"),
+    );
+    const previewToggle = within(childrenPanel).getByRole("button", { name: "Index preview" });
+    expect(previewToggle).toHaveAttribute("aria-expanded", "false");
+    expect(previewRequests()).toHaveLength(0);
+    await userEvent.click(previewToggle);
+    expect(await within(childrenPanel).findByRole("link", { name: "Child 01" }))
+      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`);
+    expect(previewRequests()).toHaveLength(1);
+    expect(previewRequests()[0][0].toString()).toBe(
+      `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree/nodes/node-1/index-preview`,
+    );
+    expect(within(childrenPanel).getByText("Summary: Child routing summary."))
+      .toBeInTheDocument();
+    await userEvent.click(within(childrenPanel).getByRole("tab", { name: "Source" }));
+    expect(within(childrenPanel).getByRole("tabpanel", { name: "Source" }))
+      .toHaveTextContent(`dtxwiki://index/context/${SECOND_PAGE_ID}`);
 
     await userEvent.click(screen.getByRole("tab", { name: "View" }));
     await waitFor(() => expect(searches.at(-1)).toBe(""));
@@ -6054,6 +6088,7 @@ describe("ContextChildrenIndex", () => {
           node={parent}
           nodes={[parent, pageChild, folderChild]}
           onSelectNode={onSelectNode}
+          workspaceId={WORKSPACE_ID}
         />
       </MemoryRouter>,
     );
@@ -6090,6 +6125,7 @@ describe("ContextChildrenIndex", () => {
           node={parent}
           nodes={[parent, ...children]}
           onSelectNode={vi.fn()}
+          workspaceId={WORKSPACE_ID}
         />
       </MemoryRouter>,
     );
@@ -6139,6 +6175,7 @@ describe("ContextChildrenIndex", () => {
           node={parent}
           nodes={[parent, child]}
           onSelectNode={vi.fn()}
+          workspaceId={WORKSPACE_ID}
         />
       </MemoryRouter>,
     );
