@@ -1,7 +1,7 @@
 import type { CosmosPointPickFrame, CosmosPointPicker, CosmosPointPickResult } from "./cosmosPointPickingTypes";
 import { withGraphGlState } from "./graphGlState";
 import { createWorkspaceGpuReadback, type WorkspaceGpuReadback } from "./gpuReadback";
-import { WORKSPACE_NATIVE_GLYPH_SHAPES } from "../shared/workspaceGlyphGeometry";
+import { nativeGlyphContainsPoint, NATIVE_GLYPH_HIT_GLSL, WORKSPACE_NATIVE_GLYPH_SHAPES } from "../shared/workspaceGlyphGeometry";
 
 /** CSS pixels from a point's centre that still target it: the accessible hover and click target of the native map. */
 const NATIVE_POINT_TARGET_PX = 12;
@@ -38,6 +38,7 @@ uniform float pointOpacity;
 uniform float greyoutOpacity;
 uniform float depthBound;
 flat out vec4 candidate;
+${NATIVE_GLYPH_HIT_GLSL}
 void main() {
   gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   gl_PointSize = 1.0;
@@ -60,10 +61,9 @@ void main() {
   float diameter = min(body.r * sizeScale * zoom, maxPointSize);
   if (diameter <= 0.0) return;
   // Preserve the existing ${targetPx} CSS-pixel accessible target, plus the actual
-  // rendered circle/square/diamond when zoom makes its body larger than that target.
-  bool onBody = body.g == 1.0 ? all(lessThanEqual(abs(delta), vec2(diameter * 0.4)))
-    : body.g == 3.0 ? abs(delta.x) + abs(delta.y) / 1.2 <= diameter * 0.4
-    : distanceSquared <= diameter * diameter * 0.25;
+  // rendered glyph when zoom makes its body larger than that target. Centre minus
+  // pointer in bottom-left coordinates gives the body's downward screen y axis.
+  bool onBody = nativeGlyphContainsPoint(body.g, diameter, delta);
   if (distanceSquared > ${(targetPx ** 2).toFixed(1)} && !onBody) return;
   // All candidates rasterize the same pixel. Depth ranks absolute center
   // distance, never painted-pixel distance, sprite size or later draw order.
@@ -121,7 +121,7 @@ export function projectNativePoint(frame: CosmosPointPickFrame, position: readon
 
 /**
  * Whether the vertex shader would still keep this point as a candidate for the
- * frame's pointer: within the target, or on its rendered circle/square/diamond.
+ * frame's pointer: within the target, or on its rendered glyph.
  * Matches the shader to float precision, not bit for bit.
  */
 export function nativePointTargetsPointer(
@@ -130,9 +130,7 @@ export function nativePointTargetsPointer(
   const [x, y] = projectNativePoint(frame, position), dx = x - frame.pointer[0], dy = y - frame.pointer[1];
   const squared = dx * dx + dy * dy, diameter = renderedDiameter(frame, size);
   if (!(diameter > 0)) return false;
-  const onBody = shape === 1 ? Math.abs(dx) <= diameter * .4 && Math.abs(dy) <= diameter * .4
-    : shape === 3 ? Math.abs(dx) + Math.abs(dy) / 1.2 <= diameter * .4
-    : squared <= diameter * diameter * .25;
+  const onBody = nativeGlyphContainsPoint(shape, diameter, dx, dy);
   return squared <= TARGET_SQUARED || onBody;
 }
 

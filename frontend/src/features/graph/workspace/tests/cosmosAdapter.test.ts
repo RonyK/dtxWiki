@@ -15,6 +15,10 @@ import { GRAPH_LINE_OPACITY, readGraphTokens } from "../../shared/graphTokens";
 import { WORKSPACE_MAP_DEFAULT_BUDGET, WORKSPACE_MAP_PC_10K_BUDGET, type WorkspaceMapBudget } from "../../shared/workspaceMapBudget";
 import { workspaceContainerIndices, workspaceDirectoryStartPositions } from "../directoryStartPositions";
 import * as nativeTracking from "../gpuTrackedPositions";
+import * as mapColumns from "../../map/sceneColumns";
+import * as cosmosScenes from "../cosmosScene";
+import * as cosmosRenderers from "../../shared/cosmos/cosmosCore";
+import { buildCosmosPresentationBuffers } from "../../shared/cosmos/sceneBuffers";
 
 const { graph, community, createGraph, createNativeGraph } = vi.hoisted(() => {
   let positions = new Float32Array();
@@ -1999,6 +2003,42 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
     },
   );
 
+  // Independent failure path: generic glyph metadata can change while indexed
+  // topology stays equal. The Map geometry case changes an edge weight, so it
+  // rejects before the glyph fence and cannot detect the Map shortcut leaking
+  // into a generic binding.
+  it("rejects a same-geometry snapshot when generic glyph presentation changes", async () => {
+    const renderer = vi.spyOn(cosmosRenderers, "createCosmosRenderer");
+    const map = await mount(columns(), true, vi.fn(), false, vi.fn(), WORKSPACE_MAP_PC_10K_BUDGET);
+    const binding = renderer.mock.calls.at(-1)![3];
+    renderer.mockRestore(); map.destroy();
+    const previousGlyphs: WorkspaceMapColumns = { ...columns(),
+      nodeVisualKinds: ["context", "context", "context"], edgeVisualKinds: ["link", "link"] };
+    const changedGlyphs: WorkspaceMapColumns = { ...previousGlyphs, nodeVisualKinds: ["version", "context", "context"] };
+    expect(binding.sameGeometry(previousGlyphs, changedGlyphs)).toBe(true);
+    const positions = Float32Array.from([333, 444, 555, 666, 777, 888]);
+    const snapshot = { budget: { ...binding.budget }, columns: previousGlyphs, positions };
+    const render = (input: WorkspaceMapColumns) => {
+      const container = document.createElement("div"); document.body.appendChild(container);
+      const adapter = cosmosRenderers.createCosmosRenderer(container, input, {
+        forcedColors: false, reducedMotion: true, initialCoordinates: snapshot,
+        callbacks: { onHover: vi.fn(), onSelect: vi.fn() },
+      }, { ...binding, snapshotGeometryIncludesGlyphs: undefined,
+        prepareScene: (columns, tokens) => buildCosmosPresentationBuffers(columns, tokens) });
+      adapters.push(adapter);
+      return adapter;
+    };
+    // Positive control: all provenance checks pass and the same glyph really
+    // restores the snapshot, rather than rejecting it before the glyph fence.
+    const unchanged = render(previousGlyphs); await unchanged.whenSettled();
+    expect(graph.getPointPositions()).toEqual(positions);
+    unchanged.destroy();
+    // Keep that exact snapshot, budget, identity and indexed geometry; only
+    // the first node's glyph changes from a circle to a triangle.
+    const generic = render(changedGlyphs); await generic.whenSettled();
+    expect(graph.getPointPositions()).not.toEqual(positions);
+  });
+
   it("retains restored coordinates while a user-paused worker waits through preference changes and Resume", async () => {
     const sdk = installedSdkLifecycle(), input = columns();
     const actual = Float32Array.from([333, 444, 555, 666, 777, 888]);
@@ -2049,6 +2089,8 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
   });
 
   it("admits exact PC 10K/100K native GPU physics and scoped copied snapshots", async () => {
+    const countScans = vi.spyOn(mapColumns, "workspaceMapAdmissionCounts");
+    const sceneBuilds = vi.spyOn(cosmosScenes, "buildCosmosSceneBuffers");
     const sdk = installedSdkLifecycle(), input = sizedColumns(10_000, 100_000);
     const budget = { ...WORKSPACE_MAP_PC_10K_BUDGET };
     const adapter = await mount(input, false, vi.fn(), false, vi.fn(), budget);
@@ -2078,6 +2120,16 @@ describe("Cosmos Map native lifecycle and semantic ownership", () => {
     adapters.push(restored); await restored.whenSettled();
     expect(graph.getPointPositions()).toEqual(snapshot.positions);
     expect(restored.captureCoordinates()!.budget).toEqual(WORKSPACE_MAP_PC_10K_BUDGET);
+    // One count scan per column object in each renderer, and one GPU buffer
+    // build per renderer: restoring a snapshot does not build its buffers.
+    expect(countScans).toHaveBeenCalledTimes(3);
+    expect(sceneBuilds).toHaveBeenCalledTimes(2);
+    const relabelled = { ...input, nodeLabels: input.nodeLabels.map(label => `${label} updated`) };
+    restored.replaceColumns(relabelled);
+    restored.captureCoordinates(); restored.fit(); restored.stopLayout();
+    expect(countScans).toHaveBeenCalledTimes(4);
+    expect(sceneBuilds).toHaveBeenCalledTimes(3);
+    expect(graph.getPointPositions()).toEqual(snapshot.positions);
   });
 
   it.each([

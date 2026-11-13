@@ -1,4 +1,5 @@
 import type { GraphConfig } from "./cosmosNative";
+import type { CosmosLayoutSolver, CosmosPositionLayout, CosmosPositionUnitBasis } from "../shared/cosmos/layoutTypes";
 import { WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
 import type { WorkspaceMapColumns } from "../map/sceneColumns";
 import { workspaceContainerIndices, workspaceDirectoryStartPositions } from "./directoryStartPositions";
@@ -6,16 +7,16 @@ import { workspaceInitialCameraPolicy } from "./initialCameraPolicy";
 import { buildWorkspaceNativeCollisionRadii } from "./nativeCollisionRadii";
 import { buildWorkspaceNativeCanonicalForceConfig } from "./nativeForceProfile";
 import { buildWorkspaceRelationForceConfig, type WorkspaceRelationCollisionBasis } from "./relationPhysics";
-import { createWorkspaceD3Layout, type WorkspaceD3Layout, type WorkspaceD3LayoutInput, type WorkspaceD3LayoutOptions, type WorkspaceD3UnitBasis } from "./d3MapLayout";
+import { createWorkspaceD3Layout, type WorkspaceD3Layout, type WorkspaceD3LayoutInput, type WorkspaceD3LayoutOptions } from "./d3MapLayout";
 
-export type WorkspacePositionLayout = WorkspaceD3Layout;
-export type WorkspacePositionUnitBasis = WorkspaceD3UnitBasis;
+export type WorkspacePositionLayout = CosmosPositionLayout;
+export type WorkspacePositionUnitBasis = CosmosPositionUnitBasis;
 
 /**
  * Solver boundary chosen once from the admitted budget. Render, camera, label,
  * picking and gesture code ask for operations, never inspect the solver kind.
  */
-export function createWorkspaceLayoutSolver(budget: WorkspaceMapBudget) {
+export function createWorkspaceLayoutSolver(budget: WorkspaceMapBudget): CosmosLayoutSolver {
   const ownsPositionRows = budget.documents <= WORKSPACE_MAP_DEFAULT_BUDGET.documents;
   return Object.freeze({
     diagnosticsName: ownsPositionRows ? "d3-worker" : "cosmos-native",

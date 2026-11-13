@@ -29,8 +29,8 @@ const notices = path.join(root, "frontend/public/third-party/cosmos-native");
 
 // Native forces remain upstream-owned. Only optional glyph collision radii,
 // picking ownership, borrowed tracked-position inputs, the dotted link
-// style's dash pattern, a constant-width ring point shape and signed-distance
-// point images are extended.
+// style's dash pattern, an upward centred triangle, a constant-width ring
+// point shape and signed-distance point images are extended.
 // Never overwrite node_modules or reuse the now-stale upstream TypeScript map:
 // this source map truthfully embeds the modified bundle as its source.
 const result = await transform(modified.replace(/\/\/# sourceMappingURL=[^\n]*\n?$/u, ""), {
@@ -40,10 +40,11 @@ const result = await transform(modified.replace(/\/\/# sourceMappingURL=[^\n]*\n
   legalComments: "inline",
 });
 const code = `${result.code}\n//# sourceMappingURL=index.js.map\n`;
+// native.5 identifies the centred upward triangle added to native.4.
 const manifest = JSON.stringify({
-  artifact: "dtxwiki-cosmos-native", artifactVersion: `${COSMOS_VERSION}-native.4`,
+  artifact: "dtxwiki-cosmos-native", artifactVersion: `${COSMOS_VERSION}-native.5`,
   upstream: { package: "@cosmos.gl/graph", version: COSMOS_VERSION, license: "MIT", sha256: COSMOS_SOURCE_SHA256 },
-  modification: "Optional per-point native collision radius column, point-picker host extension, GPU-only tracked-position framebuffer access, an optional dash pattern for the dotted link style and a ring point shape (9) with a constant CSS-px band and optional signed-distance point images on a linearly sampled atlas. Default/null/0/false and shapes 0–8 preserve upstream behavior; native force shaders, coefficients and integration are unchanged.",
+  modification: "Optional per-point native collision radius column, point-picker host extension, GPU-only tracked-position framebuffer access, an optional dash pattern for the dotted link style, a centred upward equilateral triangle (2) and a ring point shape (9) with a constant CSS-px band and optional signed-distance point images on a linearly sampled atlas. Default/null/0/false and other point shapes preserve upstream behavior; native force shaders, coefficients and integration are unchanged.",
   modifiedSourceSha256: sha256(modified),
   collisionRadiiSeamSha256: sha256(JSON.stringify(COSMOS_COLLISION_RADII_PATCH_HUNKS)),
   pointPickerSeamSha256: sha256(JSON.stringify(COSMOS_POINT_PICKER_PATCH_HUNKS)),
@@ -69,4 +70,4 @@ await Promise.all([
   writeFile(path.join(notices, "provenance.json"), `${manifest}\n`),
 ]);
 assert.equal(await readFile(sdkEntry, "utf8"), source, "Installed Cosmos was modified");
-console.log(`Generated dtxwiki-cosmos-native ${COSMOS_VERSION}-native.4; original native force laws retained`);
+console.log(`Generated dtxwiki-cosmos-native ${COSMOS_VERSION}-native.5; original native force laws retained`);

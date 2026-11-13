@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GraphRenderEdge, GraphRenderNode, GraphRenderScene } from "../../shared/rendererTypes";
 import { buildLocalScene } from "../sceneInput";
+import { buildLocalCosmosColumns } from "../../shared/cosmos/localScene";
 
 function node(id: string, entityId: string, isSeed = false): GraphRenderNode {
   return {
@@ -70,8 +71,9 @@ describe("visible Local scene input", () => {
   });
 
   it("keeps genuine backend action occurrences in both canvas edges and force topology", () => {
-    const actions = ["created", "edited", "published", "included", "cited"];
-    const sourceByAction = { created: "v1", edited: "v2", published: "audit", included: "ask", cited: "ask" };
+    const actions = ["created", "edited", "published", "included", "cited", "wikilink", "citation_page", "tree", "co_access", "referenced"];
+    const sourceByAction = { created: "v1", edited: "v2", published: "audit", included: "ask", cited: "ask",
+      wikilink: "agent", citation_page: "library", tree: "folder", co_access: "agent-version", referenced: "agent-version" };
     const input = scene(
       [
         node("seed", "seed", true),
@@ -79,6 +81,10 @@ describe("visible Local scene input", () => {
         { ...node("v2", "version-2"), entity_kind: "context_page_version" },
         { ...node("audit", "audit-1"), entity_kind: "audit_event", family: "event" },
         { ...node("ask", "ask-1"), entity_kind: "ask_turn", family: "ask" },
+        { ...node("agent", "agent-1"), entity_kind: "agent_page" },
+        { ...node("agent-version", "agent-version-1"), entity_kind: "agent_page_version" },
+        { ...node("library", "library-1"), entity_kind: "library_item" },
+        { ...node("folder", "folder-1"), entity_kind: "folder", family: "structural", grain: "folder" },
       ],
       actions.map((kind) => ({
         ...edge(`action:${kind}`, sourceByAction[kind as keyof typeof sourceByAction], "seed", kind),
@@ -96,9 +102,31 @@ describe("visible Local scene input", () => {
       "action:published": "action",
       "action:included": "actionRead",
       "action:cited": "actionCite",
+      "action:wikilink": "link",
+      "action:citation_page": "citation",
+      "action:tree": "membership",
+      "action:co_access": "coAccess",
+      "action:referenced": "actionReference",
     });
-    expect(result.layout.edges).toHaveLength(5);
-    expect(result.layout.edges.reduce((count, edge) => count + edge.count, 0)).toBe(5);
+    expect(result.layout.edges).toHaveLength(actions.length);
+    expect(result.layout.edges.reduce((count, edge) => count + edge.count, 0)).toBe(actions.length);
+
+    const common = buildLocalCosmosColumns(input, {
+      workspaceId: "workspace", actorId: "actor", surface: "local", selectionKey: "seed", visibleFingerprint: "visible",
+    });
+    expect(new Set(common.nodeVisualKinds)).toEqual(new Set([
+      "context", "version", "agent", "agentVersion", "library", "conversation", "folder",
+    ]));
+    expect(common.nodeGrains![common.nodeIds.indexOf("folder")]).toBe("folder");
+    expect(common.nodeGrains![common.nodeIds.indexOf("seed")]).toBeNull();
+    const rows = Object.fromEntries(common.edgeIds.map((id, index) => [id, {
+      kind: common.edgeRelationKinds![index],
+      source: common.nodeIds[common.edgeSources[index]],
+      target: common.nodeIds[common.edgeTargets[index]],
+    }]));
+    expect(rows["action:created"]).toEqual({ kind: "created", source: "v1", target: "seed" });
+    expect(rows["action:cited"]).toEqual({ kind: "cited", source: "ask", target: "seed" });
+    expect(rows["action:citation_page"]).toEqual({ kind: "citation_page", source: "library", target: "seed" });
   });
 
   it("does not disguise stored citations as actions or infer unknown kinds from layer/action metadata", () => {
@@ -191,6 +219,13 @@ describe("Local wire geometry identity", () => {
     [second.edges[0].source, second.edges[0].target] = [second.edges[0].target, second.edges[0].source];
     expect(buildLocalScene(second).layout).toEqual(buildLocalScene(first).layout);
     expect(buildLocalScene(second).geometryKey).not.toBe(buildLocalScene(first).geometryKey);
+    const identity = { workspaceId: "w", actorId: "a", surface: "local" as const, selectionKey: "seed", visibleFingerprint: "same-forces" };
+    const before = buildLocalCosmosColumns(first, identity), after = buildLocalCosmosColumns(second, identity);
+    const row = before.edgeIds.indexOf("ab"), changedRow = after.edgeIds.indexOf("ab");
+    expect(before.edgeDirections![row]).toBe("undirected");
+    expect(after.edgeDirections![changedRow]).toBe("undirected");
+    expect([before.nodeIds[before.edgeSources[row]], before.nodeIds[before.edgeTargets[row]]]).toEqual(["a", "b"]);
+    expect([after.nodeIds[after.edgeSources[changedRow]], after.nodeIds[after.edgeTargets[changedRow]]]).toEqual(["b", "a"]);
   });
 
   it("distinguishes occurrence counts after node radius reaches its cap", () => {
@@ -205,12 +240,23 @@ describe("Local wire geometry identity", () => {
   it.each([
     ["duplicate semantic nodes", (next: GraphRenderScene) => { next.nodes.push({ ...next.nodes[1], id: "alias-b" }); }],
     ["duplicate node wire IDs", (next: GraphRenderScene) => { next.nodes.push({ ...next.nodes[1], entity_id: "alias-b" }); }],
-    ["duplicate edge wire IDs", (next: GraphRenderScene) => { next.edges.push({ ...next.edges[0] }); }],
+    ["duplicate edge wire IDs", (next: GraphRenderScene) => {
+      next.edges.push({ ...next.edges[0], source: "b", target: "c", edge_kind: "created" });
+    }],
     ["missing entity identity", (next: GraphRenderScene) => { delete next.nodes[1].entity_id; }],
   ] as const)("does not admit a fast path for %s", (_name, mutate) => {
     const next = copy();
     mutate(next);
     expect(buildLocalScene(next).geometryKey).toBeNull();
+    if (_name === "duplicate edge wire IDs") {
+      const columns = buildLocalCosmosColumns(next, {
+        workspaceId: "w", actorId: "a", surface: "local", selectionKey: "seed", visibleFingerprint: "ambiguous",
+      });
+      const occurrences = columns.edgeIds.flatMap((id, index) => id !== "ab" ? [] : [[
+        columns.edgeRelationKinds![index], columns.nodeIds[columns.edgeSources[index]], columns.nodeIds[columns.edgeTargets[index]],
+      ]]);
+      expect(occurrences).toEqual([["created", "b", "c"], ["citation_page", "a", "b"]]);
+    }
   });
 
   it("keeps hidden endpoint and unknown-kind decoys outside admitted geometry", () => {

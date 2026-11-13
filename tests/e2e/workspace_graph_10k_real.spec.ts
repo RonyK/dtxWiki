@@ -75,12 +75,16 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       const canvas = page.getByTestId("graph-canvas");
       const connected = new Set(sceneRelations(scene).flatMap((edge) => [edge.source, edge.target]));
       const allListed = listedNodeIds(scene, new Set(admittedNodes(scene).map((node) => node.id)));
-      await expect(nodeList).toHaveAttribute("data-total-count", String(listedNodeIds(scene, connected).size));
-      await expect(canvas).toHaveAttribute("data-map-node-count", String(CONNECTED_DOCUMENT_COUNT));
-      const showUnlinked = page.getByRole("button", { name: /^Unlinked \d+$/ });
-      await expect(showUnlinked).toHaveAttribute("title", "340 unlinked documents hidden from this map.");
+      // Authored reach remains 9,660 documents. The existing containment
+      // relations also connect the remaining documents, so all are shown.
+      expect(connected.size).toBe(CONNECTED_DOCUMENT_COUNT);
+      const connectedWithContainment = new Set(scene.edges.flatMap((edge) => [edge.source, edge.target]));
+      expect(admittedNodes(scene).filter((node) => connectedWithContainment.has(node.id))).toHaveLength(DOCUMENT_COUNT);
+      await expect(nodeList).toHaveAttribute("data-total-count", String(allListed.size));
+      await expect(canvas).toHaveAttribute("data-map-node-count", String(DOCUMENT_COUNT));
+      await expect(page.getByRole("button", { name: /^Unlinked \d+$/ })).toHaveCount(0);
       const readsBeforeDisplay = overviewRequests.length;
-      await showUnlinked.click();
+      await enableUnlinkedDisplay(page);
       await expect(nodeList).toHaveAttribute("data-total-count", String(allListed.size));
       await expect(edgeList).toHaveAttribute("data-total-count", String(listedEdgeCount(scene, allListed)));
       await expect(canvas).toHaveAttribute("data-map-node-count", String(DOCUMENT_COUNT));
@@ -410,11 +414,22 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
       await expect(page.getByTestId("workspace-graph-node-list").locator('[aria-pressed="true"]')).toHaveCount(0);
       await expect.poll(async () => (await readAccountMapState(page, actorId, secondary.id))?.viewerId).toBe(actorId);
       const secondaryState = (await readAccountMapState(page, actorId, secondary.id))!;
-      expect(secondaryState).toMatchObject({ viewerId: actorId, selectedId: null, pinnedIds: [], pinnedPositions: {}, viewport: null });
+      const { viewport: secondaryViewport, viewerId, selectedId, pinnedIds, pinnedPositions, display } = secondaryState;
+      expect({ viewerId, selectedId, pinnedIds, pinnedPositions, display }).toEqual({
+        viewerId: actorId, selectedId: null, pinnedIds: [], pinnedPositions: {},
+        display: { show_edges: true, show_labels: true, show_orphans: false },
+      });
+      // Containment now keeps the fresh Agent scene visible before Show unlinked
+      // is enabled. Its renderer may already have saved a fresh Fit viewport;
+      // it must never inherit the departing workspace's 10K camera.
+      if (secondaryViewport !== null) {
+        expectFiniteAccountViewport(secondaryViewport);
+        expect(secondaryViewport).not.toEqual(before.viewport);
+      }
       // The independent fresh workspace contains only its default Agent page
-      // and the folders that hold it. Its exact one-document scene is initially
-      // hidden by the unlinked display setting, and its folders with it; retain
-      // that default and reveal the real nodes through the UI.
+      // and any containing folders. With no authored links, containment may
+      // still connect that document. Change the display setting through its
+      // always-available Refine control, independently of an Unlinked badge.
       expect(secondaryScene.representation).toBe("exact");
       expect(secondaryScene.counts).toMatchObject({ candidate_documents: 1, candidate_relations: 0,
         rendered_documents: 1, rendered_clusters: 0, rendered_relations: 0 });
@@ -423,8 +438,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
         entity_id: secondaryAgents[0].id, id: `document:agent:${secondaryAgents[0].id}` });
       expect(sceneRelations(secondaryScene)).toEqual([]);
       expectCurrentContainment(secondaryScene);
-      await expect(page.getByTestId("graph-canvas")).toHaveCount(0);
-      await page.getByRole("button", { name: "Unlinked 1", exact: true }).click();
+      await enableUnlinkedDisplay(page);
       await expectNavigationMapReady(page, secondaryScene, 0);
       const secondaryDrawn = nativeDrawCounts(secondaryScene);
       await expectNativeCounts(page, secondaryDrawn.points, secondaryDrawn.links);
@@ -947,7 +961,9 @@ async function selectReal10kContextDocument(
   expectExactAuthoredScene(full);
   await expect(scale).toHaveValue("10k");
   await view.locator("summary").click();
-  await page.getByRole("button", { name: /^Unlinked \d+$/ }).click();
+  // Dirty a real display preference for the account/reset checks even when
+  // containment leaves this exact scene with no unlinked documents.
+  await enableUnlinkedDisplay(page);
   await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-node-count", String(DOCUMENT_COUNT));
   await expect(page.getByTestId("graph-canvas")).toHaveAttribute("data-map-edge-count", String(RELATION_COUNT));
   const fullListed = listedNodeIds(full, new Set(admittedNodes(full).map((node) => node.id)));
@@ -972,6 +988,16 @@ async function selectReal10kContextDocument(
   await expect(row.locator("button.workspace-graph-list-select")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".workspace-graph-details").getByRole("heading", { name: document.label, exact: true })).toBeVisible();
   return { initial, full, document, gpu };
+}
+
+async function enableUnlinkedDisplay(page: Page) {
+  await page.getByRole("button", { name: "Refine", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Refine data", exact: true });
+  const control = dialog.getByRole("checkbox", { name: "Show unlinked documents", exact: true });
+  await expect(control).toBeEnabled();
+  await control.check();
+  await expect(control).toBeChecked();
+  await dialog.getByRole("button", { name: "Close Refine data", exact: true }).click();
 }
 
 function waitForContextDetail(page: Page, workspaceId: string, entityId: string) {

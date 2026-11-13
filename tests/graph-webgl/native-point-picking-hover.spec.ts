@@ -59,7 +59,7 @@ test("PC native hover follows a pointer swept in small steps instead of freezing
 });
 
 // The CPU test the picker re-applies must say what the shader says. The GPU is the oracle: sweep the pointer
-// outward from three isolated bodies and require the same hit/miss on both sides of every boundary. Two canvases
+// outward from isolated bodies and require the same hit/miss on both sides of every boundary. Two canvases
 // that are not 1:1: DPR 1.5 with point sizes scaled by zoom on a tall one, DPR 2 with fixed point sizes on a wide one.
 test("PC native CPU target test agrees with the GPU query at DPR 1.5 and 2 on non-square canvases, scaled and fixed point size", async ({ page }) => {
   for (const { dpr, scale, size } of [{ dpr: 1.5, scale: 1, size: "333x777" }, { dpr: 2, scale: 0, size: "900x300" }]) {
@@ -68,9 +68,13 @@ test("PC native CPU target test agrees with the GPU query at DPR 1.5 and 2 on no
     for (const zoom of [.5, 2.3]) {
       const where = `DPR ${dpr}, ${size}, zoom ${zoom}`;
       await page.evaluate(options => window.__nativeHover.loadIsolated(options), { zoom, center: [2048 + 37, 2048 - 21] as [number, number] });
+      // A matching CPU/GPU picking mistake cannot pass this: inspect the native
+      // painted sprite too, with the apex above and the lower corners absent.
+      expect(await page.evaluate(() => window.__nativeHover.trianglePaint()), where)
+        .toEqual([{ dy: -.4, ink: true }, { dy: .4, ink: false }]);
       // 0.07 px off the 1 px lattice keeps every sample clear of a boundary at float precision.
       const samples = [];
-      for (const node of [0, 1, 2]) for (const angle of [0, 45, 112, 270]) for (let radius = .07; radius < 64; radius += 1) {
+      for (const node of [0, 1, 2, 3]) for (const angle of [0, 45, 112, 270]) for (let radius = .07; radius < 64; radius += 1) {
         const theta = angle * Math.PI / 180;
         samples.push({ node, offset: [radius * Math.cos(theta), radius * Math.sin(theta)] as [number, number] });
       }
@@ -79,7 +83,7 @@ test("PC native CPU target test agrees with the GPU query at DPR 1.5 and 2 on no
       expect(rows.every(row => row.gpu === null || row.gpu === row.node), where).toBe(true);
       expect(Math.max(...rows.map(row => Math.hypot(row.projectedX - row.centerX, row.projectedY - row.centerY))), where).toBeLessThan(1e-3);
       // A meaningful sweep: every body is hit near its centre and missed far away.
-      for (const node of [0, 1, 2]) {
+      for (const node of [0, 1, 2, 3]) {
         const own = rows.filter(row => row.node === node);
         expect(own.some(row => row.cpu) && own.some(row => !row.cpu), `${where}, node ${node}`).toBe(true);
       }

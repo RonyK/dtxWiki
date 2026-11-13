@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import type { WorkspaceGraphEdge, WorkspaceGraphNode, WorkspaceGraphScene } from "../../../../shared/api/workspaceGraph";
+import { cloneCosmosSceneColumns, cosmosSceneIdentityKey } from "../../shared/cosmos/sceneTypes";
+import { sameCosmosIndexedGeometry } from "../../shared/workspaceMapGeometry";
 import {
   buildWorkspaceMapColumns,
   type WorkspaceMapColumns,
@@ -236,6 +238,28 @@ describe("Workspace Map visible columns", () => {
       surface: "workspace",
     });
     expect(tree.identity.visibleFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(tree.nodeEntityKinds).toEqual(["context", "context", "folder", "library"]);
+    expect(tree.nodeGrains).toEqual(["document", "document", "folder", "document"]);
+    expect(tree.nodeVisualKinds).toEqual(["context", "context", "folder", "library"]);
+    expect(tree.edgeRelationKinds).toEqual(["citation_page", "wikilink", "tree", "tree"]);
+    expect(tree.edgeDirections).toEqual(["directed", "directed", "directed", "directed"]);
+    expect(tree.edgeVisualKinds).toEqual(["citation", "link", "membership", "membership"]);
+
+    // A renderer remount snapshot must retain its old raw identities even if
+    // the live host later republishes metadata and mutates the input arrays.
+    const snapshot = cloneCosmosSceneColumns(tree);
+    const snapshotKey = cosmosSceneIdentityKey(snapshot);
+    tree.edgeRelationKinds![0] = "citation_source";
+    tree.edgeDirections![0] = "undirected";
+    tree.nodeEntityKinds![0] = "renamed-kind";
+    tree.nodeGrains![0] = "renamed-grain";
+    tree.identity.actorId = "other-actor";
+    expect(snapshot.edgeRelationKinds![0]).toBe("citation_page");
+    expect(snapshot.edgeDirections![0]).toBe("directed");
+    expect(snapshot.nodeEntityKinds![0]).toBe("context");
+    expect(snapshot.nodeGrains![0]).toBe("document");
+    expect(cosmosSceneIdentityKey(snapshot)).toBe(snapshotKey);
+    expect(cosmosSceneIdentityKey(tree)).not.toBe(snapshotKey);
   });
 
   it("retains an Agent document and its citation as authored map geometry", () => {
@@ -268,6 +292,8 @@ describe("Workspace Map visible columns", () => {
       id: `${edge.id}-new`,
       source: `${edge.source}-new`,
       target: `${edge.target}-new`,
+      relation_kind: edge.relation_kind === "citation_page" ? "citation_source" : edge.relation_kind,
+      direction: "undirected",
     }));
     changed.graph_revision = "revision-with-unseen-decoy";
     changed.generated_at = "2026-09-29T00:00:00Z";
@@ -280,6 +306,12 @@ describe("Workspace Map visible columns", () => {
     expect(after.nodeKeys).toEqual(before.nodeKeys);
     expect(after.edgeSources).toEqual(before.edgeSources);
     expect(after.edgeTargets).toEqual(before.edgeTargets);
+    // A raw kind remains distinguishable after mapping to the same legend
+    // stroke; metadata-only rebinding must not restart an unchanged layout.
+    expect(before.edgeRelationKinds).toContain("citation_page");
+    expect(after.edgeRelationKinds).toContain("citation_source");
+    expect(after.edgeDirections?.every((direction) => direction === "undirected")).toBe(true);
+    expect(sameCosmosIndexedGeometry(before, after)).toBe(true);
   });
 
   it("omits dangling, self and unclassified relations without adding hidden points", () => {
@@ -422,7 +454,7 @@ describe("Workspace Map visible columns", () => {
       scene.nodes.push(
         { grain: "cluster", id: "cluster-big", cluster_kind: "link_cluster", label: "Linked component",
           member_count: memberCount, relation_count: 33_651 },
-        { grain: "cluster", id: "cluster-pair", cluster_kind: "link_cluster", label: "Linked component",
+        { grain: "cluster", id: "cluster-pair", cluster_kind: "folder_cluster", label: "Linked component",
           member_count: 2, relation_count: 1 },
       );
       scene.edges.push({ id: "to-cluster", source: "row-z", target: "cluster-big", relation_kind: "wikilink",
@@ -440,6 +472,9 @@ describe("Workspace Map visible columns", () => {
       expect(counts).toEqual({
         "cluster-big": 9_244, "cluster-pair": 2, "context:page-b": 1, "context:page-z": 1, "library:item-a": 1,
       });
+      const rawKinds = Object.fromEntries(columns.nodeIds.map((id, index) => [id, [columns.nodeGrains![index], columns.nodeEntityKinds![index]]]));
+      expect(rawKinds["cluster-big"]).toEqual(["cluster", "link_cluster"]);
+      expect(rawKinds["cluster-pair"]).toEqual(["cluster", "folder_cluster"]);
     });
 
     // Not positive, not an integer, beyond the column's 32 bits.
