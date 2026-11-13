@@ -8,7 +8,7 @@ import {
   graphFacets,
   graphPayloadToNeighbors,
 } from "../graphModel";
-import { graphSceneToMermaid } from "../local/staticDiagram";
+import { decorateStaticDiagramSvg, graphSceneToMermaid } from "../local/staticDiagram";
 import { readGraphTokens } from "../shared/graphTokens";
 import type { GraphEdge, GraphNode, GraphTimelineEvent } from "../../../shared/api/graph";
 import { graphFixture } from "./graphFixture";
@@ -254,6 +254,42 @@ describe("graphModel", () => {
     expect(dark).toContain(".edgeLabel text { fill: #e5e7eb !important; }");
     // An exported file has no slot words for a renderer that cannot draw glyphs.
     expect(graphSceneToMermaid(scene, visuals, { iconSlot: false }).source).not.toMatch(/\bMm\b|wrappingWidth/);
+
+    // Inspect the decorated SVG too: Mermaid already supplies direction for
+    // stored relationships that have no Local-specific endpoint style.
+    const endpointEdges: GraphEdge[] = ["promoted_from", "page_provenance", "wikilink", "tree", "co_access", "searched"]
+      .map((edge_kind, index) => ({
+        ...payload.edges[0], id: `edge:endpoint-${index}`, label: String(index), edge_kind,
+        direction: edge_kind === "co_access" ? "undirected" : "directed",
+      }));
+    const endpointDiagram = graphSceneToMermaid({ ...scene, edges: endpointEdges }, visuals, { iconSlot: true });
+    const svg = `<svg id="static-endpoints" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="original-arrow"><path d="M0 0L4 2L0 4Z" /></marker></defs>
+      ${endpointDiagram.edges.map(({ id }, index) => `<path class="flowchart-link" id="${id}" d="M0 ${index * 10}L40 ${index * 10}"
+        ${index === 1 ? 'style="marker-end:url(#original-arrow)"' : 'marker-end="url(#original-arrow)"'}
+        marker-start="url(#original-arrow)" />`).join("")}
+    </svg>`;
+    const decorated = document.createElement("div");
+    decorated.innerHTML = decorateStaticDiagramSvg(svg, endpointDiagram.nodes, visuals, endpointDiagram.edges);
+    const paths = [...decorated.querySelectorAll<SVGPathElement>("path.flowchart-link")];
+    expect(paths[0].getAttribute("marker-end")).toBe("url(#original-arrow)");
+    expect(paths[0].style.getPropertyValue("marker-end")).toBe("");
+    expect(paths[1].style.getPropertyValue("marker-end")).toBe("url(#original-arrow)");
+    expect(paths[0].getAttribute("marker-start")).toBe("url(#original-arrow)");
+    expect(paths[1].getAttribute("marker-start")).toBe("url(#original-arrow)");
+    const markerShape = (path: SVGPathElement, end: "start" | "end") => {
+      const markerId = /#([^)"]+)/.exec(path.style.getPropertyValue(`marker-${end}`))?.[1];
+      expect(markerId).toBeDefined();
+      return decorated.querySelector<SVGPathElement>(`marker[id="${markerId}"] path`)!;
+    };
+    expect(markerShape(paths[2], "end").style.fill).toBe("none");
+    expect(paths[2].style.getPropertyValue("marker-start")).toBe("none");
+    expect(markerShape(paths[3], "start").style.fill).toBe(visuals.tokens.surface);
+    expect(markerShape(paths[3], "end").style.fill).toBe("none");
+    expect(paths[4].style.getPropertyValue("marker-start")).toBe("none");
+    expect(paths[4].style.getPropertyValue("marker-end")).toBe("none");
+    expect(markerShape(paths[5], "end").style.fill).toBe(visuals.tokens.edge.action);
+    expect(markerShape(paths[5], "end").style.stroke).toBe("none");
   });
 
   it("does not project structural tree edges into the legacy neighbors panel", () => {

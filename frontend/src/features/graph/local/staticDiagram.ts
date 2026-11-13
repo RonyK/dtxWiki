@@ -15,6 +15,7 @@ export type StaticDiagramVisuals = {
 };
 
 export type StaticDiagramNode = { kind: GraphNodeVisualKind; seed: boolean };
+/** A null visual kind keeps Mermaid's original relationship endpoints. */
 export type StaticDiagramEdge = { id: string; kind: GraphEdgeVisualKind | null; directed: boolean };
 
 export type StaticDiagram = {
@@ -146,7 +147,7 @@ export function decorateStaticDiagramSvg(
   }
 }
 
-/** Give Mermaid the same relationship endpoints as the canvas and legend. */
+/** Override only endpoints with a shared visual definition; preserve all others. */
 function decorateEdges(host: HTMLElement, edges: readonly StaticDiagramEdge[], visuals: StaticDiagramVisuals) {
   const svg = host.querySelector("svg");
   if (!svg || !edges.length) return;
@@ -155,14 +156,10 @@ function decorateEdges(host: HTMLElement, edges: readonly StaticDiagramEdge[], v
   const paths = Array.from(svg.querySelectorAll<SVGPathElement>("path.flowchart-link"));
   const size = GRAPH_EDGE_ENDPOINT_SIZE_PX;
   for (const edge of edges) {
+    if (!edge.kind) continue;
     const path = paths.find((candidate) => candidate.id === edge.id || candidate.dataset.id === edge.id);
     if (!path) continue;
-    path.style.setProperty("marker-start", "none");
-    path.style.setProperty("marker-end", "none");
-    path.removeAttribute("marker-start");
-    path.removeAttribute("marker-end");
-    if (!edge.kind || !edge.directed) continue;
-    const endpoints = GRAPH_EDGE_ENDPOINTS[edge.kind];
+    const endpoints = edge.directed ? GRAPH_EDGE_ENDPOINTS[edge.kind] : { source: "none", target: "none" };
     const filled = endpoints.target === "filled-triangle";
     const arrowLength = filled ? GRAPH_EDGE_TRIANGLE_SIZE_PX.length : size.arrowLength;
     const ink = visuals.tokens.edge[edge.kind];
@@ -186,17 +183,25 @@ function decorateEdges(host: HTMLElement, edges: readonly StaticDiagramEdge[], v
       shape.style.setProperty("stroke-linejoin", "round");
       element.append(shape);
       defs.append(element);
-      path.style.setProperty(end === "source" ? "marker-start" : "marker-end", `url(#${id})`);
+      const attribute = end === "source" ? "marker-start" : "marker-end";
+      path.setAttribute(attribute, `url(#${id})`);
+      path.style.setProperty(attribute, `url(#${id})`);
     };
     const cy = size.arrowHalfWidth + 1;
     if (endpoints.target === "open-arrow") {
       marker("target", `M0 ${cy - size.arrowHalfWidth}L${size.arrowLength} ${cy}L0 ${cy + size.arrowHalfWidth}`, "none");
     } else if (filled) {
       marker("target", `M0 ${cy - GRAPH_EDGE_TRIANGLE_SIZE_PX.halfWidth}L${arrowLength} ${cy}L0 ${cy + GRAPH_EDGE_TRIANGLE_SIZE_PX.halfWidth}Z`, ink, "none");
+    } else if (endpoints.target === "none") {
+      path.setAttribute("marker-end", "none");
+      path.style.setProperty("marker-end", "none");
     }
     if (endpoints.source === "open-diamond") {
       const start = size.nodeGap;
       marker("source", `M${start} ${cy}L${start + size.diamondLength / 2} ${cy - size.diamondHalfWidth}L${start + size.diamondLength} ${cy}L${start + size.diamondLength / 2} ${cy + size.diamondHalfWidth}Z`, visuals.tokens.surface);
+    } else if (endpoints.source === "none") {
+      path.setAttribute("marker-start", "none");
+      path.style.setProperty("marker-start", "none");
     }
   }
   svg.prepend(defs);
