@@ -456,7 +456,6 @@
       "tools": "AI chats",
       "versions": "Document versions",
       "relations": "Relationship changes",
-      "group": "Expand {{count}} records",
       "showInGraph": "Show in graph",
       "show": "Show",
       "recordedAt": "Recorded at",
@@ -482,8 +481,6 @@
         "removed": "Relationship removed"
       },
       "restoredLatest": "The record you were viewing is no longer in the results. Moved to the latest record.",
-      "groupRecords": "{{count}} nearby records",
-      "closeGroup": "Close",
       "referenced": "Structure-only looks",
       "referencedHint": "Chats that only read this document's outline or structure. Hidden by default.",
       "sessionDetail": "This document: {{verbs}}",

@@ -1,10 +1,11 @@
 import { Activity, ArrowUpRight, Check, ChevronLeft, ChevronRight, Clock3, Info, MessageSquare, Minus, Pause, Play, Plus, SkipForward, Terminal, Triangle } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
-import type { GraphQueryPayload, GraphTimelineEvent } from "../../../shared/api/graph";
+import type { GraphQueryPayload } from "../../../shared/api/graph";
 import { formatVersionTimestamp } from "../../../shared/lib/datetime";
 import { eventInvolves, GraphPreviewBadge, type LocalTimelineEvent } from "./LocalGraphChrome";
 import type { TimelineMarkKind } from "./timelinePresentation";
+import { nearestTimelineIndex, timelineLayout } from "./timelineLayout";
 import { sessionActivityDigest } from "../sessionActivity";
 import "./LocalGraphTimeline.css";
 
@@ -29,55 +30,76 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
   payload: GraphQueryPayload; playing: boolean; reducedMotion: boolean; selectedId: string | null;
   speed: number; timeline: LocalTimelineEvent[]; restoredLatest: boolean;
 }) {
-  const { t } = useTranslation("graph");
-  const axisRef = useRef<HTMLDivElement>(null);
-  const [axis, setAxis] = useState({ width: 400, markWidth: 44 });
-  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const { t, i18n } = useTranslation("graph");
+  const plotRef = useRef<HTMLDivElement>(null);
+  const datesRef = useRef<HTMLDivElement>(null);
+  const [metrics, setMetrics] = useState({ width: 400, unit: 32, gap: 12, pad: 4, inset: 22 });
+  const [labelWidths, setLabelWidths] = useState<Record<string, number>>({});
+  const [more, setMore] = useState({ left: false, right: false });
+  const [dragging, setDragging] = useState(false);
   useEffect(() => {
-    if (!axisRef.current || typeof ResizeObserver === "undefined") return;
-    // Marks closer than one hit width (--history-mark-width, set per layout in
-    // the stylesheet) merge into a group so their buttons never overlap.
-    const observer = new ResizeObserver(([entry]) => {
-      const markWidth = Number.parseFloat(getComputedStyle(entry.target).getPropertyValue("--history-mark-width"));
-      setAxis({ width: Math.max(1, entry.contentRect.width), markWidth: markWidth > 0 ? markWidth : 44 });
+    const plot = plotRef.current;
+    if (!plot || typeof ResizeObserver === "undefined") return;
+    // Column width, day gap and band pad come from the stylesheet, per layout.
+    const observer = new ResizeObserver(() => {
+      const style = getComputedStyle(plot);
+      const px = (name: string, fallback: number) => Number.parseFloat(style.getPropertyValue(name)) || fallback;
+      const inset = px("--history-plot-inset", 22);
+      const next = { width: Math.max(1, plot.clientWidth - 2 * inset), unit: px("--history-mark-width", 32),
+        gap: px("--history-day-gap", 12), pad: px("--history-day-pad", 4), inset };
+      setMetrics((current) => (Object.keys(next) as (keyof typeof next)[]).every((key) => current[key] === next[key]) ? current : next);
     });
-    observer.observe(axisRef.current);
+    observer.observe(plot);
     return () => observer.disconnect();
   }, [timeline.length]);
+  const layout = useMemo(() => timelineLayout(timeline, { width: metrics.width, unit: metrics.unit, gap: metrics.gap, minWidth: labelWidths }),
+    [labelWidths, metrics, timeline]);
+  const dayFormats = useMemo(() => ({
+    day: new Intl.DateTimeFormat(i18n.language, { month: "2-digit", day: "2-digit" }),
+    year: new Intl.DateTimeFormat(i18n.language, { year: "numeric", month: "2-digit", day: "2-digit" }),
+  }), [i18n.language]);
+  const dayLabels = useMemo(() => layout.days.map((day) => (day.newYear ? dayFormats.year : dayFormats.day).format(new Date(`${day.key}T12:00:00`))),
+    [dayFormats, layout.days]);
+  // A day is never narrower than its date label, so labels never collide.
+  useLayoutEffect(() => {
+    const spans = datesRef.current?.children;
+    if (!spans) return;
+    const next = Object.fromEntries(layout.days.map((day, index) => [day.key, Math.ceil(spans[index]?.getBoundingClientRect().width ?? 0)]));
+    setLabelWidths((current) => Object.keys(current).length === layout.days.length
+      && layout.days.every((day) => current[day.key] === next[day.key]) ? current : next);
+  }, [dayLabels, layout.days]);
   const event = timeline[cursor];
-  const first = timeline.length ? Date.parse(timeline[0].occurred_at) : 0;
-  const last = timeline.length ? Date.parse(timeline[timeline.length - 1].occurred_at) : first;
-  const position = (item: GraphTimelineEvent) => last > first ? (Date.parse(item.occurred_at) - first) / (last - first) * 100 : 50;
-  const playhead = event ? position(event) : 0;
+  const playhead = event ? layout.x[cursor] : 0;
+  const currentDay = event ? layout.days.find((day) => day.indices.includes(cursor)) : undefined;
+  const updateMore = useCallback(() => {
+    const plot = plotRef.current;
+    if (!plot) return;
+    const left = plot.scrollLeft > 1;
+    const right = plot.scrollLeft + plot.clientWidth < plot.scrollWidth - 1;
+    setMore((current) => current.left === left && current.right === right ? current : { left, right });
+  }, []);
+  // While the days scroll, keep the current day whole in view (or the
+  // playhead, when the day is wider than the view). Stepping inside a visible
+  // day never scrolls, and nothing moves under a dragged scrubber.
+  useLayoutEffect(() => {
+    const plot = plotRef.current;
+    if (plot && layout.scroll && !dragging) {
+      const view = plot.clientWidth - 2 * metrics.inset;
+      const [from, to] = currentDay && currentDay.width <= view
+        ? [currentDay.left, currentDay.left + currentDay.width]
+        : [playhead - metrics.unit / 2, playhead + metrics.unit / 2];
+      if (from < plot.scrollLeft || to > plot.scrollLeft + view) {
+        plot.scrollTo({ left: Math.max(0, (from + to - view) / 2), behavior: reducedMotion ? "auto" : "smooth" });
+      }
+    }
+    updateMore();
+  }, [currentDay, dragging, layout, metrics, playhead, reducedMotion, updateMore]);
   const lanes = payload.history.mode === "action" ? ["authoring", "tools"] : ["versions", "relations"];
-  const groups = lanes.map((_, lane) => {
-    const result: Array<{ id: string; left: number; indices: number[] }> = [];
-    timeline.forEach((item, index) => {
-      if (item.lane !== lane) return;
-      const left = position(item);
-      const previous = result[result.length - 1];
-      if (previous && (left - previous.left) / 100 * axis.width < axis.markWidth) previous.indices.push(index);
-      else result.push({ id: item.id, left, indices: [index] });
-    });
-    return result;
-  });
-  const expanded = groups.flat().find((group) => group.id === openGroup);
-  const closeGroup = () => {
-    axisRef.current?.querySelector<HTMLButtonElement>('[aria-expanded="true"]')?.focus();
-    setOpenGroup(null);
-  };
-  const closeOnEscape = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (e.key === "Escape" && expanded) { e.preventDefault(); e.stopPropagation(); closeGroup(); }
-  };
   const markLabel = (item: LocalTimelineEvent, index: number) => `${index + 1}/${timeline.length} · ${formatVersionTimestamp(item.occurred_at)} · ${item.summary} · ${item.detail}`;
   const seekPointer = (e: PointerEvent<HTMLInputElement>) => {
-    const bounds = e.currentTarget.getBoundingClientRect();
-    const at = first + Math.max(0, Math.min(1, (e.clientX - bounds.left) / bounds.width)) * (last - first);
-    const closest = timeline.reduce((best, item, index) => Math.abs(Date.parse(item.occurred_at) - at) < Math.abs(Date.parse(timeline[best].occurred_at) - at) ? index : best, 0);
-    onCursorChange(closest);
+    onCursorChange(nearestTimelineIndex(layout.x, e.clientX - e.currentTarget.getBoundingClientRect().left));
   };
   const digest = payload.history.mode === "action" ? sessionActivityDigest(payload, t) : null;
-  const shortDate = (at: number) => new Intl.DateTimeFormat(undefined, { month: "2-digit", day: "2-digit" }).format(at);
   return <section className="local-history" aria-labelledby="graph-timeline-heading" data-testid="graph-timeline">
     <header className="local-history-header">
       <div className="local-history-heading">
@@ -104,50 +126,52 @@ export function LocalGraphTimeline({ cursor, onCursorChange, onPause, onPlay, on
     {!timeline.length ? <p className="local-history-empty">{t("graph.timeline.noEvents")}</p> : <>
       <div className="local-history-chart">
         <div className="local-history-lane-labels">{lanes.map((lane) => <span key={lane}>{t(`graph.historyUi.${lane}`)}</span>)}</div>
-        <div className="local-history-plot">
-          <div className="local-history-axis" ref={axisRef}>
-            <div className="local-history-future" style={event ? { left: `${playhead}%` } : undefined} aria-hidden="true" />
-            <div className="local-history-playhead" style={{ left: `${playhead}%` }} aria-hidden="true" />
-            {groups.map((lane, laneIndex) => <div key={lanes[laneIndex]} className="local-history-lane" role="group" aria-label={t(`graph.historyUi.${lanes[laneIndex]}`)}>
-              {lane.map((group) => {
-                const index = group.indices.includes(cursor) ? cursor : group.indices[0];
-                const item = timeline[index];
-                const clustered = group.indices.length > 1;
-                const related = group.indices.some((i) => eventInvolves(timeline[i], selectedId, payload.edges));
-                const current = group.indices.includes(cursor);
-                return <button key={group.id} type="button" className={`local-history-mark ${current ? "is-current" : ""} ${selectedId ? related ? "is-related" : "is-quiet" : ""} ${index > cursor ? "is-future" : ""}`}
-                  style={{ left: `${group.left}%` }} title={clustered ? t("graph.historyUi.group", { count: group.indices.length }) : markLabel(item, index)}
-                  aria-label={clustered ? t("graph.historyUi.group", { count: group.indices.length }) : markLabel(item, index)}
-                  aria-current={current ? "step" : undefined} aria-expanded={clustered ? openGroup === group.id : undefined}
-                  onKeyDownCapture={closeOnEscape}
-                  onMouseEnter={() => !clustered && onHoverEvent(item.id)} onMouseLeave={() => onHoverEvent(null)}
-                  onFocus={() => !clustered && onHoverEvent(item.id)} onBlur={() => onHoverEvent(null)}
-                  onClick={() => { if (clustered) { onPause(); setOpenGroup(openGroup === group.id ? null : group.id); } else { setOpenGroup(null); onCursorChange(index); } }}>
-                  <span className={`local-history-symbol is-${clustered ? "cluster" : item.mark}`}>{clustered ? group.indices.length : <MarkIcon kind={item.mark} />}</span>
-                </button>;
-              })}
-            </div>)}
-            <input className="local-history-scrubber" type="range" min={0} max={timeline.length} value={Math.max(0, cursor + 1)}
-              aria-label={t("graph.timeline.scrubber")} aria-valuetext={event ? markLabel(event, cursor) : t("graph.timeline.start")}
-              onChange={(e) => onCursorChange(Number(e.target.value) - 1)}
-              onPointerDown={(e) => { e.preventDefault(); e.currentTarget.focus(); e.currentTarget.setPointerCapture(e.pointerId); seekPointer(e); }}
-              onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) seekPointer(e); }}
-              onPointerUp={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); }} />
+        <div className={`local-history-plot${layout.scroll ? " is-scroll" : ""}${layout.scroll && more.left ? " has-more-left" : ""}${layout.scroll && more.right ? " has-more-right" : ""}`}
+          ref={plotRef} onScroll={updateMore}>
+          <div className="local-history-track" style={{ width: layout.width }}>
+            <div className="local-history-axis">
+              <div className="local-history-future" style={event ? { left: playhead } : undefined} aria-hidden="true" />
+              <div className="local-history-playhead" style={{ left: playhead }} aria-hidden="true" />
+              {lanes.map((lane, laneIndex) => <div key={lane} className="local-history-lane" role="group" aria-label={t(`graph.historyUi.${lane}`)}>
+                {/* Each day is its own band; playback fills the bands purple from the first record up to the playhead. */}
+                {layout.days.map((day) => <span key={day.key} className="local-history-day" style={{ left: day.left - metrics.pad, width: day.width + 2 * metrics.pad }} aria-hidden="true">
+                  {event ? <span className="local-history-day-progress"
+                    style={{ width: Math.max(0, Math.min(day.width + 2 * metrics.pad, playhead - day.left + metrics.pad)) }} /> : null}
+                </span>)}
+                {timeline.map((item, index) => item.lane !== laneIndex ? null : <button key={item.id} type="button"
+                  className={`local-history-mark ${index === cursor ? "is-current" : ""} ${selectedId ? eventInvolves(item, selectedId, payload.edges) ? "is-related" : "is-quiet" : ""} ${index > cursor ? "is-future" : ""}`}
+                  style={{ left: layout.x[index] }} title={markLabel(item, index)} aria-label={markLabel(item, index)}
+                  aria-current={index === cursor ? "step" : undefined}
+                  onMouseEnter={() => onHoverEvent(item.id)} onMouseLeave={() => onHoverEvent(null)}
+                  onFocus={() => onHoverEvent(item.id)} onBlur={() => onHoverEvent(null)}
+                  onClick={() => onCursorChange(index)}>
+                  <span className={`local-history-symbol is-${item.mark}`}><MarkIcon kind={item.mark} /></span>
+                </button>)}
+              </div>)}
+              <input className="local-history-scrubber" type="range" min={0} max={timeline.length} value={Math.max(0, cursor + 1)}
+                aria-label={t("graph.timeline.scrubber")} aria-valuetext={event ? markLabel(event, cursor) : t("graph.timeline.start")}
+                onChange={(e) => onCursorChange(Number(e.target.value) - 1)}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.focus({ preventScroll: true });
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  // Hold the days still under the pointer: stop a smooth scroll in flight.
+                  const plot = plotRef.current;
+                  if (plot && layout.scroll) plot.scrollTo({ left: plot.scrollLeft, behavior: "auto" });
+                  setDragging(true);
+                  seekPointer(e);
+                }}
+                onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) seekPointer(e); }}
+                onPointerUp={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); }}
+                onLostPointerCapture={() => setDragging(false)} />
+            </div>
+            <div className="local-history-dates" ref={datesRef} aria-hidden="true">
+              {layout.days.map((day, index) => <span key={day.key} className={day === currentDay ? "is-current" : undefined}
+                data-label={dayLabels[index]} style={{ left: day.left + day.width / 2 }}>{dayLabels[index]}</span>)}
+            </div>
           </div>
-          <div className="local-history-dates" aria-hidden="true"><span>{shortDate(first)}</span><span>{last > first ? shortDate(first + (last - first) / 2) : ""}</span><span>{shortDate(last)}</span></div>
         </div>
       </div>
-      {expanded ? <div className="local-history-group" role="group" aria-label={t("graph.historyUi.group", { count: expanded.indices.length })}>
-        <div className="local-history-group-heading"><strong>{t("graph.historyUi.groupRecords", { count: expanded.indices.length })}</strong><button type="button" onClick={closeGroup} onKeyDownCapture={closeOnEscape}>{t("graph.historyUi.closeGroup")}</button></div>
-        {expanded.indices.map((i) => <button className="local-history-record" key={timeline[i].id} type="button" aria-current={cursor === i ? "step" : undefined}
-          onKeyDownCapture={closeOnEscape}
-          onMouseEnter={() => onHoverEvent(timeline[i].id)} onMouseLeave={() => onHoverEvent(null)}
-          onFocus={() => onHoverEvent(timeline[i].id)} onBlur={() => onHoverEvent(null)}
-          onClick={() => onCursorChange(i)}>
-          <span className={`local-history-symbol is-${timeline[i].mark}`}><MarkIcon kind={timeline[i].mark} /></span>
-          <span><strong>{timeline[i].summary}</strong><small>{timeline[i].detail}</small></span><time>{formatVersionTimestamp(timeline[i].occurred_at)}</time>
-        </button>)}
-      </div> : null}
       <div className="local-history-event" aria-live={playing ? "off" : "polite"}>
         {event ? <>
           <span className={`local-history-symbol is-${event.mark}`}><MarkIcon kind={event.mark} /></span>

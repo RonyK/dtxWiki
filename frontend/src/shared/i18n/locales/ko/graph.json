@@ -456,7 +456,6 @@
       "tools": "AI 대화",
       "versions": "문서 버전",
       "relations": "관계 변화",
-      "group": "기록 {{count}}건 펼치기",
       "showInGraph": "그래프에서 보기",
       "show": "보기",
       "recordedAt": "기록 시점",
@@ -482,8 +481,6 @@
         "removed": "관계 삭제"
       },
       "restoredLatest": "보던 기록이 새 조회 결과에 없어 최신 기록으로 이동했습니다.",
-      "groupRecords": "가까운 기록 {{count}}건",
-      "closeGroup": "닫기",
       "referenced": "구조만 본 관계",
       "referencedHint": "목차나 구조만 읽은 대화 관계입니다. 기본으로 숨깁니다.",
       "sessionDetail": "이 문서 {{verbs}}",

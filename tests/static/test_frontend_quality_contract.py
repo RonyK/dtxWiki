@@ -626,7 +626,6 @@ def test_no_button_renders_without_a_visible_treatment():
         },
         "features/graph/local/LocalGraphTimeline.tsx": {
             "local-history-controls": ".local-history-controls button",
-            "local-history-group-heading": ".local-history-group-heading > button",
             "local-history-event": ".local-history-event > button",
         },
     }
