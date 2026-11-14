@@ -32,10 +32,14 @@ def _workspace_id(page_service):
         return session.scalar(select(Workspace).where(Workspace.slug == "default")).id
 
 
-def _structure_map(workspace_id, page_id, actor, page_service):
+def _structure_map(workspace_id, page_id, actor, page_service, **overrides):
     return dispatch(
         "read_structure_map",
-        {"workspace_id": str(workspace_id), "page_id": str(page_id)},
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(page_id),
+            **overrides,
+        },
         actor=actor,
         page_service=page_service,
     )
@@ -259,7 +263,7 @@ def test_partial_stale_no_effect_receipts_stay_aligned_with_caller_operations(
     ]
     assert result.operation_receipts[0].chars_delta == 0
     assert result.operation_receipts[1].chars_delta != 0
-    after = _structure_map(workspace_id, page.id, actor, page_service)
+    after = _structure_map(workspace_id, page.id, actor, page_service, version="draft")
     assert any(block.preview == "first changed at head" for block in after.blocks)
     assert any(block.preview == "second applied edit" for block in after.blocks)
 
@@ -856,7 +860,9 @@ def test_reconcile_carries_the_branchs_clean_change_and_discards_the_branch(
 
     assert reconcile_result.push_outcome in ("committed", "rebased")
 
-    final_map = _structure_map(workspace_id, page.id, actor, page_service)
+    final_map = _structure_map(
+        workspace_id, page.id, actor, page_service, version="draft"
+    )
     previews = {b.preview for b in final_map.blocks}
     assert "first, reconciled" in previews
     assert "second!" in previews  # the branch's clean carry landed

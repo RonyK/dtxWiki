@@ -24,7 +24,7 @@ from backend.schemas.read import (
     SearchFilters,
     SearchPayload,
 )
-from backend.services.context_visibility import visible_context_version_id
+from backend.services.context_visibility import searchable_context_version_id
 from backend.services.entity_ref import (
     EntityKind,
     context_page_entity_ref,
@@ -431,7 +431,7 @@ class SearchService:
             page = session.get(ContextPage, edge.id)
             if page is None or page.workspace_id != workspace_id:
                 continue
-            version_id, _ = visible_context_version_id(page, actor)
+            version_id, _ = searchable_context_version_id(page, actor)
             version = (
                 session.get(ContextPageVersion, version_id) if version_id else None
             )
@@ -503,7 +503,7 @@ class SearchService:
                 or not _page_matches_context_filters(page, filters)
             ):
                 return []
-            version_id, _is_draft = visible_context_version_id(page, actor)
+            version_id, _is_draft = searchable_context_version_id(page, actor)
             version = (
                 session.get(ContextPageVersion, version_id)
                 if version_id is not None

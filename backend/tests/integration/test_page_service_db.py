@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine, delete, event, select
@@ -943,15 +944,22 @@ def test_autosave_from_reviewed_restore_forks_without_embed_job():
     assert jobs == []
 
 
-def test_metadata_only_update_keeps_restore_draft_unpublished():
+def test_metadata_only_update_keeps_restore_draft_unpublished(monkeypatch):
     # Draft metadata is version-scoped: the canonical page fields and published
     # name projection remain unchanged while the editor projection gains the
     # pending title.
     service = make_service()
     created, updated, restored = _seed_restored_draft(service)
+    with service.session_factory() as session:
+        saved_before = session.get(
+            ContextPageVersion, restored.version_id
+        ).last_saved_at
+    saved_at = saved_before + timedelta(seconds=1)
+    monkeypatch.setattr("backend.services.page_service.utc_now", lambda: saved_at)
 
-    patched = service.update_page(
-        page_id=created.id,
+    patched = service.write_page(
+        workspace_slug="default",
+        slug=created.slug,
         title="Restore Meta Renamed",
         body_md=restored.body_md,
         actor_kind="human",
@@ -964,6 +972,7 @@ def test_metadata_only_update_keeps_restore_draft_unpublished():
     with service.session_factory() as session:
         page = session.get(ContextPage, created.id)
         draft = session.get(ContextPageVersion, restored.version_id)
+        assert draft.last_saved_at == saved_at
         current_version_id = page.current_version_id
         published_version_id = page.current_published_version_id
         draft_status = draft.version_status

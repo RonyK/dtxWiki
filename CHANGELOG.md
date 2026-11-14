@@ -32,6 +32,30 @@
   and when locating a node from far zoomed out, zoom back in to a readable
   level, as the Knowledge Map does.
 
+### Context draft visibility and reading
+
+- Make saved Context editing rows and their media readable by workspace Editors
+  and Owners, including edits opened through MCP. These rows were previously
+  visible only to their author. Editing, submitting and discarding another
+  author's editing session remain restricted; Viewers and public visitors keep
+  reading published content.
+- Open Context pages on their published version by default. Show the number of
+  open drafts, their authors, review states and last saved times, with paginated
+  browsing and explicit version selection. A never-published page shows its
+  most recently saved draft, including its review outcome when no draft is open.
+- Keep the last saved time tied to authored saves. Reviews, reindexing and
+  storage maintenance no longer move drafts ahead of newer saved content.
+- Preserve archived version and review-evidence reads while omitting their
+  open-draft discovery list. Keep discovery metadata out of write responses.
+- Label unpublished bodies in the browser and MCP results. Add `open_drafts`,
+  `draft` metadata and the read-only `list_context_drafts` tool in MCP contract
+  revision 32. Clients must refresh cached `tools/list` results and schemas;
+  agents following the latest decisions should inspect relevant open drafts
+  and identify their contents as awaiting approval.
+- Partial-read cursor continuations omit `open_drafts`; use
+  `list_context_drafts` to refresh that list. A readable page without a resumable
+  editing version shows an editing-unavailable message with a link to the page.
+
 ### Graph legends
 
 - Lay out the Context Graph and Knowledge Map legends with one rule: visible

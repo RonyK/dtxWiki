@@ -65,7 +65,6 @@ from backend.schemas.page import (
 )
 from backend.services.actor_visible_read import (
     PUBLISHED_CONTEXT_VERSION_STATUSES,
-    context_page_visible,
     context_parent_projection,
     context_version_is_visible,
 )
@@ -561,7 +560,11 @@ class PageService:
             version_id=version_id,
             actor=actor,
         )
-        visible_version_id, _is_draft = visible_context_version_id(page, actor)
+        visible_version_id = (
+            version.id
+            if version_id is None
+            else visible_context_version_id(page, actor)[0]
+        )
         payload = self._payload_from_page(
             session,
             page,
@@ -584,10 +587,10 @@ class PageService:
     ) -> tuple[ContextPage, ContextPageVersion]:
         """Resolve an actor-visible version without constructing its payload."""
         page = self._resolve_page(session, page_id, workspace_slug, slug)
-        visible_version_id, _is_draft = visible_context_version_id(page, actor)
-        version = self._require_page_version(
-            session, page, version_id or visible_version_id
-        )
+        selected_version_id = version_id
+        if selected_version_id is None:
+            selected_version_id = visible_context_version_id(page, actor)[0]
+        version = self._require_page_version(session, page, selected_version_id)
         if not context_version_is_visible(version, actor):
             raise PageNotFoundError("page version not found")
         return page, version
@@ -835,7 +838,7 @@ class PageService:
             # no published version yet, and even then must not hand back a
             # DIFFERENT author's private `editing` row: this actor may hold no
             # relationship to it at all beyond editor/owner role.
-            fallback_id = _hidden_editing_id_replaced_with_published(
+            fallback_id = _editable_target_or_published(
                 page, page.current_version_id, actor_kind, actor_id
             )
             version = self._require_page_version(
@@ -3282,6 +3285,7 @@ class PageService:
                 )
             ):
                 if title_changed or metadata_changed:
+                    current.last_saved_at = utc_now()
                     if not stage_metadata:
                         apply_page_metadata(
                             page,
@@ -3581,6 +3585,7 @@ class PageService:
             ):
                 current.editing_revision += 1
                 if title_changed or metadata_changed or placement_changed:
+                    current.last_saved_at = utc_now()
                     if not stage_metadata:
                         apply_page_metadata(
                             page,
@@ -5044,7 +5049,7 @@ class PageService:
         # applies to BOTH `visible_version_id` and `_payload_from_page`'s own
         # `current_version_id` field (which otherwise defaults to the raw
         # page-global pointer -- safe only for a true self-view response).
-        safe_current_id = _hidden_editing_id_replaced_with_published(
+        safe_current_id = _editable_target_or_published(
             page, current.id, actor_kind, actor_id
         )
         return self._payload_from_page(
@@ -5238,6 +5243,7 @@ class PageService:
         version.block_map = prepared_block_map
         version.body_md = body_md
         version.content_hash = prepared.content_hash
+        version.last_saved_at = utc_now()
 
     def _settle_autosave_reviews_of_open_edit(
         self,
@@ -5775,8 +5781,14 @@ class PageService:
         if open_edit is not None and open_edit.id == version_id:
             return open_edit
         if open_edit is None:
-            if self.actor_context is not None and not context_page_visible(
-                page, self.actor_context, workspace_id=page.workspace_id
+            # Draft-read visibility also includes other authors' work. Writes
+            # retain the actor-specific editing base and its opaque miss.
+            if self.actor_context is not None and (
+                page.lifecycle_status == "archived"
+                or self._editable_version_id_for_actor(
+                    session, page, actor_kind, actor_id
+                )
+                is None
             ):
                 raise PageNotFoundError("page not found")
             raise PageConflictError(
@@ -6338,26 +6350,15 @@ def _draft_review_reason(statuses: list[str]) -> DraftReviewReason | None:
     return None
 
 
-def _hidden_editing_id_replaced_with_published(
+def _editable_target_or_published(
     page: ContextPage, candidate: UUID | None, actor_kind: str, actor_id: str
 ) -> UUID | None:
-    """``candidate``, unless it might name someone else's private `editing` row.
+    """Choose a resumable edit target, falling back from another actor's work.
 
-    Shared by call sites that only have the raw ``actor_kind``/``actor_id``
-    strings this codebase's write methods take (not a full ``ActorContext``)
-    but still must not hand back a DIFFERENT author's private editing head,
-    even as a bare id -- P2.2/P2.6, same rule as `_editable_head_for_actor`
-    and `editing_row_hidden_from_actor`.
-
-    There is no session here to look up an arbitrary ``candidate`` id's own
-    row, so this can only PROVE safety for ids it can inspect without one:
-    the published id (trivially safe), `latest_draft_version_id`, and
-    `current_version_id` (both inspectable via their loaded relationships --
-    a page that has never published can have `current_version_id` name an
-    `editing` row directly, with `latest_draft_version_id` staying `None`
-    the whole time, so both must be checked independently rather than
-    assuming they always name the same row). A `candidate` naming neither
-    pointer is not provably safe -- replaced rather than assumed so.
+    Editing rows are readable by other editors, but only their author can
+    resume that session. Callers also use this target in write conflicts.
+    Without a session, inspect only the loaded current/latest relationships;
+    an unrecognized candidate falls back to the published version.
     """
 
     if candidate is None or candidate == page.current_published_version_id:
@@ -6393,32 +6394,18 @@ def _editable_head_for_actor(
     can_read_drafts: bool,
     actor: ActorContext | None = None,
 ) -> UUID | None:
-    """The head this actor may edit -- and may know about.
+    """The actor's edit target, independently of the default body selection.
 
-    ``current_version_id`` follows the draft once a session stages one, so
-    handing it to everyone answers "does an unpublished draft exist?" for an
-    actor who is not allowed to ask: the id differs from the published pointer
-    exactly when a draft is open. An actor who cannot see drafts is told about
-    the published head, which is the newest version that actually exists for
-    them.
-
-    ``actor`` is only given on a genuine cross-actor read (``list_pages``,
-    ``read_page``'s viewer). Write-response payloads leave it ``None``: the
-    version they return is what that same actor just wrote, so there is
-    nothing to hide from them in their own response. When given, a
-    page-global ``current_version_id`` that is actually someone else's
-    private ``editing`` row -- or any other id this function cannot verify,
-    e.g. after it has diverged from `latest_draft_version_id` -- is not
-    handed out; see `_hidden_editing_id_replaced_with_published`'s docstring
-    for why an unverifiable candidate is replaced too, not assumed safe.
-    P2.2/P2.6.
+    Keep the current pointer for author-owned sessions and shared drafts.
+    Another actor's editing row remains readable by version ID but cannot
+    be adopted as this actor's resumable session.
     """
 
     if not can_read_drafts:
         return page.current_published_version_id
     if actor is None:
         return page.current_version_id
-    return _hidden_editing_id_replaced_with_published(
+    return _editable_target_or_published(
         page, page.current_version_id, actor.actor_kind, actor.actor_id
     )
 

@@ -277,8 +277,7 @@ def test_projection_uses_single_call_edge_and_hides_private_version(session_fact
         assert result.visible and result.grouping_key is not None
         assert result.resource_id == page.id
         assert result.navigation_path == (
-            f"/workspaces/{page.workspace_id}"
-            f"/context/pages/{page.id}"
+            f"/workspaces/{page.workspace_id}/context/pages/{page.id}"
         )
         assert result.operation == "read" and result.result == "succeeded"
         assert result.duration_ms == 12 and result.public_error_code is None
@@ -598,7 +597,7 @@ def test_dispatch_snapshots_actual_read_and_keeps_internal_attribute_off_wire(
     "tool",
     ["read", "fetch", "read_context_outline", "read_structure_map"],
 )
-def test_all_context_read_handlers_capture_exact_editing_revision(
+def test_context_read_handlers_capture_the_served_version_identity(
     page_service, mcp_default_actor, tool
 ):
     from backend.mcp.router import dispatch
@@ -625,16 +624,16 @@ def test_all_context_read_handlers_capture_exact_editing_revision(
 
         _sync_page_name_index(session, page=page)
         page_id, version_id, slug = page.id, version.id, page.slug
+        published_id, published_body = published.id, published.body_md
     target = {
         "read": {"target_type": "context_page_version", "target_id": str(version_id)},
         "fetch": {"id": str(page_id), "type": "context_page"},
         "read_concept": {"path": f"/context/{slug}.md", "include_neighbors": False},
         "read_context_outline": {
-            "page_id": str(page_id), "version_id": str(version_id)
+            "page_id": str(page_id),
+            "version_id": str(version_id),
         },
-        "read_structure_map": {
-            "page_id": str(page_id), "version_id": str(version_id)
-        },
+        "read_structure_map": {"page_id": str(page_id), "version_id": str(version_id)},
     }[tool]
     response = dispatch(
         tool,
@@ -644,12 +643,17 @@ def test_all_context_read_handlers_capture_exact_editing_revision(
     )
     assert response.envelope.result_status == "succeeded"
     projection = response._served_read_projection
-    assert projection["version_id"] == str(version_id)
-    assert projection["editing_revision"] == 7
-    assert (
-        projection["content_identity"]
-        == hashlib.sha256(b"# Editing\n\nserved revision seven").hexdigest()
-    )
+    if tool == "fetch":
+        # Fetch has no version selector: its served identity is the published
+        # default, even though open_drafts announces the editing version.
+        assert projection["version_id"] == str(published_id)
+        assert projection["editing_revision"] is None
+        body = published_body
+    else:
+        assert projection["version_id"] == str(version_id)
+        assert projection["editing_revision"] == 7
+        body = "# Editing\n\nserved revision seven"
+    assert projection["content_identity"] == hashlib.sha256(body.encode()).hexdigest()
     assert "read_projection" not in response.model_dump_json()
 
 

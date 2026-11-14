@@ -20,6 +20,7 @@ EXPECTED_TOOLS = {
     "guide",
     "list_agent_categories",
     "list_changes",
+    "list_context_drafts",
     "list_my_workspaces",
     "list_requested_changes",
     "read",
@@ -71,6 +72,7 @@ def test_tool_descriptors_expose_required_role_metadata():
 
     assert tools["list_my_workspaces"].meta["required_role"] is None
     assert tools["read"].meta["required_role"] == "viewer"
+    assert tools["list_context_drafts"].meta["required_role"] == "viewer"
     assert tools["create_context_page"].meta["required_role"] == "editor"
     assert tools["get_operation_status"].meta["required_role"] == "editor"
 

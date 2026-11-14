@@ -173,14 +173,11 @@ def context_version_is_visible(
         return True
     if not actor_can_read_drafts(actor):
         return False
-    # P2.2/P2.6: naming a private `editing` row by its exact version_id must
-    # not bypass the same author-only check `context_visibility.py`'s
-    # pointer-based lookups apply -- draft-read capability alone answers
-    # "may this actor see SOME unpublished content", not "may this actor see
-    # THIS specific author's unshared editing".
-    from backend.repositories.context_visibility import editing_row_hidden_from_actor
+    # Editing rows share the ordinary draft-read boundary. Discarded work
+    # keeps its author-only visibility until its later physical cleanup.
+    from backend.repositories.context_visibility import discarded_row_hidden_from_actor
 
-    return not editing_row_hidden_from_actor(version, actor)
+    return not discarded_row_hidden_from_actor(version, actor)
 
 
 def context_parent_projection(

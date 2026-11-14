@@ -3,12 +3,10 @@
 from collections import defaultdict
 from urllib.parse import urlsplit
 
-from sqlalchemy.orm import selectinload
-
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.library import LibraryItem
-from backend.repositories.context_visibility import visible_context_version_id
+from backend.repositories.context_visibility import visible_context_version_ids
 from backend.repositories.workspace_scoped import select_in_workspace_by_ids
 from backend.services.library_canonical import effective_library_markdown_many
 from backend.utils.markdown_anchors import markdown_fragment_statuses
@@ -44,23 +42,11 @@ def reference_location_warnings(session, *, workspace_id, entries, resolved, act
         kind: {rid for rkind, rid in fragments if rkind == kind}
         for kind in ("context_page", "library_item", "agent_page")
     }
-    columns = (
-        ContextPageVersion.id,
-        ContextPageVersion.version_status,
-        ContextPageVersion.created_by_actor_kind,
-        ContextPageVersion.created_by_actor_id,
+    pages = load(ContextPage, requested["context_page"])
+    defaults = visible_context_version_ids(
+        session, workspace_id=workspace_id, pages=pages.values(), actor=actor
     )
-    pages = load(
-        ContextPage,
-        requested["context_page"],
-        options=(
-            selectinload(ContextPage.current_version).load_only(*columns),
-            selectinload(ContextPage.latest_draft_version).load_only(*columns),
-        ),
-    )
-    heads = {
-        page.id: visible_context_version_id(page, actor)[0] for page in pages.values()
-    }
+    heads = {page_id: selected[0] for page_id, selected in defaults.items()}
     versions = load(
         ContextPageVersion, {head for head in heads.values() if head is not None}
     )

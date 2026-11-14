@@ -811,13 +811,34 @@ describe("ContextScreen", () => {
   });
 
   it("says a displayed draft is unpublished and names the reader-visible head", async () => {
-    await renderDecisionLog();
+    const fetchMock = await renderDecisionLog();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const response = await originalFetch(input, init);
+      if (String(input).endsWith(`/context/pages/${SECOND_PAGE_ID}`)) {
+        const body = await response.json();
+        return jsonResponse({ data: {
+          ...body.data,
+          draft: {
+            author: { actor_kind: "human", actor_id: "author-closed", display_name: "Earlier Author" },
+            last_saved_at: "2026-05-10T00:00:00Z", is_editing: false,
+            review: { id: "closed-review", status: "rejected" }, is_behind: null,
+          },
+          open_drafts: { total: 0, items: [], next_cursor: null },
+        } });
+      }
+      return response;
+    });
     await userEvent.click(
       screen.getByRole("treeitem", { name: "Architecture Notes" }),
     );
 
     expect(await screen.findByText("Selected second page")).toBeInTheDocument();
     expect(screen.getByText("Editing draft")).toBeInTheDocument();
+    expect(screen.getByText("Draft · Not published")).toBeInTheDocument();
+    expect(screen.getByText("Earlier Author")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Rejected" })).toBeInTheDocument();
+    expect(screen.getByText("0 open drafts")).toBeInTheDocument();
     const readerVersion = screen.getByRole("button", {
       name: /Readers see v2; open this version in History/,
     });
@@ -835,6 +856,85 @@ describe("ContextScreen", () => {
       1,
     );
     await waitFor(() => expect(publishedRow).toHaveFocus());
+  });
+
+  it("pages through open drafts, reads their exact versions and fences late reads after returning to published", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const pageUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
+    const base = (await (await originalFetch(pageUrl, undefined)).json()).data;
+    const author = { actor_kind: "human", actor_id: "author-1", display_name: "Draft Author" };
+    const writing = {
+      version_id: "writing-1", version_status: "editing", author,
+      last_saved_at: "2026-05-11T01:00:00Z", is_editing: true,
+      review: null, is_behind: false, is_mine: false, state: "writing",
+    };
+    const reviewing = {
+      ...writing, version_id: "reviewing-1", version_status: "draft", is_editing: false,
+      author: { ...author, display_name: "Review Author" },
+      review: { id: "review-1", status: "pending" }, state: "reviewing",
+    };
+    const openDrafts = { total: 2, items: [writing], next_cursor: "draft-cursor" };
+    const pending = deferredResponse();
+    let delayWriting = false;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `${new URL(pageUrl).pathname}/drafts`) {
+        expect(url.searchParams.get("limit")).toBe("5");
+        if (!url.searchParams.has("cursor")) return jsonResponse({ data: openDrafts });
+        expect(url.searchParams.get("cursor")).toBe("draft-cursor");
+        return jsonResponse({ data: { total: 2, items: [reviewing], next_cursor: null } });
+      }
+      if (url.pathname === new URL(pageUrl).pathname) {
+        const selected = url.searchParams.get("version_id");
+        if (selected === "writing-1" && delayWriting) return pending.promise;
+        const draft = selected === "writing-1" ? writing : selected === "reviewing-1" ? reviewing : null;
+        return jsonResponse({ data: {
+          ...base, open_drafts: openDrafts, draft,
+          version_id: draft?.version_id ?? "version-1",
+          version_status: draft?.version_status ?? "published_snapshot",
+          body_md: draft ? `Selected ${draft.version_id}` : "Published body",
+        } });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
+        <HistoryButtons />
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Published body");
+    await userEvent.click(screen.getByText("2 open drafts"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "More drafts" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "More drafts" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Review Author/ }));
+    await screen.findByText("Selected reviewing-1");
+    expect(screen.getByText("Draft · Not published")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Pending" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Back to published version" }));
+    await screen.findByText("Published body");
+
+    await userEvent.click(screen.getByText("2 open drafts"));
+    await userEvent.click(screen.getByRole("button", { name: /Draft Author/ }));
+    await screen.findByText("Selected writing-1");
+    expect(screen.getByText("Draft · Not published")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Back to published version" }));
+    await screen.findByText("Published body");
+
+    delayWriting = true;
+    await userEvent.click(screen.getByText("2 open drafts"));
+    await userEvent.click(screen.getByRole("button", { name: /Draft Author/ }));
+    expect(screen.queryByText("Published body")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await screen.findByText("Published body");
+    await act(async () => pending.resolve(jsonResponse({ data: {
+      ...base, version_id: "writing-1", version_status: "editing", draft: writing,
+      open_drafts: openDrafts, body_md: "Late writing body",
+    } })));
+    expect(screen.queryByText("Late writing body")).not.toBeInTheDocument();
+    expect(screen.getByText("Published body")).toBeInTheDocument();
   });
 
   it("presents the reader-visible version as one described action with a decorative arrow", async () => {

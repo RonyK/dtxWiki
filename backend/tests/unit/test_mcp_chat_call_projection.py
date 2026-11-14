@@ -238,24 +238,24 @@ def test_input_version_number_resolves_exact_input_not_latest_or_result(
         ]
 
 
-def test_input_version_number_does_not_expose_another_authors_private_version(
+def test_input_version_number_hides_draft_versions_from_viewers(
     session_factory,
 ):
     with session_factory.begin() as session:
         workspace, client, owner = _setup(session)
         page, _ = _published_page(
-            session, workspace.id, "private-version-input", "Guide"
+            session, workspace.id, "draft-version-input", "Guide"
         )
-        private = _version(
+        editing = _version(
             session, page, status="editing", author=str(uuid4()), number=37
         )
         chat = _Chat(session, workspace, client, owner)
         call = chat.call(
             "update_context_edit",
-            {"page_id": str(page.id), "version_id": str(private.id)},
+            {"page_id": str(page.id), "version_id": str(editing.id)},
             links=[_page_link(page, McpChatArtifactVerb.EDITED)],
         )
-        item = _item(chat.read(_human(owner.id, workspace.id)), call)
+        item = _item(chat.read(_human(owner.id, workspace.id, role="viewer")), call)
         assert not any(
             entry.key == "input_version" for entry in item.input_display_items
         )
@@ -713,9 +713,7 @@ def test_the_callers_own_discarded_page_reads_as_a_discarded_edit(session_factor
 
 
 def test_previews_follow_the_visibility_of_the_edited_version(session_factory):
-    """The page may be public while the edit went into its author's private
-    editing row. The call stays visible to everyone who can see the page; the
-    text it wrote is shown only to readers who can see that row."""
+    """Other editors can read an editing row and its traced edit previews."""
 
     with session_factory.begin() as session:
         workspace, client, owner = _setup(session)
@@ -733,41 +731,42 @@ def test_previews_follow_the_visibility_of_the_edited_version(session_factory):
         chat = _Chat(session, workspace, client, owner)
         call = chat.call(
             "patch_context_edit",
-            _patch_arguments(page.id, editing.id, new_text="PRIVATE-EDIT-TEXT"),
+            _patch_arguments(page.id, editing.id, new_text="SHARED-EDIT-TEXT"),
             links=(_page_link(page, McpChatArtifactVerb.EDITED),),
         )
         owner_view = _item(chat.read(_human(owner.id, workspace.id)), call)
         other_view = _item(chat.read(_human(uuid4(), workspace.id)), call)
 
     assert owner_view.input_summary["operations"][0]["new_text_preview"] == {
-        "text": "PRIVATE-EDIT-TEXT",
+        "text": "SHARED-EDIT-TEXT",
         "truncated": False,
     }
     owner_previews = owner_view.edit_summary.operations[0].previews
     assert [(preview.field, preview.text) for preview in owner_previews] == [
         ("old_text", "old words"),
-        ("new_text", "PRIVATE-EDIT-TEXT"),
+        ("new_text", "SHARED-EDIT-TEXT"),
     ]
 
     assert other_view.redaction_reason is None
     assert other_view.headline == "Edited: Preview Gate"
-    assert "PRIVATE-EDIT-TEXT" not in other_view.model_dump_json()
-    assert "old words" not in other_view.model_dump_json()
+    assert "SHARED-EDIT-TEXT" in other_view.model_dump_json()
+    assert "old words" in other_view.model_dump_json()
     other_operations = other_view.edit_summary.operations
     assert [operation.op for operation in other_operations] == [
         "replace_text",
         "insert_after",
     ]
-    assert all(operation.previews == [] for operation in other_operations)
-    assert other_view.edit_summary.previews_withheld is True
+    assert [preview.model_dump() for preview in other_operations[0].previews] == [
+        preview.model_dump() for preview in owner_previews
+    ]
+    assert other_view.edit_summary.previews_withheld is False
     assert owner_view.edit_summary.previews_withheld is False
-    # The hidden-version projection is an allowlist that keeps no digests, so
-    # there is nothing to estimate sizes from; only a server receipt's counts
-    # would survive (none was recorded here).
-    assert other_operations[0].chars_added is None
-    assert other_operations[0].chars_removed is None
-    for heading_or_block in ("Guide", "Setup", "b_2"):
-        assert heading_or_block not in other_view.model_dump_json()
+    assert other_operations[0].chars_added == len("SHARED-EDIT-TEXT")
+    assert other_operations[0].chars_removed == len("old words")
+    for heading in ("Guide", "Setup"):
+        assert heading in other_view.model_dump_json()
+    # Trace capture digests raw block addresses for every reader.
+    assert "b_2" not in other_view.model_dump_json()
 
 
 def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
@@ -824,7 +823,9 @@ def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
             },
             links=(_page_link(page, McpChatArtifactVerb.EDITED),),
         )
-        other_view = _item(chat.read(_human(uuid4(), workspace.id)), call)
+        other_view = _item(
+            chat.read(_human(uuid4(), workspace.id, role="viewer")), call
+        )
         owner_view = _item(chat.read(_human(owner.id, workspace.id)), call)
 
     assert other_view.input_summary == {
@@ -1205,8 +1206,8 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
         "write_reason"
     }
 
-    # Someone else's open editing row is private; their submitted draft is not.
-    assert _item(other_detail, last).session_diff is None
+    # Editors can inspect both the open working row and the submitted draft.
+    assert _item(other_detail, last).session_diff == last_diff
     assert _item(other_detail, submit).session_diff is not None
 
 

@@ -16,6 +16,7 @@ from backend.schemas.common import (
     RetrievalMode,
     SearchScope,
 )
+from backend.schemas.context_drafts import ContextDraftInfo, OpenDrafts
 from backend.schemas.context_edit import SectionAddress
 from backend.schemas.document_reference import ReferenceView
 from backend.schemas.mcp.context_projection import (
@@ -307,6 +308,14 @@ class ConceptNeighbors(BaseModel):
 
 
 class ReadConceptOutput(BaseModel):
+    draft: ContextDraftInfo | None = None
+    open_drafts: OpenDrafts | None = Field(
+        default=None,
+        description=(
+            "Current Context draft summary. Omitted for historical as_of "
+            "reads and non-Context targets."
+        ),
+    )
     envelope: MCPResultEnvelope
     status: Literal["found", "redirected", "ambiguous", "not_found"] | None = None
     path: str | None = None
@@ -351,7 +360,8 @@ class ReadConceptOutput(BaseModel):
 # side effects (no row is opened when there is none).
 ContextReadVersion = Literal["visible", "draft", "published", "my_edit"]
 _CONTEXT_READ_VERSION_DESCRIPTION = (
-    "Which version to read: 'visible' (default; what this caller sees), "
+    "Which version to read: 'visible' (default; published, or latest saved "
+    "draft when never published), "
     "'draft', 'published', or 'my_edit' -- your own open editing row, the "
     "exact body patch_context_edit edits (no_open_edit when this page is "
     "visible but you have none; it never opens one). An explicit version_id "
@@ -410,6 +420,14 @@ class ReadContextOutlineInput(ContextPartialReadInput):
 
 
 class ContextOutlineDocument(BaseModel):
+    draft: ContextDraftInfo | None = None
+    open_drafts: OpenDrafts | None = Field(
+        default=None,
+        description=(
+            "Open draft summary on the first response. Omitted on cursor "
+            "continuation; use list_context_drafts for the current list."
+        ),
+    )
     page_id: UUID
     version_id: UUID
     version_status: str
@@ -568,6 +586,14 @@ class StructureMapBlock(BaseModel):
 
 
 class StructureMapDocument(BaseModel):
+    draft: ContextDraftInfo | None = None
+    open_drafts: OpenDrafts | None = Field(
+        default=None,
+        description=(
+            "Open draft summary on the first response. Omitted on cursor "
+            "continuation; use list_context_drafts for the current list."
+        ),
+    )
     page_id: UUID
     version_id: UUID
     version_status: str
@@ -716,6 +742,22 @@ class GrepWikiInput(MCPConversationInput):
 class GrepWikiOutput(BaseModel):
     envelope: MCPResultEnvelope
     matches: list[dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ListContextDraftsInput(MCPConversationInput):
+    workspace_id: UUID
+    page_id: MCPPageInput
+    limit: int = Field(default=5, ge=1, le=100)
+    cursor: str | None = Field(default=None, max_length=2048)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ListContextDraftsOutput(BaseModel):
+    envelope: MCPResultEnvelope
+    data: OpenDrafts | None = None
 
     model_config = ConfigDict(extra="forbid")
 

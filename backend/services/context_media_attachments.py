@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from backend.context_media.domain import ContextMediaAttachmentProjection
+from backend.context_media.domain import ActorIdentity, ContextMediaAttachmentProjection
 
 _CURSOR_PREFIX = "attach1:"
 
@@ -88,10 +88,9 @@ def attachment_read_projection(
     and forgetting it should fail loudly rather than quietly render a raw actor
     id at a person.
 
-    ``caller_may_delete`` narrows the domain's own ``can_delete``. The
-    page-scoped listing can publish the domain answer unqualified because that
-    route is already editor-gated; this one is readable by a viewer, so without
-    the role term the UI would offer a delete button that 403s.
+    ``caller_may_delete`` supplies the role boundary. The domain additionally
+    preserves ownership for open-session uploads, including uploads that
+    another editor can now read.
     """
 
     asset = projection.asset
@@ -117,7 +116,10 @@ def attachment_read_projection(
             record.created_by.kind == viewer_actor_kind
             and str(record.created_by.id) == viewer_actor_id
         ),
-        "can_delete": asset.can_delete and caller_may_delete,
+        "can_delete": asset.can_delete_by(
+            ActorIdentity(viewer_actor_kind, viewer_actor_id)
+        )
+        and caller_may_delete,
         "usage_token": asset.usage_token,
         "content_url": attachment_content_url(
             workspace_id=workspace_id,

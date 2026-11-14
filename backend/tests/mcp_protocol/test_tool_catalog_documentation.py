@@ -92,6 +92,7 @@ REQUIRED_SKILL_TOOLS = {
         "read",
         "read_context_outline",
         "read_structure_map",
+        "list_context_drafts",
     ),
 }
 

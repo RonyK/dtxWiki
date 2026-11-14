@@ -28,7 +28,8 @@ from sqlalchemy.orm import Session
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
-from backend.services.context_visibility import visible_context_version_id
+from backend.repositories.workspace_scoped import select_in_workspace_by_ids
+from backend.services.context_visibility import visible_context_version_ids
 from backend.services.index_refs import (
     IndexRefKind,
     format_index_ref,
@@ -150,6 +151,7 @@ def build_routing_index(
             projection,
             target.id,
             actor,
+            workspace_id=workspace_id,
             token_budget=GET_INDEX_NODE_TOKEN_BUDGET - header_tokens,
         )
         markdown = "\n".join([header, "", *lines]).rstrip() + "\n"
@@ -175,6 +177,7 @@ def build_routing_index(
             projection,
             root.id,
             actor,
+            workspace_id=workspace_id,
             token_budget=section_budget,
         )
         lines.extend(section_lines or ["_(none)_"])
@@ -348,6 +351,7 @@ def _node_entry_lines(
     node_id: UUID,
     actor: ActorContext | None,
     *,
+    workspace_id: UUID,
     token_budget: int,
 ) -> tuple[list[str], list[IndexEntry], int]:
     children = projection.visible_children(node_id, folders_first=True)
@@ -365,11 +369,21 @@ def _node_entry_lines(
     descriptions: dict[UUID, str] = {}
     drafts: dict[UUID, bool] = {}
     if page_ids:
-        for page in session.scalars(
-            select(ContextPage).where(ContextPage.id.in_(page_ids))
-        ).all():
-            pages[page.id] = page
-            version_id, is_draft = visible_context_version_id(page, actor)
+        pages = {
+            page.id: page
+            for page in session.scalars(
+                select_in_workspace_by_ids(
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    resource_ids=page_ids,
+                )
+            )
+        }
+        defaults = visible_context_version_ids(
+            session, workspace_id=workspace_id, pages=pages.values(), actor=actor
+        )
+        for page in pages.values():
+            version_id, is_draft = defaults[page.id]
             drafts[page.id] = is_draft
             if version_id is not None:
                 descriptions[page.id] = version_id  # placeholder: resolved below

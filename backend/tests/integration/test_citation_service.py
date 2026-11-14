@@ -121,9 +121,12 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(
         assert edit.editing_revision == 1
         assert not list(session.scalars(select(ContextDocumentReference)))
         edit.body_md = "# Owner"
+        edit.last_saved_at = utc_now() - timedelta(days=1)
         session.flush()
+        saved_before_reference_edit = edit.last_saved_at
         first = service.cite(session, ws_id, command, actor=ACTOR)
         assert first.editing_revision == 2
+        assert edit.last_saved_at > saved_before_reference_edit
         assert first.added[0].target_id == target_id
         assert session.get(ContextPageVersion, edit_id).body_md == "# Owner"
         links = derive_artifact_links(

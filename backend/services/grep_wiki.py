@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.policy.auth import ActorContext
-from backend.services.context_visibility import visible_context_version_id
+from backend.services.context_visibility import searchable_context_version_id
 from backend.services.okf import context_concept_path
 from backend.utils.markdown_outline import parse_outline
 
@@ -65,7 +65,7 @@ def grep_wiki(
         .order_by(ContextPage.title.asc())
     ).all()
     for page in pages:
-        version_id, _is_draft = visible_context_version_id(page, actor)
+        version_id, _is_draft = searchable_context_version_id(page, actor)
         if version_id is None:
             continue
         version = session.get(ContextPageVersion, version_id)

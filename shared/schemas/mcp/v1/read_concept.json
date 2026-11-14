@@ -124,6 +124,184 @@
         "title": "ConceptNeighbors",
         "type": "object"
       },
+      "ContextDraftAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Display Name"
+          }
+        },
+        "required": [
+          "actor_kind",
+          "actor_id"
+        ],
+        "title": "ContextDraftAuthor",
+        "type": "object"
+      },
+      "ContextDraftInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/ContextDraftAuthor"
+          },
+          "is_behind": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.",
+            "title": "Is Behind",
+            "x-wire-explicit": true
+          },
+          "is_editing": {
+            "title": "Is Editing",
+            "type": "boolean"
+          },
+          "last_saved_at": {
+            "format": "date-time",
+            "title": "Last Saved At",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "author",
+          "last_saved_at",
+          "is_editing"
+        ],
+        "title": "ContextDraftInfo",
+        "type": "object"
+      },
+      "ContextDraftReview": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "ContextDraftReview",
+        "type": "object"
+      },
+      "ContextDraftSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/ContextDraftAuthor"
+          },
+          "is_behind": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.",
+            "title": "Is Behind",
+            "x-wire-explicit": true
+          },
+          "is_editing": {
+            "title": "Is Editing",
+            "type": "boolean"
+          },
+          "is_mine": {
+            "title": "Is Mine",
+            "type": "boolean"
+          },
+          "last_saved_at": {
+            "format": "date-time",
+            "title": "Last Saved At",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "state": {
+            "enum": [
+              "writing",
+              "reviewing"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "enum": [
+              "editing",
+              "draft"
+            ],
+            "title": "Version Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "author",
+          "last_saved_at",
+          "is_editing",
+          "version_id",
+          "version_status",
+          "is_mine",
+          "state"
+        ],
+        "title": "ContextDraftSummary",
+        "type": "object"
+      },
       "EnvelopeWarning": {
         "additionalProperties": false,
         "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
@@ -636,6 +814,38 @@
         "title": "NeighborEntry",
         "type": "object"
       },
+      "OpenDrafts": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/ContextDraftSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Cursor"
+          },
+          "total": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "OpenDrafts",
+        "type": "object"
+      },
       "TextMatchCandidate": {
         "additionalProperties": false,
         "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
@@ -731,6 +941,17 @@
         "default": null,
         "title": "Content"
       },
+      "draft": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContextDraftInfo"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "envelope": {
         "$ref": "#/$defs/MCPResultEnvelope"
       },
@@ -782,6 +1003,18 @@
           }
         ],
         "default": null
+      },
+      "open_drafts": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/OpenDrafts"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Current Context draft summary. Omitted for historical as_of reads and non-Context targets."
       },
       "page_id": {
         "anyOf": [

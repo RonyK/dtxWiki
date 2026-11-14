@@ -118,6 +118,7 @@ class CitationService:
             audit_event_id = None
             if changed:
                 version.editing_revision += 1
+                version.last_saved_at = utc_now()
                 page.updated_at = utc_now()
                 event = self.audit_service.emit(
                     session=session,

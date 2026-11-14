@@ -79,6 +79,8 @@ from backend.schemas.mcp.read_tools import (
     ListAgentCategoriesOutput,
     ListChangesInput,
     ListChangesOutput,
+    ListContextDraftsInput,
+    ListContextDraftsOutput,
     ListMyWorkspacesInput,
     ListMyWorkspacesOutput,
     ReadAgentPageInput,
@@ -191,6 +193,13 @@ TOOL_META = {
         "Read workspace entity",
         "Read a specific context, source, artifact, feedback, or change entity "
         "by target_type and target_id.",
+        True,
+    ),
+    "list_context_drafts": (
+        "List Context drafts",
+        "List saved open drafts for a Context page, newest save first. "
+        "Editors can read other authors' drafts; viewer results are empty. "
+        "Pass next_cursor to read the remainder. Reading never opens an edit.",
         True,
     ),
     "list_changes": (
@@ -540,6 +549,11 @@ def list_dtxwiki_tools(tool_names: Iterable[str] | None = None) -> list[Tool]:
             "read_concept",
             ReadConceptInput.model_json_schema(),
             ReadConceptOutput.model_json_schema(),
+        ),
+        tool(
+            "list_context_drafts",
+            ListContextDraftsInput.model_json_schema(),
+            ListContextDraftsOutput.model_json_schema(),
         ),
         tool(
             "list_changes",

@@ -317,9 +317,10 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     # P8.1: the version row's own last-saved timestamp, distinct from
     # `created_at` (set once, at insert). Updated on every real autosave so
     # a caller can show "last saved at" without conflating it with when the
-    # row was first opened.
+    # row was first opened. Authored save paths stamp this explicitly;
+    # publication, review and storage bookkeeping must not change it.
     last_saved_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False, default=utc_now, onupdate=utc_now
+        UTCDateTime(), nullable=False, default=utc_now
     )
     # Write-time navigational description (first prose paragraph, <=200 chars).
     # NULL on legacy rows = derive at read time; reindex backfills (rebuildable).

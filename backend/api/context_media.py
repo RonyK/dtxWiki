@@ -295,7 +295,10 @@ def create_context_media_router(
         )
         return {
             "data": [
-                _asset_payload(item, workspace_id=workspace_id) for item in projections
+                _asset_payload(
+                    item, workspace_id=workspace_id, actor=_actor_identity(actor)
+                )
+                for item in projections
             ]
         }
 
@@ -597,7 +600,10 @@ def _actor_identity(actor: ActorContext) -> ActorIdentity:
 
 
 def _asset_payload(
-    projection: ContextMediaAssetProjection, *, workspace_id: UUID
+    projection: ContextMediaAssetProjection,
+    *,
+    workspace_id: UUID,
+    actor: ActorIdentity,
 ) -> dict[str, object]:
     asset = projection.asset
     return {
@@ -613,7 +619,7 @@ def _asset_payload(
             projection.current_published_reference_count
         ),
         "historical_reference_count": projection.historical_reference_count,
-        "can_delete": projection.can_delete,
+        "can_delete": projection.can_delete_by(actor),
         "usage_token": projection.usage_token,
         "content_url": (
             f"/api/v1/workspaces/{workspace_id}/context/pages/{asset.page_id}"

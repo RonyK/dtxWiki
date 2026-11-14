@@ -82,6 +82,7 @@
       "guide": "워크스페이스 가이드 보기",
       "list_agent_categories": "에이전트 카테고리 목록",
       "list_changes": "변경 기록 목록",
+      "list_context_drafts": "컨텍스트 초안 목록",
       "list_my_context_edits": "내 편집 중인 컨텍스트 목록",
       "list_my_workspaces": "내 워크스페이스 목록",
       "list_requested_changes": "수정 요청 목록",

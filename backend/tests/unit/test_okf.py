@@ -293,7 +293,7 @@ def test_resolve_context_concept_honors_draft_visibility(session_factory):
         )
 
 
-def test_draft_capable_actor_reads_draft_head_over_published(session_factory):
+def test_draft_capable_actor_keeps_search_head_and_published_index(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         page = _add_context_page(
@@ -335,6 +335,6 @@ def test_draft_capable_actor_reads_draft_head_over_published(session_factory):
     assert editor_version.body_md == "Draft body."
     assert viewer_version.body_md == "Published body."
     assert (
-        f"- [Dual Head]({format_index_ref('context', page.id)}) (draft)"
+        f"- [Dual Head]({format_index_ref('context', page.id)})"
         in editor_index
     )

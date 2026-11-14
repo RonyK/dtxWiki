@@ -35,10 +35,6 @@ from backend.models.mcp_trace import MCPToolCall
 from backend.models.workspace import MCPClient
 from backend.policy.auth import ActorContext
 from backend.policy.mcp_scopes import FOCUSED_READ_TOOLS
-from backend.repositories.context_visibility import (
-    PRIVATE_VERSION_STATUSES,
-    editing_row_hidden_from_actor,
-)
 from backend.repositories.mcp_chat_projection import (
     ChatPageProjection,
     ProjectionLink,
@@ -1694,7 +1690,7 @@ class McpChatService:
         shared_only: bool = False,
     ) -> tuple[str | None, str | None]:
         # ``shared_only`` (the reader-less stored labels) additionally hides a
-        # page only its author can see; see _author_private_page.
+        # page only its author can see; see _discarded_only_page.
         #
         # Chat history stores artifact ids captured under the acting client's
         # permissions; a later reader must be re-checked. Workspace ownership is
@@ -1786,20 +1782,8 @@ class McpChatService:
             # asymmetry as the archived-page check below.
             if actor is not None and asset.association_state == "tombstoned":
                 return None, None
-            # Page-bound: the asset is only as visible as the page that
-            # carries it (same rule as the CONTEXT_PAGE branch above), AND
-            # -- P3.1/P3.2 -- as visible as the specific version it was
-            # created for. Every asset is page-owned now (no more page-less
-            # "session" ownership), but a page being visible at all does not
-            # mean every asset registered against it is: page-first creation
-            # can register an asset against a private "editing" row on a
-            # page that separately has its own visible
-            # head (a published version, or a different author's shared
-            # draft). Checking only the page here would leak an unshared
-            # editing session's upload the same way P2.6 (PageNameIndex/FTS)
-            # leaked names/body text through an analogous gap -- confirmed
-            # reachable now that page-bound-but-private assets are possible,
-            # which they were not before P2/P3 existed.
+            # Media provenance follows both page and creating-version access.
+            # Editing is visible to editors; discarded work stays author-only.
             page = get_in_workspace(
                 session,
                 ContextPage,
@@ -1812,13 +1796,14 @@ class McpChatService:
                 page, actor, workspace_id=workspace_id
             ):
                 return None, None
-            if shared_only and _author_private_page(page):
+            if shared_only and _discarded_only_page(page):
                 return None, None
             created_for_version = session.get(
                 ContextPageVersion, asset.created_for_version_id
             )
-            if actor is not None and editing_row_hidden_from_actor(
-                created_for_version, actor
+            if actor is not None and (
+                created_for_version is None
+                or not context_version_is_visible(created_for_version, actor)
             ):
                 return None, None
             return asset.original_filename, context_page_url(workspace_id, page.id)
@@ -2257,7 +2242,7 @@ def _context_page_title_and_path(
     """A Context page's label and route, if ``actor`` may see the page.
 
     ``page`` was loaded by workspace scope; ``actor is None`` is the trusted
-    internal read, and ``shared_only`` additionally hides an author-private page.
+    internal read, and ``shared_only`` additionally hides a discarded-only page.
     """
 
     if page is None:
@@ -2266,22 +2251,17 @@ def _context_page_title_and_path(
         page, actor, workspace_id=workspace_id
     ):
         return None, None
-    if shared_only and _author_private_page(page):
+    if shared_only and _discarded_only_page(page):
         return None, None
     return page.title, context_page_url(workspace_id, page.id)
 
 
-def _author_private_page(page: ContextPage) -> bool:
-    """A page whose every version is author-private (open or discarded).
-
-    Until its first submit, a page-first page's title on the aggregate is
-    its author's private text. Pages with no versions at all are not
-    counted: nothing about them is private to anyone.
-    """
+def _discarded_only_page(page: ContextPage) -> bool:
+    """A page containing only discarded work, excluded from shared previews."""
 
     versions = page.versions
     return bool(versions) and all(
-        version.version_status in PRIVATE_VERSION_STATUSES for version in versions
+        version.version_status == "discarded" for version in versions
     )
 
 

@@ -4625,6 +4625,195 @@
         ],
         "type": "string"
       },
+      "ContextDraftAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          }
+        },
+        "required": [
+          "actor_kind",
+          "actor_id"
+        ],
+        "title": "ContextDraftAuthor",
+        "type": "object"
+      },
+      "ContextDraftInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/ContextDraftAuthor"
+          },
+          "is_behind": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.",
+            "title": "Is Behind",
+            "x-wire-explicit": true
+          },
+          "is_editing": {
+            "title": "Is Editing",
+            "type": "boolean"
+          },
+          "last_saved_at": {
+            "format": "date-time",
+            "title": "Last Saved At",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "author",
+          "last_saved_at",
+          "is_editing"
+        ],
+        "title": "ContextDraftInfo",
+        "type": "object"
+      },
+      "ContextDraftListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpenDrafts"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ContextDraftListResponse",
+        "type": "object"
+      },
+      "ContextDraftReview": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "ContextDraftReview",
+        "type": "object"
+      },
+      "ContextDraftSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/ContextDraftAuthor"
+          },
+          "is_behind": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.",
+            "title": "Is Behind",
+            "x-wire-explicit": true
+          },
+          "is_editing": {
+            "title": "Is Editing",
+            "type": "boolean"
+          },
+          "is_mine": {
+            "title": "Is Mine",
+            "type": "boolean"
+          },
+          "last_saved_at": {
+            "format": "date-time",
+            "title": "Last Saved At",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "writing",
+              "reviewing"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "enum": [
+              "editing",
+              "draft"
+            ],
+            "title": "Version Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "author",
+          "last_saved_at",
+          "is_editing",
+          "version_id",
+          "version_status",
+          "is_mine",
+          "state"
+        ],
+        "title": "ContextDraftSummary",
+        "type": "object"
+      },
       "ContextImageMediaType": {
         "enum": [
           "image/png",
@@ -5309,7 +5498,7 @@
       },
       "ContextMediaAttachmentPayload": {
         "additionalProperties": false,
-        "description": "One row of the workspace attachment listing.\n\nTwo deliberate departures from ``ContextMediaOrphanPayload``:\n\n``media_type`` is a plain ``str`` and ``kind`` is carried alongside it. The\norphan payload narrows the type to ``ContextImageMediaType`` (four image\nliterals), but ``context_media_asset.kind`` already admits ``audio`` and\n``video``. A workspace-wide listing is exactly where the first non-image\nasset would appear, and a ``Literal`` there turns that row into a 500 on\nresponse validation rather than a row the reader can act on.\n\n``can_delete`` answers \"may THIS caller delete this now\", not just the\ndomain's usage question -- the page-scoped listing can publish the bare\ndomain answer because that route is editor-gated, while this one is\nreadable by a viewer.",
+        "description": "One row of the workspace attachment listing.\n\nTwo deliberate departures from ``ContextMediaOrphanPayload``:\n\n``media_type`` is a plain ``str`` and ``kind`` is carried alongside it. The\norphan payload narrows the type to ``ContextImageMediaType`` (four image\nliterals), but ``context_media_asset.kind`` already admits ``audio`` and\n``video``. A workspace-wide listing is exactly where the first non-image\nasset would appear, and a ``Literal`` there turns that row into a 500 on\nresponse validation rather than a row the reader can act on.\n\n``can_delete`` answers \"may THIS caller delete this now\", combining usage,\nediting ownership and workspace role. Both listings respect editing\nownership; this workspace-wide listing is also readable by a viewer.",
         "properties": {
           "asset_id": {
             "format": "uuid",
@@ -5944,7 +6133,7 @@
       },
       "ContextPageDetail": {
         "additionalProperties": false,
-        "description": "The single canonical Context page detail shape (P9.1).\n\nA superset of ``PagePayload`` (PageService's P8-verified state-machine\nfields: ``editing_revision``, ``publish_blocked_reasons``,\n``draft_saved_at``, the privacy-projected ``parent_version_id``, etc.)\nplus the read-only projection fields the old intermediate\n``/context-pages/{page_id}`` route computed (tree placement,\nbacklinks/wikilinks, lint warnings, pending review, reconciliation\navailability) -- see ``DomainReadService.context_page_read_enrichment``,\nthe shared function that computes them. Every canonical\n``/context/pages`` REST endpoint (list item, detail, and every editing\ncommand's response) returns this one shape; there is no second,\nthinner Context page payload on this route family.",
+        "description": "Read-only Context detail with facts about the selected and open drafts.",
         "properties": {
           "aliases": {
             "items": {
@@ -5989,7 +6178,7 @@
           },
           "can_submit_for_review": {
             "default": false,
-            "description": "Whether the caller may submit this exact version for review now: its own private edit or unreviewed shared browser draft.",
+            "description": "Whether the caller may submit this exact version for review now: its own edit or unreviewed shared browser draft.",
             "title": "Can Submit For Review",
             "type": "boolean"
           },
@@ -6050,6 +6239,16 @@
               }
             ],
             "title": "Current Version Id"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextDraftInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "draft_saved_at": {
             "anyOf": [
@@ -6178,6 +6377,9 @@
               }
             ],
             "title": "Next Reconciliation Version Id"
+          },
+          "open_drafts": {
+            "$ref": "#/components/schemas/OpenDrafts"
           },
           "page_type": {
             "default": "overview",
@@ -6650,6 +6852,500 @@
           "updated_at"
         ],
         "title": "ContextPageSummary",
+        "type": "object"
+      },
+      "ContextPageWriteDetail": {
+        "additionalProperties": false,
+        "description": "Existing common Context response fields, without draft discovery facts.\n\nWrite commands preserve their original page fields and default enrichment\nvalues. Only a dedicated read computes the draft discovery metadata.",
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "alternative_draft_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alternative Draft Id"
+          },
+          "backlink_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Visible backlink count; null until requested by the inspector.",
+            "title": "Backlink Count"
+          },
+          "block_map_stale": {
+            "default": false,
+            "description": "Whether the stored block map is missing or differs from the body; a whole-body save rebuilds it.",
+            "title": "Block Map Stale",
+            "type": "boolean"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "can_submit_for_review": {
+            "default": false,
+            "description": "Whether the caller may submit this exact version for review now: its own edit or unreviewed shared browser draft.",
+            "title": "Can Submit For Review",
+            "type": "boolean"
+          },
+          "change_set_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Set Id"
+          },
+          "children_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Direct child count; null until requested by the inspector.",
+            "title": "Children Count"
+          },
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Published Version Id"
+          },
+          "current_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version Id"
+          },
+          "draft_saved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Saved At"
+          },
+          "editing_revision": {
+            "default": 1,
+            "title": "Editing Revision",
+            "type": "integer"
+          },
+          "graph_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Status"
+          },
+          "history_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "state_inconsistent",
+                  "current_editing",
+                  "current_draft",
+                  "published_snapshot",
+                  "alternative_draft",
+                  "discarded_draft",
+                  "superseded_snapshot",
+                  "superseded_draft"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History Status"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inconsistency_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inconsistency Reasons",
+            "type": "array"
+          },
+          "is_alternative": {
+            "default": false,
+            "title": "Is Alternative",
+            "type": "boolean"
+          },
+          "is_discarded": {
+            "default": false,
+            "title": "Is Discarded",
+            "type": "boolean"
+          },
+          "is_draft_head": {
+            "default": false,
+            "title": "Is Draft Head",
+            "type": "boolean"
+          },
+          "is_public": {
+            "default": false,
+            "title": "Is Public",
+            "type": "boolean"
+          },
+          "is_published_head": {
+            "default": false,
+            "title": "Is Published Head",
+            "type": "boolean"
+          },
+          "is_visible_head": {
+            "default": false,
+            "title": "Is Visible Head",
+            "type": "boolean"
+          },
+          "latest_draft_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Draft Version Id"
+          },
+          "link_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextLinkTarget"
+            },
+            "title": "Link Targets",
+            "type": "array"
+          },
+          "lint_report": {
+            "additionalProperties": true,
+            "description": "Save-time fixes and findings for the final stored body.",
+            "title": "Lint Report",
+            "type": "object"
+          },
+          "next_reconciliation_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Reconciliation Version Id"
+          },
+          "page_type": {
+            "default": "overview",
+            "enum": [
+              "overview",
+              "source",
+              "entity",
+              "concept",
+              "synthesis",
+              "comparison",
+              "decision",
+              "contradiction",
+              "query",
+              "guide"
+            ],
+            "title": "Page Type",
+            "type": "string"
+          },
+          "parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Node Id"
+          },
+          "parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Version Id"
+          },
+          "pending_draft_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Draft Version Id"
+          },
+          "pending_draft_warnings": {
+            "deprecated": true,
+            "description": "Deprecated compatibility field; always empty. Pending review state is provided by pending_review and pending_draft_version_id.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Draft Warnings",
+            "type": "array"
+          },
+          "pending_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingReviewInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preserved_as_alternative": {
+            "default": false,
+            "title": "Preserved As Alternative",
+            "type": "boolean"
+          },
+          "publish_blocked_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/DraftReviewReason"
+            },
+            "title": "Publish Blocked Reasons",
+            "type": "array"
+          },
+          "published_version_info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublishedVersionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "published_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version No"
+          },
+          "reconciliation_available": {
+            "default": false,
+            "title": "Reconciliation Available",
+            "type": "boolean"
+          },
+          "reconciliation_pending_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reconciliation Pending Count",
+            "type": "integer"
+          },
+          "reconciliation_pending_count_truncated": {
+            "default": false,
+            "title": "Reconciliation Pending Count Truncated",
+            "type": "boolean"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceView"
+            },
+            "title": "References",
+            "type": "array"
+          },
+          "references_hash": {
+            "default": "",
+            "pattern": "^(?:[a-f0-9]{64})?$",
+            "title": "References Hash",
+            "type": "string"
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Item Id"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "superseded_review_count": {
+            "default": 0,
+            "title": "Superseded Review Count",
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "tree_path": {
+            "items": {
+              "$ref": "#/components/schemas/TreePathEntry"
+            },
+            "title": "Tree Path",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Status"
+          },
+          "visible_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible Version Id"
+          },
+          "warnings": {
+            "description": "Legacy field, not computed by the canonical detail read. Request inspector section=summary for the displayed version's warnings.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "wikilink_targets": {
+            "items": {
+              "$ref": "#/components/schemas/WikilinkTarget"
+            },
+            "title": "Wikilink Targets",
+            "type": "array"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "updated_at",
+          "content_hash",
+          "workspace_id",
+          "body_md",
+          "version_id",
+          "created_at"
+        ],
+        "title": "ContextPageWriteDetail",
+        "type": "object"
+      },
+      "ContextPageWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ContextPageWriteDetail"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ContextPageWriteResponse",
         "type": "object"
       },
       "ContextReconciliationBlock": {
@@ -17056,6 +17752,37 @@
           "refresh_sliding"
         ],
         "title": "OAuthTokenLifetimeReport",
+        "type": "object"
+      },
+      "OpenDrafts": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContextDraftSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "OpenDrafts",
         "type": "object"
       },
       "PageAutosaveRequest": {
@@ -36808,7 +37535,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ContextPageDetailResponse"
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
                 }
               }
             },
@@ -37228,7 +37955,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ContextPageDetailResponse"
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
                 }
               }
             },
@@ -37478,7 +38205,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ContextPageDetailResponse"
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
                 }
               }
             },
@@ -37693,7 +38420,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ContextPageDetailResponse"
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
                 }
               }
             },
@@ -38211,6 +38938,126 @@
           }
         ],
         "summary": "Discard Context Edit",
+        "tags": [
+          "context-pages"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/drafts": {
+      "get": {
+        "operationId": "list_context_drafts_api_v1_workspaces__workspace_id__context_pages__page_id__drafts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextDraftListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Context Drafts",
         "tags": [
           "context-pages"
         ]
@@ -38757,7 +39604,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ContextPageDetailResponse"
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
                 }
               }
             },
@@ -38979,7 +39826,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ContextPageDetailResponse"
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
                 }
               }
             },
@@ -39091,7 +39938,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ContextPageDetailResponse"
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
                 }
               }
             },
@@ -39800,7 +40647,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ContextPageDetailResponse"
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
                 }
               }
             },

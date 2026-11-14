@@ -238,19 +238,23 @@ def test_traced_edit_calls_carry_previews_receipts_and_the_session_diff(
     ] == [("operations_overlap", 0, 1, "same_range")]
     assert overlap_row.error_details[0].conflict.left_lines is not None
 
-    # Nobody else can see this unshared page, so every row is shape only.
+    # Draft readers can inspect the new page and its successful edit previews.
     assert [row.redaction_reason for row in other_view.timeline[1:]] == [
-        "target_hidden",
-        "target_hidden",
-        "target_hidden",
-        "target_hidden",
+        None,
+        None,
+        "error_restricted",
+        "error_restricted",
     ]
-    hidden_overlap = other_view.timeline[-1].error_details[0].conflict
-    assert (hidden_overlap.left_op_index, hidden_overlap.right_op_index) == (0, 1)
-    assert hidden_overlap.left_lines is None
+    other_patch = other_view.timeline[2]
+    assert other_patch.edit_summary.previews_withheld is False
+    assert other_patch.session_diff == patch_row.session_diff
+    visible_overlap = other_view.timeline[-1].error_details[0].conflict
+    assert (visible_overlap.left_op_index, visible_overlap.right_op_index) == (0, 1)
+    assert visible_overlap.left_lines is not None
     serialized = other_view.model_dump_json()
-    for secret in ("E2E Chats Page", "first line", "second line", "not there"):
-        assert secret not in serialized
+    for visible in ("E2E Chats Page", "first line", "second line", "not there"):
+        assert visible in serialized
+    assert other_view.timeline[-1].result_summary is None
 
 
 def test_discarding_an_edit_deletes_the_previews_its_calls_kept(
@@ -384,14 +388,14 @@ PRIVATE_STRINGS = (
 )
 
 
-def test_a_private_edit_of_a_published_page_stays_its_authors(
+def test_published_page_edit_traces_withhold_draft_content_from_viewers(
     page_service, mcp_default_actor
 ):
-    """Editor B can see the published page, so B sees that A's calls edited
-    it -- but A's editing session is private. Nothing A wrote into it (title,
-    tags, aliases, headings, block ids, excerpts) may reach B through the
-    detail, export, list or search, and a never-published page A created must
-    not name itself in the chat's stored title or summary either."""
+    """A viewer can see the published page and that A's calls edited it.
+    Its draft title, tags, aliases, headings, block ids and excerpts stay out
+    of the viewer's detail, export, list and search. Stored labels can name a
+    draft artifact, but the viewer's projection must filter that name too.
+    """
 
     with page_service.session_factory() as session:
         workspace_id = session.scalar(
@@ -489,7 +493,7 @@ def test_a_private_edit_of_a_published_page_stays_its_authors(
     assert created["envelope"]["result_status"] == "succeeded", created
 
     service = McpChatService()
-    reader = _reader(uuid4(), workspace_id, "editor")
+    reader = _reader(uuid4(), workspace_id, "viewer")
     with page_service.session_factory() as session:
         chat = session.scalar(
             select(McpChatSession).where(
@@ -543,9 +547,10 @@ def test_a_private_edit_of_a_published_page_stays_its_authors(
         serialized = surface.model_dump_json()
         for secret in (*PRIVATE_STRINGS, *block_ids):
             assert secret not in serialized, secret
+    assert stored_labels[0] == "PRIVATE NEW PAGE"
     for label in stored_labels:
-        assert "PRIVATE" not in label, label
-    # B still sees that the published page was edited, and how much.
+        assert "PRIVATE TITLE" not in label, label
+    # The viewer still sees that the published page was edited, and how much.
     detail = surfaces[0]
     patch_row = next(
         row

@@ -136,10 +136,9 @@ class ContextMediaAttachmentPayload(BaseModel):
     asset would appear, and a ``Literal`` there turns that row into a 500 on
     response validation rather than a row the reader can act on.
 
-    ``can_delete`` answers "may THIS caller delete this now", not just the
-    domain's usage question -- the page-scoped listing can publish the bare
-    domain answer because that route is editor-gated, while this one is
-    readable by a viewer.
+    ``can_delete`` answers "may THIS caller delete this now", combining usage,
+    editing ownership and workspace role. Both listings respect editing
+    ownership; this workspace-wide listing is also readable by a viewer.
     """
 
     asset_id: UUID

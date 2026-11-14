@@ -42,6 +42,7 @@ import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { MarkdownView } from "../pages/MarkdownView";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
 import { ContextReconciliationWorkbench } from "./ContextReconciliationWorkbench";
+import { ContextDrafts } from "./ContextDrafts";
 import { citationKeyForSource } from "../pages/editorCompletions";
 import {
   contextGraphQuery,
@@ -169,6 +170,7 @@ import {
 import {
   resolveExpandedNodeIds,
   TREE_EXPANDED_PARAM,
+  TREE_VERSION_PARAM,
   updateTreeSearchParams,
   writeExpandedNodeIdsToStorage,
 } from "../../shared/components/treeRouteState";
@@ -224,6 +226,7 @@ type ContextState = {
   treePolicies: Record<string, TreeSectionPolicy>;
   selectedNodeId: string | null;
   detail: ContextPageDetail | null;
+  detailReadVersionId?: string | null;
   history: ContextChangeHistory | null;
   tombstones: LibraryItemTombstone[];
 };
@@ -283,6 +286,7 @@ function ScopedContextScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const selectedReadVersionId = searchParams.get(TREE_VERSION_PARAM);
   const routedPageId = workspaceRoute?.targetKind === "page"
     ? workspaceRoute.targetId
     : null;
@@ -298,7 +302,7 @@ function ScopedContextScreen() {
     workspaceRoute.targetKind === "folder",
   );
   const routeFolderParentId = searchParams.get("parent");
-  const routeIdentity = `${routeWorkspaceId}:${location.pathname}`;
+  const routeIdentity = JSON.stringify([routeWorkspaceId, location.pathname, selectedReadVersionId]);
   const routeIdentityRef = useRef(routeIdentity);
   const [routeNotFoundKey, setRouteNotFoundKey] = useState<string | null>(null);
   useLayoutEffect(() => {
@@ -943,6 +947,7 @@ function ScopedContextScreen() {
             treePolicies: treeData.policies,
             selectedNodeId: targetNodeId,
             detail,
+            detailReadVersionId: null,
             history,
           }
         : current,
@@ -957,6 +962,7 @@ function ScopedContextScreen() {
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
     nextParams.delete("reconcile");
+    nextParams.delete(TREE_VERSION_PARAM);
     const query = nextParams.toString();
     void navigate({
       pathname: contextPageHref(workspaceId, pageId),
@@ -1072,7 +1078,8 @@ function ScopedContextScreen() {
     }
     if (
       state.selectedNodeId === targetNodeId &&
-      state.detail?.id === selectedPageId
+      state.detail?.id === selectedPageId &&
+      (state.detailReadVersionId ?? null) === selectedReadVersionId
     ) {
       return;
     }
@@ -1080,8 +1087,9 @@ function ScopedContextScreen() {
     let cancelled = false;
     setError(null);
     void (async () => {
-      const detail = await readContextPage(state.workspaceId, selectedPageId);
-      if (detail.workspace_id !== state.workspaceId || detail.id !== selectedPageId) {
+      const detail = await readContextPage(state.workspaceId, selectedPageId, selectedReadVersionId);
+      if (detail.workspace_id !== state.workspaceId || detail.id !== selectedPageId ||
+          (selectedReadVersionId && detail.version_info?.version_id !== selectedReadVersionId)) {
         throw new ApiError(404, {
           error_code: "not_found",
           message: "Context page not found.",
@@ -1102,6 +1110,7 @@ function ScopedContextScreen() {
                 ...current,
                 selectedNodeId: targetNodeId,
                 detail,
+                detailReadVersionId: selectedReadVersionId,
                 history,
               }
             : current,
@@ -1175,6 +1184,7 @@ function ScopedContextScreen() {
     routeIdentity,
     routeWorkspaceId,
     searchParams,
+    selectedReadVersionId,
     setError,
     setState,
     state,
@@ -1192,7 +1202,10 @@ function ScopedContextScreen() {
       <RouteLoading label={t("loading", { defaultValue: "Loading Context" })} />
     );
   }
-  if (routedPageId && state.detail?.id !== routedPageId && !error) {
+  const displayedDetail = (state.detailReadVersionId ?? null) === selectedReadVersionId
+    ? state.detail
+    : null;
+  if (routedPageId && (displayedDetail?.id !== routedPageId) && !error) {
     return <RouteLoading label={t("loading", { defaultValue: "Loading Context" })} />;
   }
   if (
@@ -1263,7 +1276,7 @@ function ScopedContextScreen() {
             title={t("rail.title", { defaultValue: "Context" })}
             accent="context"
             nodes={state.tree}
-            activeTargetId={state.detail?.id}
+            activeTargetId={displayedDetail?.id}
             activeNodeId={state.selectedNodeId}
             expandedNodeIds={expandedNodeIds}
             forceActivePathExpanded={false}
@@ -1305,12 +1318,12 @@ function ScopedContextScreen() {
                 workspaceId: state.workspaceId,
                 rootLabel: t("breadcrumb.root", { defaultValue: "Context" }),
                 nodes: state.tree,
-                targetId: state.detail?.id,
+                targetId: displayedDetail?.id,
                 targetNodeId: state.selectedNodeId,
-                fallbackLabel: state.detail?.title,
+                fallbackLabel: displayedDetail?.title,
               })}
             />
-            {!state.detail ? (
+            {!displayedDetail ? (
               <div className="feature-header">
                 <div>
                   <p className="eyebrow">
@@ -1320,7 +1333,7 @@ function ScopedContextScreen() {
                   <p className="feature-subtitle">
                     {t("header.subtitle", {
                       defaultValue:
-                        "Durable pages the team and the AI both read. Drafts stay out of answers until they are published.",
+                        "Published pages are the default for people and AI. Editors can also read open drafts.",
                     })}
                   </p>
                 </div>
@@ -1366,11 +1379,11 @@ function ScopedContextScreen() {
                       )}
               </StatusBanner>
             ) : null}
-            {state.detail ? (
+            {displayedDetail ? (
               <ContextReader
-                key={`${state.workspaceId}:${state.detail.id}:${state.detail.version_info?.version_id ?? ""}`}
+                key={`${state.workspaceId}:${displayedDetail.id}:${displayedDetail.version_info?.version_id ?? ""}`}
                 canEdit={canEdit}
-                detail={state.detail}
+                detail={displayedDetail}
                 favoriteScope={favoriteScope}
                 history={state.history}
                 node={selectedNode}
@@ -1383,10 +1396,10 @@ function ScopedContextScreen() {
                 onRenameNode={setRenameNode}
                 onSelectNode={selectNode}
                 onReviewDecided={() =>
-                  reloadContextAfterRestore(state.detail!.id)
+                  reloadContextAfterRestore(displayedDetail.id)
                 }
                 onVersionRestored={() =>
-                  reloadContextAfterRestore(state.detail!.id)
+                  reloadContextAfterRestore(displayedDetail.id)
                 }
               />
             ) : selectedNode ? (
@@ -1566,10 +1579,10 @@ function ScopedContextScreen() {
           </section>
         }
         inspector={
-          state.detail ? (
+          displayedDetail ? (
             <ContextInspector
-              key={`${state.workspaceId}:${state.detail.id}:${state.detail.version_info?.version_id ?? ""}`}
-              detail={state.detail}
+              key={`${state.workspaceId}:${displayedDetail.id}:${displayedDetail.version_info?.version_id ?? ""}`}
+              detail={displayedDetail}
               workspaceId={state.workspaceId}
             />
           ) : undefined
@@ -2912,7 +2925,9 @@ function ContextReader({
     .published_version_info;
   const publishedTipId = `context-published-version-tip-${detail.id}`;
   const displayedVersionIsDraft =
-    detail.version_info?.history_status === "current_draft";
+    Boolean(detail.draft) ||
+    detail.version_info?.version_status === "editing" ||
+    detail.version_info?.version_status === "draft";
   const pendingCompareCandidate = pendingReviewCompareCandidate(
     detail,
     versions,
@@ -3058,6 +3073,7 @@ function ContextReader({
           {formatVersionTimestamp(detail.updated_at)}
         </time>
       </div>
+      {canEdit && workspaceId ? <ContextDrafts detail={detail} workspaceId={workspaceId} /> : null}
       {reviewNotice ? (
         <StatusBanner tone="info">{reviewNotice}</StatusBanner>
       ) : null}

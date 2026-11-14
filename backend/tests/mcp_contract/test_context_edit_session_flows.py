@@ -173,6 +173,7 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     created = _create(page_service, actor, workspace_id, "# Hello\n\nInitial body.")
     short_link = f"/p/{created.id}"
     full_link = f"/p/{workspace_id}/{created.id}"
+    opened_at = _stored(page_service, created.version_id).last_saved_at
 
     first = _update(
         page_service,
@@ -183,6 +184,8 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
         "u-1",
     )
     assert first.envelope.result_status == "succeeded", first.envelope
+    first_saved_at = _stored(page_service, created.version_id).last_saved_at
+    assert first_saved_at > opened_at
     second = _update(
         page_service,
         actor,
@@ -192,6 +195,7 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
         "u-2",
     )
     assert second.envelope.result_status == "succeeded", second.envelope
+    assert _stored(page_service, created.version_id).last_saved_at > first_saved_at
 
     # A second autosave must not fork a draft: same row, still editing.
     assert second.data.version_id == created.version_id
@@ -686,8 +690,9 @@ def test_structure_map_my_edit_reads_the_open_edit_without_opening_one(
         actor=other,
         page_service=page_service,
     )
-    assert theirs.envelope.result_status == "failed"
-    assert theirs.envelope.error_code == "not_found"
+    # The page is readable, but reading another author's work opens no edit.
+    assert theirs.envelope.result_status == "conflict"
+    assert theirs.envelope.error_code == "no_open_edit"
     with page_service.session_factory() as session:
         editing_rows = session.scalars(
             select(ContextPageVersion).where(

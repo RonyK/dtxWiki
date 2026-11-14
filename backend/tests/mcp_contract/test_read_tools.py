@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from backend.mcp.router import dispatch
 from backend.models.agent import AgentPage, AgentPageVersion
-from backend.models.context import EdgeProjection
+from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.coverage import KnowledgeCoverageGap
 from backend.models.user import User
 from backend.models.workspace import Workspace
@@ -16,6 +16,7 @@ from backend.schemas.read import SEARCH_QUERY_MAX_LENGTH
 from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG
 from backend.services.extraction_service import ExtractionService
 from backend.services.library_service import LibraryService
+from backend.services.page_service import sync_page_projections
 from backend.services.retrieval.outline_location import raw_body_sha256
 from backend.utils.content_hash import content_hash as calculate_content_hash
 
@@ -200,6 +201,25 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         actor_provenance="browser_session",
     )
     with page_service.session_factory.begin() as session:
+        alpha_page = session.get(ContextPage, alpha.id)
+        draft = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=alpha.id,
+            version_no=session.get(ContextPageVersion, alpha.version_id).version_no + 1,
+            parent_version_id=alpha.version_id,
+            body_md="# Canonical Alpha\n\nUnapproved alpha draft",
+            content_hash="canonical-alpha-draft",
+            actor_type="human",
+            created_by_actor_kind=actor.actor_kind,
+            created_by_actor_id=actor.actor_id,
+            version_status="draft",
+        )
+        session.add(draft)
+        session.flush()
+        alpha_page.latest_draft_version_id = draft.id
+        alpha_page.current_version_id = draft.id
+        sync_page_projections(session, page=alpha_page, version=draft)
+        draft_id = draft.id
         session.add(
             EdgeProjection(
                 workspace_id=workspace_id,
@@ -252,6 +272,15 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
     )
     assert redirected.page_id is not None
     assert redirected.version_id is not None
+    # Name/alias matching may find the draft, while ordinary content reads
+    # still select the published version and announce the open draft.
+    assert redirected.version_id == alpha.version_id
+    assert "Alpha body" in redirected.content
+    assert "Unapproved alpha draft" not in redirected.content
+    assert redirected.open_drafts.total == 1
+    assert redirected.open_drafts.items[0].version_id == draft_id
+    assert mermaid.version_id == alpha.version_id
+    assert mermaid.open_drafts.items[0].version_id == draft_id
     assert "# Canonical Alpha" in redirected.content
     assert redirected.mermaid is None
     assert redirected.neighbors is not None
@@ -366,6 +395,7 @@ def test_read_context_outline_cursor_round_trip_and_version_binding(
     )
     assert first.section.truncated is True
     assert first.section.next_cursor
+    assert first.document.open_drafts is not None
 
     parts = [first.section.content]
     cursor = first.section.next_cursor
@@ -376,6 +406,7 @@ def test_read_context_outline_cursor_round_trip_and_version_binding(
             actor=actor,
             page_service=page_service,
         )
+        assert page_response.document.open_drafts is None
         parts.append(page_response.section.content)
         cursor = page_response.section.next_cursor
     assert "".join(parts) == body
@@ -491,15 +522,35 @@ def test_read_context_outline_hides_frontmatter_and_separates_raw_hash(
 
 def test_mcp_grep_wiki_returns_visible_line_context(page_service, actor):
     workspace_id = _workspace_id(page_service)
-    page_service.write_page(
+    page = page_service.write_page(
         workspace_slug="default",
         slug="grep-target",
         title="Grep Target",
-        body_md="# Grep Target\n\nBefore\nliteral/needle\nAfter",
+        body_md="# Grep Target\n\nPublished body",
         actor_kind=actor.actor_kind,
         actor_id=actor.actor_id,
         actor_provenance=actor.provenance,
     )
+    with page_service.session_factory.begin() as session:
+        stored = session.get(ContextPage, page.id)
+        published = session.get(ContextPageVersion, page.version_id)
+        draft = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=page.id,
+            version_no=published.version_no + 1,
+            parent_version_id=published.id,
+            body_md="# Grep Target\n\nBefore\nliteral/needle\nAfter",
+            content_hash="grep-draft-only-needle",
+            actor_type=actor.actor_kind,
+            created_by_actor_kind=actor.actor_kind,
+            created_by_actor_id=actor.actor_id,
+            version_status="draft",
+        )
+        session.add(draft)
+        session.flush()
+        stored.current_version_id = stored.latest_draft_version_id = draft.id
+        sync_page_projections(session, page=stored, version=draft)
+        draft_id = draft.id
 
     response = dispatch(
         "grep_wiki",
@@ -513,6 +564,7 @@ def test_mcp_grep_wiki_returns_visible_line_context(page_service, actor):
     )
 
     assert response.envelope.result_status == "succeeded"
+    assert response.matches[0]["version_id"] == str(draft_id)
     assert response.matches[0]["stable_url"] == (
         f"/p/{workspace_id}/{response.matches[0]['page_id']}"
     )

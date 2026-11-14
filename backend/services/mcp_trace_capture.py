@@ -400,6 +400,7 @@ EDGE_LESS_TOOLS = frozenset(
         "get_index",
         "list_my_workspaces",
         "list_changes",
+        "list_context_drafts",
         "what_changed",
         "list_agent_categories",
         "list_requested_changes",

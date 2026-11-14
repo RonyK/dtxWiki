@@ -315,10 +315,6 @@ def restore_effect(
         for (table, row_id), obj in loaded.items()
         if table == "context_page_version"
     }
-    # Like a publication, status repair must not look like an author save.
-    preserved_last_saved_at = {
-        row_id: version.last_saved_at for row_id, version in versions.items()
-    }
     # The partial unique index allows one published_snapshot per page: write
     # the demotion first, then the rest.
     demoted = {
@@ -365,8 +361,6 @@ def restore_effect(
             elif isinstance(obj, LintFinding) and obj.status == "open":
                 obj.status = "fixed"
                 obj.resolved_at = now
-    for row_id, version in versions.items():
-        version.last_saved_at = preserved_last_saved_at[row_id]
     session.flush()
     return restored
 

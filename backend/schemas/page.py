@@ -16,6 +16,7 @@ from backend.schemas.common import (
     DraftReviewReason,
     RESTResponseBase,
 )
+from backend.schemas.context_drafts import ContextDraftInfo, OpenDrafts
 from backend.schemas.context_ingress import ContextPageType
 from backend.schemas.document_reference import ReferenceView
 from backend.schemas.edit_receipt import EditReceipt
@@ -667,28 +668,18 @@ class ContextPageCreateRequest(PrivateContextPageCreateRequest):
     )
 
 
-class ContextPageDetail(PagePayload):
-    """The single canonical Context page detail shape (P9.1).
+class ContextPageWriteDetail(PagePayload):
+    """Existing common Context response fields, without draft discovery facts.
 
-    A superset of ``PagePayload`` (PageService's P8-verified state-machine
-    fields: ``editing_revision``, ``publish_blocked_reasons``,
-    ``draft_saved_at``, the privacy-projected ``parent_version_id``, etc.)
-    plus the read-only projection fields the old intermediate
-    ``/context-pages/{page_id}`` route computed (tree placement,
-    backlinks/wikilinks, lint warnings, pending review, reconciliation
-    availability) -- see ``DomainReadService.context_page_read_enrichment``,
-    the shared function that computes them. Every canonical
-    ``/context/pages`` REST endpoint (list item, detail, and every editing
-    command's response) returns this one shape; there is no second,
-    thinner Context page payload on this route family.
+    Write commands preserve their original page fields and default enrichment
+    values. Only a dedicated read computes the draft discovery metadata.
     """
-
     latest_draft_version_id: UUID | None = None
     can_submit_for_review: bool = Field(
         default=False,
         description=(
             "Whether the caller may submit this exact version for review now: "
-            "its own private edit or unreviewed shared browser draft."
+            "its own edit or unreviewed shared browser draft."
         ),
     )
     published_version_info: PublishedVersionInfo | None = None
@@ -727,8 +718,27 @@ class ContextPageDetail(PagePayload):
     reconciliation_available: bool = False
 
 
+class ContextPageDetail(ContextPageWriteDetail):
+    """Read-only Context detail with facts about the selected and open drafts."""
+
+    draft: ContextDraftInfo | None = None
+    open_drafts: OpenDrafts = Field(default_factory=OpenDrafts)
+
+
+class ContextDraftListResponse(RESTResponseBase):
+    data: OpenDrafts
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ContextPageDetailResponse(RESTResponseBase):
     data: ContextPageDetail
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextPageWriteResponse(RESTResponseBase):
+    data: ContextPageWriteDetail
 
     model_config = ConfigDict(extra="forbid")
 

@@ -1017,14 +1017,14 @@ means server-confirmed links, not permission to activate arbitrary authored
 references. An omitted or empty value confirms no additional references. This
 MCP revision does not add that metadata to read responses.
 
-- **MCP Streamable HTTP**: 30 tools are registered; the tools available to a
+- **MCP Streamable HTTP**: 31 tools are registered; the tools available to a
   particular client are determined by its permissions and returned by `tools/list`.
 
 <!-- mcp-tool-catalog:start -->
 
 | Purpose | Tools |
 | --- | --- |
-| Discover and read | `list_my_workspaces`, `guide`, `search`, `fetch`, `grep_wiki`, `what_changed`, `read`, `get_index`, `read_concept`, `read_context_outline`, `read_structure_map`, `list_changes` |
+| Discover and read | `list_my_workspaces`, `guide`, `search`, `fetch`, `grep_wiki`, `what_changed`, `read`, `get_index`, `read_concept`, `read_context_outline`, `read_structure_map`, `list_context_drafts`, `list_changes` |
 | Edit Context | `create_context_page`, `begin_context_edit`, `update_context_edit`, `submit_context_edit_for_review`, `discard_context_edit`, `patch_context_edit`, `list_my_context_edits`, `upload_image`, `cite`, `submit_feedback` |
 | Recover writes | `get_operation_status` |
 | Agent workflows | `list_agent_categories`, `read_agent_page`, `write_agent_page_draft`, `build_agent_input_bundle` |
@@ -1082,26 +1082,38 @@ document addresses to register citations.
 
 Browser create and autosave requests set `share_draft: true` to save a shared,
 unpublished draft. Only browser-session authentication accepts this option;
-MCP creation and editing keep their private defaults. Before changing reference
+MCP creation and editing keep their separate author-owned editing rows. Before changing reference
 metadata, the editor stages an owned draft even when the body is unchanged.
 Reviewed versions are forked first. The browser can explicitly submit its
 shared draft through `submit-for-review`; saving alone does not request review.
 Browser publication of a mutable version requires both content and reference
 hashes. Browser image uploads also accept the owner's current unreviewed draft.
-`share_draft` never changes an existing version's visibility. Browser and MCP
+All saved editing rows are readable by Editors and Owners; `share_draft` selects
+the browser write workflow rather than a privacy setting. Browser and MCP
 authentication resolve to the same human actor, so a browser save continues the
-shared draft line and lands on the caller's own private `editing` row only when
-the request names it as its base or session version. That row stays private,
-including through reference changes, until it is submitted or published.
+shared draft line and lands on the caller's own `editing` row only when
+the request names it as its base or session version. Reading another author's
+editing row does not grant write ownership of that session.
 
-Saving a private `editing` row moves `current_version_id` and
+Saving an author-owned `editing` row moves `current_version_id` and
 `latest_draft_version_id` only on a never-published page whose pointers name no
-version other people can read. Otherwise the pointers keep naming the shared
-head; authors reach their private edit through their own editing row
-(`version: "my_edit"` in MCP reads). Submitting a private edit while another
+submitted draft, browser-shared draft or published snapshot. Otherwise the
+pointers keep naming the shared head; authors reach their edit through their own
+editing row (`version: "my_edit"` in MCP reads). Submitting an edit while another
 shared draft holds `latest_draft_version_id` is refused as a conflict. A save by
-another actor skips a pointer that still names someone else's private row (older
-data or a reopened submission) and starts from the version that actor can read.
+another actor keeps the existing write-target selection and does not adopt
+someone else's editing row as its writable session.
+
+Ordinary Context reads prefer the published version. Without a published version,
+they select the most recently saved `editing` or `draft` row. Editors and Owners
+receive `open_drafts` and unpublished bodies carry `draft` metadata. Open drafts
+include all editing rows, every unreviewed draft (including rows outside the
+latest-draft pointer), and drafts with a pending or changes-requested review.
+Resolved reviews remain readable history, including the default body of a
+never-published page when no draft remains open. `list_context_drafts` and the
+REST page's `/drafts` endpoint paginate summaries without loading their bodies.
+Search keeps its published-plus-latest-draft selection. Discarded editing rows
+remain outside default reads and draft lists.
 
 REST detail and write responses carry `can_submit_for_review` for the calling
 actor; the editor enables **Request review** only when it is true. MCP tool
@@ -1113,6 +1125,13 @@ and reindex does not discover historical citations or reinterpret Chats records.
 Structure results are paginated. Follow `next_cursor` for `read_structure_map`;
 for `read_context_outline`, send `outline_next_cursor` back as `outline_cursor`.
 Its separate `cursor` field pages the selected section body.
+The first response includes `open_drafts`; cursor continuations omit that
+optional summary instead of reporting a false zero. Refresh it with
+`list_context_drafts`. REST and MCP write results do not carry discovery facts.
+
+`ContextPageVersion.last_saved_at` is stamped by authored content, metadata and
+reference saves. Review decisions, reindexing and storage maintenance leave it
+unchanged. This ORM rule requires no database migration.
 
 <!-- legacy-tool-migration:start -->
 

@@ -3,6 +3,7 @@ import binascii
 import hashlib
 import hmac
 import json
+from dataclasses import replace
 from datetime import datetime
 from uuid import UUID
 
@@ -40,6 +41,8 @@ from backend.schemas.mcp.read_tools import (
     ListAgentCategoriesOutput,
     ListChangesInput,
     ListChangesOutput,
+    ListContextDraftsInput,
+    ListContextDraftsOutput,
     ListMyWorkspacesInput,
     ListMyWorkspacesOutput,
     ReadAgentPageInput,
@@ -75,6 +78,13 @@ from backend.services.client_round_state import (
 from backend.services.concept_resolution import (
     ConceptReadResult,
     resolve_context_concept,
+)
+from backend.services.context_drafts import (
+    list_context_drafts as list_saved_context_drafts,
+)
+from backend.services.context_drafts import (
+    project_context_draft,
+    project_open_drafts,
 )
 from backend.services.context_links import (
     LinkContext,
@@ -970,9 +980,9 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         if index_ref is not None and index_ref.kind == "context"
         else request.path
     )
-    library_match = (
-        index_ref is not None and index_ref.kind == "library"
-    ) or (request.path.startswith("/library/") and request.path.endswith(".md"))
+    library_match = (index_ref is not None and index_ref.kind == "library") or (
+        request.path.startswith("/library/") and request.path.endswith(".md")
+    )
     try:
         locator = None if library_match else parse_page_input(page_path)
     except ValueError:
@@ -980,7 +990,9 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
     parsed = (
         ("library", str(index_ref.target_id))
         if index_ref is not None and index_ref.kind == "library"
-        else parse_concept_path(request.path) if library_match else None
+        else parse_concept_path(request.path)
+        if library_match
+        else None
     )
     if not library_match and locator is None:
         return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
@@ -1039,6 +1051,19 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
             result = resolve_context_concept(
                 session, ctx.workspace_id, identifier=locator.slug, actor=actor
             )
+            if result.page is not None:
+                # Name lookup retains search's draft-aware matching. Once the
+                # page is identified, its body follows the ordinary default.
+                _page, selected_version = resolve_visible_context_version(
+                    session,
+                    workspace_id=ctx.workspace_id,
+                    page_id=result.page.id,
+                    version_id=None,
+                    path=None,
+                    version_preference="visible",
+                    actor=actor,
+                )
+                result = replace(result, version=selected_version)
         if result.status == "not_found":
             return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
         if result.status == "ambiguous":
@@ -1077,12 +1102,18 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
                 return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
         links = page_links(ctx.workspace_id, page.id, page.title)
         content = render_context_concept(
-            page, version, workspace_slug=workspace_slug,
+            page,
+            version,
+            workspace_slug=workspace_slug,
             resource_url=links["stable_url"],
         )
         record_served_read("context_page", page.id, version)
         frontmatter = project_context_frontmatter(
             page, version, workspace_slug=workspace_slug
+        )
+        draft = project_context_draft(session, page, version, actor)
+        open_drafts = (
+            project_open_drafts(session, page, actor) if request.as_of is None else None
         )
         frontmatter["resource"] = links["stable_url"]
         neighbors = (
@@ -1144,6 +1175,8 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         **links,
         version_id=version.id,
         version_status=version.version_status,
+        draft=draft,
+        **({"open_drafts": open_drafts} if open_drafts is not None else {}),
         content=content,
         frontmatter=frontmatter,
         neighbors=neighbors,
@@ -1330,6 +1363,12 @@ def read_context_outline(
             else None
         )
         document = ContextOutlineDocument(
+            draft=project_context_draft(session, page, version, actor),
+            open_drafts=(
+                project_open_drafts(session, page, actor)
+                if request.cursor is None and request.outline_cursor is None
+                else None
+            ),
             page_id=page.id,
             version_id=version.id,
             version_status=version.version_status,
@@ -1536,6 +1575,12 @@ def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapO
             row_index = 0
 
         document = StructureMapDocument(
+            draft=project_context_draft(session, page, version, actor),
+            open_drafts=(
+                project_open_drafts(session, page, actor)
+                if request.cursor is None
+                else None
+            ),
             page_id=page.id,
             version_id=version.id,
             version_status=version.version_status,
@@ -1550,9 +1595,7 @@ def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapO
                 else None
             ),
             resolved_version_source=(
-                "exact_version"
-                if request.version_id is not None
-                else request.version
+                "exact_version" if request.version_id is not None else request.version
             ),
             map_repaired=map_repaired,
         )
@@ -1674,6 +1717,38 @@ def grep_wiki(payload: dict, ctx: ToolCallContext) -> GrepWikiOutput:
             for match in matches
         ],
     )
+
+
+def list_context_drafts(payload: dict, ctx: ToolCallContext) -> ListContextDraftsOutput:
+    """Read another page of saved drafts without opening an editing session."""
+    actor = ctx.actor
+    try:
+        request = ListContextDraftsInput.model_validate(payload)
+        with ctx.session_factory() as session:
+            page_id = resolve_page_input(
+                request.page_id, LinkContext(session, ctx.workspace_id, actor)
+            )
+            data = list_saved_context_drafts(
+                session,
+                workspace_id=ctx.workspace_id,
+                page_id=page_id,
+                actor=actor,
+                limit=request.limit,
+                cursor=request.cursor,
+            )
+    except ValidationError as exc:
+        return ListContextDraftsOutput(
+            envelope=validation_error_envelope(
+                actor, exc, allowed_fields=ListContextDraftsInput.model_fields
+            )
+        )
+    except ReadServiceError as exc:
+        return ListContextDraftsOutput(
+            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
+        )
+    except PageLocatorNotFound:
+        return ListContextDraftsOutput(envelope=error_envelope(actor, "not_found"))
+    return ListContextDraftsOutput(envelope=ok_envelope(actor), data=data)
 
 
 def list_changes(payload: dict, ctx: ToolCallContext) -> ListChangesOutput:

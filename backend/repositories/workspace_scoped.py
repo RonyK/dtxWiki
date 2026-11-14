@@ -134,6 +134,8 @@ def _validate_workspace_model(model: type, *, operation: str) -> None:
 
 def _validate_workspace_scope(model: type, *, operation: str) -> None:
     mapper = inspect(model)
+    if mapper.is_aliased_class:
+        mapper = mapper.mapper
     table = mapper.local_table
     if table.name not in WORKSPACE_PLANE_TABLES:
         raise TypeError(

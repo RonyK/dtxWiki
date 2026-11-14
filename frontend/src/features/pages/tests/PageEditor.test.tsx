@@ -491,7 +491,7 @@ describe("PageEditor", () => {
     const baseFetch = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
-      if (url.endsWith(`/context/pages/${page.id}`)) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", current_published_version_id: page.version_id, can_submit_for_review: allowed } });
+      if (url.endsWith(`/context/pages/${page.id}`)) return jsonResponse({ data: { ...page, version_id: "v2", current_version_id: "v2", version_status: "draft", current_published_version_id: page.version_id, can_submit_for_review: allowed } });
       return baseFetch(input, init);
     });
     renderWithRouter("/pages/hello/edit", <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />);
@@ -511,7 +511,7 @@ describe("PageEditor", () => {
         const payload = JSON.parse(String(init.body));
         return jsonResponse({ data: { ...page, body_md: payload.body_md, version_id: "v3", parent_version_id: "v2", version_status: "draft", superseded_review_count: 1, can_submit_for_review: true } });
       }
-      if (url.endsWith(`/context/pages/${page.id}`)) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", current_published_version_id: page.version_id, review_item_id: "review-1" } });
+      if (url.endsWith(`/context/pages/${page.id}`)) return jsonResponse({ data: { ...page, version_id: "v2", current_version_id: "v2", version_status: "draft", current_published_version_id: page.version_id, review_item_id: "review-1" } });
       return baseFetch(input, init);
     });
     renderWithRouter("/pages/hello/edit", <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />);
@@ -777,7 +777,7 @@ describe("PageEditor", () => {
   });
 
   it("restores the unpublished-changes indicator when a draft exists on load", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
         return workspaceResponse();
@@ -837,10 +837,10 @@ describe("PageEditor", () => {
           url.includes("/context/pages/22222222-2222-4222-8222-222222222222")
             ? {
                 ...page,
-                version_id: "v2",
+                version_id: url.includes("version_id=v2") ? "v2" : "v1",
                 current_version_id: "v2",
                 current_published_version_id: "v1",
-                version_status: "draft",
+                version_status: url.includes("version_id=v2") ? "draft" : "published_snapshot",
                 parent_version_id: "v1",
                 content_hash: "b".repeat(64),
                 is_public: true,
@@ -858,6 +858,7 @@ describe("PageEditor", () => {
     // PUB-09: publicationState is "staged" here (a published head plus a
     // staged draft), so the pill names that instead of a bare "Saved".
     expect(syncStatus()).toHaveTextContent("Unpublished draft saved");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("?version_id=v2"))).toBe(true);
     // The page is on the web, so publishing also replaces its public link.
     expect(publicationActions().getByRole("button", { name: "Publish" })).toHaveAccessibleDescription(
       "Publishing also updates the public web link.",

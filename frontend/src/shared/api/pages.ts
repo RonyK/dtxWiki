@@ -24,12 +24,10 @@ export function newIdempotencyKey(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-// P9.1: the backend's single canonical Context page shape (a superset of the
-// old hand-rolled PagePayload -- see ContextPageDetail's docstring in the
-// generated schema). Kept under the historical `PagePayload` name so callers
-// migrated from the old /api/v1/pages surface do not all need renaming.
+// Editor state uses the fields shared by reads and write responses. Draft
+// discovery metadata belongs to the richer read response only.
 export type PageSummary = components["schemas"]["ContextPageSummary"];
-export type PagePayload = components["schemas"]["ContextPageDetail"];
+export type PagePayload = components["schemas"]["ContextPageWriteDetail"];
 
 export type PageVersionEntry = components["schemas"]["PageVersionEntry"];
 
@@ -91,7 +89,8 @@ type PageTagListResponse = {
   data: string[];
 };
 
-type PageResponse = components["schemas"]["ContextPageDetailResponse"];
+type PageReadResponse = components["schemas"]["ContextPageDetailResponse"];
+type PageResponse = components["schemas"]["ContextPageWriteResponse"];
 
 type PageVersionDiffResponse = {
   data: PageVersionDiff;
@@ -167,10 +166,31 @@ export async function readPage(
   const query = versionId
     ? `?${new URLSearchParams({ version_id: versionId }).toString()}`
     : "";
-  const response = await apiRequest<PageResponse>(
+  const response = await apiRequest<PageReadResponse>(
     pagesPath(workspaceId, `/${id}${query}`),
   );
   return response.data;
+}
+
+// A successful read can expose a draft that this actor cannot resume editing.
+// Keep that state separate from an HTTP not-found or failed read.
+export class PageEditingUnavailableError extends Error {
+  constructor() {
+    super("No editable version is available for this actor");
+    this.name = "PageEditingUnavailableError";
+  }
+}
+
+// Reading defaults to the published snapshot. The actor-projected current
+// pointer still identifies the existing editable head, so resuming an editor
+// must select it explicitly without opening or modifying a session.
+export async function readEditablePage(workspaceId: string, id: string) {
+  const visible = await readPage(workspaceId, id);
+  const editableId = visible.current_version_id;
+  if (editableId == null) throw new PageEditingUnavailableError();
+  return editableId === visible.version_id
+    ? visible
+    : readPage(workspaceId, id, editableId);
 }
 
 export async function beginPageEdit(workspaceId: string, page: PagePayload) {
@@ -402,7 +422,7 @@ export function sendPageAutosave(
 
 export async function readPageBySlug(workspaceId: string, slug: string) {
   try {
-    const response = await apiRequest<PageResponse>(
+    const response = await apiRequest<PageReadResponse>(
       pagesPath(workspaceId, `/by-slug/${encodeURIComponent(slug)}`),
     );
     return response.data;

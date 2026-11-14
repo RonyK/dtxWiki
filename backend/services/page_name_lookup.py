@@ -12,7 +12,7 @@ from backend.models.context import ContextPage, ContextPageVersion, PageNameInde
 from backend.policy.auth import ActorContext
 from backend.services.context_visibility import (
     editable_context_version_id,
-    visible_context_version_id,
+    searchable_context_version_id,
 )
 from backend.services.read_errors import PageNameOccupiedError, ReadServiceError
 
@@ -131,7 +131,7 @@ def visible_page_name_matches(
         if include_unpublished:
             version_id = editable_context_version_id(page)
         else:
-            version_id, _is_draft = visible_context_version_id(page, actor)
+            version_id, _is_draft = searchable_context_version_id(page, actor)
         if version_id == index.source_version_id == version.id:
             matches.append(
                 VisiblePageNameMatch(index=index, page=page, version=version)
