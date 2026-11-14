@@ -30,7 +30,6 @@ def preview_link_targets(
             workspace_id=workspace_id,
             page_id=request.source_page_id,
             version_id=request.source_version_id,
-            path=None,
             version_preference="visible",
             actor=actor,
         )

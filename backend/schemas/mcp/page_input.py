@@ -22,20 +22,6 @@ def validate_page_input(value: object) -> UUID | str:
     return locator.page_id if locator.kind == "page_id" else str(value)
 
 
-def validate_context_path_input(value: object) -> UUID | str:
-    """Context outline paths retain legacy /context/<slug>.md compatibility."""
-    if not isinstance(value, (str, UUID)):
-        raise ValueError("Expected a page UUID or Context page path")
-    if isinstance(value, str) and len(value) > 512:
-        raise ValueError("Page locator must be at most 512 characters")
-    from backend.services.context_links import parse_page_input
-
-    locator = parse_page_input(value)
-    if locator.kind not in {"page_id", "stable_full", "stable_short", "concept_path"}:
-        raise ValueError("Expected a Context page UUID, stable URL, or legacy path")
-    return locator.page_id if locator.kind == "page_id" else str(value)
-
-
 MCPPageInput = Annotated[
     UUID | str,
     BeforeValidator(validate_page_input),
@@ -48,23 +34,6 @@ MCPPageInput = Annotated[
             "description": (
                 "Context page UUID or stable_url: /p/<workspace_id>/<page_id> "
                 "or /p/<page_id> in this workspace."
-            ),
-        }
-    ),
-]
-
-
-MCPContextPathInput = Annotated[
-    UUID | str,
-    BeforeValidator(validate_context_path_input),
-    WithJsonSchema(
-        {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 512,
-            "description": (
-                "Context page UUID, stable /p/<workspace_id>/<page_id> or "
-                "/p/<page_id> URL, or legacy /context/<slug>.md path."
             ),
         }
     ),
@@ -89,7 +58,7 @@ def validate_read_concept_path_input(value: object) -> str:
         if not suffix.endswith(".md") or not suffix[: -len(".md")]:
             raise ValueError("Invalid Library path")
     else:
-        validate_context_path_input(value)
+        validate_page_input(value)
     return raw
 
 
@@ -104,8 +73,8 @@ MCPReadConceptPathInput = Annotated[
             "description": (
                 "Exact dtxwiki://index/context/<id> or dtxwiki://index/library/<id> "
                 "Markdown destination from get_index, unchanged with the same "
-                "workspace_id; or a Context page UUID, stable URL, legacy "
-                "/context/<slug>.md path, or /library/<id>.md lookup path."
+                "workspace_id; or a Context page UUID, stable URL, or "
+                "/library/<id>.md lookup path."
             ),
         }
     ),

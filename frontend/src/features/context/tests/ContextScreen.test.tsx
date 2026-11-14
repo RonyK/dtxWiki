@@ -4101,8 +4101,9 @@ describe("ContextScreen", () => {
       .closest(".history-card") as HTMLElement;
     expect(versionOne.tagName).toBe("LI");
 
-    // The visible head offers its own Changes but never Restore; the explicit
-    // two-version toolbar opens the newest version's Changes first.
+    // The current (edit-head) version offers its own Changes but never
+    // Restore; the explicit two-version toolbar opens the newest version's
+    // Changes first.
     const versionTwo = within(historyPanel)
       .getByText("v2")
       .closest(".history-card") as HTMLElement;
@@ -5232,12 +5233,33 @@ describe("ContextScreen", () => {
     ).not.toHaveAttribute("data-current-published");
   });
 
-  it("offers Restore on neither the pending draft nor the current pointer", async () => {
-    // Published v1 keeps the current pointer while pending draft v2 is the
-    // visible head. Restoring v2 would fork a duplicate version and leave its
-    // pending review targeting a non-head version, so the gate must read the
-    // publication metadata, not just `is_current`.
-    mockFetch(pendingReviewFetch());
+  it("offers Restore on the published default read but not on the current draft", async () => {
+    // Readers default to published v1 (the visible head) while draft v2 holds
+    // the current pointer and the latest-draft slot. Restore follows the edit
+    // head, not the default read: v1 can seed a new draft, and restoring v2
+    // would fork a duplicate version under its own pending review.
+    mockFetch({
+      ...pendingReviewFetch(),
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=context_page&target_id=${PAGE_ID}`]:
+        {
+          data: {
+            versions: [
+              historyVersion("version-2", 2, "draft", undefined, {
+                is_current: true,
+                is_latest_draft: true,
+              }),
+              historyVersion("version-1", 1, "published", undefined, {
+                is_current: false,
+                is_current_published: true,
+                is_visible_head: true,
+              }),
+            ],
+            changesets: [],
+            review_decisions: [],
+            diffs: null,
+          },
+        },
+    });
     render(
       <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`]}>
         <ContextScreen />
@@ -5259,11 +5281,12 @@ describe("ContextScreen", () => {
     expect(
       within(draftCard).queryByRole("button", { name: "Start a new draft from this version" }),
     ).toBeNull();
+    expect(publishedCard).toHaveAttribute("aria-current", "page");
     expect(
-      within(publishedCard).queryByRole("button", {
+      within(publishedCard).getByRole("button", {
         name: "Start a new draft from this version",
       }),
-    ).toBeNull();
+    ).toBeInTheDocument();
   });
 
   function emptyBaselineHistoryFetch(): Record<string, unknown> {

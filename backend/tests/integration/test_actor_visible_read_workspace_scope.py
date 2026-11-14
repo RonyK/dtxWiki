@@ -87,7 +87,6 @@ def test_context_id_and_version_resolution_treat_foreign_ids_as_missing(
             workspace_id=workspace.id,
             page_id=None,
             version_id=foreign_version.id,
-            path=None,
             version_preference="visible",
             actor=actor,
         )
@@ -96,7 +95,6 @@ def test_context_id_and_version_resolution_treat_foreign_ids_as_missing(
             workspace_id=workspace.id,
             page_id=None,
             version_id=uuid4(),
-            path=None,
             version_preference="visible",
             actor=actor,
         )
@@ -105,7 +103,6 @@ def test_context_id_and_version_resolution_treat_foreign_ids_as_missing(
             workspace_id=workspace.id,
             page_id=foreign_page.id,
             version_id=None,
-            path=None,
             version_preference="visible",
             actor=actor,
         )
@@ -114,7 +111,6 @@ def test_context_id_and_version_resolution_treat_foreign_ids_as_missing(
             workspace_id=workspace.id,
             page_id=missing_page_id,
             version_id=None,
-            path=None,
             version_preference="visible",
             actor=actor,
         )

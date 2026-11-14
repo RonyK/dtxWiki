@@ -3,7 +3,6 @@ import binascii
 import hashlib
 import hmac
 import json
-from dataclasses import replace
 from datetime import datetime
 from uuid import UUID
 
@@ -74,10 +73,6 @@ from backend.services.client_round_state import (
     RERANK_STATE_KIND,
     ClientRoundStateCodec,
     ClientRoundStateError,
-)
-from backend.services.concept_resolution import (
-    ConceptReadResult,
-    resolve_context_concept,
 )
 from backend.services.context_drafts import (
     list_context_drafts as list_saved_context_drafts,
@@ -963,9 +958,11 @@ def _concept_neighbors(session, ctx, page, actor):
 def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
     actor = ctx.actor
     session_factory = ctx.session_factory
-    """Read one OKF concept by path (e.g. "/context/x.md") as frontmatter + body,
-    honoring per-actor draft visibility; "/library/<id>.md" resolves the
-    extracted source text (A-8)."""
+    """Read one Context page or Library item as frontmatter + body.
+
+    Context pages are addressed by UUID, stable URL, or get_index ref and honor
+    per-actor draft visibility; "/library/<id>.md" resolves the extracted
+    source text (A-8)."""
     try:
         request = ReadConceptInput.model_validate(payload)
     except ValidationError as exc:
@@ -1030,65 +1027,20 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         workspace_slug = resolve_workspace_slug(session, ctx.workspace_id)
         if workspace_slug is None:
             return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
-        if locator.kind in {"page_id", "stable_full", "stable_short"}:
-            try:
-                page_id = resolve_page_input(
-                    page_path, LinkContext(session, ctx.workspace_id, actor)
-                )
-            except PageLocatorNotFound:
-                return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
-            page, version = resolve_visible_context_version(
-                session,
-                workspace_id=ctx.workspace_id,
-                page_id=page_id,
-                version_id=None,
-                path=None,
-                version_preference="visible",
-                actor=actor,
+        try:
+            page_id = resolve_page_input(
+                page_path, LinkContext(session, ctx.workspace_id, actor)
             )
-            result = ConceptReadResult(status="found", page=page, version=version)
-        else:
-            result = resolve_context_concept(
-                session, ctx.workspace_id, identifier=locator.slug, actor=actor
-            )
-            if result.page is not None:
-                # Name lookup retains search's draft-aware matching. Once the
-                # page is identified, its body follows the ordinary default.
-                _page, selected_version = resolve_visible_context_version(
-                    session,
-                    workspace_id=ctx.workspace_id,
-                    page_id=result.page.id,
-                    version_id=None,
-                    path=None,
-                    version_preference="visible",
-                    actor=actor,
-                )
-                result = replace(result, version=selected_version)
-        if result.status == "not_found":
+        except PageLocatorNotFound:
             return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
-        if result.status == "ambiguous":
-            return ReadConceptOutput(
-                envelope=ok_envelope(actor),
-                status="ambiguous",
-                path=request.path,
-                candidates=[
-                    {
-                        "id": candidate.page_id,
-                        "title": candidate.title,
-                        **page_links(
-                            ctx.workspace_id, candidate.page_id, candidate.title
-                        ),
-                        "match_reason": {
-                            "slug": "exact_slug",
-                            "title": "exact_title",
-                            "alias": "exact_alias",
-                        }.get(candidate.match_kind, "exact_title"),
-                    }
-                    for candidate in result.candidates
-                ],
-            )
-        page = result.page
-        version = result.version
+        page, version = resolve_visible_context_version(
+            session,
+            workspace_id=ctx.workspace_id,
+            page_id=page_id,
+            version_id=None,
+            version_preference="visible",
+            actor=actor,
+        )
         if page is None or version is None:
             return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
         if request.as_of is not None:
@@ -1167,7 +1119,7 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
     }
     return ReadConceptOutput(
         envelope=ok_envelope(actor),
-        status=result.status,
+        status="found",
         path=request.path,
         target_kind="context_page",
         target_id=page.id,
@@ -1193,7 +1145,7 @@ def _resolve_outline_version(
     actor,
 ):
     # Identify the page without judging access; the version resolver decides
-    # what this actor may read. Only a legacy path needs name resolution.
+    # what this actor may read.
     locator = parse_page_input(request.page_id)
     if locator.workspace_id is not None and locator.workspace_id != ctx.workspace_id:
         return None, None
@@ -1208,7 +1160,6 @@ def _resolve_outline_version(
         workspace_id=ctx.workspace_id,
         page_id=page_id,
         version_id=request.version_id,
-        path=None,
         version_preference=request.version,
         actor=actor,
     )

@@ -250,11 +250,7 @@ def parse_page_input(value: str | UUID) -> Locator:
     if looks_like_index_ref(value):
         raise IndexRefInputError(PAGE_INPUT_REF_GUIDANCE)
     locator = classify(str(value))
-    # Legacy MCP paths historically accepted a title/alias containing spaces.
-    # This is input compatibility, never a second body-URL classification rule.
-    if locator.kind == "unknown" and str(value).startswith("/context/"):
-        locator = classify(str(value).replace(" ", "%20"))
-    if locator.kind not in {"page_id", "stable_full", "stable_short", "concept_path"}:
+    if locator.kind not in {"page_id", "stable_full", "stable_short"}:
         raise ValueError("Expected a Context page UUID or permanent page URL")
     return locator
 

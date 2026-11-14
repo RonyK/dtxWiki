@@ -55,6 +55,15 @@
 - Partial-read cursor continuations omit `open_drafts`; use
   `list_context_drafts` to refresh that list. A readable page without a resumable
   editing version shows an editing-unavailable message with a link to the page.
+- Remove the deprecated `/context/<name>.md` Context path as an MCP page input.
+  `read_concept`, `read_context_outline` and `read_structure_map` now take the
+  same page locators as other tools: a page UUID, `/p/<workspace_id>/<page_id>`
+  or `/p/<page_id>`, and `read_concept` also takes `get_index` refs and
+  `/library/<id>.md`. A Context path returns `validation_failed`;
+  `read_concept` no longer returns `redirected`, `ambiguous` or `candidates`.
+- Restore stays available on the published version when a newer draft holds
+  the edit head. Activity shows Editors the MCP reads of shared editing
+  versions, while Viewers still do not see them.
 
 ### Graph legends
 

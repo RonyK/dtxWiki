@@ -178,14 +178,13 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
     assert changes.data.diffs[0]["target_type"] == "context_page"
 
 
-def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, actor):
+def test_mcp_read_concept_reads_published_default_with_neighbors(page_service, actor):
     workspace_id = _workspace_id(page_service)
     alpha = page_service.write_page(
         workspace_slug="default",
         slug="canonical-alpha",
         title="Canonical Alpha",
         body_md="# Canonical Alpha\n\nAlpha body",
-        aliases=["Shared Alias", "Alpha Shortcut"],
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
@@ -195,7 +194,6 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         slug="canonical-beta",
         title="Canonical Beta",
         body_md="# Canonical Beta\n\nBeta body",
-        aliases=["Shared Alias"],
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
@@ -238,16 +236,16 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": "/context/Alpha Shortcut.md",
+            "path": f"/p/{workspace_id}/{alpha.id}",
         },
         actor=actor,
         page_service=page_service,
     )
-    ambiguous = dispatch(
+    legacy_path = dispatch(
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": "/context/Shared Alias.md",
+            "path": "/context/canonical-alpha.md",
         },
         actor=actor,
         page_service=page_service,
@@ -256,7 +254,7 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": "/context/canonical-alpha.md",
+            "path": str(alpha.id),
             "format": "mermaid",
         },
         actor=actor,
@@ -264,16 +262,17 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
     )
 
     assert redirected.envelope.result_status == "succeeded"
-    assert redirected.status == "redirected"
-    assert "canonical_path" not in redirected.model_dump()
+    assert redirected.status == "found"
+    # Name-based Context paths were removed as page inputs.
+    assert legacy_path.envelope.error_code == "validation_failed"
     assert redirected.stable_url == f"/p/{workspace_id}/{alpha.id}"
     assert (
         redirected.link_markdown == f"[Canonical Alpha](/p/{workspace_id}/{alpha.id})"
     )
     assert redirected.page_id is not None
     assert redirected.version_id is not None
-    # Name/alias matching may find the draft, while ordinary content reads
-    # still select the published version and announce the open draft.
+    # Ordinary content reads select the published version and announce the
+    # open draft.
     assert redirected.version_id == alpha.version_id
     assert "Alpha body" in redirected.content
     assert "Unapproved alpha draft" not in redirected.content
@@ -297,19 +296,6 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
     assert redirected.neighbors.co_access[0].edge_kind == "co_access"
     assert mermaid.mermaid is not None
     assert mermaid.mermaid.startswith("graph LR")
-    assert ambiguous.envelope.result_status == "succeeded"
-    assert ambiguous.status == "ambiguous"
-    assert {candidate.stable_url for candidate in ambiguous.candidates} == {
-        f"/p/{workspace_id}/{alpha.id}",
-        f"/p/{workspace_id}/{beta.id}",
-    }
-    assert set(type(ambiguous.candidates[0]).model_fields) == {
-        "id",
-        "title",
-        "match_reason",
-        "stable_url",
-        "link_markdown",
-    }
 
 
 def test_read_context_outline_duplicate_sections_and_selected_hash(page_service, actor):
@@ -329,11 +315,24 @@ def test_read_context_outline_duplicate_sections_and_selected_hash(page_service,
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "page_id": f"/context/{page.slug}.md",
+            "page_id": f"/p/{workspace_id}/{page.id}",
         },
         actor=actor,
         page_service=page_service,
     )
+
+    for tool in ("read_context_outline", "read_structure_map"):
+        legacy_path = dispatch(
+            tool,
+            {
+                "workspace_id": str(workspace_id),
+                "page_id": f"/context/{page.slug}.md",
+            },
+            actor=actor,
+            page_service=page_service,
+        )
+        # Name-based Context paths were removed as page inputs.
+        assert legacy_path.envelope.error_code == "validation_failed"
 
     repeats = [entry for entry in outline.outline if entry.title == "Repeat"]
     assert len(repeats) == 2

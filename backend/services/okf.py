@@ -369,28 +369,6 @@ def _library_index_lines(
     return lines
 
 
-# --- read_concept resolution ------------------------------------------------
-
-
-def resolve_context_concept(
-    session: Session,
-    workspace_id: UUID,
-    *,
-    slug: str,
-    actor: ActorContext | None,
-) -> tuple[ContextPage, ContextPageVersion] | None:
-    """Resolve an OKF context path slug using the legacy tuple contract."""
-
-    from backend.services.concept_resolution import (
-        resolve_context_concept as resolve,
-    )
-
-    result = resolve(session, workspace_id, identifier=slug, actor=actor)
-    if result.page is None or result.version is None:
-        return None
-    return result.page, result.version
-
-
 # --- OKF bundle export (producer) -------------------------------------------
 
 

@@ -20,12 +20,10 @@ from backend.schemas.context_drafts import ContextDraftInfo, OpenDrafts
 from backend.schemas.context_edit import SectionAddress
 from backend.schemas.document_reference import ReferenceView
 from backend.schemas.mcp.context_projection import (
-    MCPContextCandidate,
     MCPGuidePayload,
     MCPSearchPayload,
 )
 from backend.schemas.mcp.page_input import (
-    MCPContextPathInput,
     MCPPageInput,
     MCPReadConceptPathInput,
     validate_typed_target,
@@ -262,8 +260,9 @@ class GetIndexOutput(BaseModel):
 
 
 class ReadConceptInput(MCPConversationInput):
-    # Read a single OKF concept by its path (e.g. "/context/my-page.md"),
-    # returning frontmatter + Markdown body of the actor-visible version.
+    # Read one Context page (UUID, stable URL or get_index ref) or Library
+    # item ("/library/<id>.md"), returning frontmatter + Markdown body of the
+    # actor-visible version.
     # include_neighbors adds the 1-hop block (design 5.5); set false to save
     # tokens on pure content reads.
     workspace_id: UUID
@@ -317,7 +316,7 @@ class ReadConceptOutput(BaseModel):
         ),
     )
     envelope: MCPResultEnvelope
-    status: Literal["found", "redirected", "ambiguous", "not_found"] | None = None
+    status: Literal["found", "not_found"] | None = None
     path: str | None = None
     # Concept identity across sections (A-8): context pages fill
     # target_kind="context_page" (target_id == page_id); library sources
@@ -341,7 +340,6 @@ class ReadConceptOutput(BaseModel):
     version_status: str | None = None
     content: str | None = None
     frontmatter: dict[str, Any] | None = None
-    candidates: list[MCPContextCandidate] = Field(default_factory=list)
     neighbors: ConceptNeighbors | None = None
     as_of: datetime | None = None
     mermaid: str | None = None
@@ -371,7 +369,7 @@ _CONTEXT_READ_VERSION_DESCRIPTION = (
 
 class ContextPartialReadInput(MCPConversationInput):
     workspace_id: UUID
-    page_id: MCPContextPathInput
+    page_id: MCPPageInput
     version_id: UUID | None = Field(
         default=None,
         description=(

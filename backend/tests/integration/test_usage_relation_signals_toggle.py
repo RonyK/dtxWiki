@@ -17,7 +17,7 @@ from sqlalchemy import event, func, select
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.mcp.router import dispatch
-from backend.models.context import ContextPage, EdgeProjection
+from backend.models.context import EdgeProjection
 from backend.models.job import Job
 from backend.models.mcp_chat import (
     McpChatArtifactKind,
@@ -321,7 +321,6 @@ def test_policy_opt_out_queues_after_commit_and_clears_rest_and_mcp_neighbors(
             refresh_usage_projection=True,
         )
         assert _co_access_count(session, workspace_id) == 1
-        left_slug = session.get(ContextPage, left_id).slug
         # A prompt settings tick must not remove curated links or another
         # workspace's usage projection, or delete the read trail it derives.
         foreign_workspace_id = session.scalar(
@@ -363,7 +362,7 @@ def test_policy_opt_out_queues_after_commit_and_clears_rest_and_mcp_neighbors(
     def mcp_neighbors():
         response = dispatch(
             "read_concept",
-            {"workspace_id": str(workspace_id), "path": f"/context/{left_slug}.md"},
+            {"workspace_id": str(workspace_id), "path": str(left_id)},
             actor=actor,
             page_service=page_service,
         )

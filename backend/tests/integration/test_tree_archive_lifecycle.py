@@ -22,7 +22,6 @@ from backend.schemas.context_write import (
 )
 from backend.schemas.tree import TreeFolderCreateRequest
 from backend.scripts.seed_dev import seed_default_workspace
-from backend.services.concept_resolution import resolve_context_concept
 from backend.services.context_write_service import ContextWriteService
 from backend.services.indexing import DbNativeIndexer
 from backend.services.okf import build_workspace_index
@@ -176,15 +175,11 @@ def test_folder_archive_cascades_to_descendant_pages(
             )
             is None
         )
-        # gone from the name index -> entity lane and read_concept stop finding it
+        # gone from the name index -> the search entity lane stops finding it
         rows = session.scalars(
             select(PageNameIndex).where(PageNameIndex.page_id == page.id)
         ).all()
         assert rows == []
-        result = resolve_context_concept(
-            session, workspace_id=workspace_id, identifier="cascade-page", actor=None
-        )
-        assert result.status == "not_found"
         index = build_workspace_index(
             session, workspace_id, actor=None, workspace_slug="default"
         )

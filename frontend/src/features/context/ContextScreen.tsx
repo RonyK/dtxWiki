@@ -4291,7 +4291,8 @@ export function ContextHistory({
 
   async function restoreVersion(entry: VersionEntry) {
     // Restoring the version you are already on just stacks an identical one.
-    if (entry.is_visible_head || !workspaceId || restoring) {
+    // That is the edit head (is_current), not the default-read version.
+    if (versionBooleanField(entry, "is_current") || !workspaceId || restoring) {
       return;
     }
     const ok = window.confirm(
@@ -4381,7 +4382,6 @@ export function ContextHistory({
     const historyStatus = entry.history_status ?? "state_inconsistent";
     const presentation = contextHistoryPresentation(historyStatus);
     const comparing = comparePair?.to === entry.version_id;
-    const isVisibleHead = entry.version_id === visibleHeadVersionId;
     const isCurrent = versionBooleanField(entry, "is_current");
     const isLatestDraft =
       versionBooleanField(entry, "is_draft_head") ||
@@ -4395,7 +4395,6 @@ export function ContextHistory({
             {canEdit &&
             !comparing &&
             !isCurrent &&
-            !isVisibleHead &&
             !isLatestDraft &&
             entry.reconciliation_available !== true ? (
               <HistoryActionButton

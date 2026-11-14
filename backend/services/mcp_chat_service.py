@@ -1893,9 +1893,10 @@ class _ReaderGate:
     def visible_version(self, version_id: UUID) -> ContextPageVersion | None:
         """The Context version, if the reader may read both it and its page.
 
-        A page can be public while one author's editing row on it is private,
-        so a page-level answer is not enough for anything a call wrote into a
-        specific version.
+        A page can be public while one of its versions is not readable by this
+        actor (an unpublished draft for a viewer, or another author's discarded
+        work), so a page-level answer is not enough for anything a call wrote
+        into a specific version.
         """
 
         if version_id not in self._versions:

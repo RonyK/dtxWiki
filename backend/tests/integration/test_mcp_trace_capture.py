@@ -119,7 +119,7 @@ def test_read_concept_links_viewed_page(page_service):
             tool_name="read_concept",
             arguments={
                 "workspace_id": str(ws.id),
-                "path": "/context/concept-trace.md",
+                "path": f"/p/{ws.id}/{page.id}",
             },
             payload={
                 "status": "found",
@@ -276,8 +276,8 @@ def test_read_context_outline_links_the_resolved_page(page_service):
         candidates = derive_artifact_links(
             session=session,
             tool_name="read_context_outline",
-            # Addressed by path: only the response knows which page it resolved to.
-            arguments={"workspace_id": str(ws.id), "page_id": "/context/x.md"},
+            # Links come from the response's resolved page, not the argument.
+            arguments={"workspace_id": str(ws.id), "page_id": f"/p/{page.id}"},
             # ReadContextOutlineOutput is flat -- document lives at the
             # payload's top level, not under a "data" wrapper like the write
             # tools' outputs.

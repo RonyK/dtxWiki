@@ -1040,7 +1040,7 @@ Keep one edit per task and submit it once. In the same MCP chat,
 pending, instead of creating a new version.
 MCP editing commands use `page_id`, `version_id`, `expected_editing_revision`,
 and `idempotency_key` to detect conflicting updates. Partial reads require a
-top-level `page_id` (UUID, stable URL, or legacy Context path); optional
+top-level `page_id` (UUID or stable URL); optional
 `version_id` selects an exact version of that same page. The former `target`
 object is no longer accepted. MCP update requires `version_id`, removes the
 `base_version_id`/`base_content_hash` inputs, and uses `placement_parent_node_id`.

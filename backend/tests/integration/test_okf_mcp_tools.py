@@ -64,8 +64,7 @@ def _seed_pages(session, workspace_id):
     session.flush()
     draft.latest_draft_version_id = dv.id
     session.flush()
-    # Production writes sync the name projection; read_concept resolves via
-    # page_name_index only (no slug fallback since the 0003 backfill).
+    # Production writes sync the name projection used by the search entity lane.
     sync_page_projections(session, page=pub, version=pv)
     sync_page_projections(session, page=draft, version=dv)
 

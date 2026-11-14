@@ -14,7 +14,6 @@ from backend.services.okf import (
     project_context_frontmatter,
     render_context_concept,
     render_frontmatter,
-    resolve_context_concept,
 )
 from backend.services.page_service import sync_page_projections
 from backend.utils.page_frontmatter import (
@@ -92,9 +91,12 @@ def _add_library_item(session, workspace_id, *, uri, title, trust_level="unknown
 
 
 def test_derive_nav_description_skips_headings_and_truncates():
-    assert derive_nav_description(
-        "# Title\n\n![구조도](/api/media/1)\n\nFirst para.\n\nSecond."
-    ) == "First para."
+    assert (
+        derive_nav_description(
+            "# Title\n\n![구조도](/api/media/1)\n\nFirst para.\n\nSecond."
+        )
+        == "First para."
+    )
     assert derive_nav_description("") == ""
     assert derive_nav_description("# only heading") == ""
     long = "word " * 100
@@ -227,8 +229,7 @@ def test_index_published_visible_to_all_drafts_only_to_editors(session_factory):
     pub_line = f"- [Published]({format_index_ref('context', pub.id)})"
     assert pub_line in editor_index
     assert (
-        f"- [Draftive]({format_index_ref('context', draft.id)}) (draft)"
-        in editor_index
+        f"- [Draftive]({format_index_ref('context', draft.id)}) (draft)" in editor_index
     )
     # Viewer sees the published concept but not the draft-only one.
     assert pub_line in viewer_index
@@ -260,40 +261,7 @@ def test_index_restricted_library_filtered_by_actor(session_factory):
     assert "Secret Doc" in owner_index  # owner can
 
 
-def test_resolve_context_concept_honors_draft_visibility(session_factory):
-    with session_factory.begin() as session:
-        workspace_id = _workspace_id(session)
-        _add_context_page(
-            session,
-            workspace_id,
-            slug="wip",
-            title="WIP",
-            body="Work in progress.",
-            published=False,
-        )
-
-    with session_factory() as session:
-        assert (
-            resolve_context_concept(
-                session, workspace_id, slug="wip", actor=_actor("editor")
-            )
-            is not None
-        )
-        assert (
-            resolve_context_concept(
-                session, workspace_id, slug="wip", actor=_actor("viewer")
-            )
-            is None
-        )
-        assert (
-            resolve_context_concept(
-                session, workspace_id, slug="missing", actor=_actor("owner")
-            )
-            is None
-        )
-
-
-def test_draft_capable_actor_keeps_search_head_and_published_index(session_factory):
+def test_draft_capable_actor_index_lists_drafted_page(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         page = _add_context_page(
@@ -317,24 +285,11 @@ def test_draft_capable_actor_keeps_search_head_and_published_index(session_facto
         session.add(draft)
         session.flush()
         page.latest_draft_version_id = draft.id
-        # Production draft writes resync the name projection (draft scope
-        # rows), which concept resolution requires for the draft head.
         sync_page_projections(session, page=page, version=draft)
 
     with session_factory() as session:
-        _page, editor_version = resolve_context_concept(
-            session, workspace_id, slug="dual-head", actor=_actor("editor")
-        )
-        _page, viewer_version = resolve_context_concept(
-            session, workspace_id, slug="dual-head", actor=_actor("viewer")
-        )
         editor_index = build_workspace_index(
             session, workspace_id, actor=_actor("editor"), workspace_slug="default"
         )
 
-    assert editor_version.body_md == "Draft body."
-    assert viewer_version.body_md == "Published body."
-    assert (
-        f"- [Dual Head]({format_index_ref('context', page.id)})"
-        in editor_index
-    )
+    assert f"- [Dual Head]({format_index_ref('context', page.id)})" in editor_index

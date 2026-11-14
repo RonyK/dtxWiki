@@ -5094,7 +5094,7 @@ def test_focused_read_requires_one_distinct_visible_artifact_across_the_chat(
                 client=client,
                 mcp_session_id=focused_session_id,
                 tool_name="read_concept",
-                input_summary={"path": "/context/architecture-guide.md"},
+                input_summary={"path": f"/p/{workspace.id}/{first_page.id}"},
             )
             service.link_artifact(
                 session=session,
@@ -5120,7 +5120,7 @@ def test_focused_read_requires_one_distinct_visible_artifact_across_the_chat(
                 client=client,
                 mcp_session_id=ambiguous_session_id,
                 tool_name="read_concept",
-                input_summary={"path": f"/context/{page.slug}.md"},
+                input_summary={"path": f"/p/{workspace.id}/{page.id}"},
             )
             service.link_artifact(
                 session=session,
