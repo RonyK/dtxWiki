@@ -21,7 +21,8 @@ function initialRows(input: LocalLayoutInput, cached?: LocalLayoutPositions | nu
     nodeKeys.add(node.key); if (node.isSeed) seeds.add(node.key);
   }
   const keys = Object.freeze([...nodeKeys].sort());
-  const seed = keys.find(key => seeds.has(key));
+  const seed = input.primarySeedKey === undefined ? keys.find(key => seeds.has(key))
+    : input.primarySeedKey !== null && nodeKeys.has(input.primarySeedKey) ? input.primarySeedKey : undefined;
   const positions = d3PhyllotaxisPositions(keys.length);
   keys.forEach((key, index) => {
     const saved = finite(fixed?.[key]) ? fixed![key] : cached?.[key];
@@ -134,12 +135,15 @@ export function createD3WorkerLayout(input: LocalLayoutInput, options: D3WorkerL
     update(next, fixedPositions, updateOptions = {}) {
       if (destroyed) return;
       const retained = getPositions();
+      const previousSeed = seed;
       const nextRows = initialRows(next, retained);
       keys = nextRows.keys; seed = nextRows.seed; positions = nextRows.positions;
       byKey = new Map(keys.map((key, index) => [key, index]));
       for (const key of keys) if (!Object.hasOwn(retained, key) && finite(fixedPositions?.[key])) localPoint(key, fixedPositions![key]);
       for (const key of arrivals.keys()) if (!byKey.has(key)) arrivals.delete(key);
       for (const key of pins) if (!byKey.has(key)) pins.delete(key);
+      if (previousSeed !== seed && previousSeed) pins.delete(previousSeed);
+      if (seed) pins.add(seed);
       topology++; catalogReady = false;
       if (updateOptions.settle || updateOptions.settleAtCurrentAlpha) pendingStaticFrame = sequence + 1;
       send({ type: "update", input: next, fixedPositions, ...updateOptions });

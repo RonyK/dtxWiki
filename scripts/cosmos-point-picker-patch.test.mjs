@@ -217,6 +217,77 @@ function hostFixture(Type = Host) {
   return { value, calls };
 }
 
+// Indexed topology can move the same semantic node while its pointer remains
+// pressed; this host state path is independent of picking and needs no GPU.
+test("native drag and hover follow the current rows and cancellation leaves no phantom target", () => {
+  const { value, calls } = hostFixture();
+  value.dragInstance = { isActive: true };
+  value.store.draggingPointIndex = 7;
+  value.graph.inputPointPositions = new Float32Array(6);
+  value.remapDraggingPoint(2);
+  assert.equal(value.store.draggingPointIndex, 2);
+  assert.equal(value.dragInstance.isActive, true);
+  assert.throws(() => value.remapDraggingPoint(3), /current indexed rows/);
+  assert.throws(() => value.remapDraggingPoint(NaN), /current indexed rows/);
+  assert.equal(value.store.draggingPointIndex, 2);
+  const protectedSeedPress = { point: { index: 0 }, released: false };
+  value.graph._dtxPointPress = protectedSeedPress;
+  value.remapDraggingPoint(null);
+  assert.equal(value.store.draggingPointIndex, undefined);
+  assert.equal(value.dragInstance.isActive, false);
+  assert.equal(value.graph._dtxPointPress, protectedSeedPress);
+  // The press moved: the deferred drag starts and the click is retired.
+  value.remapDraggingPoint(1);
+  assert.equal(value.store.draggingPointIndex, 1);
+  assert.equal(value.dragInstance.isActive, true);
+  assert.deepEqual(value.graph._dtxPointPress, { cancelled: true });
+  value.remapDraggingPoint(null);
+  assert.deepEqual(calls, ["render", "render", "render", "render"]);
+  // Rows changed under a resting pointer: hover and its link follow the same
+  // entity to its new row, silently; a departed one leaves no hover. A drag
+  // keeps its own owner even when hover has left (pointer outside the canvas).
+  value.graph.inputLinks = new Float32Array(4);
+  value.store.hoveredPoint = { index: 0, position: [3, 4] };
+  value.store.hoveredLinkIndex = 0;
+  value.store.draggingPointIndex = 1;
+  value.remapPointer(2, 1);
+  assert.deepEqual(value.store.hoveredPoint, { index: 2, position: [3, 4] });
+  assert.equal(value.store.hoveredLinkIndex, 1);
+  assert.throws(() => value.remapPointer(0, 2), /Hovered link must belong to the current indexed rows/);
+  value.remapPointer(null, null);
+  assert.equal(value.store.hoveredPoint, undefined);
+  assert.equal(value.store.hoveredLinkIndex, undefined);
+  assert.equal(value.store.draggingPointIndex, 1);
+  value.store.draggingPointIndex = void 0;
+  value._isDestroyed = true; value.remapDraggingPoint(1);
+  assert.equal(value.store.draggingPointIndex, undefined);
+});
+
+// The stock duration=0 camera path still schedules a D3 transition. Explicit
+// restore followed immediately by Center must observe the just-restored camera.
+test("explicit native camera applies the existing zoom transform synchronously with double coordinates", () => {
+  const { value } = hostFixture();
+  const center = [Math.PI, -Math.E], seen = [];
+  value.ensureDevice = () => false;
+  value.syncScreenSize = () => seen.push("screen");
+  value.zoomInstance = { behavior: { transform: {} }, getTransform(position, zoom, padding) {
+    seen.push([position, zoom, padding]); return { position, zoom };
+  } };
+  value.canvasD3Selection = { call(behavior, transform) {
+    assert.equal(behavior, value.zoomInstance.behavior.transform);
+    seen.push("call"); value.current = transform;
+  } };
+  value.setCameraCenter(center, 6);
+  assert.deepEqual(value.current, { position: center, zoom: 6 });
+  assert.equal(value.current.position[0], Math.PI);
+  assert.equal(value.zoomInstance.shouldEnableSimulationDuringZoomOverride, false);
+  assert.deepEqual(seen, ["screen", [center, 6, 0], "call"]);
+  assert.throws(() => value.setCameraCenter([NaN, 0], 6), /finite/);
+  assert.throws(() => value.setCameraCenter(center, 0), /finite/);
+  value._isDestroyed = true; value.setCameraCenter([0, 0], 1);
+  assert.equal(value.current.position[0], Math.PI);
+});
+
 test("attachment retires legacy point/link work, replaces ownership once and null restores stock paths", () => {
   const { value, calls } = hostFixture(), a = pickerFixture(calls), b = pickerFixture(calls);
   value.attachPointPicker(a);

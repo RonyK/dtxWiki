@@ -920,12 +920,18 @@ describe("GraphView", () => {
   });
 
   it("pauses timeline playback without permanently stopping the physical layout", async () => {
-    renderGraph();
+    renderGraph({ openContents: false });
     canvasHandle.pauseLayout.mockClear();
     await userEvent.click(screen.getByRole("button", { name: "Play" }));
     await userEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
     expect(canvasHandle.pauseLayout).not.toHaveBeenCalled();
+    // A timeline click releases the reader's layout pause.
+    await userEvent.click(screen.getByRole("button", { name: "Simulate renderer ready" }));
+    await userEvent.click(screen.getByRole("button", { name: "Pause layout" }));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-layout-paused", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Next event" }));
+    expect(screen.getByTestId("mock-graph-canvas")).toHaveAttribute("data-layout-paused", "false");
   });
 
   it("announces dynamic expansion availability while keeping the disabled reason adjacent", async () => {

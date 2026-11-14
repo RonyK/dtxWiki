@@ -100,7 +100,7 @@ function safeRadius(value: number): number {
 }
 
 function boundedTicks(requested: number | undefined): number {
-  return Number.isInteger(requested) && requested! > 0
+  return Number.isInteger(requested) && requested! >= 0
     ? Math.min(LOCAL_LAYOUT_PARAMS.preTicks, requested!) : LOCAL_LAYOUT_PARAMS.preTicks;
 }
 
@@ -126,7 +126,9 @@ function normalizeInput(input: LocalLayoutInput): {
   }
 
   const keys = [...byKey.keys()].sort(compareKeys);
-  const seedKey = keys.find((key) => byKey.get(key)?.isSeed) ?? null;
+  const seedKey = input.primarySeedKey === undefined
+    ? keys.find((key) => byKey.get(key)?.isSeed) ?? null
+    : input.primarySeedKey !== null && byKey.has(input.primarySeedKey) ? input.primarySeedKey : null;
   const nodes: LayoutNode[] = keys.map((key) => ({
     key,
     radiusPx: byKey.get(key)!.radiusPx,

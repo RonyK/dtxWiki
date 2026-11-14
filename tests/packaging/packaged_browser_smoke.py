@@ -402,6 +402,42 @@ expect(layoutResponses.length).toBeGreaterThan(0);
 expect(layoutResponses.every(response => response.status === 200
   && new URL(response.url).origin === baseUrl
   && /javascript/.test(response.contentType))).toBe(true);
+const mapPhysics = await canvas.getAttribute('data-map-physics');
+const mapLayout = await readPublishedLayout();
+// Open the shipped Context lazy renderer too. A Map Worker success cannot
+// prove the Context binding's separate import/asset/CSP path is executable.
+const workersBeforeContext = workerUrls.length;
+const localPageUrl = `${baseUrl}/workspaces/${workspace.id}/context/pages/`
+  + documents.at(-1).id;
+await page.goto(localPageUrl);
+const localResponsePromise = page.waitForResponse(response =>
+  new URL(response.url()).pathname === `${workspacePath}/graph/query`
+  && response.request().method() === 'POST');
+await page.getByRole('tablist', { name: /Context reader views|Context 리더 보기/ })
+  .getByRole('tab', { name: /^(Graph|그래프)/ }).click();
+const localResponse = await localResponsePromise;
+expect(localResponse.ok()).toBe(true);
+const localScene = (await localResponse.json()).data;
+expect(localScene.nodes.some(node => node.entity_id === documents.at(-1).id))
+  .toBe(true);
+expect(localScene.edges.some(edge => edge.edge_kind === 'wikilink')).toBe(true);
+const localCanvas = page.getByRole('tabpanel', { name: /^(Graph|그래프)/ })
+  .getByTestId('graph-canvas');
+await expect(localCanvas.locator('..')).toHaveAttribute(
+  'data-renderer-status', 'ready', { timeout: 30000 });
+await expect(localCanvas).toHaveAttribute('data-local-physics', 'd3-worker');
+await expect(localCanvas.locator('canvas[data-local-graph-canvas]')).toHaveCount(1);
+await expect.poll(async () =>
+  Number(await localCanvas.getAttribute('data-local-layout-ticks')),
+  { timeout: 30000 }).toBeGreaterThan(0);
+expect(workerUrls.slice(workersBeforeContext).some(url =>
+  /\/d3Layout\.worker-[^/]+\.js$/.test(new URL(url).pathname))).toBe(true);
+const localGpu = await localCanvas.locator('canvas[data-local-graph-canvas]')
+  .evaluate(element => {
+  const gl = element.getContext('webgl2');
+  return { live: Boolean(gl) && !gl.isContextLost(), error: gl?.getError() };
+});
+expect(localGpu).toEqual({ live: true, error: 0 });
 if (pageErrors.length > 0) {
   throw new Error(`page errors: ${pageErrors.join('; ')}`);
 }
@@ -429,8 +465,9 @@ console.log(JSON.stringify({ apiRequests: sameOrigin, layoutResponses,
   graph: { nodes: scene.nodes.length, documents: documentNodes.length,
     folders: folderNodes.length, originalRelations: authoredEdges.length,
     containmentRelations: containmentEdges.length,
-    physics: await canvas.getAttribute('data-map-physics'),
-    ...await readPublishedLayout() },
+    physics: mapPhysics, ...mapLayout },
+  localGraph: { nodes: localScene.nodes.length, relations: localScene.edges.length,
+    physics: await localCanvas.getAttribute('data-local-physics'), gpu: localGpu },
   scope: 'Small installed-wheel Worker/CSP runtime smoke; '
     + 'not 2K capacity or device acceptance' }, null, 2));
 } finally {

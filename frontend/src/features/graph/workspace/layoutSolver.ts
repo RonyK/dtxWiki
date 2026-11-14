@@ -77,7 +77,7 @@ export function createWorkspaceLayoutSolver(budget: WorkspaceMapBudget): CosmosL
       simulationCollisionPadding: collisionBasis.padding };
     },
     syncPhysics(input: { permitted: boolean; paused: boolean; reducedMotion: boolean; hidden: boolean;
-      dragging: boolean; alpha: number; canInitialize: boolean; reheat: boolean }, runtime: {
+      alpha: number; canInitialize: boolean; reheat: boolean }, runtime: {
       enableNative(enabled: boolean): void;
       pauseNative(): void;
       startNative(alpha: number): void;
@@ -93,7 +93,7 @@ export function createWorkspaceLayoutSolver(budget: WorkspaceMapBudget): CosmosL
         return false;
       }
       runtime.pauseNative();
-      if ((!input.permitted && !input.reducedMotion) || input.dragging || input.paused || input.hidden) {
+      if ((!input.permitted && !input.reducedMotion) || input.paused || input.hidden) {
         runtime.stopLayout(); return false;
       }
       const layout = runtime.ensureLayout();

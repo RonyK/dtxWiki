@@ -13,6 +13,25 @@
   days do not fit, the timeline scrolls sideways and keeps the current day in
   view.
 
+### Context Graph rendering
+
+- Render Context graphs with the shared Cosmos renderer and compute their
+  layouts in the D3 Worker used by the default Knowledge Map. Preserve live
+  coordinates, pins and the camera as timeline nodes enter and leave.
+- Use the Knowledge Map's WebGL2 support check for Context graphs and keep
+  the relationship list and static view available when rendering is unavailable.
+- Resume a paused Context graph layout when the reader seeks, steps or plays
+  the timeline.
+- Select a graph node on click without moving it or waking the layout; a
+  drag starts once the pointer moves.
+- Keep neighbouring nodes moving while a node is dragged, on every graph
+  (the 2K Knowledge Map now follows the Context graph and the 10K map).
+- Keep the 2K Knowledge Map's layout, pins and camera when the same view
+  gains or loses documents, for example when showing orphans.
+- Frame a Context graph to fit after a filter, query or history-view change,
+  and when locating a node from far zoomed out, zoom back in to a readable
+  level, as the Knowledge Map does.
+
 ### Graph legends
 
 - Lay out the Context Graph and Knowledge Map legends with one rule: visible

@@ -1,6 +1,7 @@
 import { expect, test, type CDPSession, type Page } from "@playwright/test";
-import { build } from "esbuild";
 import path from "node:path";
+import { createServer, type ViteDevServer } from "vite";
+import { fixtureServerConfig } from "./vite-fixture";
 
 import type { GraphRenderScene } from "../../frontend/src/features/graph/shared/rendererTypes";
 
@@ -24,17 +25,20 @@ declare global {
       labelDraws(): Array<{ text: string; x: number; y: number }>;
       labelState(): { alpha: number; ink: number; displayed: string[] };
       detail(id: string): Promise<void>;
+      rightBoundary(id: string): Promise<void>;
       kinds(): void;
       node(id: string): {
         point: { x: number; y: number };
         graphPoint: { x: number; y: number };
         color: string | undefined;
         hidden: boolean | undefined;
+        radius: number | undefined;
       };
       focus(id: string | null): void;
       pin(id: string, pinned?: boolean, position?: { x: number; y: number }): { x: number; y: number } | null;
       positions(): Record<string, { x: number; y: number }>;
       replaceScene(scene: { nodes: unknown[]; edges: unknown[] }): void;
+      settled(): Promise<void>;
       reset(): void;
       scene: { nodes: unknown[]; edges: unknown[] };
       select(id: string | null): void;
@@ -46,25 +50,25 @@ declare global {
   }
 }
 
-let bundle = "";
-let canvasBundle = "";
+let server: ViteDevServer;
+let origin: string;
 
 test.beforeAll(async () => {
-  const output = await build({
-    entryPoints: [path.resolve("tests/graph-webgl/local-adapter-entry.ts")],
-    bundle: true,
-    platform: "browser",
-    format: "iife",
-    write: false,
+  server = await createServer({
+    ...fixtureServerConfig,
+    server: { host: "127.0.0.1", port: 0, strictPort: false, fs: { allow: [path.resolve(".")] } },
+    plugins: [{ name: "local-empty-document", configureServer(server) {
+      server.middlewares.use("/__local-fixture.html", (_request, response) => {
+        response.setHeader("content-type", "text/html"); response.end("<!doctype html><html><body></body></html>");
+      });
+    } }],
   });
-  bundle = output.outputFiles[0].text;
-  const canvasOutput = await build({
-    entryPoints: [path.resolve("tests/graph-webgl/local-canvas-entry.ts")],
-    bundle: true, platform: "browser", format: "iife", write: false,
-    define: { "process.env.NODE_ENV": '"production"' },
-  });
-  canvasBundle = canvasOutput.outputFiles[0].text;
+  await server.listen();
+  const address = server.httpServer?.address();
+  if (!address || typeof address === "string") throw new Error("Local fixture server did not bind TCP");
+  origin = `http://127.0.0.1:${address.port}`;
 });
+test.afterAll(async () => { await server?.close(); });
 
 test("Local pin state releases restored coordinates without reviving them on scene replacement", async ({ page }) => {
   const errors = await mountFixture(page);
@@ -84,6 +88,7 @@ test("Local pin state releases restored coordinates without reviving them on sce
         ? { ...edge, count: (edge.count ?? 1) + 1 } : edge),
     });
   });
+  await page.evaluate(() => window.__graphLocalFixture.settled());
   const after = await page.evaluate(() => ({
     camera: window.__graphLocalFixture.camera(),
     positions: window.__graphLocalFixture.positions(),
@@ -93,7 +98,9 @@ test("Local pin state releases restored coordinates without reviving them on sce
   expect(after.positions["context_page:linked"]).not.toEqual(before.positions["context_page:linked"]);
   expect(after.positions["library_item_version:cited"]).toEqual(before.positions["library_item_version:cited"]);
   expect(after.positions["context_page:seed"]).toEqual({ x: 0, y: 0 });
-  expect(after.camera).toEqual(before.camera);
+  // As on the Map, the renderer frames a rebuilt scene by Fit: the reader's
+  // earlier zoom does not carry over to the new layout.
+  expect(after.camera).not.toEqual(before.camera);
   expect(errors).toEqual([]);
 });
 
@@ -110,6 +117,7 @@ test("Local pin state reset stays released after replacement and keeps the seed 
         ? { ...edge, count: (edge.count ?? 1) + 1 } : edge),
     });
   });
+  await page.evaluate(() => window.__graphLocalFixture.settled());
   const after = await page.evaluate(() => window.__graphLocalFixture.positions());
   expect(after["context_page:linked"]).not.toEqual(before["context_page:linked"]);
   expect(after["library_item_version:cited"]).not.toEqual(before["library_item_version:cited"]);
@@ -153,8 +161,9 @@ test("Local tiny nodes have a 12px screen-space mouse target and win over relati
   const distance = Math.hypot(seed.x - node.x, seed.y - node.y);
   await page.mouse.click(node.x + (seed.x - node.x) * 9 / distance,
     node.y + (seed.y - node.y) * 9 / distance);
-  expect(await page.evaluate(() => window.__graphLocalFixture.rawPicks.at(-1)))
-    .toEqual({ kind: "edge", id: "edge:link" });
+  // The common 12px picker resolves the padded node before invoking native
+  // link callbacks; assert the real selected target rather than Sigma's old
+  // intermediate edge hit that the previous adapter subsequently promoted.
   await expect.poll(() => page.evaluate(() => window.__graphLocalFixture.events.filter((event) => event.type === "select").at(-1)?.id)).toBe("context:linked");
   await page.mouse.click(20, 600);
   for (const dx of [6, 11.5]) {
@@ -177,8 +186,9 @@ for (const recovery of ["restore", "retry"] as const) {
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
     await page.setViewportSize({ width: 860, height: 640 });
-    await page.setContent('<style>body{margin:0}#graph,.graph-canvas{width:860px;height:640px;background:white;color:#0f172a}.graph-canvas-frame{position:relative}.graph-canvas-status{position:absolute;inset:12px auto auto 12px;background:white;padding:10px;border:1px solid #999}</style><div id="graph"></div>');
-    await page.addScriptTag({ content: canvasBundle });
+    await page.goto(`${origin}/__local-fixture.html`);
+    await page.setContent('<style>body{margin:0}#graph,.graph-canvas{width:860px;height:640px;background:white;color:#0f172a}.graph-canvas-frame{position:relative}.graph-canvas-status{position:absolute;z-index:5;inset:12px auto auto 12px;background:white;padding:10px;border:1px solid #999}</style><div id="graph"></div>');
+    await page.addScriptTag({ type: "module", url: `${origin}/@fs${path.resolve("tests/graph-webgl/local-canvas-entry.ts")}` });
     const frame = page.locator(".graph-canvas-frame");
     await expect(frame).toHaveAttribute("data-renderer-status", "ready");
     expect(await page.evaluate(() => window.__graphCanvasFixture.instances())).toBe(1);
@@ -211,6 +221,7 @@ async function mountFixture(page: Page, width = 860, viewportWidth = width): Pro
     if (message.type() === "error") errors.push(message.text());
   });
   await page.setViewportSize({ width: viewportWidth, height: 640 });
+  await page.goto(`${origin}/__local-fixture.html`);
   await page.setContent(`
     <style>
       html, body { margin: 0; }
@@ -223,8 +234,8 @@ async function mountFixture(page: Page, width = 860, viewportWidth = width): Pro
     <div id="graph" aria-label="Local Graph renderer fixture"></div>
   `);
   await page.addStyleTag({ path: path.resolve("frontend/src/styles/03-editor.css") });
-  await page.addScriptTag({ content: bundle });
-  await expect.poll(() => page.locator("#graph canvas").count()).toBeGreaterThan(2);
+  await page.addScriptTag({ type: "module", url: `${origin}/@fs${path.resolve("tests/graph-webgl/local-adapter-entry.ts")}` });
+  await expect.poll(() => page.locator("#graph canvas[data-local-graph-canvas]").count()).toBe(1);
   await page.evaluate(() => window.__graphLocalFixture.stop());
   await expect.poll(async () => (await renderedColors(page)).nonwhite).toBeGreaterThan(100);
   // Text labels can arrive before native geometry/picking is ready. Require a
@@ -282,15 +293,17 @@ async function nodePixels(page: Page, id: string): Promise<{ painted: number; br
 }
 
 async function nodeShapePixels(page: Page, id: string): Promise<{
-  center: number[]; ring: number[]; middle: number[]; corner: number[]; axis: number[];
+  center: number[]; ring: number[]; middle: number[]; corner: number[]; diagonal: number[];
 }> {
   await page.evaluate((nodeId) => window.__graphLocalFixture.detail(nodeId), id);
-  const point = await page.evaluate((nodeId) => window.__graphLocalFixture.node(nodeId).point, id);
+  const node = await page.evaluate((nodeId) => window.__graphLocalFixture.node(nodeId), id);
+  const point = node.point;
+  expect(node.radius, "The shape witness needs a resolved native CSS radius").toBeGreaterThan(10);
   expect(Number.isFinite(point.x) && Number.isFinite(point.y), "Reduced-motion centering must never emit NaN camera coordinates").toBe(true);
   expect(point.x).toBeCloseTo(430, 1);
   expect(point.y).toBeCloseTo(320, 1);
   const screenshot = await page.locator("#graph").screenshot();
-  return page.evaluate(async ({ encoded, point: center }) => {
+  return page.evaluate(async ({ encoded, point: center, radius }) => {
     const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${encoded}`)).blob());
     const canvas = document.createElement("canvas");
     canvas.width = image.width;
@@ -298,12 +311,13 @@ async function nodeShapePixels(page: Page, id: string): Promise<{
     const context = canvas.getContext("2d");
     if (!context) throw new Error("2D screenshot decoder unavailable");
     context.drawImage(image, 0, 0);
-    const pixel = (x: number, y: number) => Array.from(context.getImageData(Math.round(center.x) + x, Math.round(center.y) + y, 1, 1).data).slice(0, 3);
-    // A 3 px point at camera ratio 1/6 is ~7.35 px in radius: the square's
-    // (6,6) corner is outside a circle, and a folder's (0,0) is transparent.
-    // Only a diamond reaches (9,0) on its axis (√2 × 7.35 ≈ 10.4 px).
-    return { center: pixel(0, 0), ring: pixel(6, 0), middle: pixel(4, 2), corner: pixel(6, 6), axis: pixel(9, 0) };
-  }, { encoded: screenshot.toString("base64"), point });
+    const pixel = (x: number, y: number) => Array.from(context.getImageData(Math.round(center.x + x), Math.round(center.y + y), 1, 1).data).slice(0, 3);
+    // Black-box silhouette witnesses use the actual drawn diameter. The square
+    // paints its corner beyond the circle; a diamond leaves a diagonal empty
+    // where a filled disc paints. Labels are disabled to keep text out of it.
+    return { center: pixel(0, 0), ring: pixel(radius * .88, 0), middle: pixel(radius * .55, radius * .3),
+      corner: pixel(radius * .76, radius * .76), diagonal: pixel(radius * .6, radius * .4) };
+  }, { encoded: screenshot.toString("base64"), point, radius: node.radius! });
 }
 
 async function touchPan(client: CDPSession): Promise<void> {
@@ -360,7 +374,7 @@ async function renderedColors(page: Page): Promise<{
   }, screenshot.toString("base64"));
 }
 
-test("Local Sigma adapter paints point nodes and all four visible relationship kinds without browser errors", async ({ page }, testInfo) => {
+test("Local Cosmos adapter paints point nodes and all four visible relationship kinds without browser errors", async ({ page }, testInfo) => {
   const errors = await mountFixture(page);
   const colors = await renderedColors(page);
   expect(colors.nonwhite, "Local graph canvas should contain visible geometry and labels").toBeGreaterThan(100);
@@ -378,7 +392,7 @@ test("Local Sigma adapter paints point nodes and all four visible relationship k
   expect(dimmed.brightness, "Non-neighbors should be dimmed into the background, not hidden").toBeGreaterThan(unrelated.brightness + 30);
   await page.evaluate(() => window.__graphLocalFixture.zoom());
   const screenshot = await page.locator("#graph").screenshot();
-  await testInfo.attach("local-sigma-graph.png", { body: screenshot, contentType: "image/png" });
+  await testInfo.attach("local-cosmos-graph.png", { body: screenshot, contentType: "image/png" });
   expect(errors).toEqual([]);
 });
 
@@ -414,7 +428,7 @@ test("Local selecting an unlinked document keeps every original relationship pai
   const quiet = await page.evaluate(() => window.__graphLocalFixture.edges());
   expect(quiet).toHaveLength(4);
   expect(quiet.every((edge) => !edge.hidden)).toBe(true);
-  expect(quiet.every((edge, index) => edge.color !== before.edges[index].color)).toBe(true);
+  expect(quiet.every((edge, index) => edge.color !== before.edges[index].color), JSON.stringify({ before: before.edges, quiet })).toBe(true);
   // Read actual native-frame pixels in a corridor away from the endpoint dots
   // and labels. Graphology counts/display flags alone cannot prove drawing.
   const endpoints = await page.evaluate(() => [window.__graphLocalFixture.node("context:seed").point,
@@ -460,7 +474,7 @@ test("Local DOM keyboard emphasis and selection stay unchanged by pointer hover"
       events: window.__graphLocalFixture.events,
       nodes: ["context:seed", "library:cited", "context:unrelated"].map((id) => ({ id, ...window.__graphLocalFixture.node(id) })),
       contexts: ["nodes", "edges"].map((name) => {
-        const canvas = document.querySelector<HTMLCanvasElement>(`#graph canvas.sigma-${name}`);
+        const canvas = document.querySelector<HTMLCanvasElement>(`#graph canvas[data-local-graph-canvas]`);
         const gl = canvas?.getContext("webgl2") ?? canvas?.getContext("webgl");
         return { name, width: canvas?.width, height: canvas?.height, lost: gl?.isContextLost(), error: gl?.getError() };
       }),
@@ -551,9 +565,9 @@ test("Local canvas mouse drag commits one pin and release outside the canvas per
 
 for (const end of ["touchEnd", "touchCancel"] as const) {
   test(`Local canvas touch ${end === "touchEnd" ? "tap" : "cancellation"} ends node interaction and permits stage pan at 390 px`, async ({ page }, testInfo) => {
-    const errors = await mountFixture(page, 390);
     const client = await page.context().newCDPSession(page);
     await client.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    const errors = await mountFixture(page, 390);
     const node = await page.evaluate(() => window.__graphLocalFixture.node("context:linked"));
     await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: node.point.x, y: node.point.y }] });
     await client.send("Input.dispatchTouchEvent", { type: end, touchPoints: [] });
@@ -648,8 +662,9 @@ for (const forcedColors of [false, true]) {
     const isWhite = (pixel: number[]) => pixel.every((channel) => channel > 245);
     expect(isWhite(context.corner), "Context is a circle, not a square").toBe(true);
     expect(isWhite(contextVersion.corner), "A Context version is a triangle, not a square").toBe(true);
-    expect(isWhite(context.axis), "Context is a circle, not a diamond").toBe(true);
-    expect(isWhite(conversation.axis), "Chat/activity records are diamonds").toBe(false);
+    expect(isWhite(context.diagonal), "Context keeps the disc's filled diagonal").toBe(false);
+    expect(isWhite(conversation.diagonal), "Chat/activity diamonds leave the disc diagonal empty").toBe(true);
+    expect(isWhite(conversation.center), "Chat/activity diamonds remain filled at their center").toBe(false);
     expect(isWhite(conversation.corner), "A diamond leaves the square corner empty").toBe(true);
     expect(isWhite(libraryVersion.corner), "Real library_item_version must paint its square corner").toBe(false);
     expect(isWhite(libraryArtifact.corner), "Real library_artifact must paint its square corner").toBe(false);
@@ -716,6 +731,7 @@ test("Local labels-off keeps actual seed and selected glyphs while suppressing o
 test("Local Library square labels near the right boundary use the shared inward clamp", async ({ page }, testInfo) => {
   const errors = await mountFixture(page);
   await page.evaluate(() => window.__graphLocalFixture.kinds());
+  await page.evaluate(() => window.__graphLocalFixture.rightBoundary("kind:2"));
   await expect.poll(() => page.evaluate(() => window.__graphLocalFixture.labelState().alpha)).toBeGreaterThan(100);
   const node = await page.evaluate(() => window.__graphLocalFixture.node("kind:2").point);
   expect(node.x, "The fixture square must be near the right boundary").toBeGreaterThan(800);
@@ -736,7 +752,7 @@ test("Local Library square labels near the right boundary use the shared inward 
   expect(errors).toEqual([]);
 });
 
-test("crowded Local priority labels all paint in native Sigma without moving nodes or camera", async ({ page }, testInfo) => {
+test("crowded Local priority labels all paint in native Cosmos without moving nodes or camera", async ({ page }, testInfo) => {
   const errors = await mountFixture(page);
   await page.evaluate(() => {
     window.__graphLocalFixture.crowdedLabels();
@@ -761,7 +777,7 @@ test("crowded Local priority labels all paint in native Sigma without moving nod
     positions: window.__graphLocalFixture.positions(), camera: window.__graphLocalFixture.camera(),
   }))).toEqual(before);
   await testInfo.attach("crowded-priority-labels.json", { contentType: "application/json", body: JSON.stringify({
-    draws, pixels, scope: "Actual pinned Sigma native paint in deliberately coincident ten-seed regression; not 2K map layout qualification",
+    draws, pixels, scope: "Actual pinned Cosmos native paint in deliberately coincident ten-seed regression; not 2K map layout qualification",
   }) });
   await page.screenshot({ path: testInfo.outputPath("crowded-priority-labels.png") });
   expect(errors).toEqual([]);

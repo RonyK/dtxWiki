@@ -1053,7 +1053,7 @@ async function expectRealLocalQuery(response: Response, workspaceId: string, ent
 async function expectLocalRendererReady(graphPanel: Locator) {
   const canvas = graphPanel.getByTestId("graph-canvas");
   await expect(canvas.locator("..")).toHaveAttribute("data-renderer-status", "ready");
-  await expect(canvas.locator("canvas.sigma-nodes")).toBeVisible();
+  await expect(canvas.locator("canvas[data-local-graph-canvas]")).toBeVisible();
 }
 
 function watchLocalRequests(page: Page, workspaceId: string) {

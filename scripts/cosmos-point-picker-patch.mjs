@@ -3,7 +3,52 @@ import { COSMOS_VERSION, COSMOS_SOURCE_SHA256, sha256 } from "./cosmos-source.mj
 import { COSMOS_COLLISION_RADII_PATCH_HUNKS } from "./cosmos-collision-radii-patch.mjs";
 
 const pinnedPointsComment = "  /**\n   * Sets which points are pinned (fixed) in position.";
-const hostMethods = `  /** Optional point picking only; native rendering, forces and drag stay owned here. */
+const hostMethods = `  /** Apply an explicit camera synchronously through the existing zoom behavior. */
+  setCameraCenter(position, zoom) {
+    if (this._isDestroyed) return;
+    if (!position || position.length !== 2 || !Array.from(position).every(Number.isFinite) || !Number.isFinite(zoom) || zoom <= 0) {
+      throw new RangeError("Camera center and zoom must be finite");
+    }
+    if (this.ensureDevice(() => this.setCameraCenter(position, zoom))) return;
+    this.zoomInstance.shouldEnableSimulationDuringZoomOverride = false;
+    this.syncScreenSize();
+    const transform = this.zoomInstance.getTransform(position, zoom, 0);
+    this.canvasD3Selection?.call(this.zoomInstance.behavior.transform, transform);
+  }
+  /** Start or remap (an index) or clear (null) the pressed pointer's native drag. */
+  remapDraggingPoint(index) {
+    if (this._isDestroyed) return;
+    this._dtxAssertPointRow(index, "Dragging point");
+    this.store.draggingPointIndex = index === null ? void 0 : index;
+    if (this.dragInstance) this.dragInstance.isActive = index !== null;
+    // Clearing the drag at pointer-down still permits a stationary click;
+    // a started drag retires the press.
+    if (index !== null) this._dtxCancelPointPress();
+    this.requestRender();
+  }
+  /** Indexed rows changed: the hovered point and link are now these rows (null:
+   * gone). Hover and its click follow them; no callback fires. A drag keeps its
+   * own owner, remapped through remapDraggingPoint. */
+  remapPointer(point, link) {
+    if (this._isDestroyed) return;
+    this._dtxAssertPointRow(point, "Hovered point");
+    const links = this.graph.inputLinks ? this.graph.inputLinks.length / 2 : this.graph.linksNumber;
+    this._dtxAssertRow(link, links, "Hovered link");
+    const hovered = this.store.hoveredPoint;
+    this.store.hoveredPoint = hovered && point !== null ? { ...hovered, index: point } : void 0;
+    this.store.hoveredLinkIndex = this.store.hoveredLinkIndex === void 0 || link === null ? void 0 : link;
+    this.requestRender();
+  }
+  _dtxAssertPointRow(index, name) {
+    const count = this.graph.inputPointPositions ? this.graph.inputPointPositions.length / 2 : this.graph.pointsNumber;
+    this._dtxAssertRow(index, count, name);
+  }
+  _dtxAssertRow(index, count, name) {
+    if (index !== null && (!Number.isInteger(count) || !Number.isInteger(index) || index < 0 || index >= count)) {
+      throw new RangeError(name + " must belong to the current indexed rows");
+    }
+  }
+  /** Optional point picking only; native rendering, forces and drag stay owned here. */
   attachPointPicker(picker) {
     if (picker !== null && (!picker ||
         ["pickSync", "request", "take", "discard", "destroy"].some(name => typeof picker[name] !== "function") ||

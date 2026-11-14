@@ -1284,19 +1284,16 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             graphPanel.getByTestId("graph-canvas").locator(".."),
           ).toHaveAttribute("data-renderer-status", "ready");
           await expect(
-            graphPanel.getByTestId("graph-canvas").locator("canvas.sigma-edges"),
-          ).toBeVisible();
-          await expect(
-            graphPanel.getByTestId("graph-canvas").locator("canvas.sigma-nodes"),
+            graphPanel.getByTestId("graph-canvas").locator("canvas[data-local-graph-canvas]"),
           ).toBeVisible();
           const webglVersion = await graphPanel.getByTestId("graph-canvas")
-            .locator("canvas.sigma-edges")
+            .locator("canvas[data-local-graph-canvas]")
             .evaluate((canvas) => {
               const context = (canvas as HTMLCanvasElement).getContext("webgl2")
                 ?? (canvas as HTMLCanvasElement).getContext("webgl");
               return context?.getParameter(context.VERSION) as string | undefined;
             });
-          expect(webglVersion).toMatch(/^WebGL [12]\.0/);
+          expect(webglVersion).toMatch(/^WebGL 2\.0/);
           const depthOne = graphPanel.getByRole("radio", { name: "Neighbor connections", exact: true });
           const depthTwo = graphPanel.getByRole("radio", { name: "Two-step expansion", exact: true });
           await expect(graphPanel.getByRole("radio", { name: "Direct connections", exact: true })).toHaveAttribute("aria-checked", "true");
@@ -1480,7 +1477,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await readerTabs.getByRole("tab", { name: /^Graph/ }).click();
           await expect(graphPanel.getByTestId("graph-canvas").locator(".."))
             .toHaveAttribute("data-renderer-status", "ready");
-          await expect(graphPanel.getByTestId("graph-canvas").locator("canvas.sigma-edges"))
+          await expect(graphPanel.getByTestId("graph-canvas").locator("canvas[data-local-graph-canvas]"))
             .toBeVisible();
         });
 

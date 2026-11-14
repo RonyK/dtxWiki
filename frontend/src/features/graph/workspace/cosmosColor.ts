@@ -1,3 +1,8 @@
+/** `share` of a colour over a background, per WebGL channel in 0..1. */
+export function blendRgb(front: ArrayLike<number>, back: ArrayLike<number>, share: number): [number, number, number] {
+  return [0, 1, 2].map(channel => front[channel] * share + back[channel] * (1 - share)) as [number, number, number];
+}
+
 /** A CSS hex or rgb() colour as WebGL channels in 0..1. */
 export function rgb(color: string): [number, number, number] {
   const hex = color.trim().match(/^#([\da-f]{3}|[\da-f]{6})$/i);

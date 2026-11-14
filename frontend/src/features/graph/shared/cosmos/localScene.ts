@@ -1,4 +1,4 @@
-import { buildLocalScene } from "../../local/sceneInput";
+import { buildLocalScene, type LocalScene } from "../../local/sceneInput";
 import { localNodeVisualKind } from "../../local/nodeVisual";
 import { localEdgeVisualKind, LOCAL_EDGE_VISUAL_KIND_ORDER } from "../../local/edgeKinds";
 import type { GraphNodeVisualKind } from "../graphTokens";
@@ -11,16 +11,15 @@ const LOCAL_NODE_VISUAL_KINDS: readonly GraphNodeVisualKind[] = [
 ];
 
 /**
- * Prepare Context expressions for the common renderer without connecting the
- * Context screen to Cosmos. Admission and semantic sorting are the existing
+ * Prepare Context expressions for the common renderer. Admission and semantic sorting are the existing
  * Local scene's; relation rows keep the wire direction and endpoint order,
  * including an undirected relationship whose force input is canonicalized.
  */
 export function buildLocalCosmosColumns(
   scene: GraphRenderScene,
   identity: GraphVisibleIdentity,
+  local: LocalScene = buildLocalScene(scene),
 ): CosmosSceneColumns {
-  const local = buildLocalScene(scene);
   const nodeIndex = new Map(local.nodes.map((node, index) => [node.key, index]));
   const wireNodes = new Map<string, GraphRenderNode>();
   for (const node of scene.nodes.filter((node) => !node.hidden).sort((left, right) => left.id.localeCompare(right.id))) {
@@ -64,6 +63,15 @@ export function buildLocalCosmosColumns(
     nodeEntityKinds: local.nodes.map((node) => node.entityKind),
     nodeGrains: local.nodes.map((node) => wireNodes.get(node.key)?.grain ?? null),
     nodeVisualKinds,
+    layoutInput: local.layout,
+    localGeometryKey: local.geometryKey,
+    nodeIsSeed: Uint8Array.from(local.nodes, node => Number(node.isSeed)),
+    nodeIsCurrent: Uint8Array.from(local.nodes, node => Number(node.isCurrent)),
+    nodeSeedGlyph: Uint8Array.from(local.nodes, node => Number(node.seedGlyph)),
+    nodeMuted: Uint8Array.from(local.nodes, node => Number(Boolean(wireNodes.get(node.key)?.muted))),
+    nodeHighlighted: Uint8Array.from(local.nodes, node => Number(Boolean(wireNodes.get(node.key)?.highlighted))),
+    nodeSessions: Uint8Array.from(local.nodes, node => Number(node.session)),
+    nodeBadges: local.nodes.map(node => node.badge),
     edgeIds: local.edges.map((edge) => edge.graphId),
     edgeSources,
     edgeTargets,
@@ -74,5 +82,10 @@ export function buildLocalCosmosColumns(
     edgeRelationKinds: originalEdges.map((edge) => edge.edge_kind!),
     edgeDirections: originalEdges.map((edge) => edge.direction ?? null),
     edgeVisualKinds,
+    edgeLabels: originalEdges.map(edge => edge.label),
+    edgeCaptions: originalEdges.map(edge => edge.eventCaption ?? null),
+    edgeMuted: Uint8Array.from(originalEdges, edge => Number(Boolean(edge.muted))),
+    edgeHighlighted: Uint8Array.from(originalEdges, edge => Number(Boolean(edge.highlighted))),
+    edgeRemoved: Uint8Array.from(originalEdges, edge => Number(Boolean(edge.removed))),
   };
 }

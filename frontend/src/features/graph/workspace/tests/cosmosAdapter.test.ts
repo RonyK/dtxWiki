@@ -55,6 +55,12 @@ const { graph, community, createGraph, createNativeGraph } = vi.hoisted(() => {
     setPointImageSizes: vi.fn(),
     setZoomLevel: vi.fn(),
     setZoomTransformByPointPositions: vi.fn(),
+    setCameraCenter: vi.fn((position: readonly number[], zoom: number) => {
+      // This existing fake routes both SDK camera entry points through its
+      // recorded camera model. The SDK host regression covers double precision.
+      graph.setZoomTransformByPointPositions(Float32Array.from(position), 0, zoom, 0, false);
+    }),
+    remapDraggingPoint: vi.fn(), remapPointer: vi.fn(),
     spaceToScreenPosition: vi.fn((_position: [number, number]) => [10, 10]),
     start: vi.fn(),
     stop: vi.fn(),
@@ -642,12 +648,15 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
     graph.spaceToScreenPosition.mockImplementation(([x, y]) => [x * 2, y * 2]);
     config.onZoom?.({ transform: { k: 4 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
     expect(title()).toMatchObject({ pointX: "600", pointY: "800" });
-    // A drag stops the worker; the title follows the pointer, then the committed row.
+    // A drag keeps the worker running: a frame moves the neighbours while the
+    // dragged title and row stay at the pointer, then at the committed row.
     graph.spaceToScreenPosition.mockImplementation(point => point);
     config.onPointMouseOver?.(0, [300, 400], undefined, false, false);
     const drag = installedSdkDrag(config, 0); drag.start(); drag.move(340, 420);
-    expect(worker.isRunning()).toBe(false);
+    expect(worker.isRunning()).toBe(true);
+    worker.options.onPositions(Float32Array.from([999, 999, 510, 610, 700, 800]));
     expect(title()).toMatchObject({ pointX: "340", pointY: "420" });
+    expect([...adapter.captureCoordinates()!.positions.slice(0, 4)]).toEqual([340, 420, 510, 610]);
     drag.move(360, 430); drag.end();
     expect(adapter.captureCoordinates()!.positions.slice(0, 2)).toEqual(Float32Array.from([360, 430]));
     // The released title follows the resumed worker again, not the last pointer.
@@ -726,13 +735,12 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
     expect(graph.setPinnedPoints).toHaveBeenLastCalledWith([0]); expect(graph.start).not.toHaveBeenCalled();
   });
 
-  it("stops CPU at native drag start, rejects frames during drag, commits the final event and exact pin", async () => {
+  it("keeps CPU running through a moved native drag, then commits the final event and exact pin", async () => {
     const { adapter, onPin } = await mountCpu(); const worker = cpu.instances[0];
     const config = createGraph.mock.calls.at(-1)![1]; config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
-    const drag = installedSdkDrag(config, 0); drag.start();
-    expect(worker.isRunning()).toBe(false); graph.setPointPositions.mockClear();
-    worker.options.onPositions(new Float32Array(6).fill(999));
-    expect(graph.setPointPositions).not.toHaveBeenCalled();
+    const drag = installedSdkDrag(config, 0); drag.start(); drag.move(25, 40);
+    expect(graph.remapDraggingPoint).toHaveBeenLastCalledWith(0);
+    expect(worker.isRunning()).toBe(true); expect(worker.stop).not.toHaveBeenCalled();
     graph.screenToSpacePosition.mockReturnValue([1234, 2345]); drag.move(30, 50); drag.end();
     expect(graph.screenToSpacePosition).toHaveBeenLastCalledWith([30, 50]);
     expect(onPin).toHaveBeenLastCalledWith("a", { x: 1234, y: 2345 });
@@ -742,13 +750,40 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
       .toEqual(Float32Array.from([1234, 2345]));
   });
 
-  it("stationary touch is not a pin and restarting after a tap preserves the current CPU scene", async () => {
+  it("stationary touch is not a pin and leaves the native drag, CPU layout and scene untouched", async () => {
     const { onPin } = await mountCpu(); const worker = cpu.instances[0];
     const config = createGraph.mock.calls.at(-1)![1]; config.onPointMouseOver?.(1, [0, 0], undefined, false, false);
+    worker.start.mockClear(); worker.stop.mockClear(); graph.remapDraggingPoint.mockClear();
     const drag = installedSdkDrag(config, 1); drag.start("touchstart"); drag.end("touchend");
     expect(onPin).not.toHaveBeenCalled(); expect(worker.isRunning()).toBe(true);
-    expect(worker.start).toHaveBeenLastCalledWith(false);
+    expect(worker.stop).not.toHaveBeenCalled(); expect(worker.start).not.toHaveBeenCalled();
+    expect(graph.remapDraggingPoint).toHaveBeenCalledExactlyOnceWith(null);
     expect(worker.setPositions).not.toHaveBeenCalled();
+  });
+
+  it("carries a same-request topology update by stable keys and ends hover, drag and waits that left", async () => {
+    const onHover = vi.fn();
+    const { adapter } = await mountCpu(columns(), {
+      callbacks: { onHover, onSelect: vi.fn(), onPin: vi.fn(), onRuntimeError: vi.fn() } });
+    const worker = Object.assign(cpu.instances[0], { update: vi.fn(), unpin: vi.fn(), pinWhenSettled: vi.fn() });
+    const config = createGraph.mock.calls.at(-1)![1];
+    config.onPointMouseOver?.(2, [0, 0], undefined, false, false);
+    const drag = installedSdkDrag(config, 2); drag.start(); drag.move(30, 50);
+    community.compute.mockClear();
+    const input = columns(), withoutC: WorkspaceMapColumns = { ...input,
+      identity: { ...input.identity, visibleFingerprint: "visible-without-c" },
+      nodeIds: ["a", "b"], nodeKeys: ["context:a", "context:b"], nodeLabels: ["Alpha", "Beta"], nodeFolderKeys: [null, null],
+      nodeKinds: new Uint8Array(2), nodeSizes: Float32Array.from([3, 3]), edgeIds: ["ab"], edgeSources: Uint32Array.from([0]),
+      edgeTargets: Uint32Array.from([1]), edgeKinds: new Uint8Array(1), edgeCounts: Uint32Array.from([1]),
+      edgeWeights: Float64Array.from([1]), edgeCrossFolder: new Uint8Array(1) };
+    expect(adapter.replaceColumns(withoutC)).toBe("topology");
+    expect(onHover).toHaveBeenLastCalledWith(null);
+    expect(graph.remapDraggingPoint).toHaveBeenLastCalledWith(null);
+    expect(graph.remapPointer).toHaveBeenLastCalledWith(null, null);
+    expect(worker.isRunning()).toBe(true);
+    expect(community.compute).toHaveBeenCalledWith(withoutC, expect.anything());
+    adapter.pinWhenSettled("b"); adapter.reset();
+    expect(worker.unpin).toHaveBeenCalledWith(1, false);
   });
 
   it("keeps the current Worker through metadata updates but rejects old output after authority replacement", async () => {
@@ -3229,11 +3264,7 @@ describe("Cosmos Map interaction contracts", () => {
     const config = createGraph.mock.calls[0][1];
     // Every line is the legend's one width; no scene-size scale.
     expect(config).toMatchObject({ linkDefaultWidth: 1.5, linkVisibilityMinTransparency: GRAPH_LINE_OPACITY.fade.small.floor,
-      hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6,
-      linkDashLength: 8, linkDashGap: 3, linkDashDotLength: 1.5, linkDashDotGap: 3,
-      linkDottedDashLength: 10, linkDottedDashGap: 4,
-      linkEndpointMarkers: true, linkEndpointArrowLength: 6, linkEndpointArrowHalfWidth: 4,
-      linkEndpointDiamondLength: 10, linkEndpointDiamondHalfWidth: 4, linkEndpointNodeGap: 1.5 });
+      hoveredLinkWidthIncrease: .6, focusedLinkWidthIncrease: .6 });
     graph.setConfigPartial.mockClear();
     config.onZoom?.({ transform: { k: 0.02 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
     expect(graph.setConfigPartial).toHaveBeenLastCalledWith(expect.objectContaining({ pointSizeScale: 1 }));

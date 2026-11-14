@@ -22,6 +22,8 @@ export type LocalLayoutEdgeInput = {
 };
 
 export type LocalLayoutInput = {
+  /** The visible primary query seed. null explicitly disables an anchor. */
+  primarySeedKey?: string | null;
   nodes: readonly LocalLayoutNodeInput[];
   edges: readonly LocalLayoutEdgeInput[];
 };

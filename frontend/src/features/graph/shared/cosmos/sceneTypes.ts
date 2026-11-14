@@ -1,5 +1,6 @@
 import type { GraphEdgeVisualKind, GraphNodeVisualKind } from "../graphTokens";
 import type { GraphVisibleIdentity } from "../rendererTypes";
+import type { LocalLayoutInput } from "../physics/layoutTypes";
 
 /**
  * Actor-visible columns consumed by the shared Cosmos renderer. Original IDs
@@ -27,6 +28,16 @@ export type CosmosSceneColumns = {
   /** Original entity kinds, independent of the supplying adapter's codes. */
   nodeEntityKinds?: string[];
   nodeVisualKinds?: GraphNodeVisualKind[];
+  /** Local's force input uses semantic kinds, not the Map's numeric enum. */
+  layoutInput?: LocalLayoutInput;
+  localGeometryKey?: string | null;
+  nodeIsSeed?: Uint8Array;
+  nodeIsCurrent?: Uint8Array;
+  nodeSeedGlyph?: Uint8Array;
+  nodeMuted?: Uint8Array;
+  nodeHighlighted?: Uint8Array;
+  nodeSessions?: Uint8Array;
+  nodeBadges?: Array<string | null>;
   edgeIds: string[];
   edgeSources: Uint32Array;
   edgeTargets: Uint32Array;
@@ -39,18 +50,32 @@ export type CosmosSceneColumns = {
   /** Original direction; the indexed source/target order is never reversed. */
   edgeDirections?: Array<string | null>;
   edgeVisualKinds?: GraphEdgeVisualKind[];
+  edgeLabels?: string[];
+  edgeCaptions?: Array<string | null>;
+  edgeMuted?: Uint8Array;
+  edgeHighlighted?: Uint8Array;
+  edgeRemoved?: Uint8Array;
 };
 
 /** The same authority fence is used by layout, picking and deferred scene work. */
+// Identities are immutable once a scene's columns are built; a scene's key is
+// derived once and reused by every later check, however large the scene.
+const identityKeys = new WeakMap<CosmosSceneColumns["identity"], string>();
+
 export function cosmosSceneIdentityKey(columns: Pick<CosmosSceneColumns, "identity">): string {
   const identity = columns.identity;
-  return JSON.stringify([
-    identity.workspaceId,
-    identity.actorId,
-    identity.surface,
-    identity.selectionKey,
-    identity.visibleFingerprint,
-  ]);
+  let key = identityKeys.get(identity);
+  if (key === undefined) {
+    key = JSON.stringify([
+      identity.workspaceId,
+      identity.actorId,
+      identity.surface,
+      identity.selectionKey,
+      identity.visibleFingerprint,
+    ]);
+    identityKeys.set(identity, key);
+  }
+  return key;
 }
 
 /** A transient snapshot owns its columns, including any presentation metadata. */
@@ -69,6 +94,18 @@ export function cloneCosmosSceneColumns(columns: CosmosSceneColumns): CosmosScen
     nodeGrains: columns.nodeGrains?.slice(),
     nodeEntityKinds: columns.nodeEntityKinds?.slice(),
     nodeVisualKinds: columns.nodeVisualKinds?.slice(),
+    layoutInput: columns.layoutInput ? {
+      ...columns.layoutInput,
+      nodes: columns.layoutInput.nodes.map(node => ({ ...node })),
+      edges: columns.layoutInput.edges.map(edge => ({ ...edge })),
+    } : undefined,
+    nodeIsSeed: columns.nodeIsSeed?.slice(),
+    nodeIsCurrent: columns.nodeIsCurrent?.slice(),
+    nodeSeedGlyph: columns.nodeSeedGlyph?.slice(),
+    nodeMuted: columns.nodeMuted?.slice(),
+    nodeHighlighted: columns.nodeHighlighted?.slice(),
+    nodeSessions: columns.nodeSessions?.slice(),
+    nodeBadges: columns.nodeBadges?.slice(),
     edgeIds: [...columns.edgeIds],
     edgeSources: columns.edgeSources.slice(),
     edgeTargets: columns.edgeTargets.slice(),
@@ -79,5 +116,10 @@ export function cloneCosmosSceneColumns(columns: CosmosSceneColumns): CosmosScen
     edgeRelationKinds: columns.edgeRelationKinds?.slice(),
     edgeDirections: columns.edgeDirections?.slice(),
     edgeVisualKinds: columns.edgeVisualKinds?.slice(),
+    edgeLabels: columns.edgeLabels?.slice(),
+    edgeCaptions: columns.edgeCaptions?.slice(),
+    edgeMuted: columns.edgeMuted?.slice(),
+    edgeHighlighted: columns.edgeHighlighted?.slice(),
+    edgeRemoved: columns.edgeRemoved?.slice(),
   };
 }

@@ -1,6 +1,8 @@
 import { WORKSPACE_MAP_EDGE_KIND, type WorkspaceMapColumns } from "../map/sceneColumns";
+import { createD3RowOrder } from "../shared/physics/d3RowOrder";
 import { createD3WorkerLayout, type D3WorkerLayoutState } from "../shared/physics/d3WorkerLayout";
-import type { LocalLayoutInput, LocalLayoutPositions } from "../local/layoutTypes";
+import type { LocalLayoutInput, LocalLayoutPositions } from "../shared/physics/layoutTypes";
+import type { GraphPoint } from "../shared/rendererTypes";
 import { directoryStartIsStructured, workspaceContainerIndices } from "./directoryStartPositions";
 import { buildWorkspaceD3UnitBasis, isReusableWorkspaceD3UnitBasis, measureWorkspaceD3BodyOverlap,
   workspaceD3FitZoom, type WorkspaceD3UnitBasis } from "./d3MapUnits";
@@ -13,6 +15,10 @@ export type WorkspaceD3Layout = {
   setReducedMotion(enabled: boolean): void;
   destroy(): void;
   isRunning(): boolean;
+  update(input: WorkspaceD3LayoutInput): void;
+  beginDrag(index: number, position: GraphPoint): GraphPoint | null;
+  moveDrag(index: number, position: GraphPoint): GraphPoint | null;
+  endDrag(index: number): void;
 };
 
 /** Indexed Map binding. Relations and TreeRail containment lines are the D3 links; folders never add any other force. */
@@ -50,7 +56,8 @@ const MATERIAL_OVERLAP_CSS = .5;
 const DIRECTORY_START_ALPHA = .25;
 
 export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: WorkspaceD3LayoutOptions): WorkspaceD3Layout {
-  const keys = input.columns.nodeKeys;
+  let currentInput = input;
+  let keys = input.columns.nodeKeys;
   const toRecord = (positions: Float32Array): LocalLayoutPositions => Object.fromEntries(
     keys.map((key, index) => [key, { x: positions[index * 2], y: positions[index * 2 + 1] }]),
   );
@@ -63,19 +70,18 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
   let requestedRunning = false;
   let requestedReheat = false;
   let reducedMotion = input.reducedMotion;
-  let indexedOrder: readonly number[] | null = null;
-  let directOrder = true;
   let fixedIndices = new Set(input.pins);
-  let catalog: readonly string[] | null = null;
+  const rowOrder = createD3RowOrder();
   let calibrationPasses = 0;
-  const edges: LocalLayoutInput["edges"] = input.columns.edgeIds.map((_, index) => ({
-    sourceKey: keys[input.columns.edgeSources[index]], targetKey: keys[input.columns.edgeTargets[index]],
-    kind: input.columns.edgeKinds[index] === WORKSPACE_MAP_EDGE_KIND.citation ? "citation"
-      : input.columns.edgeKinds[index] === WORKSPACE_MAP_EDGE_KIND.membership ? "membership" : "link",
-    count: input.columns.edgeCounts[index], occurrences: input.columns.edgeWeights[index],
-  }));
   const scene = (): LocalLayoutInput => ({
-    nodes: keys.map((key, index) => ({ key, isSeed: false, radiusPx: basis.radiusModel[index] })), edges,
+    primarySeedKey: null,
+    nodes: keys.map((key, index) => ({ key, isSeed: false, radiusPx: basis.radiusModel[index] })),
+    edges: currentInput.columns.edgeIds.map((_, index) => ({
+      sourceKey: keys[currentInput.columns.edgeSources[index]], targetKey: keys[currentInput.columns.edgeTargets[index]],
+      kind: currentInput.columns.edgeKinds[index] === WORKSPACE_MAP_EDGE_KIND.citation ? "citation"
+        : currentInput.columns.edgeKinds[index] === WORKSPACE_MAP_EDGE_KIND.membership ? "membership" : "link",
+      count: currentInput.columns.edgeCounts[index], occurrences: currentInput.columns.edgeWeights[index],
+    })),
   });
   let currentScene = scene();
   const cachedPositions = toRecord(input.positions);
@@ -89,7 +95,7 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
     options.onError(error);
   };
   const hasBodyOverlap = (positions: Float32Array, fit: number): boolean => {
-    const actualGlyphs = buildWorkspaceD3UnitBasis({ ...input, positions, viewport: basis.referenceViewport, referenceZoom: fit });
+    const actualGlyphs = buildWorkspaceD3UnitBasis({ ...currentInput, positions, viewport: basis.referenceViewport, referenceZoom: fit });
     return measureWorkspaceD3BodyOverlap(positions, actualGlyphs.nominalRadiusCss, fit, MATERIAL_OVERLAP_CSS, fixedIndices).overlappingNodes > 0;
   };
   const layout = createD3WorkerLayout(currentScene, {
@@ -99,17 +105,7 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
     onIndexedTick(positions, workerKeys) {
       if (destroyed) return;
       try {
-        if (catalog !== workerKeys) {
-          catalog = workerKeys;
-          const source = new Map(workerKeys.map((key, index) => [key, index]));
-          indexedOrder = keys.map(key => source.get(key) ?? -1);
-          if (indexedOrder.some(index => index < 0)) { fail(new Error("D3 Map received a different visible catalog")); return; }
-          directOrder = indexedOrder.every((source, index) => source === index);
-        }
-        const ordered = directOrder ? positions : new Float32Array(positions.length);
-        if (!directOrder) indexedOrder!.forEach((source, index) => {
-          ordered[index * 2] = positions[source * 2]; ordered[index * 2 + 1] = positions[source * 2 + 1];
-        });
+        const ordered = rowOrder(positions, workerKeys, keys);
         if (!acceptedSolved) {
           // A hidden/user-paused initial scene retains displayed rows. Resume
           // asks for another bounded Worker frame instead of copying phyllotaxis.
@@ -120,7 +116,7 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
           // phone's Fit. Zooming in resolves that; it is never a Map failure.
           if (coolingRemains || calibrationPasses <= MAX_CONTACT_PASSES && hasBodyOverlap(ordered, fit)) {
             calibrationPasses++;
-            basis = buildWorkspaceD3UnitBasis({ ...input, positions: ordered, viewport: basis.referenceViewport,
+            basis = buildWorkspaceD3UnitBasis({ ...currentInput, positions: ordered, viewport: basis.referenceViewport,
               referenceZoom: Math.max(.001, Math.min(basis.referenceZoom, fit) * FIT_CLEARANCE_SLACK),
               calibrationPasses });
             currentScene = scene();
@@ -151,6 +147,22 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
     onError: fail,
   });
   return {
+    update(next) {
+      if (destroyed) return;
+      currentInput = next; keys = next.columns.nodeKeys;
+      fixedIndices = new Set(next.pins);
+      // The original CSS/world reference remains owned by this scene. A
+      // topology edit is neither another cold solve nor a new camera Fit.
+      basis = buildWorkspaceD3UnitBasis({ ...next, viewport: basis.referenceViewport,
+        referenceZoom: basis.referenceZoom, calibrationPasses: basis.calibrationPasses });
+      basisPublished = false;
+      currentScene = scene();
+      const rows = toRecord(next.positions);
+      const fixed = Object.fromEntries(next.pins.map(index => [keys[index], rows[keys[index]]]));
+      layout.update(currentScene, fixed, explicitlyPaused
+        ? { settle: true, settleTicks: 0, settleAtCurrentAlpha: true }
+        : reducedMotion ? { settle: true } : {});
+    },
     start(reheat = false) {
       if (destroyed) return;
       const wasPaused = explicitlyPaused;
@@ -182,5 +194,11 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
       layout.setPositions(toRecord(positions), pins.map(index => keys[index]),
         { pinsOnly: !acceptedSolved, reheat: acceptedSolved && reconcile.reheat !== false });
     },
+    // Once its solved rows are the Map's, the Worker holds a dragged node at
+    // the pointer and its neighbours follow. Before that the cold solve owns
+    // the rows, so the drag stays native-only.
+    beginDrag(index, position) { return destroyed || !acceptedSolved ? null : layout.beginDrag(keys[index], position); },
+    moveDrag(index, position) { return destroyed || !acceptedSolved ? null : layout.moveDrag(keys[index], position); },
+    endDrag(index) { if (!destroyed) layout.endDrag(keys[index]); },
   };
 }

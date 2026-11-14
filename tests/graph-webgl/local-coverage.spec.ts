@@ -104,10 +104,16 @@ for (const rebuild of ["theme", "forced-colors", "reduced-motion", "context-rest
       await expect(page.locator(".graph-canvas-frame")).toHaveAttribute("data-renderer-status", "error");
       await page.evaluate(() => window.__localCoverageFixture.restoreContext());
     }
-    await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.read().instances)).toBe(before.instances + 1);
+    await expect.poll(() => page.evaluate(() => window.__localCoverageFixture.instances())).toBe(before.instances + 1);
     await expect(page.locator(".graph-canvas-frame")).toHaveAttribute("data-renderer-status", "ready");
     const after = await page.evaluate(() => window.__localCoverageFixture.read());
-    expect(after.camera).toEqual(before.camera);
+    // Reading a graph-space center through the native screen projection and
+    // restoring it makes a double-precision matrix round trip. Keep zoom and
+    // orientation exact; sub-picounit center noise cannot move a visible pixel.
+    expect(after.camera.ratio).toBe(before.camera.ratio);
+    expect(after.camera.angle).toBe(before.camera.angle);
+    expect(after.camera.x).toBeCloseTo(before.camera.x, 10);
+    expect(after.camera.y).toBeCloseTo(before.camera.y, 10);
     expect(errors).toEqual([]);
     await testInfo.attach("local-native-camera-rebuild", { contentType: "application/json",
       body: JSON.stringify({ rebuild, before, after }, null, 2) });
@@ -119,7 +125,7 @@ test("Local GraphView keeps its native camera and engine while Dialog locks and 
   try {
     const errors = await mount(page, "camera-rebuild", "en", "light", { width: 1440, height: 900 });
     const before = await zoomAndPanLocalGraph(page);
-    const native = await page.locator("canvas.sigma-nodes").elementHandle();
+    const native = await page.locator("canvas[data-local-graph-canvas]").elementHandle();
     await page.getByRole("button", { name: "Open camera fixture dialog", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Camera fixture dialog", exact: true })).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
@@ -131,7 +137,7 @@ test("Local GraphView keeps its native camera and engine while Dialog locks and 
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const after = await page.evaluate(() => window.__localCoverageFixture.read());
     expect(after).toEqual(before);
-    expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+    expect(await native!.evaluate((element) => element === document.querySelector("canvas[data-local-graph-canvas]"))).toBe(true);
     expect(errors).toEqual([]);
     await testInfo.attach("local-native-dialog-camera", { contentType: "application/json",
       body: JSON.stringify({ before, after }, null, 2) });
@@ -147,7 +153,7 @@ test("Local GraphView keeps its native camera and engine while Dialog locks and 
 });
 
 for (const { locale, scenario } of COVERAGE_LAYOUT_CASES) {
-  test(`Local ${locale} ${scenario} coverage explanation stays readable at 390px with actual Sigma paint`, async ({ page }, testInfo) => {
+  test(`Local ${locale} ${scenario} coverage explanation stays readable at 390px with actual Cosmos paint`, async ({ page }, testInfo) => {
     const errors = await mount(page, scenario, locale);
     const words = copy[locale];
     const heading = scenario === "folder" ? words.folder : words.coverage;
@@ -211,7 +217,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(unpin).toHaveCount(1);
     await showGraph(page);
     const before = await page.evaluate(() => window.__localCoverageFixture.read());
-    const nativeCanvas = await graph.locator("canvas.sigma-nodes").elementHandle();
+    const nativeCanvas = await graph.locator("canvas[data-local-graph-canvas]").elementHandle();
     await summary.focus();
     await page.keyboard.press("Enter");
     await expect(disclosure).toHaveAttribute("open");
@@ -237,7 +243,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(details.locator("h5.graph-details-title")).toHaveText("Decision Log");
     await expect(unpin).toHaveCount(1);
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(before);
-    expect(await nativeCanvas!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+    expect(await nativeCanvas!.evaluate((element) => element === document.querySelector("canvas[data-local-graph-canvas]"))).toBe(true);
     await graph.locator(".graph-frame-header .graph-view-options > summary").click();
     await summary.click();
     await page.evaluate(() => window.__localCoverageFixture.replacePayload());
@@ -320,7 +326,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(graph.getByRole("complementary")).toHaveCount(0);
     expect(idle.frame).toEqual(idle.stage);
     const initial = await page.evaluate(() => window.__localCoverageFixture.read());
-    const native = await graph.locator("canvas.sigma-nodes").elementHandle();
+    const native = await graph.locator("canvas[data-local-graph-canvas]").elementHandle();
     await evidenceScreenshot(page, testInfo, `local-${locale}-${mode}-${viewport.width}-details-idle.png`);
 
     const seed = await page.evaluate(() => window.__localCoverageFixture.point("node:seed"));
@@ -375,7 +381,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(graph).toBeFocused();
     expect(await localStageGeometry(graph)).toEqual(idle);
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(initial);
-    expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+    expect(await native!.evaluate((element) => element === document.querySelector("canvas[data-local-graph-canvas]"))).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
     await evidenceScreenshot(page, testInfo, `local-${locale}-${mode}-${viewport.width}-details-cleared.png`);
     await testInfo.attach("details-native-invariants.json", { body: Buffer.from(JSON.stringify({ idle, initial })), contentType: "application/json" });
@@ -462,7 +468,7 @@ async function localStageGeometry(graph: Locator) {
       // focus-induced page scroll; input/hit tests use fresh viewport points.
       return { x: bounds.x + window.scrollX, y: bounds.y + window.scrollY, width: bounds.width, height: bounds.height };
     };
-    const native = element.querySelector<HTMLCanvasElement>("canvas.sigma-nodes")!;
+    const native = element.querySelector<HTMLCanvasElement>("canvas[data-local-graph-canvas]")!;
     return { stage: box(".graph-local-stage"), frame: box(".graph-canvas-frame"), backing: { width: native.width, height: native.height } };
   });
 }
@@ -719,7 +725,7 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     // The list pages through the exact Local API ceiling the canvas renders.
     await expect(list.locator(".graph-list-counts")).toHaveText(words.counts);
     expect((await page.evaluate(() => window.__localCoverageFixture.read())).positions).toHaveLength(250);
-    const native = await graph.locator("canvas.sigma-nodes").elementHandle();
+    const native = await graph.locator("canvas[data-local-graph-canvas]").elementHandle();
     const idleGeometry = await localStageGeometry(graph);
     const ordinaryWitness = await page.evaluate(() => window.__localCoverageFixture.display("node:boundary:121"));
 
@@ -857,7 +863,7 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(clear).toBeFocused();
     await graph.locator(".graph-local-stage").scrollIntoViewIfNeeded();
     await evidenceScreenshot(page, testInfo, `local-${locale}-${viewport.width}-keyboard-selected-relation.png`);
-    expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+    expect(await native!.evaluate((element) => element === document.querySelector("canvas[data-local-graph-canvas]"))).toBe(true);
     // A narrow List grows in the page with its opened groups; the canvas under it does not.
     const { frame, backing } = await localStageGeometry(graph);
     expect({ frame, backing }).toEqual({ frame: idleGeometry.frame, backing: idleGeometry.backing });
@@ -873,7 +879,7 @@ for (const { locale, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(textLists.nth(1).locator(":scope > li")).toHaveCount(750);
     await expect(fallback.locator(".mermaid")).toHaveCount(0);
     await testInfo.attach("local-keyboard-native-invariants.json", {
-      body: JSON.stringify({ fixture: "synthetic exact250/750 Local wire; actual GraphView/Sigma", locale, viewport, idleGeometry, idleState }, null, 2),
+      body: JSON.stringify({ fixture: "synthetic exact250/750 Local wire; actual GraphView/Cosmos", locale, viewport, idleGeometry, idleState }, null, 2),
       contentType: "application/json",
     });
     expect(errors).toEqual([]);
@@ -941,7 +947,7 @@ test("Local bounded keyboard entries retire on disclosure, tab, scene and worksp
 });
 
 test("Local revision-only refresh preserves an already pinned native drag until release", async ({ page }, testInfo) => {
-  // Three synthetic public nodes, actual GraphView/Sigma and native mouse.
+  // Three synthetic public nodes, actual GraphView/Cosmos and native mouse.
   // This is an interaction gate, not Local 250/750 or Map 2k performance proof.
   const errors = await mount(page, "complete", "en", "light", { width: 1440, height: 900 });
   const graph = page.getByTestId("graph-view");
@@ -949,7 +955,7 @@ test("Local revision-only refresh preserves an already pinned native drag until 
   // Details' title is the selection witness: the list and its pressed row
   // give way to the canvas for the native drag.
   const title = details.locator("h5.graph-details-title");
-  const native = await graph.locator("canvas.sigma-nodes").elementHandle();
+  const native = await graph.locator("canvas[data-local-graph-canvas]").elementHandle();
   const diagnosticPath = testInfo.outputPath("pinned-drag-native-gesture.json");
   const diagnostics: Array<{ phase: string; node: ReturnType<Window["__localCoverageFixture"]["nativeNode"]> }> = [];
   const observe = async (phase: string) => {
@@ -969,7 +975,7 @@ test("Local revision-only refresh preserves an already pinned native drag until 
   await observe("pinned-before-center");
   // Real Center keeps the selected node outside the overlaid Details drawer.
   await (await localDetailsActions(details)).getByRole("button", { name: "Center", exact: true }).click();
-  // Camera state changes synchronously; Sigma's painted conversion matrix is
+  // Camera state changes synchronously; the native painted conversion matrix is
   // updated at render. Wait for paint, not an arbitrary timer or a canvas hit.
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect.poll(() => page.evaluate(() => {
@@ -1021,7 +1027,7 @@ test("Local revision-only refresh preserves an already pinned native drag until 
     const refreshed = await page.evaluate(() => window.__localCoverageFixture.read());
     expect(refreshed).toEqual(dragging);
     expect(await localStageGeometry(graph)).toEqual(geometry);
-    expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+    expect(await native!.evaluate((element) => element === document.querySelector("canvas[data-local-graph-canvas]"))).toBe(true);
     await expect(title).toHaveText("Architecture Notes");
     await expect(unpin).toHaveCount(1);
     await evidenceScreenshot(page, testInfo, "local-pinned-drag-revision-held.png");
@@ -1040,7 +1046,7 @@ test("Local revision-only refresh preserves an already pinned native drag until 
     await expect(title).toHaveText("Architecture Notes");
     await expect(unpin).toHaveCount(1);
     const invariantPath = testInfo.outputPath("pinned-drag-metadata-native-invariants.json");
-    await writeFile(invariantPath, JSON.stringify({ fixture: "synthetic three-node actual GraphView/Sigma",
+    await writeFile(invariantPath, JSON.stringify({ fixture: "synthetic three-node actual GraphView/Cosmos",
       before, dragging, refreshed, released, revisionBefore: revision, revisionAfter: revision + 1,
       start, destination, geometry, pointerReleased: true }, null, 2));
     await testInfo.attach("pinned-drag-metadata-native-invariants.json", { path: invariantPath, contentType: "application/json" });
@@ -1065,7 +1071,7 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   await expect(details.getByRole("button", { name: "Unpin", exact: true, includeHidden: true })).toHaveCount(1);
   const before = await page.evaluate(() => window.__localCoverageFixture.read());
   const geometry = await localStageGeometry(graph);
-  const native = await graph.locator("canvas.sigma-nodes").elementHandle();
+  const native = await graph.locator("canvas[data-local-graph-canvas]").elementHandle();
 
   await nodes.locator('button[data-local-graph-id="node:folder"]').click();
   await expect(details.locator("h5.graph-details-title")).toHaveText("Visible Source Folder");
@@ -1084,7 +1090,7 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   await expect(details.getByRole("button", { name: "Unpin", exact: true, includeHidden: true })).toHaveCount(1);
   expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(before);
   expect(await localStageGeometry(graph)).toEqual(geometry);
-  expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+  expect(await native!.evaluate((element) => element === document.querySelector("canvas[data-local-graph-canvas]"))).toBe(true);
 
   // No second click/focus call scopes Escape: the pointer recovery alone
   // must let the immediate native key clear selection without clearing pins.
@@ -1094,7 +1100,7 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   await expect(graph.locator("button[data-local-graph-id][aria-pressed='true']")).toHaveCount(0);
   expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(before);
   expect(await localStageGeometry(graph)).toEqual(geometry);
-  expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+  expect(await native!.evaluate((element) => element === document.querySelector("canvas[data-local-graph-canvas]"))).toBe(true);
   await seed.click();
   await expect(seed).toBeFocused();
   await expect(details).not.toBeFocused();
@@ -1103,7 +1109,7 @@ test("Local disappearing pointer member recovers scoped Escape without a keyboar
   expect(await localStageGeometry(graph)).toEqual(geometry);
   await evidenceScreenshot(page, testInfo, "local-pointer-member-scoped-escape-390px.png");
   const invariantPath = testInfo.outputPath("pointer-member-native-invariants.json");
-  await writeFile(invariantPath, JSON.stringify({ fixture: "actual GraphView/Sigma node-cues",
+  await writeFile(invariantPath, JSON.stringify({ fixture: "actual GraphView/Cosmos node-cues",
     originDisconnected: true, pointerRecovery: "Graph root, not Details", pinsRetained: true,
     before, geometry, after: await page.evaluate(() => window.__localCoverageFixture.read()) }, null, 2));
   await testInfo.attach("pointer-member-native-invariants.json", { path: invariantPath, contentType: "application/json" });
@@ -1125,7 +1131,7 @@ for (const { locale, size } of [
     // Architecture Notes links to the seed: a row of the seed's incoming list.
     const nodes = (await openList(page)).locator('section.graph-list-group[data-list-group^="seed:"]')
       .getByRole("list", { name: locale === "en" ? "Incoming" : "들어오는 관계", exact: true });
-    const native = await graph.locator("canvas.sigma-nodes").elementHandle();
+    const native = await graph.locator("canvas[data-local-graph-canvas]").elementHandle();
     const geometry = await localStageGeometry(graph);
     const initial = await page.evaluate(() => window.__localCoverageFixture.read());
     const words = { open: locale === "en" ? "Open" : "열기", pin: locale === "en" ? "Pin" : "고정",
@@ -1205,7 +1211,7 @@ for (const { locale, size } of [
     await expectAllLocalDetailsActions(details, undefined, ".graph-details-close,.graph-details-sheet-toggle");
     expect(await page.evaluate(() => window.__localCoverageFixture.read())).toEqual(expanded);
     expect(await localStageGeometry(graph)).toEqual(geometry);
-    expect(await native!.evaluate((element) => element === document.querySelector("canvas.sigma-nodes"))).toBe(true);
+    expect(await native!.evaluate((element) => element === document.querySelector("canvas[data-local-graph-canvas]"))).toBe(true);
     await expectLocalDetailsBounds(graph, "below");
     const invariantPath = testInfo.outputPath("long-title-native-invariants.json");
     await writeFile(invariantPath, JSON.stringify({ locale, size, firstActions, initial, expanded,
@@ -1317,9 +1323,9 @@ for (const { locale, mode } of [
   { locale: "ko", mode: "dark" },
   { locale: "ko", mode: "forced" },
 ] as const) {
-  test(`Local ${locale} ${mode} canonical node cues retain visible silhouettes at 390px with actual Sigma`, async ({ page }, testInfo) => {
+  test(`Local ${locale} ${mode} canonical node cues retain visible silhouettes at 390px with actual Cosmos`, async ({ page }, testInfo) => {
     test.setTimeout(60_000);
-    // Synthetic public wire data, actual GraphView/Sigma/styles/translations.
+    // Synthetic public wire data, actual GraphView/Cosmos/styles/translations.
     // This gate does not claim live API, authentication or visibility proof.
     const errors = await mount(page, "node-cues", locale, mode);
     const words = NAVIGATION_COPY[locale];
@@ -1389,7 +1395,7 @@ for (const { locale, mode } of [
 
     // Canvas paint and GPU state are read from the Graph view, not under the list.
     await showGraph(page);
-    const nativeNodes = panel.locator("canvas.sigma-nodes");
+    const nativeNodes = panel.locator("canvas[data-local-graph-canvas]");
     await expect(nativeNodes).toBeVisible();
     const gpu = await nativeNodes.evaluate((element) => {
       const canvas = element as HTMLCanvasElement;
@@ -1405,7 +1411,7 @@ for (const { locale, mode } of [
     await panel.locator(".graph-local-stage").scrollIntoViewIfNeeded();
     await evidenceScreenshot(page, testInfo, `local-${locale}-${mode}-node-cues-390px.png`);
     await testInfo.attach(`local-${locale}-${mode}-node-cues.json`, {
-      body: JSON.stringify({ fixture: "synthetic wire data, native GraphView/Sigma", locale, mode, renderedNodes: 8, directMembers: 7, directNeighbors: 7, folders: 1, silhouettes, gpu }, null, 2),
+      body: JSON.stringify({ fixture: "synthetic wire data, native GraphView/Cosmos", locale, mode, renderedNodes: 8, directMembers: 7, directNeighbors: 7, folders: 1, silhouettes, gpu }, null, 2),
       contentType: "application/json",
     });
     expect(errors).toEqual([]);

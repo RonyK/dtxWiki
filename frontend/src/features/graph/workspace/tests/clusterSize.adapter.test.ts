@@ -22,7 +22,7 @@ const { graph, createNativeGraph, cpu } = vi.hoisted(() => {
     setLinks: vi.fn(), setPinnedPoints: vi.fn(), setPointClusters: vi.fn(), setPointColors: vi.fn(),
     setPointPositions: vi.fn((next: Float32Array) => { positions = next.slice(); }),
     setPointShapes: vi.fn(), setPointSizes: vi.fn(), setPointCollisionRadii: vi.fn(),
-    setZoomLevel: vi.fn(), setZoomTransformByPointPositions: vi.fn(),
+    setZoomLevel: vi.fn(), setZoomTransformByPointPositions: vi.fn(), setCameraCenter: vi.fn(), remapDraggingPoint: vi.fn(), remapPointer: vi.fn(),
     spaceToScreenPosition: vi.fn(() => [10, 10]), start: vi.fn(), stop: vi.fn(),
     trackPointPositionsByIndices: vi.fn(), unpause: vi.fn(),
   };

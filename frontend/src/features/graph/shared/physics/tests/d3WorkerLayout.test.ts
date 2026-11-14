@@ -7,6 +7,8 @@ import { createRequire } from "node:module";
 import { createD3WorkerLayout, createInitialD3Positions } from "../d3WorkerLayout";
 import type { D3WorkerResponse } from "../d3WorkerProtocol";
 import type { LocalLayoutInput } from "../layoutTypes";
+import { createLocalCosmosLayoutSolver } from "../../../local/cosmosLayout";
+import type { CosmosSceneColumns } from "../../cosmos/sceneTypes";
 
 const input: LocalLayoutInput = {
   nodes: Array.from({ length: 40 }, (_, index) => ({ key: `node:${String(index).padStart(2, "0")}`, isSeed: index === 0, radiusPx: 6 })),
@@ -46,10 +48,44 @@ class ThreadWorker extends EventTarget {
     this.node.postMessage(message, transfer as Array<ArrayBuffer>);
   }
 }
-afterEach(() => { for (const worker of live) worker.terminate(); });
+afterEach(() => { for (const worker of live) worker.terminate(); vi.unstubAllGlobals(); });
 const factory = (worker: ThreadWorker) => () => worker as unknown as Worker;
 
 describe("shared D3 Worker and proxy integration", () => {
+  // An actual retained Worker/catalog is required: a factory mock cannot
+  // detect a recreated simulation that silently loses velocities and pins.
+  it("updates the Local indexed catalog on one live Worker and settles an arrival without losing an existing pin", async () => {
+    const workers: ThreadWorker[] = [];
+    vi.stubGlobal("Worker", class extends ThreadWorker {
+      constructor() { super(); workers.push(this); }
+    });
+    const scene: LocalLayoutInput = { primarySeedKey: "z", nodes: [
+      { key: "z", radiusPx: 6, isSeed: true }, { key: "b", radiusPx: 6, isSeed: false },
+    ], edges: [{ sourceKey: "z", targetKey: "b", kind: "link", count: 1 }] };
+    const columns = { nodeKeys: ["z", "b"], layoutInput: scene } as CosmosSceneColumns;
+    const frames = vi.fn(), states = vi.fn(), settled = vi.fn(), errors = vi.fn();
+    const solver = createLocalCosmosLayoutSolver();
+    const initial = { columns, positions: Float32Array.from([0, 0, 80, 20]), diameters: Float32Array.from([12, 12]),
+      shapes: new Float32Array(2), pins: [], reducedMotion: true, viewport: { width: 800, height: 600 } };
+    const layout = solver.createPositionLayout(initial, { onPositions: frames, onState: states, onSettledPin: settled, onError: errors })!;
+    await vi.waitFor(() => expect(states).toHaveBeenCalledWith(expect.objectContaining({ ready: true })), { timeout: 10_000 });
+    layout.pin!(1, { x: 200, y: 125 }, false);
+    await vi.waitFor(() => expect(frames.mock.lastCall?.[0][2]).toBe(200));
+    layout.update!({ ...initial, columns: { ...columns, nodeKeys: ["a", "z", "b"], layoutInput: {
+      ...scene, nodes: [{ key: "a", radiusPx: 6, isSeed: false }, ...scene.nodes],
+      edges: [...scene.edges, { sourceKey: "a", targetKey: "b", kind: "citation", count: 1 }],
+    } }, positions: Float32Array.from([10, 10, 0, 0, 200, 125]),
+    diameters: Float32Array.from([12, 12, 12]), shapes: new Float32Array(3), pins: [2] });
+    await vi.waitFor(() => expect(frames.mock.lastCall?.[0]).toHaveLength(6));
+    expect(workers).toHaveLength(1);
+    expect(Array.from(frames.mock.lastCall![0].slice(2))).toEqual([0, 0, 200, 125]);
+    layout.pinWhenSettled!(0);
+    layout.start();
+    await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
+    expect(settled.mock.lastCall![0]).toBe(0);
+    expect(errors).not.toHaveBeenCalled();
+    layout.destroy(); expect(workers[0].terminate).toHaveBeenCalledOnce();
+  });
   it("keeps the real cold solve through queued pause/pin reconciliation and publishes reduced-motion rows with stable catalogs", async () => {
     const worker = new ThreadWorker(), indexed = vi.fn(), onError = vi.fn(), settledPin = vi.fn();
     const layout = createD3WorkerLayout(input, { workerFactory: factory(worker), autoStart: false,
@@ -81,10 +117,13 @@ describe("shared D3 Worker and proxy integration", () => {
 
     // A shortened first batch reaches the real Worker and stops the solve there.
     const extent = (rows: Float32Array) => Math.max(...rows) - Math.min(...rows);
-    const early = createD3WorkerLayout(input, { workerFactory: factory(new ThreadWorker()), autoStart: false, initialTicks: 1 });
-    const full = createD3WorkerLayout(input, { workerFactory: factory(new ThreadWorker()), autoStart: false });
+    const expanded = { ...input, primarySeedKey: "node:10" };
+    const early = createD3WorkerLayout(expanded, { workerFactory: factory(new ThreadWorker()), autoStart: false, initialTicks: 1 });
+    const full = createD3WorkerLayout(expanded, { workerFactory: factory(new ThreadWorker()), autoStart: false });
     await vi.waitFor(() => expect(early.getState().ready && full.getState().ready).toBe(true), { timeout: 10_000 });
     expect(extent(early.getIndexedPositions())).toBeLessThan(extent(full.getIndexedPositions()) / 2);
+    expect(full.getPositions()["node:10"]).toEqual({ x: 0, y: 0 });
+    expect(full.getPositions()["node:00"]).not.toEqual({ x: 0, y: 0 });
   });
 
   it("restores solved checkpoints without motion, preserves cooled permission resumes, and fails closed on an older live Worker error", async () => {

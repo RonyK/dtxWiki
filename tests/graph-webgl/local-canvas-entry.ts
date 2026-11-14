@@ -2,7 +2,7 @@ import { createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createInstance } from "i18next";
 import { initReactI18next } from "react-i18next";
-import Sigma from "sigma";
+import { observeLocalNative } from "./local-native-observer";
 
 import { GraphCanvas } from "../../frontend/src/features/graph/GraphCanvas";
 import type { GraphRenderScene } from "../../frontend/src/features/graph/shared/rendererTypes";
@@ -19,20 +19,11 @@ const scene: GraphRenderScene = {
     { id: "citation", source: "seed", target: "source", edge_kind: "citation_source", layer: "evidence", label: "Source citation" },
   ],
 };
-const renderers: Sigma[] = [];
+const observation = observeLocalNative(() => scene);
+const renderers = observation.renderers;
 const selections: Array<string | null> = [];
 let lostContext: WEBGL_lose_context | null = null;
-const originalRefresh = Sigma.prototype.refresh;
-// Observe actual engine identity without exposing a production-only test API.
-Sigma.prototype.refresh = function (...args: Parameters<Sigma["refresh"]>) {
-  if (!renderers.includes(this)) renderers.push(this);
-  return originalRefresh.apply(this, args);
-};
-function current(): Sigma {
-  const renderer = renderers.at(-1);
-  if (!renderer) throw new Error("No Local GraphCanvas renderer observed");
-  return renderer;
-}
+function current() { return observation.current(); }
 function Fixture() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   return createElement(GraphCanvas, {

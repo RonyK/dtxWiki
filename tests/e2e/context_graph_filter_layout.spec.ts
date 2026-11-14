@@ -79,7 +79,7 @@ for (const viewport of viewports) {
       page.on("request", (request) => {
         if (request.method() === "POST" && /\/graph\/query(?:\?|$)/.test(request.url())) graphQueries += 1;
       });
-      const nativeCanvas = await graph.locator("canvas.sigma-nodes").elementHandle();
+      const nativeCanvas = await graph.locator("canvas[data-local-graph-canvas]").elementHandle();
       await graph.getByRole("button", { name: "List", exact: true }).click();
       // The list is a view of the canvas area; the canvas stays mounted underneath.
       const sourceRow = graph.getByTestId("graph-list-view").locator("button[data-local-graph-id]")
@@ -134,10 +134,12 @@ for (const viewport of viewports) {
       await details.getByRole("button", { name: "Clear selection", exact: true }).click();
       await expect(details).toBeHidden();
       expect(graphQueries).toBe(0);
-      expect(await nativeCanvas!.evaluate((element) => element === document.querySelector('[data-testid="graph-view"] canvas.sigma-nodes'))).toBe(true);
+      expect(await nativeCanvas!.evaluate((element) => element === document.querySelector('[data-testid="graph-view"] canvas[data-local-graph-canvas]'))).toBe(true);
       const clearedSize = await canvasFrame.boundingBox();
-      expect(clearedSize!.width).toBe(geometry.canvasWidth);
-      expect(clearedSize!.height).toBe(geometry.canvasHeight);
+      // boundingBox uses the browser protocol, while geometry uses DOMRect.
+      // Firefox transports fractional CSS pixels with a small rounding error.
+      expect(clearedSize!.width).toBeCloseTo(geometry.canvasWidth, 3);
+      expect(clearedSize!.height).toBeCloseTo(geometry.canvasHeight, 3);
 
       await filters.locator("summary").click();
       await expect(filters).toHaveAttribute("open", "");
