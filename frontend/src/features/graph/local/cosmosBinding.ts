@@ -3,13 +3,8 @@ import type { CosmosLayoutSolver } from "../shared/cosmos/layoutTypes";
 import type { CosmosRendererBinding } from "../shared/cosmos/renderBinding";
 import { buildCosmosPresentationBuffers } from "../shared/cosmos/sceneBuffers";
 import { cosmosSceneIdentityKey, type CosmosSceneColumns } from "../shared/cosmos/sceneTypes";
-import { rgb } from "../workspace/cosmosColor";
+import { blendRgb, rgb } from "../workspace/cosmosColor";
 import { createLocalCosmosOverlay, LOCAL_QUIET_SHARE } from "./cosmosOverlay";
-
-function mix(foreground: string, background: string, share: number) {
-  const front = rgb(foreground), back = rgb(background);
-  return front.map((value, channel) => value * share + back[channel] * (1 - share));
-}
 
 /** Local admission is owned by its API query; this binding does not add a new cap. */
 export type LocalCosmosBinding = CosmosRendererBinding & { setTracing(id: string | null): void };
@@ -43,6 +38,7 @@ export function createLocalCosmosBinding(solver: CosmosLayoutSolver, container: 
     prepareScene(columns, tokens, options) {
       latestTokens = tokens; forcedColors = options.forcedColors;
       const buffers = buildCosmosPresentationBuffers(columns, tokens, options);
+      const surface = rgb(tokens.surface);
       columns.nodeIds.forEach((_, index) => {
         if (columns.nodeSeedGlyph?.[index]) {
           buffers.pointShapes[index] = 0;
@@ -52,10 +48,7 @@ export function createLocalCosmosBinding(solver: CosmosLayoutSolver, container: 
           buffers.pointImageIndices[index] = -1;
         }
         if (columns.nodeMuted?.[index] && !columns.nodeIsCurrent?.[index]) {
-          const color = buffers.pointColors.slice(index * 4, index * 4 + 3), surface = rgb(tokens.surface);
-          color.forEach((value, channel) => {
-            buffers.pointColors[index * 4 + channel] = value * LOCAL_QUIET_SHARE + surface[channel] * (1 - LOCAL_QUIET_SHARE);
-          });
+          buffers.pointColors.set(blendRgb(buffers.pointColors.subarray(index * 4, index * 4 + 3), surface, LOCAL_QUIET_SHARE), index * 4);
         }
       });
       columns.edgeVisualKinds!.forEach((kind, index) => {
@@ -66,7 +59,7 @@ export function createLocalCosmosBinding(solver: CosmosLayoutSolver, container: 
         const color = columns.edgeRemoved?.[index] ? GRAPH_REMOVED_EDGE_COLOR
           : columns.edgeHighlighted?.[index] ? tokens.highlight : tokens.edge[kind];
         const quiet = columns.edgeMuted?.[index] && !columns.edgeHighlighted?.[index] && !columns.edgeRemoved?.[index];
-        buffers.linkColors.set([...(quiet ? mix(color, tokens.surface, GRAPH_LINE_OPACITY.dimmed) : rgb(color)),
+        buffers.linkColors.set([...(quiet ? blendRgb(rgb(color), surface, GRAPH_LINE_OPACITY.dimmed) : rgb(color)),
           forcedColors ? 1 : kind === "citation" ? GRAPH_LINE_OPACITY.citation : GRAPH_LINE_OPACITY.line], index * 4);
       });
       return buffers;
@@ -76,8 +69,7 @@ export function createLocalCosmosBinding(solver: CosmosLayoutSolver, container: 
       const selected = new Set(incident), next = colors.slice(), surface = rgb(latestTokens.surface);
       columns.edgeIds.forEach((_, index) => {
         if (selected.has(index) || columns.edgeMuted?.[index] || columns.edgeHighlighted?.[index] || columns.edgeRemoved?.[index]) return;
-        for (let channel = 0; channel < 3; channel++) next[index * 4 + channel] = colors[index * 4 + channel] * GRAPH_LINE_OPACITY.dimmed
-          + surface[channel] * (1 - GRAPH_LINE_OPACITY.dimmed);
+        next.set(blendRgb(colors.subarray(index * 4, index * 4 + 3), surface, GRAPH_LINE_OPACITY.dimmed), index * 4);
       });
       return next;
     },

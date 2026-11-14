@@ -648,12 +648,15 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
     graph.spaceToScreenPosition.mockImplementation(([x, y]) => [x * 2, y * 2]);
     config.onZoom?.({ transform: { k: 4 } } as Parameters<NonNullable<GraphConfig["onZoom"]>>[0], false);
     expect(title()).toMatchObject({ pointX: "600", pointY: "800" });
-    // A drag stops the worker; the title follows the pointer, then the committed row.
+    // A drag keeps the worker running: a frame moves the neighbours while the
+    // dragged title and row stay at the pointer, then at the committed row.
     graph.spaceToScreenPosition.mockImplementation(point => point);
     config.onPointMouseOver?.(0, [300, 400], undefined, false, false);
     const drag = installedSdkDrag(config, 0); drag.start(); drag.move(340, 420);
-    expect(worker.isRunning()).toBe(false);
+    expect(worker.isRunning()).toBe(true);
+    worker.options.onPositions(Float32Array.from([999, 999, 510, 610, 700, 800]));
     expect(title()).toMatchObject({ pointX: "340", pointY: "420" });
+    expect([...adapter.captureCoordinates()!.positions.slice(0, 4)]).toEqual([340, 420, 510, 610]);
     drag.move(360, 430); drag.end();
     expect(adapter.captureCoordinates()!.positions.slice(0, 2)).toEqual(Float32Array.from([360, 430]));
     // The released title follows the resumed worker again, not the last pointer.
@@ -732,15 +735,12 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
     expect(graph.setPinnedPoints).toHaveBeenLastCalledWith([0]); expect(graph.start).not.toHaveBeenCalled();
   });
 
-  it("stops CPU once a native drag moves, rejects frames during drag, commits the final event and exact pin", async () => {
+  it("keeps CPU running through a moved native drag, then commits the final event and exact pin", async () => {
     const { adapter, onPin } = await mountCpu(); const worker = cpu.instances[0];
     const config = createGraph.mock.calls.at(-1)![1]; config.onPointMouseOver?.(0, [0, 0], undefined, false, false);
-    const drag = installedSdkDrag(config, 0); drag.start();
-    expect(worker.isRunning()).toBe(true); drag.move(25, 40);
-    expect(worker.isRunning()).toBe(false); graph.setPointPositions.mockClear();
+    const drag = installedSdkDrag(config, 0); drag.start(); drag.move(25, 40);
     expect(graph.remapDraggingPoint).toHaveBeenLastCalledWith(0);
-    worker.options.onPositions(new Float32Array(6).fill(999));
-    expect(graph.setPointPositions).not.toHaveBeenCalled();
+    expect(worker.isRunning()).toBe(true); expect(worker.stop).not.toHaveBeenCalled();
     graph.screenToSpacePosition.mockReturnValue([1234, 2345]); drag.move(30, 50); drag.end();
     expect(graph.screenToSpacePosition).toHaveBeenLastCalledWith([30, 50]);
     expect(onPin).toHaveBeenLastCalledWith("a", { x: 1234, y: 2345 });
@@ -769,7 +769,6 @@ describe("default 2K D3 Worker with Cosmos GPU drawing", () => {
     const config = createGraph.mock.calls.at(-1)![1];
     config.onPointMouseOver?.(2, [0, 0], undefined, false, false);
     const drag = installedSdkDrag(config, 2); drag.start(); drag.move(30, 50);
-    expect(worker.isRunning()).toBe(false);
     community.compute.mockClear();
     const input = columns(), withoutC: WorkspaceMapColumns = { ...input,
       identity: { ...input.identity, visibleFingerprint: "visible-without-c" },

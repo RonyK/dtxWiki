@@ -49,7 +49,9 @@ function createLocalPositionLayout(input: CosmosPositionLayoutInput, options: Co
   const key = (index: number) => keys[index];
   return {
     start(reheat = false) { if (!destroyed) { paused = false; layout.resume(reheat); } },
-    stop() { if (!destroyed) { paused = true; layout.pause(); } },
+    // The Worker owns its unpinned rows, so a pause sends none back; stopping
+    // a stopped layout does nothing.
+    stop() { if (!destroyed && !paused) { paused = true; layout.pause(true); } },
     update(next) {
       if (destroyed) return;
       current = next; keys = next.columns.nodeKeys;
@@ -120,7 +122,7 @@ export function createLocalCosmosLayoutSolver(): CosmosLayoutSolver {
       // A cold static frame must be solved even while the reader is paused.
       const layout = runtime.ensureLayout();
       layout?.setReducedMotion(input.reducedMotion);
-      if (input.paused || input.hidden || input.dragging) { layout?.stop(); return false; }
+      if (input.paused || input.hidden) { layout?.stop(); return false; }
       if (layout && (input.reheat || !layout.isRunning())) layout.start(input.reheat && !input.reducedMotion);
       return layout?.isRunning() ?? false;
     },

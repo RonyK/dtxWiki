@@ -65,7 +65,6 @@ export type CosmosPhysicsPermission = {
   paused: boolean;
   reducedMotion: boolean;
   hidden: boolean;
-  dragging: boolean;
   alpha: number;
   canInitialize: boolean;
   reheat: boolean;

@@ -109,6 +109,10 @@ describe("Local Cosmos scene and interaction ownership", () => {
     const columns = state.core.replaceColumns.mock.calls.at(-1)![0];
     expect(columns.localGeometryKey).toBeNull();
     expect(columns.identity.selectionKey).not.toBe("same-query");
+    // Both wire ids name one drawn node; the renderer only knows its representative.
+    adapter.select("neighbor");
+    expect(state.core.select).toHaveBeenLastCalledWith(columns.nodeIds.find(id => id === "alias" || id === "neighbor"));
+    expect(columns.nodeIds).not.toContain("neighbor");
     // The same ambiguous wire/semantic aliases cannot retain renderer state
     // merely because the Context query scope itself has not changed.
     expect(adapter.replaceScene({ ...ambiguous, nodes: ambiguous.nodes.map(node => ({ ...node, label: `New ${node.label}` })) }))

@@ -106,6 +106,12 @@ export function createLocalGraphAdapter(
   // Explicit reader input supersedes queued navigation. An already-playing
   // locate trace continues to follow the node through camera movement.
   const cancelNavigation = () => { navigation++; };
+  // The renderer knows one representative id per semantic node. Every node id
+  // handed to it goes through here; relationship ids pass unchanged.
+  const rendered = (id: string) => {
+    const key = local.keyByGraphId.get(id);
+    return key === undefined ? id : local.graphIdByKey.get(key) ?? id;
+  };
   const renderTrace = () => {
     markCanvas();
     if (!trace.playing || !tracingId || !renderer) return;
@@ -115,22 +121,27 @@ export function createLocalGraphAdapter(
     trace.place(point ? { x: point.x, y: point.y, radius: point.radius * .88,
       width: point.radius * .24, color: readGraphTokens(container, mode).ink } : null);
   };
+  // A renderer pin resolves every request that asked for that node, under any
+  // alias; a pin nobody asked for (a drag) reports the node's own id.
   const publishPin = (id: string, point: GraphPoint) => {
     if (destroyed || lost || !finitePoint(point)) return;
-    pendingPins.delete(id);
-    requestedArrivals.delete(id);
-    positions.set(id, { ...point });
-    options.callbacks.onPin(id, { ...point });
+    const asked = [...pendingPins].filter(other => rendered(other) === id);
+    for (const each of asked.length ? asked : [id]) {
+      pendingPins.delete(each);
+      requestedArrivals.delete(each);
+      positions.set(each, { ...point });
+      options.callbacks.onPin(each, { ...point });
+    }
   };
   const requestArrival = (id: string) => {
     if (!renderer || requestedArrivals.has(id) || !local.keyByGraphId.has(id)) return;
     requestedArrivals.add(id);
-    renderer.pinWhenSettled(id);
+    renderer.pinWhenSettled(rendered(id));
   };
   const reconcilePins = (restore?: ReadonlySet<string>) => {
     if (!renderer || destroyed || lost) return;
     for (const [id, point] of positions) {
-      if (restore?.has(id) && local.keyByGraphId.has(id)) renderer.pin(id, true, point, { reconcile: true });
+      if (restore?.has(id) && local.keyByGraphId.has(id)) renderer.pin(rendered(id), true, point, { reconcile: true });
     }
     for (const id of pendingPins) {
       requestArrival(id);
@@ -189,12 +200,12 @@ export function createLocalGraphAdapter(
   const navigate = (id: string, withTrace: boolean) => {
     if (!active()) return;
     cancelTrace();
-    const request = navigation, current = revision;
+    const request = navigation, current = revision, target = rendered(id);
     void renderer!.whenSettled().then(() => {
       if (!active() || request !== navigation || current !== revision) return;
-      renderer!.centerOn(id);
-      if (!withTrace || options.reducedMotion || !local.nodes.some(node => node.graphId === id && node.isCurrent)) return;
-      tracingId = id; binding.setTracing(id); trace.play(); renderTrace();
+      renderer!.centerOn(target);
+      if (!withTrace || options.reducedMotion || !local.nodes.some(node => node.graphId === target && node.isCurrent)) return;
+      tracingId = target; binding.setTracing(target); trace.play(); renderTrace();
     }).catch(() => undefined);
   };
   return {
@@ -209,14 +220,14 @@ export function createLocalGraphAdapter(
       if (hoverChip) hoverChip.style.zIndex = previousChipLayer;
     },
     fit() { if (active()) { cancelTrace(); renderer!.fit(); } },
-    focus(id) { if (active()) renderer!.focus(id); },
+    focus(id) { if (active()) renderer!.focus(id === null ? null : rendered(id)); },
     locate(id) { navigate(id, true); },
     pin(id, pinned, position) {
       if (!active()) return null;
       if (!pinned) {
         pendingPins.delete(id); requestedArrivals.delete(id); positions.delete(id);
-        const point = renderer!.getNodePosition(id);
-        renderer!.pin(id, false);
+        const point = renderer!.getNodePosition(rendered(id));
+        renderer!.pin(rendered(id), false);
         return point;
       }
       if (position !== undefined && !finitePoint(position)) return null;
@@ -230,7 +241,7 @@ export function createLocalGraphAdapter(
         pendingPins.add(id); requestArrival(id); return null;
       }
       const chosen = position === undefined && !positions.has(id);
-      const point = renderer!.pin(id, true, position ?? positions.get(id));
+      const point = renderer!.pin(rendered(id), true, position ?? positions.get(id));
       if (point) { positions.set(id, { ...point }); if (chosen) options.callbacks.onPin(id, { ...point }); }
       return point;
     },
@@ -261,7 +272,7 @@ export function createLocalGraphAdapter(
     resize() { if (active()) { renderer!.resize(); renderTrace(); } },
     resumeLayout() { if (active()) renderer!.resumeLayout(); },
     setLabelsVisible(enabled) { if (active()) renderer!.setLabelsVisible(enabled); },
-    select(id) { if (active()) renderer!.select(id); },
+    select(id) { if (active()) renderer!.select(id === null ? null : rendered(id)); },
     setViewport(viewport) { if (active()) { cancelNavigation(); renderer!.setViewport(viewport); } },
     stopLayout() { if (active()) renderer!.stopLayout(); },
     async whenSettled() {

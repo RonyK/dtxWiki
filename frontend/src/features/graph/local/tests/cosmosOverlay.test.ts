@@ -41,7 +41,7 @@ function frame(input: GraphRenderScene, options: Partial<CosmosOverlayFrame> = {
     selectionKey: "query", visibleFingerprint: "visible" });
   return { columns, points: Float32Array.from(columns.nodeIds.flatMap(() => [300, 200])),
     diameters: new Float32Array(columns.nodeIds.length).fill(10), selectedId: null, focusedId: null, star: null,
-    showLabels: false, zoom: 1, forcedColors: false, tokens: readGraphTokens(container, "light"),
+    showLabels: false, tokens: readGraphTokens(container, "light"),
     width: 860, height: 640, ...options };
 }
 const labels = () => contexts.get(container.querySelector<HTMLCanvasElement>("[data-local-graph-labels]")!)!;

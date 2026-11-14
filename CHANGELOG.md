@@ -24,6 +24,10 @@
   the timeline.
 - Select a graph node on click without moving it or waking the layout; a
   drag starts once the pointer moves.
+- Keep neighbouring nodes moving while a node is dragged, on every graph
+  (the 2K Knowledge Map now follows the Context graph and the 10K map).
+- Keep the 2K Knowledge Map's layout, pins and camera when the same view
+  gains or loses documents, for example when showing orphans.
 - Frame a Context graph to fit after a filter, query or history-view change,
   and when locating a node from far zoomed out, zoom back in to a readable
   level, as the Knowledge Map does.

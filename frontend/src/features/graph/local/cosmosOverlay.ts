@@ -2,14 +2,12 @@ import { GRAPH_NODE_VISUALS, GRAPH_REMOVED_EDGE_COLOR, type GraphNodeShape } fro
 import { GRAPH_RING_GAP_PX, GRAPH_RING_WIDTH_PX, traceOutline } from "../shared/nodeShapes";
 import { nativeGlyphOutline, nativeGlyphShape } from "../shared/workspaceGlyphGeometry";
 import type { CosmosOverlayFrame } from "../shared/cosmos/renderBinding";
-import { rgb } from "../workspace/cosmosColor";
+import { blendRgb, rgb } from "../workspace/cosmosColor";
 
 /** A quiet glyph keeps this share of its colour over the surface. */
 export const LOCAL_QUIET_SHARE = .14;
 export function quietColor(color: string, surface: string): string {
-  const front = rgb(color), back = rgb(surface);
-  return `rgb(${front.map((value, channel) =>
-    Math.round((value * LOCAL_QUIET_SHARE + back[channel] * (1 - LOCAL_QUIET_SHARE)) * 255)).join(", ")})`;
+  return `rgb(${blendRgb(rgb(color), rgb(surface), LOCAL_QUIET_SHARE).map(value => Math.round(value * 255)).join(", ")})`;
 }
 
 type Bounds = { left: number; right: number; top: number; bottom: number };

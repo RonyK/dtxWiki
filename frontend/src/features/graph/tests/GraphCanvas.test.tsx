@@ -6,7 +6,7 @@ import { deriveGraphScene, graphFacets } from "../graphModel";
 import { graphFixture } from "./graphFixture";
 import type { GraphRenderScene, GraphViewport } from "../shared/rendererTypes";
 
-const { adapter, createAdapter } = vi.hoisted(() => {
+const { adapter, createAdapter, detectWebGL } = vi.hoisted(() => {
   const adapter = {
     captureCoordinates: vi.fn<() => unknown>(() => null),
     destroy: vi.fn(),
@@ -27,12 +27,15 @@ const { adapter, createAdapter } = vi.hoisted(() => {
   return {
     adapter,
     createAdapter: vi.fn(() => adapter),
+    detectWebGL: vi.fn((): { supported: true; floatBlend: boolean } | { supported: false; reason: "webgl2" } =>
+      ({ supported: true, floatBlend: true })),
   };
 });
 
 vi.mock("../local/cosmosAdapter", () => ({
   createLocalGraphAdapter: createAdapter,
 }));
+vi.mock("../workspace/webglSupport", () => ({ detectWorkspaceMapWebGL: detectWebGL }));
 
 const reconciliationProps = () => ({
   active: true,
@@ -432,6 +435,7 @@ describe("GraphCanvas reconciliation", () => {
     const payload = graphFixture();
     const scene = deriveGraphScene(payload, graphFacets(payload), null);
     const onRendererStatusChange = vi.fn();
+    detectWebGL.mockReturnValueOnce({ supported: false, reason: "webgl2" });
     createAdapter
       .mockImplementationOnce(() => {
         throw new Error("renderer unavailable");
@@ -455,6 +459,10 @@ describe("GraphCanvas reconciliation", () => {
       />,
     );
 
+    // An unsupported device reports the error without loading the renderer.
+    expect(createAdapter).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry renderer" }));
+    await waitFor(() => expect(createAdapter).toHaveBeenCalledOnce());
     const retry = await screen.findByRole("button", { name: "Retry renderer" });
     const frame = screen.getByTestId("graph-canvas").closest(".graph-canvas-frame");
     expect(frame).toHaveAttribute(
@@ -468,6 +476,8 @@ describe("GraphCanvas reconciliation", () => {
       "ready",
     ));
     expect(onRendererStatusChange.mock.calls.map(([status]) => status)).toEqual([
+      "loading",
+      "error",
       "loading",
       "error",
       "loading",

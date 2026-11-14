@@ -14,6 +14,7 @@ import type {
   GraphViewport,
 } from "./shared/rendererTypes";
 import { readGraphTokens } from "./shared/graphTokens";
+import { detectWorkspaceMapWebGL } from "./workspace/webglSupport";
 
 export type GraphCanvasHandle = {
   centerOn(id: string): void;
@@ -197,6 +198,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         return;
       }
       publishStatus("loading");
+      // As on the Map, probe WebGL2 before importing the renderer: an
+      // unsupported device keeps the list and static view without the bundle.
+      let supported = false;
+      try { supported = detectWorkspaceMapWebGL().supported; } catch { /* a failing probe is unsupported */ }
+      if (!supported) {
+        publishStatus("error");
+        return;
+      }
       void import("./local/cosmosAdapter")
         .then(async ({ createLocalGraphAdapter }) => {
           if (cancelled || generation !== generationRef.current) return;

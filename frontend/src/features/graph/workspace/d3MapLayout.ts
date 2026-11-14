@@ -2,6 +2,7 @@ import { WORKSPACE_MAP_EDGE_KIND, type WorkspaceMapColumns } from "../map/sceneC
 import { createD3RowOrder } from "../shared/physics/d3RowOrder";
 import { createD3WorkerLayout, type D3WorkerLayoutState } from "../shared/physics/d3WorkerLayout";
 import type { LocalLayoutInput, LocalLayoutPositions } from "../shared/physics/layoutTypes";
+import type { GraphPoint } from "../shared/rendererTypes";
 import { directoryStartIsStructured, workspaceContainerIndices } from "./directoryStartPositions";
 import { buildWorkspaceD3UnitBasis, isReusableWorkspaceD3UnitBasis, measureWorkspaceD3BodyOverlap,
   workspaceD3FitZoom, type WorkspaceD3UnitBasis } from "./d3MapUnits";
@@ -15,6 +16,9 @@ export type WorkspaceD3Layout = {
   destroy(): void;
   isRunning(): boolean;
   update(input: WorkspaceD3LayoutInput): void;
+  beginDrag(index: number, position: GraphPoint): GraphPoint | null;
+  moveDrag(index: number, position: GraphPoint): GraphPoint | null;
+  endDrag(index: number): void;
 };
 
 /** Indexed Map binding. Relations and TreeRail containment lines are the D3 links; folders never add any other force. */
@@ -190,5 +194,11 @@ export function createWorkspaceD3Layout(input: WorkspaceD3LayoutInput, options: 
       layout.setPositions(toRecord(positions), pins.map(index => keys[index]),
         { pinsOnly: !acceptedSolved, reheat: acceptedSolved && reconcile.reheat !== false });
     },
+    // Once its solved rows are the Map's, the Worker holds a dragged node at
+    // the pointer and its neighbours follow. Before that the cold solve owns
+    // the rows, so the drag stays native-only.
+    beginDrag(index, position) { return destroyed || !acceptedSolved ? null : layout.beginDrag(keys[index], position); },
+    moveDrag(index, position) { return destroyed || !acceptedSolved ? null : layout.moveDrag(keys[index], position); },
+    endDrag(index) { if (!destroyed) layout.endDrag(keys[index]); },
   };
 }

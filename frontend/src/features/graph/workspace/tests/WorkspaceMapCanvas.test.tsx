@@ -22,7 +22,6 @@ const { detectSupport, createAdapter, adapter } = vi.hoisted(() => {
     getViewport: vi.fn(() => null),
     getNodePosition: vi.fn(() => null),
     getNodeDisplayData: vi.fn(() => null),
-    getEdgeDisplayData: vi.fn(() => null),
     pinWhenSettled: vi.fn(),
     captureCoordinates: vi.fn(() => null),
     pin: vi.fn((_id: string, _pinned: boolean, position?: { x: number; y: number }) => position ?? { x: 2, y: 3 }),

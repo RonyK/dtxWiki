@@ -14,8 +14,6 @@ export type CosmosOverlayFrame = {
   /** Points of the active star behind the GPU greyout; null emphasizes nothing. */
   star: ReadonlySet<number> | null;
   showLabels: boolean;
-  zoom: number;
-  forcedColors: boolean;
   tokens: GraphVisualTokens;
   width: number;
   height: number;
