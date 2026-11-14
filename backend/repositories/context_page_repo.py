@@ -15,6 +15,7 @@ from backend.context_media.application import SyncVersionUsage
 from backend.context_media.domain import validate_markdown_media_policy
 from backend.context_media.ports import ContextMediaRepository
 from backend.domain.prepared_body import PreparedBody
+from backend.models.base import utc_now
 from backend.models.context import ContextPage, ContextPageVersion, PageLink
 from backend.models.tree import WorkspaceTreeNode
 from backend.repositories.context_visibility import (
@@ -793,6 +794,7 @@ def _insert_version_raw(
         created_by_actor_id=actor_id,
         version_status=version_status,
         change_set_id=change_set_id,
+        last_saved_at=utc_now(),
         nav_description=derive_nav_description(body_md),
         block_map=(
             prepared_block_map

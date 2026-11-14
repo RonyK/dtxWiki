@@ -82,6 +82,7 @@
       "guide": "Get workspace guide",
       "list_agent_categories": "List agent categories",
       "list_changes": "List change history",
+      "list_context_drafts": "List Context drafts",
       "list_my_context_edits": "List my context edits",
       "list_my_workspaces": "List my workspaces",
       "list_requested_changes": "List requested changes",

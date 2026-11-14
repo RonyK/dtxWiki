@@ -1230,11 +1230,9 @@ def test_bundle_hash_stable_across_draft_only_edits(session_factory, page_servic
     # viewer's cache key (nor leak WHEN draft work happened)
     assert hash_after == hash_before
     assert viewer_modified_after == viewer_modified_before
-    # the editor's bundle content IS draft-inclusive, so content_hash (the
-    # precise cache key) changes; lastModified is deliberately published-only
-    # so it pairs consistently with what_changed (which reports published
-    # deltas only) and never churns on a draft edit that produced no delta.
-    assert editor_hash_after != editor_hash_before
+    # Editor bundles also default to published content, preserving the cache
+    # key and publication timestamp while drafts are edited.
+    assert editor_hash_after == editor_hash_before
     assert editor_modified_after == editor_modified_before
     del payload
 

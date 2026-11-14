@@ -316,6 +316,7 @@ class ContextMediaAssetProjection:
     current_published_reference_count: int
     historical_reference_count: int
     usage_token: str
+    created_for_version_is_editing: bool = False
 
     @classmethod
     def from_snapshot(cls, snapshot: AssetUsageSnapshot) -> ContextMediaAssetProjection:
@@ -325,7 +326,7 @@ class ContextMediaAssetProjection:
         # is recomputed from THESE counts, not `snapshot.state` -- passing
         # through the real state while zeroing the displayed count would
         # otherwise show "0 draft references" next to an "Active" badge,
-        # which discloses the same "someone is privately editing this" fact
+        # which discloses the same hidden discarded-work fact
         # through a different field. usage_token is untouched: it always
         # hashes the real, unmasked facts (see AssetUsageSnapshot's docstring)
         # so DeleteUnusedMedia's optimistic-concurrency check never depends
@@ -358,11 +359,18 @@ class ContextMediaAssetProjection:
             current_published_reference_count=published,
             historical_reference_count=historical,
             usage_token=snapshot.usage_token,
+            created_for_version_is_editing=snapshot.created_for_version_is_editing,
         )
 
     @property
     def can_delete(self) -> bool:
         return self.usage_state is UsageState.UNUSED
+
+    def can_delete_by(self, actor: ActorIdentity) -> bool:
+        """Mirror the existing ownership guard for open-session uploads."""
+        return self.can_delete and (
+            not self.created_for_version_is_editing or self.asset.created_by == actor
+        )
 
 
 @dataclass(frozen=True, slots=True)

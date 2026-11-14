@@ -229,7 +229,12 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
         role="viewer",
     )
     assert draft["version_status"] == "draft"
-    assert editor.get(page_url).json()["data"]["version_id"] == draft["version_id"]
+    assert (
+        editor.get(page_url, params={"version_id": draft["version_id"]}).json()["data"][
+            "version_id"
+        ]
+        == draft["version_id"]
+    )
     assert viewer.get(page_url).status_code == 404
 
     def save(value, key, body=None):
@@ -261,7 +266,9 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
     )
     assert added.status_code == 200, added.text
     assert added.json()["data"]["publication_state"] == "draft"
-    draft = editor.get(page_url).json()["data"]
+    draft = editor.get(page_url, params={"version_id": draft["version_id"]}).json()[
+        "data"
+    ]
     assert draft["references"][0]["target_id"] == target["id"]
     assert _publish_created_version(owner, page_service, draft).status_code == 200
     published = viewer.get(page_url).json()["data"]
@@ -285,7 +292,9 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
         replay.json()["data"]["editing_revision"]
         == removed.json()["data"]["editing_revision"]
     )
-    draft = editor.get(page_url).json()["data"]
+    draft = editor.get(page_url, params={"version_id": draft["version_id"]}).json()[
+        "data"
+    ]
     assert not draft["references"]
 
     # This valid add would mutate the shared draft if REST lost the flag on
@@ -307,7 +316,9 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
         page_version_and_pointer_snapshot(page_service, UUID(draft["id"]))
         == before_lookup
     )
-    assert not editor.get(page_url).json()["data"]["references"]
+    assert not editor.get(page_url, params={"version_id": draft["version_id"]}).json()[
+        "data"
+    ]["references"]
     assert viewer.get(page_url).json()["data"]["version_id"] == published["version_id"]
     assert viewer.get(page_url).json()["data"]["references"]
 
@@ -349,13 +360,20 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
         page_url, params={"version_id": reviewed["version_id"]}
     ).json()["data"]
     assert not historical["references"]
-    current = editor.get(page_url).json()["data"]
+    current = editor.get(
+        page_url, params={"version_id": successor["version_id"]}
+    ).json()["data"]
     current = save(
         current,
         "body-after-reference-change",
         "# Shared references\n\nSaved after references.",
     )
-    assert editor.get(page_url).json()["data"]["body_md"] == current["body_md"]
+    assert (
+        editor.get(page_url, params={"version_id": current["version_id"]}).json()[
+            "data"
+        ]["body_md"]
+        == current["body_md"]
+    )
     assert current["version_status"] == "draft"
     stale = _publish_created_version(
         owner,
@@ -437,9 +455,9 @@ def _mcp_private_save(page_service, page_id, user_id, body, key):
     )
 
 
-def test_browser_save_keeps_the_same_users_mcp_edit_private(page_service):
+def test_browser_save_keeps_the_same_users_mcp_edit_separate(page_service):
     # Browser and MCP authentication resolve to the same human. The browser
-    # continues the shared draft line; it neither shares nor ends the MCP edit.
+    # continues the shared draft line and keeps the MCP session separate.
     owner = make_client(page_service)
     page = create_published_page(
         owner, page_service, title="Private edit", body_md="# Private edit"
@@ -482,7 +500,9 @@ def test_browser_save_keeps_the_same_users_mcp_edit_private(page_service):
     )
     assert cited.status_code == 200, cited.text
     assert cited.json()["data"]["publication_state"] == "draft"
-    peer = editor.get(page_url).json()["data"]
+    peer = editor.get(page_url, params={"version_id": saved["version_id"]}).json()[
+        "data"
+    ]
     assert peer["version_id"] == saved["version_id"]
     assert "MCP private notes" not in peer["body_md"]
 
@@ -502,7 +522,12 @@ def test_browser_save_keeps_the_same_users_mcp_edit_private(page_service):
     )
     assert continued.version_id == edit.version_id
     assert continued.version_status == "editing"
-    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
+    assert (
+        editor.get(page_url, params={"version_id": saved["version_id"]}).json()["data"][
+            "version_id"
+        ]
+        == saved["version_id"]
+    )
     # One draft line per page: the private edit cannot replace the pending
     # shared draft by being submitted over it.
     with pytest.raises(PageConflictError):
@@ -516,13 +541,17 @@ def test_browser_save_keeps_the_same_users_mcp_edit_private(page_service):
             expected_editing_revision=continued.editing_revision,
             idempotency_key="mcp-private-submit",
         )
-    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
+    assert (
+        editor.get(page_url, params={"version_id": saved["version_id"]}).json()["data"][
+            "version_id"
+        ]
+        == saved["version_id"]
+    )
 
 
-def test_browser_keeps_an_opened_private_edit_private_until_review(page_service):
-    # A page created over MCP is the author's private edit and the page's only
-    # version, so the browser opens that edit. Saving and reference changes
-    # keep it private; only the explicit review request shares it.
+def test_browser_keeps_an_opened_edit_owned_until_review(page_service):
+    # The browser resumes its author's MCP session. Other editors can read it;
+    # saving and references keep its editing state until review is requested.
     owner = make_client(page_service)
     target = create_published_page(
         owner, page_service, title="Opened source", body_md="# Opened source"
@@ -565,7 +594,7 @@ def test_browser_keeps_an_opened_private_edit_private_until_review(page_service)
     )
     assert cited.status_code == 200, cited.text
     assert cited.json()["data"]["publication_state"] == "editing"
-    assert editor.get(page_url).status_code == 404
+    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
 
     submitted = owner.post(
         f"{page_url}/submit-for-review",
@@ -603,7 +632,12 @@ def test_private_mcp_save_neither_hides_nor_blocks_shared_drafts(page_service):
     assert first.status_code == 200, first.text
     draft = first.json()["data"]
     assert draft["version_status"] == "draft"
-    assert reader.get(page_url).json()["data"]["version_id"] == draft["version_id"]
+    assert (
+        reader.get(page_url, params={"version_id": draft["version_id"]}).json()["data"][
+            "version_id"
+        ]
+        == draft["version_id"]
+    )
 
     # Saving the private edit again neither hides that shared draft nor stops
     # its author from continuing it.
@@ -621,7 +655,12 @@ def test_private_mcp_save_neither_hides_nor_blocks_shared_drafts(page_service):
         expected_editing_revision=edit.editing_revision,
         editing_version_id=edit.version_id,
     )
-    assert reader.get(page_url).json()["data"]["version_id"] == draft["version_id"]
+    assert (
+        reader.get(page_url, params={"version_id": draft["version_id"]}).json()["data"][
+            "version_id"
+        ]
+        == draft["version_id"]
+    )
     second = _browser_save(
         author, page_url, draft, "author-second", "# Shared line\n\nAuthor again."
     )
@@ -668,7 +707,12 @@ def test_shared_save_starts_from_the_readable_head_over_a_foreign_private_pointe
     saved = saved.json()["data"]
     assert saved["parent_version_id"] == page["version_id"]
     assert "MCP private notes" not in saved["body_md"]
-    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
+    assert (
+        editor.get(page_url, params={"version_id": saved["version_id"]}).json()["data"][
+            "version_id"
+        ]
+        == saved["version_id"]
+    )
 
 
 def test_only_the_author_can_request_review_of_a_shared_browser_draft(page_service):
@@ -1308,7 +1352,7 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
     assert page_versions[0].body_md == "# Second autosave\n"
 
 
-def test_begin_context_edit_gives_each_author_an_independent_row_and_hides_it_from_others(  # noqa: E501
+def test_begin_context_edit_gives_each_author_an_independent_readable_row(
     page_service,
 ):
     """P8.1/P8.3/P8.4: each author's `begin-edit` opens its own private
@@ -1317,8 +1361,7 @@ def test_begin_context_edit_gives_each_author_an_independent_row_and_hides_it_fr
     exact id, or act on it by naming its version_id."""
 
     owner_client = make_client(page_service)
-    # Independent authors fork a published page, never another author's
-    # unsubmitted private-only page, even if they know its UUID.
+    # Independent authors each own a session based on the published page.
     created = create_published_page(
         owner_client,
         page_service,
@@ -1356,12 +1399,13 @@ def test_begin_context_edit_gives_each_author_an_independent_row_and_hides_it_fr
         ).all()
     assert len(editing_rows) == 2
 
-    # The other author may not read the owner's editing row by its exact id.
+    # Other editors can read the owner's editing row by its exact id.
     forbidden = other_client.get(
         f"{pages_url(page_service)}/{page_id}",
         params={"version_id": owner_version_id},
     )
-    assert forbidden.status_code == 404
+    assert forbidden.status_code == 200
+    assert forbidden.json()["data"]["draft"]["is_editing"] is True
 
     # Naming the owner's real editing version_id in a mutation is refused
     # with the caller's OWN open edit, exactly as a made-up id is, so the
@@ -1603,8 +1647,9 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
         json={"idempotency_key": "t-28"},
     ).json()["data"]
     editing_version_id = begun["version_id"]
+    assert "draft" not in begun and "open_drafts" not in begun
 
-    # A different editor must not see the private editing body/id yet.
+    # Ordinary reads still select the published body for another editor.
     other_view = other_client.get(f"{pages_url(page_service)}/{page_id}").json()["data"]
     assert other_view["current_version_id"] != editing_version_id
     assert other_view["body_md"] == "# Full Flow Target\n\nPublished body."
@@ -1857,10 +1902,10 @@ def test_page_first_creation_defaults_title_slug_and_allows_empty_body(page_serv
         assert f"slug: {with_metadata['slug']}" in version.body_md
 
 
-def test_page_first_creation_is_visible_to_its_own_author_and_hidden_from_others(
+def test_page_first_creation_is_readable_by_other_editors(
     page_service,
 ):
-    """An unsubmitted private-only page is invisible to other authors."""
+    """Other editors can read a page-first draft without owning its session."""
 
     owner_client = make_client(page_service)
     created = owner_client.post(
@@ -1878,14 +1923,14 @@ def test_page_first_creation_is_visible_to_its_own_author_and_hidden_from_others
     )
 
     forbidden_read = other_client.get(f"{pages_url(page_service)}/{page_id}")
-    assert forbidden_read.status_code == 404
+    assert forbidden_read.status_code == 200
+    assert forbidden_read.json()["data"]["draft"]["is_editing"] is True
 
     forbidden_list = other_client.get(pages_url(page_service))
     assert forbidden_list.status_code == 200
-    assert page_id not in {p["id"] for p in forbidden_list.json()["data"]}
+    assert page_id in {p["id"] for p in forbidden_list.json()["data"]}
 
-    # Removed the former "second author gets an empty edit" test. Knowing
-    # this UUID grants neither read access nor a fork of a private-only page.
+    # Reading another author's work does not adopt their writing session.
     before = page_version_and_pointer_snapshot(page_service, UUID(page_id))
     forbidden_begin = other_client.post(
         f"{pages_url(page_service)}/{page_id}/begin-edit",
@@ -2935,7 +2980,12 @@ def test_preserve_alternative_after_in_place_autosave_conflict_rebases_editable_
         "data"
     ]
     assert current_read["current_version_id"] == draft_id
-    assert current_read["body_md"] == "# Draft H1"
+    assert current_read["body_md"] == created["body_md"]
+    explicit_draft = client.get(
+        f"{pages_url(page_service)}/{created['id']}",
+        params={"version_id": draft_id},
+    ).json()["data"]
+    assert explicit_draft["body_md"] == "# Draft H1"
 
     stuck = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
@@ -3021,7 +3071,14 @@ def test_autosave_title_change_on_published_page_stays_staged_not_published(
     ).json()["data"]
     assert autosaved["title"] == "Staged title"
 
-    draft_read = client.get(f"{pages_url(page_service)}/{created['id']}").json()["data"]
+    default_read = client.get(f"{pages_url(page_service)}/{created['id']}").json()[
+        "data"
+    ]
+    assert default_read["title"] == "Published title"
+    draft_read = client.get(
+        f"{pages_url(page_service)}/{created['id']}",
+        params={"version_id": autosaved["version_id"]},
+    ).json()["data"]
     assert draft_read["title"] == "Staged title"
 
     published_read = client.get(
@@ -3371,7 +3428,7 @@ def test_backlinks_hide_draft_only_source_from_viewers(page_service):
     assert "Unpublished sensitive note" in (editor_backlinks[0].snippet or "")
 
 
-def test_backlinks_include_latest_draft_projection_for_draft_actor(page_service):
+def test_backlinks_use_published_projection_for_draft_actor(page_service):
     target = page_service.write_page(
         workspace_slug="default",
         slug="latest-draft-target",
@@ -3432,7 +3489,7 @@ def test_backlinks_include_latest_draft_projection_for_draft_actor(page_service)
 
     editor_backlinks = page_service.list_backlinks(page_id=target.id, actor=editor)
 
-    assert [item.slug for item in editor_backlinks] == ["latest-draft-source"]
+    assert editor_backlinks == []
 
 
 def test_pages_api_resolves_korean_wikilink_targets(page_service):
@@ -3918,10 +3975,10 @@ def test_version_metadata_is_actor_aware_and_batched(page_service):
     neither_row = by_id[neither_id]
     assert published_row.is_current_published is True
     assert published_row.is_latest_draft is False
-    assert published_row.is_visible_head is False
+    assert published_row.is_visible_head is True
     assert rejected_row.is_current_published is False
     assert rejected_row.is_latest_draft is True
-    assert rejected_row.is_visible_head is True
+    assert rejected_row.is_visible_head is False
     assert rejected_row.review_status == "rejected"
     assert rejected_row.review_item_id == rejected_review_id
     assert rejected_row.parent_version_id == UUID(published["version_id"])
@@ -4037,7 +4094,12 @@ def test_pages_api_restores_historical_version_as_new_draft(page_service):
     assert restored["review_item_id"]
     assert restored["block_map_stale"] is True
 
-    read_response = client.get(f"{pages_url(page_service)}/{created['id']}")
+    default_read = client.get(f"{pages_url(page_service)}/{created['id']}")
+    assert default_read.json()["data"]["version_id"] == updated["version_id"]
+    read_response = client.get(
+        f"{pages_url(page_service)}/{created['id']}",
+        params={"version_id": restored["version_id"]},
+    )
     assert read_response.json()["data"]["version_id"] == restored["version_id"]
     assert read_response.json()["data"]["block_map_stale"] is True
 

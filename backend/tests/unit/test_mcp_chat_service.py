@@ -841,21 +841,7 @@ def _seed_media_blob(session, workspace_id: UUID, *, salt: str) -> tuple[UUID, U
 
 
 def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
-    """A page-bound media asset is visible exactly when BOTH its page is
-    visible to the actor AND the specific version it was created for is not
-    someone else's private, unshared "editing" row (P3.1/P3.2: every asset
-    is page-owned now -- there is no more page-less "session" ownership
-    shape -- but a page having some visible head does not make every asset
-    registered against it visible; page-first creation and begin_editing
-    can register an asset against a private editing row on a page that
-    separately has its own visible head).
-
-    _actor_visible_artifact_link_predicate's docstring calls itself
-    "equivalent to _artifact_payload gates" -- a stated invariant, not a
-    coincidence of the combined list_artifact_links() pipeline. This test
-    checks all three: the end-to-end visible set, the SQL predicate run
-    directly, and the Python per-row gate run directly, on the SAME fixture.
-    """
+    """Editing media is shared; discarded media is hidden in SQL and Python."""
 
     service = McpChatService()
     with session_factory.begin() as session:
@@ -1101,11 +1087,14 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
         )
 
     expected = {page_visible_asset.id, owned_editing_asset.id}
-    assert listed_ids == expected
-    assert sql_visible_ids == expected
-    assert python_visible_ids == expected
+    editing_expected = expected | {foreign_editing_asset.id}
+    assert listed_ids == editing_expected
+    assert sql_visible_ids == editing_expected
+    assert python_visible_ids == editing_expected
     assert discarded_sql_ids == discarded_python_ids == expected
-    assert discarded_chat == editing_chat
+    assert foreign_editing_asset.id in {
+        link.resource_id for link in editing_chat.items[0].linked_artifacts
+    }
     assert foreign_editing_asset.id not in {
         link.resource_id for link in discarded_chat.items[0].linked_artifacts
     }
@@ -5105,7 +5094,7 @@ def test_focused_read_requires_one_distinct_visible_artifact_across_the_chat(
                 client=client,
                 mcp_session_id=focused_session_id,
                 tool_name="read_concept",
-                input_summary={"path": "/context/architecture-guide.md"},
+                input_summary={"path": f"/p/{workspace.id}/{first_page.id}"},
             )
             service.link_artifact(
                 session=session,
@@ -5131,7 +5120,7 @@ def test_focused_read_requires_one_distinct_visible_artifact_across_the_chat(
                 client=client,
                 mcp_session_id=ambiguous_session_id,
                 tool_name="read_concept",
-                input_summary={"path": f"/context/{page.slug}.md"},
+                input_summary={"path": f"/p/{workspace.id}/{page.id}"},
             )
             service.link_artifact(
                 session=session,

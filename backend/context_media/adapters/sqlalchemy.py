@@ -52,14 +52,17 @@ from backend.repositories.context_media_orphans import (
 )
 from backend.repositories.context_visibility import (
     explicit_context_version_visible_expression,
-    foreign_editing_version_exists,
+    foreign_discarded_version_exists,
     visible_context_page_expression,
 )
 from backend.repositories.media_blob_reference import (
     BlobReferenceOwnerKind,
     SqlAlchemyBlobReferenceLedger,
 )
-from backend.repositories.workspace_scoped import select_projection_in_workspace
+from backend.repositories.workspace_scoped import (
+    select_in_workspace,
+    select_projection_in_workspace,
+)
 from backend.services.actor_visible_read import context_version_is_visible
 from backend.services.db_write_intent import acquire_write_intent
 
@@ -528,32 +531,27 @@ class SqlAlchemyContextMediaRepository:
         page = self._page(workspace_id, page_id)
         assets = tuple(
             self._session.scalars(
-                select(ContextMediaAsset)
-                .where(
-                    ContextMediaAsset.workspace_id == workspace_id,
-                    ContextMediaAsset.page_id == page_id,
-                    # P8.4: an "editing" row is private to its author, and so
-                    # are the uploads staged against it -- their filenames and
-                    # the `created_for_version_id` the content URL is built
-                    # from would otherwise hand a non-author both the private
-                    # file's name and the exact version id that naming
-                    # directly is required to 404 on. Excluded in the query,
-                    # not after the fetch. A `None` viewer hides every
-                    # editing-staged asset, matching editing_row_hidden_from_
-                    # actor's fail-closed answer for an unidentified actor.
-                    ~foreign_editing_version_exists(
-                        ContextMediaAsset.created_for_version_id,
-                        None if viewer is None else (viewer.kind, viewer.id),
+                select_in_workspace(
+                    ContextMediaAsset,
+                    workspace_id=workspace_id,
+                    conditions=(
+                        ContextMediaAsset.page_id == page_id,
+                        # Editing uploads share draft visibility; discarded work
+                        # remains hidden from other editors.
+                        ~foreign_discarded_version_exists(
+                            ContextMediaAsset.created_for_version_id,
+                            None if viewer is None else (viewer.kind, viewer.id),
+                        ),
                     ),
-                )
-                .order_by(ContextMediaAsset.created_at, ContextMediaAsset.id)
+                ).order_by(ContextMediaAsset.created_at, ContextMediaAsset.id)
             ).all()
         )
         usages = tuple(
             self._session.scalars(
-                select(ContextMediaUsage).where(
-                    ContextMediaUsage.workspace_id == workspace_id,
-                    ContextMediaUsage.page_id == page_id,
+                select_in_workspace(
+                    ContextMediaUsage,
+                    workspace_id=workspace_id,
+                    conditions=(ContextMediaUsage.page_id == page_id,),
                 )
             ).all()
         )
@@ -625,17 +623,9 @@ class SqlAlchemyContextMediaRepository:
             visible_context_page_expression(actor),
             ContextMediaAsset.workspace_id == workspace_id,
             ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
-            # P8.4, and the reason this method needs the most care in the file:
-            # every listing before it was scoped to one page, so a private
-            # editing upload could only ever leak to someone already on that
-            # page. This one spans the workspace, which makes it the first
-            # surface that could hand a NON-AUTHOR another author's in-progress
-            # filename and the created_for_version_id its content URL is keyed
-            # on. Masked in the query, for every caller including an owner --
-            # the row is private by identity, not by role -- and a `None`
-            # viewer hides every editing-staged asset rather than none.
+            # Match the visibility of the creating version or a readable use.
             or_(
-                ~foreign_editing_version_exists(
+                ~foreign_discarded_version_exists(
                     ContextMediaAsset.created_for_version_id,
                     None if viewer is None else (viewer.kind, viewer.id),
                 ),
@@ -1238,24 +1228,14 @@ def _usage_snapshot(
             published_count += usage.reference_count
         if usage.page_version_id not in active_ids:
             historical_count += usage.reference_count
-    # P8.4: the buckets above are the real, unmasked canonical facts --
-    # `usage_token`'s CAS round-trip (`get_page_asset_usage`/
-    # `tombstone_and_enqueue_gc`) depends on them staying exactly this way
-    # regardless of viewer, or delete's optimistic-concurrency check would
-    # break. A *viewer-facing* count is a separate, optional projection:
-    # any `ContextMediaUsage` row still keyed to a version that is CURRENTLY
-    # "editing" and NOT authored by `viewer` is that author's private,
-    # unsubmitted content -- P2.2's "at most one open editing session per
-    # page+author" means several authors can each hold their own concurrent
-    # editing row on the same page, so this is not just `latest_draft_
-    # version_id`'s row; any usage row can point at one. Exclude every such
-    # row from every viewer-visible bucket rather than only the "latest" one.
+    # Canonical counts continue to drive deletion CAS. Only discarded work
+    # is masked in the editor-facing projection; editing usage is readable.
     viewer_latest_count = latest_count
     viewer_published_count = published_count
     viewer_historical_count = historical_count
     if viewer is not None:
         distinct_version_ids = {usage.page_version_id for usage in usages}
-        foreign_editing_ids = (
+        foreign_discarded_ids = (
             {
                 version_id
                 for version_id, status, actor_kind, actor_id in session.execute(
@@ -1266,18 +1246,18 @@ def _usage_snapshot(
                         ContextPageVersion.created_by_actor_id,
                     ).where(ContextPageVersion.id.in_(distinct_version_ids))
                 ).all()
-                if status == "editing"
+                if status == "discarded"
                 and (actor_kind, actor_id) != (viewer.kind, viewer.id)
             }
             if distinct_version_ids
             else set()
         )
-        if foreign_editing_ids:
+        if foreign_discarded_ids:
             viewer_latest_count = 0
             viewer_published_count = 0
             viewer_historical_count = 0
             for usage in usages:
-                if usage.page_version_id in foreign_editing_ids:
+                if usage.page_version_id in foreign_discarded_ids:
                     continue
                 if usage.page_version_id == page.latest_draft_version_id:
                     viewer_latest_count += usage.reference_count

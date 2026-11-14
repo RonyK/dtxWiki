@@ -57,6 +57,8 @@ from backend.schemas.mcp.read_tools import (
     ListAgentCategoriesOutput,
     ListChangesInput,
     ListChangesOutput,
+    ListContextDraftsInput,
+    ListContextDraftsOutput,
     ListMyWorkspacesInput,
     ListMyWorkspacesOutput,
     ReadAgentPageInput,
@@ -134,6 +136,10 @@ def build_mcp_schemas() -> dict[str, dict]:
         "read_concept": {
             "input": ReadConceptInput.model_json_schema(),
             "output": ReadConceptOutput.model_json_schema(),
+        },
+        "list_context_drafts": {
+            "input": ListContextDraftsInput.model_json_schema(),
+            "output": ListContextDraftsOutput.model_json_schema(),
         },
         "list_changes": {
             "input": ListChangesInput.model_json_schema(),

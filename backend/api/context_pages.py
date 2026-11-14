@@ -68,10 +68,13 @@ from backend.schemas.page import (
     PAGE_LIST_LIMIT_MAX,
     PAGE_SLUG_PATTERN,
     BeginContextEditRequest,
+    ContextDraftListResponse,
     ContextPageCreateRequest,
     ContextPageDetail,
     ContextPageDetailResponse,
     ContextPageInspectorResponse,
+    ContextPageWriteDetail,
+    ContextPageWriteResponse,
     DiscardContextEditRequest,
     PageAutosaveRequest,
     PageBacklinkListResponse,
@@ -89,6 +92,9 @@ from backend.schemas.page import (
     SubmitContextEditRequest,
 )
 from backend.schemas.read import ContextPageListResponse
+from backend.services.context_drafts import (
+    list_context_drafts as list_saved_context_drafts,
+)
 from backend.services.lint import LintRegistry, LintStage
 from backend.services.page_service import (
     PageConflictError,
@@ -208,13 +214,34 @@ def read_page_by_slug(
             )
             if workspace_slug is None:
                 raise PageNotFoundError("page not found")
-        page = page_service.read_page(
-            workspace_slug=workspace_slug, slug=slug, actor=actor
-        )
+            page, version, payload = page_service.resolve_page_for_detail(
+                session, workspace_slug=workspace_slug, slug=slug, actor=actor
+            )
+            enrichment = services.domain_read.context_page_read_enrichment(
+                session,
+                workspace_id,
+                page,
+                version,
+                actor,
+                include_warnings=False,
+                include_pending_review=True,
+                include_inspector_counts=False,
+            )
+            summary = services.domain_read._context_page_summary(
+                page, actor=actor, visible_version_id=payload.visible_version_id
+            )
+            detail = ContextPageDetail(
+                **{
+                    **payload.model_dump(),
+                    "can_submit_for_review": payload._can_submit_for_review,
+                    "latest_draft_version_id": summary.latest_draft_version_id,
+                    **enrichment,
+                }
+            )
     except PageServiceError as exc:
         return service_error_response(exc)
     return page_write_response(
-        _to_detail(page),
+        detail,
         write_operation=False,
         lint_registry=page_service.lint_registry,
     )
@@ -223,7 +250,7 @@ def read_page_by_slug(
 @router.post(
     "",
     status_code=201,
-    response_model=ContextPageDetailResponse,
+    response_model=ContextPageWriteResponse,
     responses=REST_WRITE_ERROR_RESPONSES,
 )
 def create_context_page(
@@ -333,7 +360,7 @@ def get_context_page(
                 include_references=False,
             )
             latest_draft_version_id = services.domain_read._context_page_summary(
-                page, actor=actor
+                page, actor=actor, visible_version_id=payload.visible_version_id
             ).latest_draft_version_id
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -403,6 +430,39 @@ def list_page_backlinks(
     except PageServiceError as exc:
         return service_error_response(exc)
     return {"data": backlinks}
+
+
+@router.get(
+    "/{page_id}/drafts",
+    response_model=ContextDraftListResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def list_context_drafts(
+    request: Request,
+    workspace_id: UUID,
+    page_id: UUID,
+    actor: RestActorDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 5,
+    cursor: Annotated[str | None, Query(max_length=2048)] = None,
+):
+    try:
+        actor, page_service = _workspace_page_service(
+            request, actor, workspace_id, required_role="viewer"
+        )
+        with page_service.session_factory() as session:
+            data = list_saved_context_drafts(
+                session,
+                workspace_id=workspace_id,
+                page_id=page_id,
+                actor=actor,
+                limit=limit,
+                cursor=cursor,
+            )
+    except PageServiceError as exc:
+        return service_error_response(exc)
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
+    return {"data": data}
 
 
 @router.get(
@@ -522,7 +582,7 @@ def discard_alternative_draft(
 
 @router.post(
     "/{page_id}/versions/{version_id}/publish",
-    response_model=ContextPageDetailResponse,
+    response_model=ContextPageWriteResponse,
     responses=REST_WRITE_ERROR_RESPONSES,
 )
 def publish_page_version(
@@ -645,7 +705,7 @@ def create_page_inline_comment(
 
 @router.post(
     "/{page_id}/begin-edit",
-    response_model=ContextPageDetailResponse,
+    response_model=ContextPageWriteResponse,
     responses=REST_WRITE_ERROR_RESPONSES,
 )
 def begin_context_edit(
@@ -683,7 +743,7 @@ def begin_context_edit(
 
 @router.post(
     "/{page_id}/submit-for-review",
-    response_model=ContextPageDetailResponse,
+    response_model=ContextPageWriteResponse,
     responses=REST_WRITE_ERROR_RESPONSES,
 )
 def submit_context_edit_for_review(
@@ -756,7 +816,7 @@ def discard_context_edit(
 
 @router.post(
     "/{page_id}/restore",
-    response_model=ContextPageDetailResponse,
+    response_model=ContextPageWriteResponse,
     responses=REST_WRITE_ERROR_RESPONSES,
 )
 def restore_page_version(
@@ -793,7 +853,7 @@ def restore_page_version(
 
 @router.post(
     "/{page_id}/publish",
-    response_model=ContextPageDetailResponse,
+    response_model=ContextPageWriteResponse,
     responses=REST_WRITE_ERROR_RESPONSES,
 )
 def set_page_public(
@@ -828,7 +888,7 @@ def set_page_public(
 
 @router.patch(
     "/{page_id}",
-    response_model=ContextPageDetailResponse,
+    response_model=ContextPageWriteResponse,
     responses=REST_WRITE_ERROR_RESPONSES,
 )
 def update_page(
@@ -869,7 +929,7 @@ def update_page(
 
 @router.post(
     "/{page_id}/autosave",
-    response_model=ContextPageDetailResponse,
+    response_model=ContextPageWriteResponse,
     responses=REST_WRITE_ERROR_RESPONSES,
 )
 def autosave_page(
@@ -913,25 +973,24 @@ def autosave_page(
     )
 
 
-def _to_detail(page) -> ContextPageDetail:
-    """Wrap a write command's ``PagePayload`` in the canonical detail shape.
+def _to_detail(page) -> ContextPageWriteDetail:
+    """Wrap a write command's ``PagePayload`` without draft discovery metadata.
 
     Deliberately does not run ``context_page_read_enrichment`` (tree
     placement, backlinks, reconciliation availability, pending review): that
     projection needs its own page/version read and is only computed for the
     dedicated ``GET /{page_id}`` detail route, exactly matching the old
     ``/pages/*`` write endpoints, which never returned it either. Every field
-    this leaves at its default is still present on the wire -- just empty --
-    so the response shape never varies by route.
+    the original common enrichment fields remain at their defaults.
     """
 
-    return ContextPageDetail(
+    return ContextPageWriteDetail(
         **page.model_dump(), can_submit_for_review=page._can_submit_for_review
     )
 
 
 def page_write_response(
-    page: ContextPageDetail,
+    page: ContextPageWriteDetail,
     *,
     published_findings=None,
     write_operation: bool = True,

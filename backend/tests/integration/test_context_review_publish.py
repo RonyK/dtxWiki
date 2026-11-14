@@ -393,7 +393,7 @@ def test_reject_latest_draft_restores_published_head_for_both_reader_classes(
     )
 
 
-def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
+def test_reject_first_draft_keeps_editor_readable_evidence(
     session_factory,
 ):
     write = ContextWriteService()
@@ -413,6 +413,9 @@ def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
             actor_id=ACTOR,
             actor_role="owner",
         )
+        saved_before_rejection = session.get(
+            ContextPageVersion, created.draft_version_id
+        ).last_saved_at
         _reject(session, workspace.id, created.review_item_id)
 
         page = session.get(ContextPage, created.page_id)
@@ -423,6 +426,7 @@ def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
         assert page.lifecycle_status == "draft"
         assert version is not None
         assert version.version_status == "draft"
+        assert version.last_saved_at == saved_before_rejection
         assert (
             _decision_audit(session, created.review_item_id).payload["reject_effect"]
             == "hide_unpublished"
@@ -437,8 +441,8 @@ def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
         )
         operation = detail.evidence.operations[0]
         assert operation.document.document_id == page.id
-        assert operation.document.can_open is False
-        assert operation.document.reader_href is None
+        assert operation.document.can_open is True
+        assert operation.document.reader_href is not None
         assert operation.content.candidate_version_id == version.id
         assert operation.content.can_read is True
         assert detail.actions.approve.allowed is False
@@ -449,12 +453,17 @@ def test_reject_first_draft_hides_page_but_preserves_draft_evidence(
     pages = PageService(session_factory)
     for role in ("editor", "viewer"):
         actor = _actor(workspace_id, role)
-        with pytest.raises(PageNotFoundError):
-            pages.read_page(page_id=page_id, actor=actor)
+        if role == "viewer":
+            with pytest.raises(PageNotFoundError):
+                pages.read_page(page_id=page_id, actor=actor)
+        else:
+            assert (
+                pages.read_page(page_id=page_id, actor=actor).version_id == version_id
+            )
         visible_page_ids = {
             row.id for row in pages.list_pages("default", actor=actor).pages
         }
-        assert page_id not in visible_page_ids
+        assert (page_id in visible_page_ids) is (role == "editor")
 
     history = pages.list_versions(page_id, actor=_actor(workspace_id, "editor"))
     rejected_entry = next(entry for entry in history if entry.version_id == version_id)

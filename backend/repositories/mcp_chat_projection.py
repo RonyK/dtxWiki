@@ -52,9 +52,7 @@ from backend.policy.trust_boundaries import (
     actor_can_read_sensitive_agent_pages,
 )
 from backend.repositories.context_visibility import (
-    PRIVATE_VERSION_STATUSES,
     explicit_context_version_visible_expression,
-    foreign_editing_version_exists,
     visible_context_page_expression,
 )
 from backend.repositories.workspace_scoped import select_projection_in_workspace
@@ -136,7 +134,7 @@ def _context_visibility(
     if actor is not None:
         predicates.append(visible_context_page_expression(actor))
     if shared_only:
-        # Preserve bool(versions) and all(private) without loading any bodies.
+        # Exclude discarded-only pages without loading their bodies.
         has_version = (
             select_projection_in_workspace(
                 ContextPageVersion,
@@ -154,9 +152,7 @@ def _context_visibility(
                 columns=(ContextPageVersion.id,),
                 predicates=(
                     ContextPageVersion.page_id == ContextPage.id,
-                    ContextPageVersion.version_status.notin_(
-                        tuple(PRIVATE_VERSION_STATUSES)
-                    ),
+                    ContextPageVersion.version_status != "discarded",
                 ),
             )
             .correlate_except(ContextPageVersion)
@@ -221,16 +217,13 @@ def _media_visibility(
                     predicates=(
                         ContextPageVersion.id
                         == ContextMediaAsset.created_for_version_id,
+                        explicit_context_version_visible_expression(
+                            ContextPageVersion, actor
+                        ),
                     ),
                 )
                 .correlate_except(ContextPageVersion)
                 .exists(),
-                not_(
-                    foreign_editing_version_exists(
-                        ContextMediaAsset.created_for_version_id,
-                        (actor.actor_kind, actor.actor_id),
-                    )
-                ),
             )
         )
     return and_(*predicates)

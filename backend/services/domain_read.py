@@ -7,7 +7,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, tuple_
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from backend.library_media.ports import LibraryBlobRepositoryFactory
 from backend.models.agent import AgentPage, AgentPageVersion
@@ -77,6 +77,7 @@ from backend.services.actor_visible_read import (
     context_version_is_visible,
     library_item_visible,
 )
+from backend.services.context_drafts import project_context_draft, project_open_drafts
 from backend.services.context_lifecycle import project_context_version
 from backend.services.context_link_targets import (
     context_link_targets,
@@ -88,7 +89,7 @@ from backend.services.context_review_disposition import (
     context_version_review_metadata,
 )
 from backend.services.context_visibility import (
-    editing_row_hidden_from_actor,
+    discarded_row_hidden_from_actor,
     visible_context_version_expression,
     visible_context_version_id,
 )
@@ -816,6 +817,15 @@ class DomainReadService:
             base = base.where(
                 has_unpublished_head if has_draft else ~has_unpublished_head
             )
+        pointer_columns = (
+            ContextPageVersion.version_status,
+            ContextPageVersion.created_by_actor_kind,
+            ContextPageVersion.created_by_actor_id,
+        )
+        base = base.add_columns(visible_version.label("visible_version_id")).options(
+            selectinload(ContextPage.current_version).load_only(*pointer_columns),
+            selectinload(ContextPage.latest_draft_version).load_only(*pointer_columns),
+        )
         total = session.scalar(select(func.count()).select_from(base.subquery())) or 0
         stmt = base.order_by(modified_at.desc(), ContextPage.id.desc())
         decoded = _decode_keyset_cursor(cursor)
@@ -838,6 +848,7 @@ class DomainReadService:
                     row.ContextPage,
                     actor=actor,
                     modified_at=row.modified_at,
+                    visible_version_id=row.visible_version_id,
                 )
                 for row in page_rows
             ],
@@ -897,7 +908,9 @@ class DomainReadService:
             include_pending_review=include_pending_review,
         )
         return ContextPageDetail(
-            **self._context_page_summary(page, actor=actor).model_dump(),
+            **self._context_page_summary(
+                page, actor=actor, visible_version_id=visible_head_id
+            ).model_dump(),
             body_markdown=version.body_md if version is not None else None,
             version_info=(
                 self._context_version_info(session, page, version, actor=actor)
@@ -1103,6 +1116,8 @@ class DomainReadService:
 
         return {
             **reference_fields,
+            "draft": project_context_draft(session, page, version, actor),
+            "open_drafts": project_open_drafts(session, page, actor),
             "published_version_info": (
                 PublishedVersionInfo(
                     version_id=published_version.id,
@@ -1395,6 +1410,19 @@ class DomainReadService:
                     "version_id": str(version.id),
                     "concept_path": concept_path,
                     "page_type": page.page_type,
+                    "version_status": version.version_status,
+                    "draft": (
+                        draft.model_dump(mode="json")
+                        if (
+                            draft := project_context_draft(
+                                session, page, version, actor
+                            )
+                        )
+                        else None
+                    ),
+                    "open_drafts": project_open_drafts(session, page, actor).model_dump(
+                        mode="json"
+                    ),
                 },
             }
 
@@ -2270,24 +2298,20 @@ class DomainReadService:
         *,
         actor: ActorContext | None = None,
         modified_at=None,
+        visible_version_id: UUID | None = None,
     ) -> ContextPageSummary:
-        visible_id, _is_draft = visible_context_version_id(page, actor)
+        visible_id = (
+            visible_version_id
+            if visible_version_id is not None
+            else visible_context_version_id(page, actor)[0]
+        )
         can_read_drafts = actor_can_read_drafts(actor)
-        # P2.2/P2.6: role-based `can_read_drafts` answers "may this actor see
-        # SOME unpublished content", not "may this actor see THIS author's
-        # unshared editing" -- a page-global pointer that currently names a
-        # private `editing` row must fall back to the published id instead,
-        # same rule as page_service.py's `_editable_head_for_actor`.
-        # `current_version_id` and `latest_draft_version_id` are checked
-        # independently via their own loaded relationships (not by comparing
-        # one id to the other) because a page that has never published can
-        # have `current_version_id` name an `editing` row directly, with
-        # `latest_draft_version_id` staying `None` the whole time
-        # (page-first creation, before any Save draft).
-        latest_is_hidden_editing = editing_row_hidden_from_actor(
+        # Editing rows are readable by other editors. Only discarded work
+        # needs author-based redaction on the two independent page pointers.
+        latest_is_hidden_discarded = discarded_row_hidden_from_actor(
             page.latest_draft_version, actor
         )
-        current_is_hidden_editing = editing_row_hidden_from_actor(
+        current_is_hidden_discarded = discarded_row_hidden_from_actor(
             page.current_version, actor
         )
         return ContextPageSummary(
@@ -2303,13 +2327,13 @@ class DomainReadService:
             # the published pointer exactly when one is open.
             current_version_id=(
                 page.current_version_id
-                if can_read_drafts and not current_is_hidden_editing
+                if can_read_drafts and not current_is_hidden_discarded
                 else page.current_published_version_id
             ),
             current_published_version_id=page.current_published_version_id,
             latest_draft_version_id=(
                 page.latest_draft_version_id
-                if can_read_drafts and not latest_is_hidden_editing
+                if can_read_drafts and not latest_is_hidden_discarded
                 else None
             ),
             is_public=page.is_public,

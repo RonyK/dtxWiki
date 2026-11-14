@@ -59,6 +59,7 @@ EXPECTED_TOOLS = {
     "guide",
     "list_agent_categories",
     "list_changes",
+    "list_context_drafts",
     "list_my_workspaces",
     "list_requested_changes",
     "read",
@@ -153,6 +154,7 @@ def test_list_tools_filters_by_actor_scopes(page_service, mcp_default_actor):
                 "read_concept",
                 "read_context_outline",
                 "read_structure_map",
+                "list_context_drafts",
                 "list_agent_categories",
                 "read_agent_page",
             }
@@ -594,9 +596,8 @@ def test_context_resources_honor_published_and_draft_visibility(
         )
 
         # E-2 slimming: the LIST advertises entry points only — no per-page
-        # resources for ANY role (a stronger negative pin than the old
-        # per-page membership check). Direct URI reads keep the original
-        # visibility contract verbatim below.
+        # resources for ANY role. Direct URI reads use the published default
+        # while editors can still read pages without a published version.
         assert dual_uri not in viewer_uris
         assert draft_only_uri not in viewer_uris
         assert dual_uri not in editor_uris
@@ -608,7 +609,7 @@ def test_context_resources_honor_published_and_draft_visibility(
         assert viewer_draft is None
         assert viewer_error is not None
 
-        assert editor_body == "Draft resource body."
+        assert editor_body == "Published resource body."
         assert editor_error is None
         assert editor_draft is not None
         assert editor_draft.contents[0].text == "Draft-only resource body."

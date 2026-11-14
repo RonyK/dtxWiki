@@ -1839,6 +1839,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Context Drafts */
+        get: operations["list_context_drafts_api_v1_workspaces__workspace_id__context_pages__page_id__drafts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/inspector": {
         parameters: {
             query?: never;
@@ -5163,6 +5180,81 @@ export interface components {
         };
         /** @enum {string} */
         CompatibilityReasonCode: "catalog_app_unavailable" | "transport_unavailable" | "server_oauth_unavailable" | "endpoint_unreachable" | "platform_required" | "platform_unsupported" | "shell_required" | "shell_unsupported" | "app_version_required" | "app_version_too_old";
+        /** ContextDraftAuthor */
+        ContextDraftAuthor: {
+            /** Actor Id */
+            actor_id: string;
+            /** Actor Kind */
+            actor_kind: string;
+            /** Display Name */
+            display_name?: string | null;
+        };
+        /** ContextDraftInfo */
+        ContextDraftInfo: {
+            author: components["schemas"]["ContextDraftAuthor"];
+            /**
+             * Is Behind
+             * @description Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.
+             */
+            is_behind?: boolean | null;
+            /** Is Editing */
+            is_editing: boolean;
+            /**
+             * Last Saved At
+             * Format: date-time
+             */
+            last_saved_at: string;
+            review?: components["schemas"]["ContextDraftReview"] | null;
+        };
+        /** ContextDraftListResponse */
+        ContextDraftListResponse: {
+            data: components["schemas"]["OpenDrafts"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** ContextDraftReview */
+        ContextDraftReview: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+        };
+        /** ContextDraftSummary */
+        ContextDraftSummary: {
+            author: components["schemas"]["ContextDraftAuthor"];
+            /**
+             * Is Behind
+             * @description Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.
+             */
+            is_behind?: boolean | null;
+            /** Is Editing */
+            is_editing: boolean;
+            /** Is Mine */
+            is_mine: boolean;
+            /**
+             * Last Saved At
+             * Format: date-time
+             */
+            last_saved_at: string;
+            review?: components["schemas"]["ContextDraftReview"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "writing" | "reviewing";
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /**
+             * Version Status
+             * @enum {string}
+             */
+            version_status: "editing" | "draft";
+        };
         /** @enum {string} */
         ContextImageMediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
         /** ContextIngressAcceptRequest */
@@ -5407,10 +5499,9 @@ export interface components {
          *     asset would appear, and a ``Literal`` there turns that row into a 500 on
          *     response validation rather than a row the reader can act on.
          *
-         *     ``can_delete`` answers "may THIS caller delete this now", not just the
-         *     domain's usage question -- the page-scoped listing can publish the bare
-         *     domain answer because that route is editor-gated, while this one is
-         *     readable by a viewer.
+         *     ``can_delete`` answers "may THIS caller delete this now", combining usage,
+         *     editing ownership and workspace role. Both listings respect editing
+         *     ownership; this workspace-wide listing is also readable by a viewer.
          */
         ContextMediaAttachmentPayload: {
             /**
@@ -5673,19 +5764,7 @@ export interface components {
         };
         /**
          * ContextPageDetail
-         * @description The single canonical Context page detail shape (P9.1).
-         *
-         *     A superset of ``PagePayload`` (PageService's P8-verified state-machine
-         *     fields: ``editing_revision``, ``publish_blocked_reasons``,
-         *     ``draft_saved_at``, the privacy-projected ``parent_version_id``, etc.)
-         *     plus the read-only projection fields the old intermediate
-         *     ``/context-pages/{page_id}`` route computed (tree placement,
-         *     backlinks/wikilinks, lint warnings, pending review, reconciliation
-         *     availability) -- see ``DomainReadService.context_page_read_enrichment``,
-         *     the shared function that computes them. Every canonical
-         *     ``/context/pages`` REST endpoint (list item, detail, and every editing
-         *     command's response) returns this one shape; there is no second,
-         *     thinner Context page payload on this route family.
+         * @description Read-only Context detail with facts about the selected and open drafts.
          */
         ContextPageDetail: {
             /** Aliases */
@@ -5707,7 +5786,7 @@ export interface components {
             body_md: string;
             /**
              * Can Submit For Review
-             * @description Whether the caller may submit this exact version for review now: its own private edit or unreviewed shared browser draft.
+             * @description Whether the caller may submit this exact version for review now: its own edit or unreviewed shared browser draft.
              * @default false
              */
             can_submit_for_review: boolean;
@@ -5729,6 +5808,7 @@ export interface components {
             current_published_version_id?: string | null;
             /** Current Version Id */
             current_version_id?: string | null;
+            draft?: components["schemas"]["ContextDraftInfo"] | null;
             /** Draft Saved At */
             draft_saved_at?: string | null;
             /**
@@ -5790,6 +5870,7 @@ export interface components {
             };
             /** Next Reconciliation Version Id */
             next_reconciliation_version_id?: string | null;
+            open_drafts?: components["schemas"]["OpenDrafts"];
             /**
              * Page Type
              * @default overview
@@ -5970,6 +6051,214 @@ export interface components {
             updated_at: string;
             /** Visible Version Id */
             visible_version_id?: string | null;
+        };
+        /**
+         * ContextPageWriteDetail
+         * @description Existing common Context response fields, without draft discovery facts.
+         *
+         *     Write commands preserve their original page fields and default enrichment
+         *     values. Only a dedicated read computes the draft discovery metadata.
+         */
+        ContextPageWriteDetail: {
+            /** Aliases */
+            aliases?: string[];
+            /** Alternative Draft Id */
+            alternative_draft_id?: string | null;
+            /**
+             * Backlink Count
+             * @description Visible backlink count; null until requested by the inspector.
+             */
+            backlink_count?: number | null;
+            /**
+             * Block Map Stale
+             * @description Whether the stored block map is missing or differs from the body; a whole-body save rebuilds it.
+             * @default false
+             */
+            block_map_stale: boolean;
+            /** Body Md */
+            body_md: string;
+            /**
+             * Can Submit For Review
+             * @description Whether the caller may submit this exact version for review now: its own edit or unreviewed shared browser draft.
+             * @default false
+             */
+            can_submit_for_review: boolean;
+            /** Change Set Id */
+            change_set_id?: string | null;
+            /**
+             * Children Count
+             * @description Direct child count; null until requested by the inspector.
+             */
+            children_count?: number | null;
+            /** Content Hash */
+            content_hash: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current Published Version Id */
+            current_published_version_id?: string | null;
+            /** Current Version Id */
+            current_version_id?: string | null;
+            /** Draft Saved At */
+            draft_saved_at?: string | null;
+            /**
+             * Editing Revision
+             * @default 1
+             */
+            editing_revision: number;
+            /** Graph Status */
+            graph_status?: string | null;
+            /** History Status */
+            history_status?: ("state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Inconsistency Reasons */
+            inconsistency_reasons?: string[];
+            /**
+             * Is Alternative
+             * @default false
+             */
+            is_alternative: boolean;
+            /**
+             * Is Discarded
+             * @default false
+             */
+            is_discarded: boolean;
+            /**
+             * Is Draft Head
+             * @default false
+             */
+            is_draft_head: boolean;
+            /**
+             * Is Public
+             * @default false
+             */
+            is_public: boolean;
+            /**
+             * Is Published Head
+             * @default false
+             */
+            is_published_head: boolean;
+            /**
+             * Is Visible Head
+             * @default false
+             */
+            is_visible_head: boolean;
+            /** Latest Draft Version Id */
+            latest_draft_version_id?: string | null;
+            /** Link Targets */
+            link_targets?: components["schemas"]["ContextLinkTarget"][];
+            /**
+             * Lint Report
+             * @description Save-time fixes and findings for the final stored body.
+             */
+            lint_report?: {
+                [key: string]: unknown;
+            };
+            /** Next Reconciliation Version Id */
+            next_reconciliation_version_id?: string | null;
+            /**
+             * Page Type
+             * @default overview
+             * @enum {string}
+             */
+            page_type: "overview" | "source" | "entity" | "concept" | "synthesis" | "comparison" | "decision" | "contradiction" | "query" | "guide";
+            /** Parent Node Id */
+            parent_node_id?: string | null;
+            /** Parent Version Id */
+            parent_version_id?: string | null;
+            /** Pending Draft Version Id */
+            pending_draft_version_id?: string | null;
+            /**
+             * Pending Draft Warnings
+             * @deprecated
+             * @description Deprecated compatibility field; always empty. Pending review state is provided by pending_review and pending_draft_version_id.
+             */
+            pending_draft_warnings?: string[];
+            pending_review?: components["schemas"]["PendingReviewInfo"] | null;
+            /**
+             * Preserved As Alternative
+             * @default false
+             */
+            preserved_as_alternative: boolean;
+            /** Publish Blocked Reasons */
+            publish_blocked_reasons?: components["schemas"]["DraftReviewReason"][];
+            published_version_info?: components["schemas"]["PublishedVersionInfo"] | null;
+            /** Published Version No */
+            published_version_no?: number | null;
+            /**
+             * Reconciliation Available
+             * @default false
+             */
+            reconciliation_available: boolean;
+            /**
+             * Reconciliation Pending Count
+             * @default 0
+             */
+            reconciliation_pending_count: number;
+            /**
+             * Reconciliation Pending Count Truncated
+             * @default false
+             */
+            reconciliation_pending_count_truncated: boolean;
+            /** References */
+            references?: components["schemas"]["ReferenceView"][];
+            /**
+             * References Hash
+             * @default
+             */
+            references_hash: string;
+            /** Review Item Id */
+            review_item_id?: string | null;
+            /** Slug */
+            slug: string;
+            /**
+             * Superseded Review Count
+             * @default 0
+             */
+            superseded_review_count: number;
+            /** Tags */
+            tags?: string[];
+            /** Title */
+            title: string;
+            /** Tree Path */
+            tree_path?: components["schemas"]["TreePathEntry"][];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Status */
+            version_status?: string | null;
+            /** Visible Version Id */
+            visible_version_id?: string | null;
+            /**
+             * Warnings
+             * @description Legacy field, not computed by the canonical detail read. Request inspector section=summary for the displayed version's warnings.
+             */
+            warnings?: string[];
+            /** Wikilink Targets */
+            wikilink_targets?: components["schemas"]["WikilinkTarget"][];
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** ContextPageWriteResponse */
+        ContextPageWriteResponse: {
+            data: components["schemas"]["ContextPageWriteDetail"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** ContextReconciliationBlock */
         ContextReconciliationBlock: {
@@ -9629,6 +9918,18 @@ export interface components {
             access_token: components["schemas"]["OAuthLifetimeValue"];
             refresh_sliding: components["schemas"]["OAuthSlidingValue"];
             refresh_token: components["schemas"]["OAuthLifetimeValue"];
+        };
+        /** OpenDrafts */
+        OpenDrafts: {
+            /** Items */
+            items?: components["schemas"]["ContextDraftSummary"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
         };
         /**
          * PageAutosaveRequest
@@ -19841,7 +20142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContextPageDetailResponse"];
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -20094,7 +20395,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContextPageDetailResponse"];
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -20238,7 +20539,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContextPageDetailResponse"];
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -20371,7 +20672,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContextPageDetailResponse"];
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -20674,6 +20975,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTConflictErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    list_context_drafts_api_v1_workspaces__workspace_id__context_pages__page_id__drafts_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                page_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextDraftListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -21005,7 +21368,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContextPageDetailResponse"];
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -21149,7 +21512,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContextPageDetailResponse"];
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -21221,7 +21584,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContextPageDetailResponse"];
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -21646,7 +22009,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContextPageDetailResponse"];
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
                 };
             };
             /** @description Unauthorized */

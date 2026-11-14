@@ -489,32 +489,18 @@ def _served_version_visible(
         UUID(read["version_id"]),
         UUID(read["resource_id"]),
     )
-    # A served draft stays draft-readers-only after it is published or
-    # activated in place, as a served editing state stays author-only below.
+    # A served draft or editing state stays draft-readers-only after the row
+    # is published or activated in place: the recorded state decides, not the
+    # row's current status.
     if (
-        read["version_status"] == "draft"
+        read["version_status"] in {"draft", "editing"}
         and actor is not None
         and not actor_can_read_drafts(actor)
     ):
         return False
     if kind == "context_page":
         version = gate.visible_version(version_id)
-        if version is None or version.page_id != resource_id:
-            return False
-        # The same Context version id can move from private editing through
-        # autosaves to a submitted draft/public snapshot. Sharing its final
-        # body does not share earlier, never-submitted revisions that a trace
-        # actually served. Preserve that served state's author-only rule even
-        # after the mutable database row has become public.
-        if read["version_status"] == "editing" and actor is not None:
-            return (
-                actor_can_read_drafts(actor)
-                and bool(actor.actor_kind)
-                and bool(actor.actor_id)
-                and version.created_by_actor_kind == actor.actor_kind
-                and version.created_by_actor_id == actor.actor_id
-            )
-        return True
+        return version is not None and version.page_id == resource_id
     if kind == "agent_page":
         page = get_in_workspace(
             session, AgentPage, workspace_id=gate.workspace_id, resource_id=resource_id

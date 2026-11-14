@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from backend.app.db import make_engine, make_session_factory
 from backend.llm.embedding import DeterministicEmbedding
+from backend.mcp.router import dispatch
 from backend.models.audit import AuditEvent
 from backend.models.base import Base
 from backend.models.change import ChangeOperation, ChangeSet
@@ -21,7 +22,6 @@ from backend.schemas.context_write import (
 )
 from backend.schemas.tree import TreeFolderCreateRequest
 from backend.scripts.seed_dev import seed_default_workspace
-from backend.services.concept_resolution import resolve_context_concept
 from backend.services.context_write_service import ContextWriteService
 from backend.services.indexing import DbNativeIndexer
 from backend.services.okf import build_workspace_index
@@ -30,6 +30,7 @@ from backend.services.read_errors import ReadValidationError
 from backend.services.review_service import ReviewService
 from backend.services.tree_service import TreeService
 from backend.services.vector_store import BruteForceVectorStore
+from backend.tests.integration._cross_transport_helpers import make_client
 
 pytestmark = pytest.mark.integration
 
@@ -146,11 +147,14 @@ def test_folder_archive_cascades_to_descendant_pages(
             embedder=DeterministicEmbedding(dim=128),
             vector_store=BruteForceVectorStore(),
         ).index(session=session, source_kind="context_page", source_id=payload.id)
-        assert session.scalar(
-            select(ContentChunk.id)
-            .where(ContentChunk.document_id == payload.id)
-            .limit(1)
-        ) is not None
+        assert (
+            session.scalar(
+                select(ContentChunk.id)
+                .where(ContentChunk.document_id == payload.id)
+                .limit(1)
+            )
+            is not None
+        )
         tree.archive_node(
             session=session,
             workspace_id=workspace_id,
@@ -163,20 +167,19 @@ def test_folder_archive_cascades_to_descendant_pages(
         workspace_id = _workspace_id(session)
         page = session.get(ContextPage, payload.id)
         assert page.lifecycle_status == "archived"
-        assert session.scalar(
-            select(ContentChunk.id)
-            .where(ContentChunk.document_id == page.id)
-            .limit(1)
-        ) is None
-        # gone from the name index -> entity lane and read_concept stop finding it
+        assert (
+            session.scalar(
+                select(ContentChunk.id)
+                .where(ContentChunk.document_id == page.id)
+                .limit(1)
+            )
+            is None
+        )
+        # gone from the name index -> the search entity lane stops finding it
         rows = session.scalars(
             select(PageNameIndex).where(PageNameIndex.page_id == page.id)
         ).all()
         assert rows == []
-        result = resolve_context_concept(
-            session, workspace_id=workspace_id, identifier="cascade-page", actor=None
-        )
-        assert result.status == "not_found"
         index = build_workspace_index(
             session, workspace_id, actor=None, workspace_slug="default"
         )
@@ -194,7 +197,7 @@ def test_folder_archive_cascades_to_descendant_pages(
 
 
 def test_archive_keeps_pending_context_review_readable_and_actionable(
-    session_factory, page_service: PageService
+    session_factory, page_service: PageService, mcp_default_actor
 ):
     write = ContextWriteService()
     reviews = ReviewService()
@@ -236,12 +239,15 @@ def test_archive_keeps_pending_context_review_readable_and_actionable(
         assert _primary_node(session, page.id).visibility_status == "archived"
         assert review.status == "pending"
         assert change_set.status == "draft_created"
-        assert session.scalar(
-            select(AuditEvent.id).where(
-                AuditEvent.action == "review.superseded_by_page_archive",
-                AuditEvent.target_id == review.id,
+        assert (
+            session.scalar(
+                select(AuditEvent.id).where(
+                    AuditEvent.action == "review.superseded_by_page_archive",
+                    AuditEvent.target_id == review.id,
+                )
             )
-        ) is None
+            is None
+        )
 
         detail = reviews.get_review(
             session=session,
@@ -270,6 +276,54 @@ def test_archive_keeps_pending_context_review_readable_and_actionable(
         actor=actor,
     )
     assert "Readable while archived." in readable.body_md
+    assert "draft" not in readable.model_dump()
+    assert "open_drafts" not in readable.model_dump()
+
+    # Existing explicit review-evidence reads remain usable. Discovery is
+    # empty for archived pages and must never prevent returning their body.
+    client = make_client(page_service)
+    endpoint = f"/api/v1/workspaces/{workspace_id}/context/pages/{page_id}"
+    archived_read = client.get(endpoint, params={"version_id": str(draft_version_id)})
+    assert archived_read.status_code == 200, archived_read.text
+    archived_data = archived_read.json()["data"]
+    assert "Readable while archived." in archived_data["body_md"]
+    assert archived_data["draft"]["review"]["id"] == str(review_id)
+    assert archived_data["open_drafts"] == {
+        "total": 0,
+        "items": [],
+        "next_cursor": None,
+    }
+    assert client.get(f"{endpoint}/drafts").status_code == 404
+
+    mcp_actor = mcp_default_actor(scopes=("read",))
+    outline = dispatch(
+        "read_context_outline",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(page_id),
+            "version_id": str(draft_version_id),
+        },
+        actor=mcp_actor,
+        page_service=page_service,
+    )
+    structure = dispatch(
+        "read_structure_map",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(page_id),
+            "version_id": str(draft_version_id),
+        },
+        actor=mcp_actor,
+        page_service=page_service,
+    )
+    assert outline.envelope.result_status == "succeeded", outline.envelope
+    assert structure.envelope.result_status == "succeeded", structure.envelope
+    assert (
+        outline.document.version_id == structure.document.version_id == draft_version_id
+    )
+    assert (
+        outline.document.open_drafts.total == structure.document.open_drafts.total == 0
+    )
 
     with session_factory.begin() as session:
         approved = reviews.apply_decision(
@@ -380,14 +434,20 @@ def test_rejecting_archived_page_draft_keeps_page_archived_and_unindexed(
         assert page.current_published_version_id == published_version_id
         assert page.latest_draft_version_id is None
         assert node.visibility_status == "archived"
-        assert session.scalars(
-            select(PageNameIndex).where(PageNameIndex.page_id == page_id)
-        ).all() == []
-        assert session.scalar(
-            select(ContentChunk.id)
-            .where(ContentChunk.document_id == page_id)
-            .limit(1)
-        ) is None
+        assert (
+            session.scalars(
+                select(PageNameIndex).where(PageNameIndex.page_id == page_id)
+            ).all()
+            == []
+        )
+        assert (
+            session.scalar(
+                select(ContentChunk.id)
+                .where(ContentChunk.document_id == page_id)
+                .limit(1)
+            )
+            is None
+        )
 
 
 def test_review_approval_refreshes_page_archived_after_stale_identity_load(tmp_path):
@@ -549,15 +609,19 @@ def test_review_decision_revalidates_stale_review_before_second_terminal_write(
 
         with session_factory() as session:
             assert session.get(ReviewItem, review_id).status == "rejected"
-            assert len(
-                session.scalars(
-                    select(ReviewDecision).where(
-                        ReviewDecision.review_item_id == review_id
-                    )
-                ).all()
-            ) == 1
+            assert (
+                len(
+                    session.scalars(
+                        select(ReviewDecision).where(
+                            ReviewDecision.review_item_id == review_id
+                        )
+                    ).all()
+                )
+                == 1
+            )
     finally:
         engine.dispose()
+
 
 def test_rewrite_after_folder_archive_lands_under_default_parent(
     session_factory, page_service: PageService
@@ -597,9 +661,7 @@ def test_rewrite_after_folder_archive_lands_under_default_parent(
             actor_id="tester",
         )
 
-    revived = _write(
-        page_service, "orphan-revive", "Orphan Revive Again", base=payload
-    )
+    revived = _write(page_service, "orphan-revive", "Orphan Revive Again", base=payload)
 
     with session_factory() as session:
         page = session.get(ContextPage, revived.id)

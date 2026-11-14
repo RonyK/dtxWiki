@@ -277,8 +277,7 @@ def test_projection_uses_single_call_edge_and_hides_private_version(session_fact
         assert result.visible and result.grouping_key is not None
         assert result.resource_id == page.id
         assert result.navigation_path == (
-            f"/workspaces/{page.workspace_id}"
-            f"/context/pages/{page.id}"
+            f"/workspaces/{page.workspace_id}/context/pages/{page.id}"
         )
         assert result.operation == "read" and result.result == "succeeded"
         assert result.duration_ms == 12 and result.public_error_code is None
@@ -325,7 +324,7 @@ def test_projection_uses_single_call_edge_and_hides_private_version(session_fact
 
 
 @pytest.mark.parametrize("shared_status", ["draft", "published_snapshot"])
-def test_captured_private_edit_does_not_become_shared_with_later_revision(
+def test_captured_edit_stays_with_draft_readers_after_later_revision(
     session_factory, shared_status
 ):
     with session_factory.begin() as session:
@@ -367,12 +366,14 @@ def test_captured_private_edit_does_not_become_shared_with_later_revision(
         call.result_detail = {
             "read_projection": finish_served_read("read", call.input_summary, snapshots)
         }
-        assert project_mcp_activity(session, call, author).grouping_key is not None
-        assert not project_mcp_activity(session, call, other_editor).visible
+        # Editing rows share the draft-read boundary: any Editor sees the
+        # served read, a Viewer does not.
+        for editor in (author, other_editor):
+            assert project_mcp_activity(session, call, editor).grouping_key is not None
         assert not project_mcp_activity(session, call, viewer).visible
 
-        # Only the final revision is deliberately submitted/shared. The older
-        # private snapshot in result_detail must retain its original policy.
+        # The recorded served state, not the row's later status, decides: the
+        # editing read stays hidden from a Viewer after the row is shared.
         if shared_status == "published_snapshot":
             published.version_status = "superseded_snapshot"
             session.flush()
@@ -383,15 +384,15 @@ def test_captured_private_edit_does_not_become_shared_with_later_revision(
         page.current_version_id = version.id
         page.latest_draft_version_id = version.id if shared_status == "draft" else None
         session.flush()
-        assert project_mcp_activity(session, call, author).grouping_key is not None
-        for reader in (viewer, other_editor):
-            projection = project_mcp_activity(session, call, reader)
-            assert projection.visible is False
-            assert projection.grouping_key is None and projection.resource_id is None
-            assert projection.title is None and projection.navigation_path is None
+        for editor in (author, other_editor):
+            assert project_mcp_activity(session, call, editor).grouping_key is not None
+        projection = project_mcp_activity(session, call, viewer)
+        assert projection.visible is False
+        assert projection.grouping_key is None and projection.resource_id is None
+        assert projection.title is None and projection.navigation_path is None
 
         # Losing draft-read capability also hides the author's own historical
-        # private read; being the recorded author alone is insufficient.
+        # editing read; being the recorded author alone is insufficient.
         downgraded_author = ActorContext(
             actor_kind="human",
             actor_id="editing-author",
@@ -598,7 +599,7 @@ def test_dispatch_snapshots_actual_read_and_keeps_internal_attribute_off_wire(
     "tool",
     ["read", "fetch", "read_context_outline", "read_structure_map"],
 )
-def test_all_context_read_handlers_capture_exact_editing_revision(
+def test_context_read_handlers_capture_the_served_version_identity(
     page_service, mcp_default_actor, tool
 ):
     from backend.mcp.router import dispatch
@@ -621,20 +622,17 @@ def test_all_context_read_handlers_capture_exact_editing_revision(
         session.add(version)
         session.flush()
         page.latest_draft_version_id = version.id
-        from backend.services.page_service import _sync_page_name_index
-
-        _sync_page_name_index(session, page=page)
-        page_id, version_id, slug = page.id, version.id, page.slug
+        page_id, version_id = page.id, version.id
+        published_id, published_body = published.id, published.body_md
     target = {
         "read": {"target_type": "context_page_version", "target_id": str(version_id)},
         "fetch": {"id": str(page_id), "type": "context_page"},
-        "read_concept": {"path": f"/context/{slug}.md", "include_neighbors": False},
+        "read_concept": {"path": str(page_id), "include_neighbors": False},
         "read_context_outline": {
-            "page_id": str(page_id), "version_id": str(version_id)
+            "page_id": str(page_id),
+            "version_id": str(version_id),
         },
-        "read_structure_map": {
-            "page_id": str(page_id), "version_id": str(version_id)
-        },
+        "read_structure_map": {"page_id": str(page_id), "version_id": str(version_id)},
     }[tool]
     response = dispatch(
         tool,
@@ -644,12 +642,17 @@ def test_all_context_read_handlers_capture_exact_editing_revision(
     )
     assert response.envelope.result_status == "succeeded"
     projection = response._served_read_projection
-    assert projection["version_id"] == str(version_id)
-    assert projection["editing_revision"] == 7
-    assert (
-        projection["content_identity"]
-        == hashlib.sha256(b"# Editing\n\nserved revision seven").hexdigest()
-    )
+    if tool == "fetch":
+        # Fetch has no version selector: its served identity is the published
+        # default, even though open_drafts announces the editing version.
+        assert projection["version_id"] == str(published_id)
+        assert projection["editing_revision"] is None
+        body = published_body
+    else:
+        assert projection["version_id"] == str(version_id)
+        assert projection["editing_revision"] == 7
+        body = "# Editing\n\nserved revision seven"
+    assert projection["content_identity"] == hashlib.sha256(body.encode()).hexdigest()
     assert "read_projection" not in response.model_dump_json()
 
 
@@ -713,18 +716,16 @@ def test_concept_handler_snapshots_its_resolved_published_version(
     page_service, mcp_default_actor
 ):
     from backend.mcp.router import dispatch
-    from backend.services.page_service import _sync_page_name_index
 
     actor = mcp_default_actor(scopes=("read",))
     with page_service.session_factory.begin() as session:
         workspace, _client, page, version, _actor = _seed(session)
-        _sync_page_name_index(session, page=page)
-        slug, version_id = page.slug, version.id
+        page_id, version_id = page.id, version.id
     response = dispatch(
         "read_concept",
         {
             "workspace_id": str(workspace.id),
-            "path": f"/context/{slug}.md",
+            "path": f"/p/{workspace.id}/{page_id}",
             "include_neighbors": False,
         },
         actor=actor,

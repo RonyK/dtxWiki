@@ -992,19 +992,10 @@ def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
         assert deleted.association_state is AssociationState.TOMBSTONED
 
 
-def test_list_page_usage_masks_a_foreign_authors_private_draft_reference_count(
+def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
     session_factory,
 ) -> None:
-    """P8.4: `latest_draft_reference_count` is derived from `page.latest_
-    draft_version_id`'s body -- a page-global pointer that, per P2.2's
-    per-author (not per-page) "one open editing row" uniqueness, can name a
-    DIFFERENT author's currently-open, private editing row. Before this fix,
-    any viewer calling `list_page_usage` saw that author's real, private
-    reference count for a shared asset (e.g. 0 if they just removed an
-    image, or 3 if they tripled it) -- a signal about their unsubmitted
-    edit, even though the asset itself stays visible (it is also used by the
-    published head, so the asset-level `foreign_editing_version_exists`
-    filter does not hide it)."""
+    """Editing usage is shared with editors without changing deletion CAS counts."""
 
     author = ActorIdentity("human", str(uuid4()))
     other_author = ActorIdentity("human", str(uuid4()))
@@ -1034,9 +1025,7 @@ def test_list_page_usage_masks_a_foreign_authors_private_draft_reference_count(
             body_markdown=f"![pixel]({asset.logical_reference})",
         )
 
-        # A DIFFERENT author's currently-open, private editing row -- not
-        # `published`'s successor in any submitted sense, just a live
-        # concurrent edit (P2.2's uniqueness is per page+author).
+        # A second author can hold a concurrent edit with shared usage counts.
         private_editing = ContextPageVersion(
             id=uuid4(),
             workspace_id=workspace_id,
@@ -1079,14 +1068,12 @@ def test_list_page_usage_masks_a_foreign_authors_private_draft_reference_count(
             workspace_id, page.id, viewer=author
         )
         assert foreign_snapshot.latest_draft_reference_count == 3
-        assert foreign_snapshot.viewer_visible_latest_draft_reference_count == 0
+        assert foreign_snapshot.viewer_visible_latest_draft_reference_count == 3
         assert foreign_snapshot.usage_token == unmasked.usage_token
 
         projection = ContextMediaAssetProjection.from_snapshot(foreign_snapshot)
-        assert projection.latest_draft_reference_count == 0
-        # Published usage alone (count 1) is what keeps this ACTIVE -- the
-        # masked draft count must not itself demote it to UNUSED/HISTORY_ONLY
-        # nor should the stale ACTIVE-because-of-a-hidden-draft signal leak.
+        assert projection.latest_draft_reference_count == 3
+        # Both the editing and published references keep the asset active.
         assert projection.usage_state is UsageState.ACTIVE
         assert projection.usage_token == unmasked.usage_token
 

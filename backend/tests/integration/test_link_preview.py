@@ -95,9 +95,8 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
         assert session.scalar(select(ContextDocumentReference.id)) is None
         assert session.scalar(select(ContextPublishedCitation.id)) is None
 
-    # Budget exception: an arbitrary buffer must not probe pin mappings from a
-    # different author's private version of a readable source. Stored-reader
-    # tests use the actual body and cannot expose this new transport failure.
+    # An arbitrary buffer only uses pins from the selected source version.
+    # Other readable editing versions cannot supply its mappings.
     private_locator = "[[private-mapping]]"
     with page_service.session_factory.begin() as session:
         private_version = ContextPageVersion(
@@ -142,6 +141,7 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
     with page_service.session_factory.begin() as session:
         version = session.get(ContextPageVersion, UUID(source["version_id"]))
         version.created_by_actor_id = "unrelated-author"
+        version.version_status = "discarded"
     private_source = client.post(url, json=request)
     assert private_source.status_code == 404
     assert private_source.json()["error_code"] == "not_found"

@@ -255,15 +255,8 @@ def test_workspace_scope_is_refused_for_a_non_owner(page_service):
     assert "shot.png" not in response.text
 
 
-def test_owner_scope_still_hides_another_authors_open_editing_upload(page_service):
-    """The merge gate for this endpoint.
-
-    An open ``editing`` row is private to its author by identity, not by role.
-    A workspace-wide listing is the first surface that could hand a non-author
-    both the private filename and the ``created_for_version_id`` its content
-    URL is keyed on -- exactly the pair the P8.4 mask exists to keep apart. An
-    owner is not an exception to it.
-    """
+def test_owner_scope_reads_another_authors_open_editing_upload(page_service):
+    """Editing uploads are readable without granting session ownership."""
 
     owner = make_client(page_service, "attach-owner3@example.com", role="owner")
     author = make_client(page_service, "attach-author3@example.com", role="editor")
@@ -280,8 +273,9 @@ def test_owner_scope_still_hides_another_authors_open_editing_upload(page_servic
     response = _list(owner, workspace_id, scope="workspace")
 
     assert response.status_code == 200
-    assert "not-your-draft.png" not in response.text
-    assert private["version_id"] not in response.text
+    assert "not-your-draft.png" in response.text
+    assert private["version_id"] in response.text
+    assert response.json()["data"]["items"][0]["can_delete"] is False
 
     own = _list(author, workspace_id, scope="mine")
     assert "not-your-draft.png" in own.text

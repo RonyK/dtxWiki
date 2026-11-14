@@ -1702,53 +1702,6 @@ def test_zero_hit_payload_includes_low_confidence_nearest_candidates(monkeypatch
     ]
 
 
-def test_read_concept_deduplicates_same_page_candidates():
-    """A page whose title and alias both normalize to the query must appear
-    once in the ambiguous candidates (strongest kind wins)."""
-
-    from backend.services.concept_resolution import resolve_context_concept
-
-    session_factory = make_session_factory()
-    page_service = PageService(session_factory)
-
-    with session_factory.begin() as session:
-        workspace = seed_default_workspace(session)
-        workspace_id = workspace.id
-    page_service.write_page(
-        workspace_slug="default",
-        slug="dup-kind-page",
-        title="Shared Concept",
-        body_md="# Shared Concept\n\nA body.",
-        aliases=["Shared Concept"],
-        actor_kind="human",
-        actor_id="00000000-0000-0000-0000-000000000010",
-        actor_provenance="browser_session",
-    )
-    page_service.write_page(
-        workspace_slug="default",
-        slug="other-shared-page",
-        title="Shared Concept",
-        body_md="# Shared Concept\n\nB body.",
-        actor_kind="human",
-        actor_id="00000000-0000-0000-0000-000000000010",
-        actor_provenance="browser_session",
-    )
-
-    with session_factory() as session:
-        result = resolve_context_concept(
-            session,
-            workspace_id,
-            identifier="Shared Concept",
-            actor=None,
-        )
-
-    assert result.status == "ambiguous"
-    assert len(result.candidates) == 2
-    kinds = {c.path: c.match_kind for c in result.candidates}
-    # dup-kind-page matched by both title and alias — title (stronger) wins.
-    assert kinds["/context/dup-kind-page.md"] == "title"
-
-
 def test_search_service_entity_lane_refreshes_metadata_only_alias_change():
     session_factory = make_session_factory()
     search_service = SearchService()

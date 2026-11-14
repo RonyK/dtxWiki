@@ -31,7 +31,7 @@ from backend.policy.auth import ActorContext
 from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
 )
-from backend.services.context_visibility import visible_context_version_id
+from backend.services.context_visibility import visible_context_version_ids
 from backend.services.entity_ref import (  # canonical (G0-1)
     context_concept_path,
     library_concept_path,
@@ -175,18 +175,6 @@ def render_context_concept(
     return f"{frontmatter}\n\n{body}".rstrip() + "\n"
 
 
-# --- visibility (per-actor, reuses the single policy predicates) ------------
-
-
-def _visible_context_version_id(
-    page: ContextPage, actor: ActorContext | None
-) -> tuple[UUID | None, bool]:
-    """Return ``(version_id, is_draft)`` for the version the actor may see, or
-    ``(None, False)`` when the actor may not see the page at all. Draft-capable actors
-    see the draft head before the published version (Epic-1 §7.4)."""
-    return visible_context_version_id(page, actor)
-
-
 # --- index.md (progressive-disclosure catalog) ------------------------------
 
 
@@ -306,9 +294,12 @@ def _context_index_lines(
         )
         .order_by(ContextPage.title.asc())
     ).all()
+    defaults = visible_context_version_ids(
+        session, workspace_id=workspace_id, pages=pages, actor=actor
+    )
     chosen: list[tuple[ContextPage, UUID, bool]] = []
     for page in pages:
-        version_id, is_draft = _visible_context_version_id(page, actor)
+        version_id, is_draft = defaults[page.id]
         if version_id is not None:
             chosen.append((page, version_id, is_draft))
     version_ids = [vid for _, vid, _ in chosen]
@@ -378,28 +369,6 @@ def _library_index_lines(
     return lines
 
 
-# --- read_concept resolution ------------------------------------------------
-
-
-def resolve_context_concept(
-    session: Session,
-    workspace_id: UUID,
-    *,
-    slug: str,
-    actor: ActorContext | None,
-) -> tuple[ContextPage, ContextPageVersion] | None:
-    """Resolve an OKF context path slug using the legacy tuple contract."""
-
-    from backend.services.concept_resolution import (
-        resolve_context_concept as resolve,
-    )
-
-    result = resolve(session, workspace_id, identifier=slug, actor=actor)
-    if result.page is None or result.version is None:
-        return None
-    return result.page, result.version
-
-
 # --- OKF bundle export (producer) -------------------------------------------
 
 
@@ -446,8 +415,11 @@ def export_workspace_bundle(
         )
         .order_by(ContextPage.slug.asc())
     ).all()
+    defaults = visible_context_version_ids(
+        session, workspace_id=workspace_id, pages=pages, actor=actor
+    )
     for page in pages:
-        version_id, _is_draft = _visible_context_version_id(page, actor)
+        version_id, _is_draft = defaults[page.id]
         if version_id is None:
             continue
         version = session.get(ContextPageVersion, version_id)

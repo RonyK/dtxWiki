@@ -41,9 +41,14 @@ export type PendingReviewInfo = {
   risk_level: string;
 };
 
+export type ContextDraftInfo = components["schemas"]["ContextDraftInfo"];
+export type OpenDrafts = components["schemas"]["OpenDrafts"];
+
 export type ContextPageDetail = ContextPageSummary & {
   workspace_id: string;
   block_map_stale: boolean;
+  draft?: ContextDraftInfo | null;
+  open_drafts?: OpenDrafts | null;
   body_markdown: string | null;
   references?: ReferenceView[];
   references_hash?: string;
@@ -198,6 +203,8 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
     updated_at: raw.updated_at,
     workspace_id: raw.workspace_id,
     block_map_stale: raw.block_map_stale ?? false,
+    draft: raw.draft ?? null,
+    open_drafts: raw.open_drafts ?? null,
     body_markdown: raw.body_md,
     references: raw.references ?? [],
     references_hash: raw.references_hash,
@@ -244,11 +251,21 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
   };
 }
 
-export async function readContextPage(workspaceId: string, pageId: string) {
+export async function readContextPage(workspaceId: string, pageId: string, versionId?: string | null) {
+  const query = versionId ? `?${new URLSearchParams({ version_id: versionId })}` : "";
   const response = await apiRequest<{ data: BackendContextPageDetail }>(
-    `/api/v1/workspaces/${workspaceId}/context/pages/${pageId}`,
+    `/api/v1/workspaces/${workspaceId}/context/pages/${pageId}${query}`,
   );
   return toContextPageDetail(response.data);
+}
+
+export async function listContextDrafts(workspaceId: string, pageId: string, cursor?: string) {
+  const query = new URLSearchParams({ limit: "5" });
+  if (cursor) query.set("cursor", cursor);
+  const response = await apiRequest<{ data: OpenDrafts }>(
+    `/api/v1/workspaces/${workspaceId}/context/pages/${pageId}/drafts?${query}`,
+  );
+  return response.data;
 }
 
 export type ContextPageInspector = Required<components["schemas"]["ContextPageInspector"]>;

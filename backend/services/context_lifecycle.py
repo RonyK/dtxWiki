@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -1474,15 +1473,6 @@ def _normalize_context_published_rows(
     ).all()
     repaired_versions = 0
     demoted_published = False
-    # P8: `last_saved_at` tracks a real author save, not an administrative
-    # pointer/status repair. Reassigning it to its own pre-repair value in
-    # the SAME flush as the status change is a no-op to SQLAlchemy's dirty
-    # tracking (identical value -> not considered "explicitly set" for this
-    # flush), so `onupdate` fires anyway. Instead: let the status-changing
-    # flush(es) happen normally below, then correct `last_saved_at` back to
-    # its preserved value as a genuinely different follow-up write, which
-    # SQLAlchemy does include (and which therefore suppresses `onupdate`).
-    preserved_last_saved_at: dict[UUID, datetime] = {}
     for previous in prior_snapshots:
         changed = False
         if previous.version_status == "published_snapshot":
@@ -1493,7 +1483,6 @@ def _normalize_context_published_rows(
             previous.graph_status = "linear"
             changed = True
         if changed:
-            preserved_last_saved_at[previous.id] = previous.last_saved_at
             repaired_versions += 1
             session.add(previous)
 
@@ -1508,30 +1497,13 @@ def _normalize_context_published_rows(
         or version.graph_status != "linear"
     ):
         repaired_versions += 1
-        preserved_last_saved_at[version.id] = version.last_saved_at
     version.commit_oid = prepared.commit_oid
     version.content_byte_size = prepared.content_byte_size
     version.version_status = "published_snapshot"
     version.graph_status = "linear"
     session.add(version)
 
-    if preserved_last_saved_at:
-        # Force the status/graph_status UPDATE(s) above to actually reach
-        # the DB (so `onupdate` runs and stamps `last_saved_at`), then
-        # correct it back to the pre-repair value as its own distinct
-        # write -- see the comment on `preserved_last_saved_at` above for
-        # why this can't be folded into the same flush as the status
-        # change.
-        session.flush()
-        for version_id, original_last_saved_at in preserved_last_saved_at.items():
-            touched = (
-                version
-                if version_id == version.id
-                else session.get(ContextPageVersion, version_id)
-            )
-            if touched is not None:
-                touched.last_saved_at = original_last_saved_at
-        session.flush()
+    session.flush()
 
     align_publication(session, page, prepared.commit_oid, context_version_writer)
     return repaired_versions

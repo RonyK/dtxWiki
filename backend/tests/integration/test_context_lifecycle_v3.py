@@ -1335,8 +1335,8 @@ def test_context_detail_history_and_mcp_changes_hide_draft_metadata_from_viewer(
 
     assert editor_detail.latest_draft_version_id == draft.version_id
     assert editor_detail.version_info is not None
-    assert editor_detail.version_info.history_status == "current_draft"
-    assert editor_detail.version_info.is_draft_head is True
+    assert editor_detail.version_info.history_status == "published_snapshot"
+    assert editor_detail.version_info.is_draft_head is False
     assert editor_detail.published_version_info is not None
     assert editor_detail.published_version_info.version_id == published.version_id
 
@@ -1359,7 +1359,7 @@ def test_context_detail_history_and_mcp_changes_hide_draft_metadata_from_viewer(
         row for row in editor_changes.versions if row.version_id == draft.version_id
     )
     assert draft_entry.history_status == "current_draft"
-    assert draft_entry.is_visible_head is True
+    assert draft_entry.is_visible_head is False
     assert draft_entry.is_draft_head is True
     assert draft_entry.prior_relation == "visible"
     assert draft_entry.prior_version_id == published.version_id
@@ -1379,13 +1379,13 @@ def test_context_detail_history_and_mcp_changes_hide_draft_metadata_from_viewer(
     )
     editor_version_by_id = {row.version_id: row for row in editor_page_versions}
     assert editor_version_by_id[draft.version_id].history_status == "current_draft"
-    assert editor_version_by_id[draft.version_id].is_visible_head is True
+    assert editor_version_by_id[draft.version_id].is_visible_head is False
     assert editor_version_by_id[draft.version_id].is_draft_head is True
     assert (
         editor_version_by_id[published.version_id].history_status
         == "published_snapshot"
     )
-    assert editor_version_by_id[published.version_id].is_visible_head is False
+    assert editor_version_by_id[published.version_id].is_visible_head is True
     assert editor_version_by_id[published.version_id].is_published_head is True
 
 

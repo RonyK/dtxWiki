@@ -123,7 +123,7 @@ class ListWorkspaceMedia:
     The ``usage`` filter runs AFTER the repository's viewer masking, on the
     projection's recomputed ``usage_state``. That ordering is the point: a
     ``used`` request must never surface an asset whose only reference lives in
-    somebody else's private editing draft, and ``ContextMediaAssetProjection.
+    somebody else's discarded work, and ``ContextMediaAssetProjection.
     from_snapshot`` is what turns the masked counts into the state we filter on.
 
     260912 review: that same ordering used to break pagination. ``has_more``

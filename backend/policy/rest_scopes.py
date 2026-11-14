@@ -70,6 +70,10 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     ): CONTEXT_PAGE_BODY_SCOPES,
     (
         "GET",
+        "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/drafts",
+    ): CONTEXT_PAGE_BODY_SCOPES,
+    (
+        "GET",
         "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/versions",
     ): CONTEXT_PAGE_BODY_SCOPES,
     (

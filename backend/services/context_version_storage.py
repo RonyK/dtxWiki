@@ -134,7 +134,6 @@ def _align_database_bodies(session, page, commit_oid, reader) -> None:
     )
     if current is None:
         raise ContextStorageServiceError("context_snapshot_invalid")
-    preserved = []
     data = reader.read(
         workspace_id=page.workspace_id,
         page_id=page.id,
@@ -146,7 +145,6 @@ def _align_database_bodies(session, page, commit_oid, reader) -> None:
     ):
         raise ContextStorageServiceError("context_snapshot_invalid")
     if current._body_md is None:
-        preserved.append((current, current.last_saved_at))
         current.body_md = codec_for(descriptor_for(current)).decode(data)
     archived_map = reader.read_block_map(
         workspace_id=page.workspace_id,
@@ -158,8 +156,6 @@ def _align_database_bodies(session, page, commit_oid, reader) -> None:
         if current._block_map is not None and current._block_map != archived_map:
             raise ContextStorageServiceError("context_snapshot_invalid")
         if current._block_map is None:
-            if not any(version is current for version, _ in preserved):
-                preserved.append((current, current.last_saved_at))
             current.block_map = archived_map
     historical = session.scalars(
         select_in_workspace(
@@ -195,18 +191,12 @@ def _align_database_bodies(session, page, commit_oid, reader) -> None:
             version._block_map is not None and version._block_map != archived_map
         ):
             raise ContextStorageServiceError("context_snapshot_invalid")
-        preserved.append((version, version.last_saved_at))
         version.body_md = None
         # Legacy content-only commits cannot recover the original identities.
         # Release the SQL copy only after verifying the exact archived map.
         if archived_map is not None:
             version.block_map = None
-    if preserved:
-        session.flush()
-        # onupdate timestamps describe author saves, not storage maintenance.
-        for version, last_saved_at in preserved:
-            version.last_saved_at = last_saved_at
-        session.flush()
+    session.flush()
 
 
 def verify_context_storage(session: Session, store) -> dict[str, int]:

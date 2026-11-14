@@ -173,14 +173,11 @@ def context_version_is_visible(
         return True
     if not actor_can_read_drafts(actor):
         return False
-    # P2.2/P2.6: naming a private `editing` row by its exact version_id must
-    # not bypass the same author-only check `context_visibility.py`'s
-    # pointer-based lookups apply -- draft-read capability alone answers
-    # "may this actor see SOME unpublished content", not "may this actor see
-    # THIS specific author's unshared editing".
-    from backend.repositories.context_visibility import editing_row_hidden_from_actor
+    # Editing rows share the ordinary draft-read boundary. Discarded work
+    # keeps its author-only visibility until its later physical cleanup.
+    from backend.repositories.context_visibility import discarded_row_hidden_from_actor
 
-    return not editing_row_hidden_from_actor(version, actor)
+    return not discarded_row_hidden_from_actor(version, actor)
 
 
 def context_parent_projection(
@@ -435,17 +432,16 @@ def resolve_visible_context_version(
     workspace_id: UUID,
     page_id: UUID | None,
     version_id: UUID | None,
-    path: str | None,
     version_preference: str,
     actor: ActorContext | None,
 ):
     """Resolve a context read target to the (page, version) an actor may see.
 
-    Read surfaces address a context page three ways -- by version, by page, or
-    by concept path -- and each way still has to land on a version this actor is
-    allowed to read.  That decision belongs here with the other visibility
-    predicates rather than in each adapter, so MCP, REST and Resources cannot
-    drift apart on which draft a reader is shown.
+    Read surfaces address a context page by version or by page, and each way
+    still has to land on a version this actor is allowed to read. That
+    decision belongs here with the other visibility predicates rather than in
+    each adapter, so MCP, REST and Resources cannot drift apart on which draft
+    a reader is shown.
 
     Returns ``(None, None)`` for not found, wrong workspace, or not visible.
     Only for ``my_edit``, ``(page, None)`` means the page is visible but the
@@ -453,15 +449,11 @@ def resolve_visible_context_version(
     a hidden page's existence.
     """
     # Deferred on purpose, not for lazy-loading. `backend.policy.auth` imports
-    # this module, and `concept_resolution` imports `policy.auth`, so hoisting
-    # these to module scope raises ImportError on a partially initialized
-    # `policy.auth` at startup. Verified by hoisting them and watching the
-    # tree fail to import.
+    # this module, so hoisting these to module scope raises ImportError on a
+    # partially initialized `policy.auth` at startup.
     from backend.models.context import ContextPage, ContextPageVersion
     from backend.repositories.context_page_repo import get_open_edit_for_actor
-    from backend.services.concept_resolution import resolve_context_concept
     from backend.services.context_visibility import visible_context_version_id
-    from backend.services.okf import parse_concept_path
 
     page = None
     explicit_version = None
@@ -474,7 +466,7 @@ def resolve_visible_context_version(
         )
         if explicit_version is None:
             return None, None
-        if page_id is None and path is None:
+        if page_id is None:
             page = get_in_workspace(
                 session,
                 ContextPage,
@@ -488,19 +480,6 @@ def resolve_visible_context_version(
             workspace_id=workspace_id,
             resource_id=page_id,
         )
-    elif path is not None:
-        parsed = parse_concept_path(path)
-        if parsed is None or parsed[0] != "context":
-            return None, None
-        resolved = resolve_context_concept(
-            session,
-            workspace_id,
-            identifier=parsed[1],
-            actor=actor,
-        )
-        if resolved.status not in {"found", "redirected"}:
-            return None, None
-        page = resolved.page
 
     if page is None or page.workspace_id != workspace_id:
         return None, None

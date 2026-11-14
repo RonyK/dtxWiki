@@ -10,6 +10,7 @@ from backend.schemas.common import (
     RetrievalMode,
     SearchScope,
 )
+from backend.schemas.context_drafts import ContextDraftInfo, OpenDrafts
 from backend.schemas.document_reference import ReferenceView
 from backend.schemas.input_policy import InputRequest
 from backend.spi.types import (
@@ -434,6 +435,8 @@ class AgentPageRestDetail(AgentPageDetail):
 
 
 class ContextPageDetail(ContextPageSummary):
+    draft: ContextDraftInfo | None = None
+    open_drafts: OpenDrafts = Field(default_factory=OpenDrafts)
     references: list["ReferenceView"] = Field(default_factory=list)
     references_hash: str = ""
     body_markdown: str | None = None

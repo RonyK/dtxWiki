@@ -94,7 +94,7 @@
     "eyebrow": "Knowledge base",
     "title": "Context",
     "newPage": "New Context page",
-    "subtitle": "Durable pages the team and the AI both read. Drafts stay out of answers until they are published."
+    "subtitle": "Published pages are the default for people and AI. Editors can also read open drafts."
   },
   "publishArrival": {
     "published": "Published.",
@@ -384,6 +384,22 @@
       "branch_only": "This branch-only block is included in the reconciled draft by default.",
       "conflict": "This block needs a manual resolution."
     }
+  },
+  "drafts": {
+    "banner": "Draft · Not published",
+    "count_one": "{{count}} open draft",
+    "count_other": "{{count}} open drafts",
+    "lastSaved": "Last saved {{time}}",
+    "unknownAuthor": "Unknown author",
+    "writing": "Writing",
+    "reviewing": "In review",
+    "mine": "Mine",
+    "behind": "Behind the published version",
+    "backPublished": "Back to published version",
+    "empty": "No open drafts",
+    "more": "More drafts",
+    "loading": "Loading drafts…",
+    "loadError": "Could not load drafts. Try again."
   },
   "pendingReview": {
     "label": "Draft pending review",

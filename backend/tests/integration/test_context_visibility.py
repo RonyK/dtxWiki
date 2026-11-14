@@ -6,6 +6,7 @@ from backend.policy.auth import ActorContext
 from backend.repositories.context_visibility import (
     visible_context_version_expression,
     visible_context_version_id,
+    visible_context_version_ids,
 )
 
 
@@ -62,7 +63,17 @@ def test_sql_visibility_matches_python_for_draft_only_legacy_head(session_factor
                 ContextPage.id == page_id
             )
         )
+        batch = visible_context_version_ids(
+            session, workspace_id=workspace_id, pages=[page], actor=actor
+        )
+        assert batch[page_id] == (version_id, True)
+        # Detached summaries may use loaded relationships, never a remembered
+        # selection that would outlive later changes to those rows.
+        loaded_version = page.current_version
 
+    assert visible_context_version_id(page, actor) == (version_id, True)
+    loaded_version.version_status = "discarded"
+    assert visible_context_version_id(page, actor) == (None, False)
     assert python_id == version_id
     assert is_draft is True
     assert sql_id == python_id

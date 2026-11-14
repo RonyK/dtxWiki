@@ -22,6 +22,7 @@ from backend.context_media.ports import ContextMediaRepository
 from backend.domain.input_policy import InputPolicyError
 from backend.domain.prepared_body import PreparedBody
 from backend.models.audit import AuditEvent
+from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import (
     ContextCitation,
@@ -121,8 +122,8 @@ from backend.services.context_reconciliation_reminder import (
 )
 from backend.services.context_visibility import (
     editable_context_version_id,
-    visible_context_version_expression,
-    visible_context_version_id,
+    editable_head_context_version_expression,
+    editable_head_context_version_id,
 )
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.document_reference_merge import (
@@ -414,7 +415,7 @@ def stale_pages_for_conversation(
     ):
         return []
 
-    visible_head_id = visible_context_version_expression(actor)
+    visible_head_id = editable_head_context_version_expression(actor)
     # One conversation can observe the same page through different semantic
     # relations (for example VIEWED by a body read, then EDITED by a patch).
     # Rank the correctness-bearing observations per page so the stale scan is
@@ -482,7 +483,7 @@ def stale_pages_for_conversation(
                 ContextPageVersion.id == link.last_read_version_id,
             )
         )
-        head_version_id, _is_draft = visible_context_version_id(page, actor)
+        head_version_id, _is_draft = editable_head_context_version_id(page, actor)
         head_version = (
             session.scalar(
                 select(ContextPageVersion).where(
@@ -3722,7 +3723,7 @@ class ContextWriteService:
                 include_unpublished=True,
             )
             if match is not None:
-                visible_version_id, _is_draft = visible_context_version_id(
+                visible_version_id, _is_draft = editable_head_context_version_id(
                     match.page, actor
                 )
                 if visible_version_id is None:
@@ -4270,6 +4271,7 @@ class ContextWriteService:
             # means metadata/citations/feedback/needs_review changed on this
             # same row. Bump the row's own conflict-check counter.
             base_version.editing_revision += 1
+            base_version.last_saved_at = utc_now()
             return base_version
         next_block_map = _next_block_map_for_edits(
             base_version=base_version,

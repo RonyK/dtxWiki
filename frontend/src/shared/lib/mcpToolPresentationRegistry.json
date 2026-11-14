@@ -11,6 +11,7 @@
   "guide": "guide",
   "list_agent_categories": "list_agent_categories",
   "list_changes": "list_changes",
+  "list_context_drafts": "list_context_drafts",
   "list_my_context_edits": "list_my_context_edits",
   "list_my_workspaces": "list_my_workspaces",
   "list_requested_changes": "list_requested_changes",

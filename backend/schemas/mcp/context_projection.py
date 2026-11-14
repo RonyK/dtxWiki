@@ -54,12 +54,3 @@ class MCPHotConceptEntry(BaseModel):
 
 class MCPGuidePayload(GuidePayload):
     hot_concepts: list[MCPHotConceptEntry] = Field(default_factory=list)
-
-
-class MCPContextCandidate(BaseModel):
-    id: UUID
-    title: str
-    match_reason: str
-    stable_url: str
-    link_markdown: str
-    model_config = ConfigDict(extra="forbid")

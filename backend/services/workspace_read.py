@@ -71,6 +71,7 @@ AVAILABLE_READ_TOOLS = [
     "patch_context_edit",
     "list_my_context_edits",
     "upload_image",
+    "list_context_drafts",
     "list_changes",
     "submit_feedback",
     "list_agent_categories",
@@ -112,6 +113,12 @@ REQUIRED_WORKFLOW = [
         "read: read_context_outline to choose a section (with select it "
         "returns that section), read for a whole page, read_structure_map for "
         "block ids before block-addressed edits."
+    ),
+    (
+        "drafts: ordinary Context reads return the published version (or the latest "
+        "saved draft when never published) and open_drafts. If the task follows "
+        "the latest decisions, read the relevant draft by version_id and state "
+        "that it is not yet approved. Use list_context_drafts for more drafts."
     ),
     (
         "references: open your edit, then cite selected document IDs; inline "

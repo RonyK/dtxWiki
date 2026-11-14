@@ -45,7 +45,7 @@
         "type": "boolean"
       },
       "path": {
-        "description": "Exact dtxwiki://index/context/<id> or dtxwiki://index/library/<id> Markdown destination from get_index, unchanged with the same workspace_id; or a Context page UUID, stable URL, legacy /context/<slug>.md path, or /library/<id>.md lookup path.",
+        "description": "Exact dtxwiki://index/context/<id> or dtxwiki://index/library/<id> Markdown destination from get_index, unchanged with the same workspace_id; or a Context page UUID, stable URL, or /library/<id>.md lookup path.",
         "maxLength": 512,
         "minLength": 1,
         "title": "Path",
@@ -122,6 +122,184 @@
           }
         },
         "title": "ConceptNeighbors",
+        "type": "object"
+      },
+      "ContextDraftAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Display Name"
+          }
+        },
+        "required": [
+          "actor_kind",
+          "actor_id"
+        ],
+        "title": "ContextDraftAuthor",
+        "type": "object"
+      },
+      "ContextDraftInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/ContextDraftAuthor"
+          },
+          "is_behind": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.",
+            "title": "Is Behind",
+            "x-wire-explicit": true
+          },
+          "is_editing": {
+            "title": "Is Editing",
+            "type": "boolean"
+          },
+          "last_saved_at": {
+            "format": "date-time",
+            "title": "Last Saved At",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "author",
+          "last_saved_at",
+          "is_editing"
+        ],
+        "title": "ContextDraftInfo",
+        "type": "object"
+      },
+      "ContextDraftReview": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "ContextDraftReview",
+        "type": "object"
+      },
+      "ContextDraftSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/ContextDraftAuthor"
+          },
+          "is_behind": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.",
+            "title": "Is Behind",
+            "x-wire-explicit": true
+          },
+          "is_editing": {
+            "title": "Is Editing",
+            "type": "boolean"
+          },
+          "is_mine": {
+            "title": "Is Mine",
+            "type": "boolean"
+          },
+          "last_saved_at": {
+            "format": "date-time",
+            "title": "Last Saved At",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "state": {
+            "enum": [
+              "writing",
+              "reviewing"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "version_status": {
+            "enum": [
+              "editing",
+              "draft"
+            ],
+            "title": "Version Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "author",
+          "last_saved_at",
+          "is_editing",
+          "version_id",
+          "version_status",
+          "is_mine",
+          "state"
+        ],
+        "title": "ContextDraftSummary",
         "type": "object"
       },
       "EnvelopeWarning": {
@@ -204,41 +382,6 @@
           "id"
         ],
         "title": "MCPActor",
-        "type": "object"
-      },
-      "MCPContextCandidate": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "link_markdown": {
-            "title": "Link Markdown",
-            "type": "string"
-          },
-          "match_reason": {
-            "title": "Match Reason",
-            "type": "string"
-          },
-          "stable_url": {
-            "title": "Stable Url",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "match_reason",
-          "stable_url",
-          "link_markdown"
-        ],
-        "title": "MCPContextCandidate",
         "type": "object"
       },
       "MCPErrorDetail": {
@@ -636,6 +779,38 @@
         "title": "NeighborEntry",
         "type": "object"
       },
+      "OpenDrafts": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/ContextDraftSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Cursor"
+          },
+          "total": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "OpenDrafts",
+        "type": "object"
+      },
       "TextMatchCandidate": {
         "additionalProperties": false,
         "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
@@ -712,13 +887,6 @@
         "default": null,
         "title": "As Of"
       },
-      "candidates": {
-        "items": {
-          "$ref": "#/$defs/MCPContextCandidate"
-        },
-        "title": "Candidates",
-        "type": "array"
-      },
       "content": {
         "anyOf": [
           {
@@ -730,6 +898,17 @@
         ],
         "default": null,
         "title": "Content"
+      },
+      "draft": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContextDraftInfo"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       },
       "envelope": {
         "$ref": "#/$defs/MCPResultEnvelope"
@@ -783,6 +962,18 @@
         ],
         "default": null
       },
+      "open_drafts": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/OpenDrafts"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Current Context draft summary. Omitted for historical as_of reads and non-Context targets."
+      },
       "page_id": {
         "anyOf": [
           {
@@ -826,8 +1017,6 @@
           {
             "enum": [
               "found",
-              "redirected",
-              "ambiguous",
               "not_found"
             ],
             "type": "string"

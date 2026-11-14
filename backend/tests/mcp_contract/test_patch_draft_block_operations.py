@@ -94,7 +94,9 @@ def test_replace_block_via_patch_draft_lands_and_updates_the_structure_map(
     assert replacement.change == "replaced"
     assert replacement.old.id == replacement.new.id == first_paragraph.id
     assert replacement.old.hash == first_paragraph.hash
-    after_map = _structure_map(workspace_id, page.id, actor, page_service)
+    after_map = _structure_map(
+        workspace_id, page.id, actor, page_service, version="draft"
+    )
     after_paragraph = next(b for b in after_map.blocks if b.id == first_paragraph.id)
     assert after_paragraph.preview.startswith("first, edited")
     # The heading and the untouched second paragraph both kept their ids.
@@ -224,7 +226,9 @@ def test_insert_row_via_patch_draft_lands_a_new_table_row(page_service, actor):
         ],
     )
 
-    after_map = _structure_map(workspace_id, page.id, actor, page_service)
+    after_map = _structure_map(
+        workspace_id, page.id, actor, page_service, version="draft"
+    )
     after_table = next(b for b in after_map.blocks if b.kind == "table")
     assert len(after_table.rows) == 2
     assert after_table.rows[0].id == row.id

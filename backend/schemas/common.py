@@ -235,7 +235,13 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        and result schemas.
 #  31 -- Unified Context locators, write identities and metadata resolution;
 #        key-only operation status replaces retry_only. Refresh cached tools.
-MCP_TOOL_CONTRACT_REVISION = 31
+#  32 -- Published-first Context reads, shared editing visibility, draft facts
+#        and paginated list_context_drafts; existing version modes remain.
+#        Context page inputs drop the deprecated /context/<name>.md path:
+#        read_concept and partial reads take UUID or /p/ links (read_concept
+#        also get_index refs and /library/<id>.md); read_concept no longer
+#        returns redirected/ambiguous status or candidates.
+MCP_TOOL_CONTRACT_REVISION = 32
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

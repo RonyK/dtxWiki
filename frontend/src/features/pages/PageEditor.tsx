@@ -104,7 +104,9 @@ import {
   listPageTags,
   listPages,
   newIdempotencyKey,
+  PageEditingUnavailableError,
   publishPageVersion,
+  readEditablePage,
   readPage,
   sendPageAutosave,
   submitPageForReview,
@@ -267,7 +269,7 @@ type SaveOptions = {
   skipFenceCheck?: boolean;
   source?: "auto" | "manual";
 };
-type PageLoadState = "loading" | "ready" | "not_found" | "error";
+type PageLoadState = "loading" | "ready" | "not_found" | "read_only" | "error";
 type MediaUploadCapabilityState = "loading" | "ready" | "error";
 type DraftSnapshot = {
   title: string;
@@ -578,6 +580,7 @@ export function PageEditor({
   const compactChrome =
     compactEditorViewport &&
     pageLoadState !== "error" &&
+    pageLoadState !== "read_only" &&
     !(mode === "edit" && pageLoadState === "not_found");
   const contextRailUsesDrawer = contextRailDrawerViewport || compactChrome;
   const [focusModeRequested, setFocusMode] = useState(false);
@@ -1866,7 +1869,7 @@ export function PageEditor({
       }
       if (mode === "edit") {
         const loaded = selectedWorkspaceId
-          ? await readPage(selectedWorkspaceId, pageId)
+          ? await readEditablePage(selectedWorkspaceId, pageId)
           : null;
         if (cancelled) return;
         if (!loaded) {
@@ -1925,6 +1928,12 @@ export function PageEditor({
     }
     load().catch((exc: unknown) => {
       if (!cancelled) {
+        if (exc instanceof PageEditingUnavailableError) {
+          setPageLoadState("read_only");
+          setStatus(null);
+          setIsEditorReady(true);
+          return;
+        }
         if (exc instanceof ApiError && [403, 404, 422].includes(exc.status)) {
           setPageLoadState("not_found");
           setStatus(translationRef.current("editor.notFound"));
@@ -3716,7 +3725,7 @@ export function PageEditor({
       pageIdRef.current === requestPageId &&
       editorGenerationRef.current === requestEditorGeneration;
     try {
-      const latest = await readPage(requestWorkspaceId, requestPageId);
+      const latest = await readEditablePage(requestWorkspaceId, requestPageId);
       if (!isCurrentReload()) return false;
       if (!latest) return false;
       const restoredPublication = readPagePublicationState(latest);
@@ -3761,6 +3770,13 @@ export function PageEditor({
       return true;
     } catch (exc) {
       if (!isCurrentReload()) return false;
+      if (exc instanceof PageEditingUnavailableError) {
+        sessionVersionIdRef.current = null;
+        setPage(null);
+        setPageLoadState("read_only");
+        setStatus(null);
+        return false;
+      }
       setStatus(apiErrorMessage(
         exc,
         t("editor.reloadLatestFailed", {
@@ -5059,7 +5075,7 @@ export function PageEditor({
     );
   }
 
-  if (pageLoadState === "error") {
+  if (pageLoadState === "error" || pageLoadState === "read_only") {
     return (
       <div
         className={`page-workspace ${focusMode ? "focus-mode" : ""}`}
@@ -5087,15 +5103,22 @@ export function PageEditor({
             </div>
           </header>
           <div className="empty-state empty-state-rich" role="alert">
-            <h2>{t("editor.loadFailed", { defaultValue: "Load failed" })}</h2>
+            <h2>{pageLoadState === "read_only"
+              ? t("editor.editingUnavailable")
+              : t("editor.loadFailed", { defaultValue: "Load failed" })}</h2>
             <p>
-              {t("editor.loadFailedBody", {
+              {pageLoadState === "read_only" ? t("editor.editingUnavailableBody") : t("editor.loadFailedBody", {
                 defaultValue:
                   "This page could not be loaded, so editing is disabled to protect its existing content.",
               })}
             </p>
             <div className="empty-state-actions">
-              <Link className="icon-button text-button primary" to={workspacePath(routeWorkspaceId, "context")}>
+              {pageLoadState === "read_only" ? (
+                <Link className="icon-button text-button primary" to={contextPageHref(routeWorkspaceId, pageId)}>
+                  {t("editor.viewPage")}
+                </Link>
+              ) : null}
+              <Link className={`icon-button text-button${pageLoadState === "error" ? " primary" : ""}`} to={workspacePath(routeWorkspaceId, "context")}>
                 {t("editor.returnToContext", { defaultValue: "Return to Context" })}
               </Link>
             </div>
@@ -7352,7 +7375,7 @@ function readPagePublicationState(page: PagePayload): {
   // The payload states this outright, so the editor asks the page rather than
   // paging through version history: a page with enough newer drafts pushes its
   // published version off the end of that list and looks never-published.
-  // P8/P9: an unsubmitted, still-private version is "editing", not "draft" --
+  // An unsubmitted working version is "editing", not "draft" --
   // both are equally unpublished until a `current_published_version_id`
   // exists, so both take this branch (see CONTEXT_PAGE_VERSION_STATUSES).
   if (page.version_status === "draft" || page.version_status === "editing") {

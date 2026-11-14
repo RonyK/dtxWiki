@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from backend.mcp.router import dispatch
 from backend.models.agent import AgentPage, AgentPageVersion
-from backend.models.context import EdgeProjection
+from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.coverage import KnowledgeCoverageGap
 from backend.models.user import User
 from backend.models.workspace import Workspace
@@ -16,6 +16,7 @@ from backend.schemas.read import SEARCH_QUERY_MAX_LENGTH
 from backend.scripts.seed_dev import DEFAULT_AGENT_PAGE_SLUG
 from backend.services.extraction_service import ExtractionService
 from backend.services.library_service import LibraryService
+from backend.services.page_service import sync_page_projections
 from backend.services.retrieval.outline_location import raw_body_sha256
 from backend.utils.content_hash import content_hash as calculate_content_hash
 
@@ -177,14 +178,13 @@ def test_mcp_search_read_and_list_changes_tools(page_service, actor):
     assert changes.data.diffs[0]["target_type"] == "context_page"
 
 
-def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, actor):
+def test_mcp_read_concept_reads_published_default_with_neighbors(page_service, actor):
     workspace_id = _workspace_id(page_service)
     alpha = page_service.write_page(
         workspace_slug="default",
         slug="canonical-alpha",
         title="Canonical Alpha",
         body_md="# Canonical Alpha\n\nAlpha body",
-        aliases=["Shared Alias", "Alpha Shortcut"],
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
@@ -194,12 +194,30 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         slug="canonical-beta",
         title="Canonical Beta",
         body_md="# Canonical Beta\n\nBeta body",
-        aliases=["Shared Alias"],
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
     )
     with page_service.session_factory.begin() as session:
+        alpha_page = session.get(ContextPage, alpha.id)
+        draft = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=alpha.id,
+            version_no=session.get(ContextPageVersion, alpha.version_id).version_no + 1,
+            parent_version_id=alpha.version_id,
+            body_md="# Canonical Alpha\n\nUnapproved alpha draft",
+            content_hash="canonical-alpha-draft",
+            actor_type="human",
+            created_by_actor_kind=actor.actor_kind,
+            created_by_actor_id=actor.actor_id,
+            version_status="draft",
+        )
+        session.add(draft)
+        session.flush()
+        alpha_page.latest_draft_version_id = draft.id
+        alpha_page.current_version_id = draft.id
+        sync_page_projections(session, page=alpha_page, version=draft)
+        draft_id = draft.id
         session.add(
             EdgeProjection(
                 workspace_id=workspace_id,
@@ -218,16 +236,16 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": "/context/Alpha Shortcut.md",
+            "path": f"/p/{workspace_id}/{alpha.id}",
         },
         actor=actor,
         page_service=page_service,
     )
-    ambiguous = dispatch(
+    legacy_path = dispatch(
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": "/context/Shared Alias.md",
+            "path": "/context/canonical-alpha.md",
         },
         actor=actor,
         page_service=page_service,
@@ -236,7 +254,7 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": "/context/canonical-alpha.md",
+            "path": str(alpha.id),
             "format": "mermaid",
         },
         actor=actor,
@@ -244,14 +262,24 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
     )
 
     assert redirected.envelope.result_status == "succeeded"
-    assert redirected.status == "redirected"
-    assert "canonical_path" not in redirected.model_dump()
+    assert redirected.status == "found"
+    # Name-based Context paths were removed as page inputs.
+    assert legacy_path.envelope.error_code == "validation_failed"
     assert redirected.stable_url == f"/p/{workspace_id}/{alpha.id}"
     assert (
         redirected.link_markdown == f"[Canonical Alpha](/p/{workspace_id}/{alpha.id})"
     )
     assert redirected.page_id is not None
     assert redirected.version_id is not None
+    # Ordinary content reads select the published version and announce the
+    # open draft.
+    assert redirected.version_id == alpha.version_id
+    assert "Alpha body" in redirected.content
+    assert "Unapproved alpha draft" not in redirected.content
+    assert redirected.open_drafts.total == 1
+    assert redirected.open_drafts.items[0].version_id == draft_id
+    assert mermaid.version_id == alpha.version_id
+    assert mermaid.open_drafts.items[0].version_id == draft_id
     assert "# Canonical Alpha" in redirected.content
     assert redirected.mermaid is None
     assert redirected.neighbors is not None
@@ -268,19 +296,6 @@ def test_mcp_read_concept_resolves_alias_redirect_and_ambiguity(page_service, ac
     assert redirected.neighbors.co_access[0].edge_kind == "co_access"
     assert mermaid.mermaid is not None
     assert mermaid.mermaid.startswith("graph LR")
-    assert ambiguous.envelope.result_status == "succeeded"
-    assert ambiguous.status == "ambiguous"
-    assert {candidate.stable_url for candidate in ambiguous.candidates} == {
-        f"/p/{workspace_id}/{alpha.id}",
-        f"/p/{workspace_id}/{beta.id}",
-    }
-    assert set(type(ambiguous.candidates[0]).model_fields) == {
-        "id",
-        "title",
-        "match_reason",
-        "stable_url",
-        "link_markdown",
-    }
 
 
 def test_read_context_outline_duplicate_sections_and_selected_hash(page_service, actor):
@@ -300,11 +315,24 @@ def test_read_context_outline_duplicate_sections_and_selected_hash(page_service,
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "page_id": f"/context/{page.slug}.md",
+            "page_id": f"/p/{workspace_id}/{page.id}",
         },
         actor=actor,
         page_service=page_service,
     )
+
+    for tool in ("read_context_outline", "read_structure_map"):
+        legacy_path = dispatch(
+            tool,
+            {
+                "workspace_id": str(workspace_id),
+                "page_id": f"/context/{page.slug}.md",
+            },
+            actor=actor,
+            page_service=page_service,
+        )
+        # Name-based Context paths were removed as page inputs.
+        assert legacy_path.envelope.error_code == "validation_failed"
 
     repeats = [entry for entry in outline.outline if entry.title == "Repeat"]
     assert len(repeats) == 2
@@ -366,6 +394,7 @@ def test_read_context_outline_cursor_round_trip_and_version_binding(
     )
     assert first.section.truncated is True
     assert first.section.next_cursor
+    assert first.document.open_drafts is not None
 
     parts = [first.section.content]
     cursor = first.section.next_cursor
@@ -376,6 +405,7 @@ def test_read_context_outline_cursor_round_trip_and_version_binding(
             actor=actor,
             page_service=page_service,
         )
+        assert page_response.document.open_drafts is None
         parts.append(page_response.section.content)
         cursor = page_response.section.next_cursor
     assert "".join(parts) == body
@@ -491,15 +521,35 @@ def test_read_context_outline_hides_frontmatter_and_separates_raw_hash(
 
 def test_mcp_grep_wiki_returns_visible_line_context(page_service, actor):
     workspace_id = _workspace_id(page_service)
-    page_service.write_page(
+    page = page_service.write_page(
         workspace_slug="default",
         slug="grep-target",
         title="Grep Target",
-        body_md="# Grep Target\n\nBefore\nliteral/needle\nAfter",
+        body_md="# Grep Target\n\nPublished body",
         actor_kind=actor.actor_kind,
         actor_id=actor.actor_id,
         actor_provenance=actor.provenance,
     )
+    with page_service.session_factory.begin() as session:
+        stored = session.get(ContextPage, page.id)
+        published = session.get(ContextPageVersion, page.version_id)
+        draft = ContextPageVersion(
+            workspace_id=workspace_id,
+            page_id=page.id,
+            version_no=published.version_no + 1,
+            parent_version_id=published.id,
+            body_md="# Grep Target\n\nBefore\nliteral/needle\nAfter",
+            content_hash="grep-draft-only-needle",
+            actor_type=actor.actor_kind,
+            created_by_actor_kind=actor.actor_kind,
+            created_by_actor_id=actor.actor_id,
+            version_status="draft",
+        )
+        session.add(draft)
+        session.flush()
+        stored.current_version_id = stored.latest_draft_version_id = draft.id
+        sync_page_projections(session, page=stored, version=draft)
+        draft_id = draft.id
 
     response = dispatch(
         "grep_wiki",
@@ -513,6 +563,7 @@ def test_mcp_grep_wiki_returns_visible_line_context(page_service, actor):
     )
 
     assert response.envelope.result_status == "succeeded"
+    assert response.matches[0]["version_id"] == str(draft_id)
     assert response.matches[0]["stable_url"] == (
         f"/p/{workspace_id}/{response.matches[0]['page_id']}"
     )

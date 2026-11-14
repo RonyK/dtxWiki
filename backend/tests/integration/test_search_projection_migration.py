@@ -63,8 +63,8 @@ def _page_with_versions(
 
 def test_backfill_projects_existing_live_heads_without_writes(session_factory):
     """MIG-2: upgrading an existing installation must populate
-    page_name_index from the live published/draft heads so the entity lane
-    and read_concept resolve pre-existing pages before any page write."""
+    page_name_index from the live published/draft heads so the search entity
+    lane resolves pre-existing pages before any page write."""
 
     with session_factory.begin() as session:
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))

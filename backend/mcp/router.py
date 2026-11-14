@@ -61,6 +61,7 @@ TOOL_HANDLERS = {
     "read": read_tools.read,
     "get_index": read_tools.get_index,
     "read_concept": read_tools.read_concept,
+    "list_context_drafts": read_tools.list_context_drafts,
     "list_changes": read_tools.list_changes,
     "list_agent_categories": read_tools.list_agent_categories,
     "read_agent_page": read_tools.read_agent_page,

@@ -86,10 +86,17 @@ def test_openapi_export_contains_phase3_page_endpoints(openapi_schema):
         "/api/v1/workspaces/{workspace_id}/context/pages"
     ]["post"]["responses"]["201"]
     assert create_response["content"]["application/json"]["schema"]["$ref"].endswith(
-        "/ContextPageDetailResponse"
+        "/ContextPageWriteResponse"
     )
     page_response = schema["components"]["schemas"]["ContextPageDetailResponse"]
     assert {"envelope", "data"}.issubset(page_response["properties"])
+    components = schema["components"]["schemas"]
+    assert {"draft", "open_drafts"}.issubset(
+        components["ContextPageDetail"]["properties"]
+    )
+    assert {"draft", "open_drafts"}.isdisjoint(
+        components["ContextPageWriteDetail"]["properties"]
+    )
 
 
 def test_openapi_export_excludes_mcp_transport_endpoint(openapi_schema):

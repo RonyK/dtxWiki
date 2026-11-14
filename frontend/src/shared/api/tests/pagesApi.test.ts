@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../client";
 import {
   PAGE_AUTOSAVE_BEACON_LIMIT_BYTES,
+  PageEditingUnavailableError,
   autosavePage,
   createPage,
   createPageComment,
@@ -10,6 +11,7 @@ import {
   listPages,
   listPagesPage,
   publishPageVersion,
+  readEditablePage,
   readPageBySlug,
   restorePageVersion,
   sendPageAutosave,
@@ -71,6 +73,16 @@ function pageDetail(overrides: Record<string, unknown> = {}) {
 describe("pages api", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("does not adopt a readable foreign editing body when no editable head exists", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ data: pageDetail({ current_version_id: null }) }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+
+    await expect(readEditablePage(WORKSPACE_ID, "p1")).rejects.toBeInstanceOf(PageEditingUnavailableError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("sends cookie credentials and create payload", async () => {

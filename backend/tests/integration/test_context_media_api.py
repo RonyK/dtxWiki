@@ -1345,21 +1345,12 @@ def test_asset_delete_enforces_editing_author_before_usage_token(
     assert owner.get(asset["content_url"]).status_code == 404
 
 
-def test_page_media_listing_hides_another_authors_private_editing_uploads(
+def test_page_media_listing_shares_another_authors_editing_uploads(
     session_factory,
     tmp_path,
     monkeypatch,
 ) -> None:
-    """P8.4: an "editing" row's uninserted uploads are private to its author.
-
-    The page itself is legitimately readable by every editor here (it has a
-    published body), so `require_page`'s role check passes and the listing is
-    reached -- the asset row behind the owner's still-open, unsubmitted
-    editing version is what must not appear. Its `original_filename` and the
-    `created_for_version_id` embedded in `content_url` would otherwise hand a
-    non-author both the private file's name and the exact editing version id
-    that naming directly is required to 404 on.
-    """
+    """Editing uploads are listed for editors; preview ownership is preserved."""
 
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DTXWIKI_LIBRARY_BLOB_ROOT", str(tmp_path / "library"))
@@ -1425,17 +1416,18 @@ def test_page_media_listing_hides_another_authors_private_editing_uploads(
     foreign_listing = editor.get(f"{media_url}?usage=unused")
     assert foreign_listing.status_code == 200, foreign_listing.text
     foreign_items = foreign_listing.json()["data"]
-    assert foreign_items == []
+    assert [item["id"] for item in foreign_items] == [asset["asset_id"]]
+    assert foreign_items[0]["can_delete"] is False
     serialized = foreign_listing.text
-    assert "owner-private-secret.png" not in serialized
-    assert editing_page["version_id"] not in serialized
+    assert "owner-private-secret.png" in serialized
+    assert editing_page["version_id"] in serialized
 
     used_listing = editor.get(f"{media_url}?usage=used")
     assert used_listing.status_code == 200, used_listing.text
     assert used_listing.json()["data"] == []
     assert "owner-private-secret.png" not in used_listing.text
 
-    # Bytes stay protected by the version-scoped gate, which is what makes the
-    # listing (and the version id it discloses) the only leak here.
+    # An uninserted preview stays uploader-only. Referenced images follow
+    # their version's shared draft visibility.
     assert editor.get(asset["content_url"]).status_code == 404
     assert owner.get(asset["content_url"]).status_code == 200
