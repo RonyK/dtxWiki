@@ -8,8 +8,6 @@ export type LocalLayoutNodeInput = {
   key: string;
   radiusPx: number;
   isSeed: boolean;
-  parentKey?: string | null;
-  primaryFolderKey?: string | null;
 };
 
 export type LocalLayoutEdgeInput = {
@@ -30,9 +28,8 @@ export type LocalLayoutInput = {
 
 export type LocalLayoutPositions = Record<string, GraphPoint>;
 
-// Changing any layout force or sizing input invalidates saved coordinates.
+// Force parameters for the shared D3 layout.
 export const LOCAL_LAYOUT_PARAMS = {
-  version: "local-d3-force-v2",
   preTicks: 300,
   relationDistance: 60,
   membershipDistance: 45,

@@ -56,10 +56,6 @@ export const GRAPH_EDGE_ENDPOINT_SIZE_PX = {
 /** Compact filled target head for a generic activity, in CSS pixels. */
 export const GRAPH_EDGE_TRIANGLE_SIZE_PX = { length: 4, halfWidth: 2.5 } as const;
 
-/** Compatibility view for callers that only need target-arrow presence. */
-export const GRAPH_EDGE_ARROW = Object.fromEntries(Object.entries(GRAPH_EDGE_ENDPOINTS)
-  .map(([kind, endpoints]) => [kind, endpoints.target !== "none"])) as Readonly<Record<GraphEdgeVisualKind, boolean>>;
-
 /**
  * The one node vocabulary for both graph views, their legends and lists.
  * Shape = what (circle: edited document, triangle: one point in a document's

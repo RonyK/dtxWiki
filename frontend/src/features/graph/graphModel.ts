@@ -8,10 +8,6 @@ import type {
   GraphQueryPayload,
   GraphTimelineEvent,
 } from "../../shared/api/graph";
-import type {
-  GraphNeighborEntry,
-  GraphNeighborsPayload,
-} from "../../shared/api/operations";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 
 export type GraphFilters = {
@@ -211,87 +207,6 @@ export function coAccessSentence(
     last: formatVersionTimestamp(evidence.lastObservedAt).split(" ")[0],
   });
 }
-
-export function graphPayloadToNeighbors(
-  payload: GraphQueryPayload | null,
-): GraphNeighborsPayload | null {
-  if (!payload) {
-    return null;
-  }
-  const seedIds = new Set(payload.nodes.filter((node) => node.is_seed).map((node) => node.id));
-  const nodes = new Map(payload.nodes.map((node) => [node.id, node]));
-  const groups: Required<Pick<
-    GraphNeighborsPayload,
-    "backlinks" | "outbound" | "citations" | "co_access"
-  >> = {
-    backlinks: [],
-    outbound: [],
-    citations: [],
-    co_access: [],
-  };
-  // A neighbour listed twice under one key keeps its higher rank.
-  const ranks = new Map<string, number>();
-  const keyOf = (entry: GraphNeighborEntry) =>
-    `${entry.kind}:${entry.id}:${entry.edge_kind}:${entry.direction}`;
-  for (const edge of stableEdges(payload.edges)) {
-    if (!LEGACY_INSPECTOR_EDGE_KINDS.has(edge.edge_kind)) {
-      continue;
-    }
-    const sourceIsSeed = seedIds.has(edge.source);
-    const targetIsSeed = seedIds.has(edge.target);
-    if (!sourceIsSeed && !targetIsSeed) {
-      continue;
-    }
-    const neighbor = nodes.get(sourceIsSeed ? edge.target : edge.source);
-    if (!neighbor || neighbor.is_seed) {
-      continue;
-    }
-    const entry: GraphNeighborEntry = {
-      kind: neighbor.entity_kind,
-      id: neighbor.entity_id,
-      title: neighbor.label,
-      path: neighbor.path ?? null,
-      edge_kind: edge.edge_kind,
-      direction: sourceIsSeed ? "out" : "in",
-    };
-    const group = edge.edge_kind === "co_access"
-      ? groups.co_access
-      : ["citation_page", "citation_source", "citation_agent"].includes(edge.edge_kind)
-        ? groups.citations
-        : sourceIsSeed
-          ? groups.outbound
-          : groups.backlinks;
-    const key = keyOf(entry);
-    const known = ranks.get(key);
-    if (known === undefined) {
-      group.push(entry);
-    }
-    ranks.set(key, Math.max(known ?? 0, edge.rank_score));
-  }
-  // Highest rank first, so the slice keeps the strongest relations; the sort
-  // is stable, so equal ranks keep the stableEdges order.
-  const byRank = (entries: GraphNeighborEntry[]) =>
-    [...entries].sort(
-      (left, right) => (ranks.get(keyOf(right)) ?? 0) - (ranks.get(keyOf(left)) ?? 0),
-    );
-  return {
-    backlinks: byRank(groups.backlinks).slice(0, 10),
-    outbound: byRank(groups.outbound).slice(0, 10),
-    citations: byRank(groups.citations).slice(0, 5),
-    co_access: byRank(groups.co_access).slice(0, 10),
-    mermaid: payload.mermaid ?? null,
-    truncated: payload.truncated,
-    warnings: [...(payload.warnings ?? [])],
-  };
-}
-
-const LEGACY_INSPECTOR_EDGE_KINDS = new Set([
-  "wikilink",
-  "citation_page",
-  "citation_source",
-  "citation_agent",
-  "co_access",
-]);
 
 function deriveTimelineScene(
   payload: GraphQueryPayload,

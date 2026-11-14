@@ -6,7 +6,6 @@ import {
   coAccessSentence,
   deriveGraphScene,
   graphFacets,
-  graphPayloadToNeighbors,
 } from "../graphModel";
 import { decorateStaticDiagramSvg, graphSceneToMermaid } from "../local/staticDiagram";
 import { readGraphTokens } from "../shared/graphTokens";
@@ -208,23 +207,8 @@ describe("graphModel", () => {
       .toBe("current relationship");
   });
 
-  it("derives inspector groups and draws an escaped static diagram in the legend vocabulary", () => {
+  it("draws an escaped static diagram in the legend vocabulary", () => {
     const payload = graphFixture();
-    const neighbors = graphPayloadToNeighbors(payload);
-    expect(neighbors?.backlinks).toEqual([
-      expect.objectContaining({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", edge_kind: "wikilink" }),
-    ]);
-    // Action/evidence edges outside the legacy Context inspector contract stay
-    // in Graph View but are not mislabeled as backlinks or citations.
-    expect(neighbors?.citations).toEqual([]);
-    expect([
-      ...(neighbors?.backlinks ?? []),
-      ...(neighbors?.outbound ?? []),
-      ...(neighbors?.co_access ?? []),
-    ]).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ edge_kind: "ask_citation" }),
-    ]));
-
     const scene = deriveGraphScene(payload, graphFacets(payload), null);
     scene.nodes[0] = { ...scene.nodes[0], label: `unsafe "|<tag>` };
     const visuals = { tokens: readGraphTokens(document.documentElement), forcedColors: false };
@@ -290,99 +274,6 @@ describe("graphModel", () => {
     expect(paths[4].style.getPropertyValue("marker-end")).toBe("none");
     expect(markerShape(paths[5], "end").style.fill).toBe(visuals.tokens.edge.action);
     expect(markerShape(paths[5], "end").style.stroke).toBe("none");
-  });
-
-  it("does not project structural tree edges into the legacy neighbors panel", () => {
-    const payload = graphFixture();
-    payload.edges = [{ ...payload.edges[0], id: "edge:tree", edge_kind: "tree" }];
-
-    expect(graphPayloadToNeighbors(payload)).toMatchObject({
-      backlinks: [],
-      outbound: [],
-      citations: [],
-      co_access: [],
-    });
-  });
-
-  it("orders inspector groups by rank before slicing", () => {
-    const payload = graphFixture();
-    const seed = payload.nodes.find((node) => node.is_seed)!;
-    // Two ranks tie (b02, b03); the two lowest (b06, b11) fall past the ten.
-    const ranks = [0.1, 0.9, 0.5, 0.5, 0.2, 0.8, 0.05, 0.7, 0.6, 0.3, 0.4, 0.01];
-    const names = ranks.map((_rank, index) => `b${String(index).padStart(2, "0")}`);
-    payload.nodes = [
-      seed,
-      ...names.map((name) => ({
-        ...seed,
-        id: `node:${name}`,
-        entity_id: `page-${name}`,
-        label: `Backlinker ${name}`,
-        is_seed: false,
-      })),
-    ];
-    payload.edges = names.map((name, index) => ({
-      ...payload.edges[0],
-      id: `edge:${name}`,
-      source: `node:${name}`,
-      target: seed.id,
-      rank_score: ranks[index],
-    }));
-
-    expect(graphPayloadToNeighbors(payload)?.backlinks?.map((entry) => entry.id)).toEqual([
-      "page-b01",
-      "page-b05",
-      "page-b07",
-      "page-b08",
-      "page-b02",
-      "page-b03",
-      "page-b10",
-      "page-b09",
-      "page-b04",
-      "page-b00",
-    ]);
-  });
-
-  it("ranks a neighbour listed twice by its stronger relation", () => {
-    const payload = graphFixture();
-    const seed = payload.nodes.find((node) => node.is_seed)!;
-    payload.nodes = [
-      seed,
-      ...["twice", "once"].map((name) => ({
-        ...seed,
-        id: `node:${name}`,
-        entity_id: `page-${name}`,
-        label: `Backlinker ${name}`,
-        is_seed: false,
-      })),
-    ];
-    // The weaker copy sorts first in edge-id order; the stronger one decides.
-    payload.edges = [
-      ["edge:a-twice-weak", "node:twice", 0.05],
-      ["edge:b-once", "node:once", 0.5],
-      ["edge:c-twice-strong", "node:twice", 0.95],
-    ].map(([id, source, rank]) => ({
-      ...payload.edges[0],
-      id: id as string,
-      source: source as string,
-      target: seed.id,
-      rank_score: rank as number,
-    }));
-
-    expect(graphPayloadToNeighbors(payload)?.backlinks?.map((entry) => entry.id)).toEqual([
-      "page-twice",
-      "page-once",
-    ]);
-  });
-
-  it("preserves bounded metadata when adapting the graph to legacy neighbors", () => {
-    const payload = graphFixture();
-    payload.truncated = true;
-    payload.warnings = ["graph_budget_applied", "future_private_warning"];
-
-    expect(graphPayloadToNeighbors(payload)).toMatchObject({
-      truncated: true,
-      warnings: ["graph_budget_applied", "future_private_warning"],
-    });
   });
 });
 

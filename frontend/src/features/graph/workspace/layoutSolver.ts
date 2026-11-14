@@ -1,5 +1,5 @@
 import type { GraphConfig } from "./cosmosNative";
-import type { CosmosLayoutSolver, CosmosPositionLayout, CosmosPositionUnitBasis } from "../shared/cosmos/layoutTypes";
+import type { CosmosLayoutSolver } from "../shared/cosmos/layoutTypes";
 import { WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";
 import type { WorkspaceMapColumns } from "../map/sceneColumns";
 import { workspaceContainerIndices, workspaceDirectoryStartPositions } from "./directoryStartPositions";
@@ -8,9 +8,6 @@ import { buildWorkspaceNativeCollisionRadii } from "./nativeCollisionRadii";
 import { buildWorkspaceNativeCanonicalForceConfig } from "./nativeForceProfile";
 import { buildWorkspaceRelationForceConfig, type WorkspaceRelationCollisionBasis } from "./relationPhysics";
 import { createWorkspaceD3Layout, type WorkspaceD3Layout, type WorkspaceD3LayoutInput, type WorkspaceD3LayoutOptions } from "./d3MapLayout";
-
-export type WorkspacePositionLayout = CosmosPositionLayout;
-export type WorkspacePositionUnitBasis = CosmosPositionUnitBasis;
 
 /**
  * Solver boundary chosen once from the admitted budget. Render, camera, label,
