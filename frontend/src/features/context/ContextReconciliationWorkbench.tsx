@@ -424,10 +424,7 @@ export function ContextReconciliationWorkbench({
         ) : null
       }
       closeLabel={t("reconciliation.close", { defaultValue: "Close" })}
-      title={
-        detail?.page.title
-        ?? t("reconciliation.title", { defaultValue: "Reconcile branch" })
-      }
+      title={t("reconciliation.title", { defaultValue: "Reconcile branch" })}
     >
       {loading ? (
         <div className="wiki-empty">

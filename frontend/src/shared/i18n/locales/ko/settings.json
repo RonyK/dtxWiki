@@ -1044,12 +1044,12 @@
         "hint": "MCP·OAuth·토큰으로 들어온 모든 쓰기를 승인 전까지 보류합니다. 끄면 에이전트 쓰기도 사람이 쓴 것처럼 바로 게시되며, 허용한 정책은 그대로 기록됩니다."
       },
       "reconciliationReminder": {
-        "label": "조정 브랜치 알림",
-        "hint": "조정 브랜치가 이 시간 동안 해결되지 않으면 워크스페이스 소유자에게 알립니다."
+        "label": "수정본 확인 알림",
+        "hint": "확인이 필요한 수정본이 이 시간 동안 남아 있으면 워크스페이스 소유자에게 알립니다."
       },
       "reconciliationAttention": {
-        "label": "조정 브랜치 주의 기간",
-        "hint": "조정 브랜치가 이 일수 동안 해결되지 않으면 삭제하지 않고 기본 리뷰 필터에서 접습니다."
+        "label": "수정본 표시 기간",
+        "hint": "확인이 필요한 수정본이 이 일수 동안 남아 있으면 기본 리뷰 목록에서 접어 표시합니다. 수정본은 삭제되지 않습니다."
       },
       "reviewFromRisk": {
         "label": "수동 리뷰 시작 위험도",
@@ -1625,10 +1625,10 @@
     "autoApproveWholeHours": "자동 승인 대기 시간은 정수 시간으로 계산되어야 합니다.",
     "autoApproveMin": "자동 승인 대기 시간은 최소 1시간이어야 합니다.",
     "autoApproveMax": "자동 승인 대기 시간은 {{days}}일 이하여야 합니다.",
-    "reconciliationReminderMin": "조정 브랜치 알림 대기 시간은 최소 1시간이어야 합니다.",
-    "reconciliationReminderMax": "조정 브랜치 알림 대기 시간은 30일 이하여야 합니다.",
-    "reconciliationAttentionMin": "조정 브랜치 주의 기간은 최소 1일이어야 합니다.",
-    "reconciliationAttentionMax": "조정 브랜치 주의 기간은 365일 이하여야 합니다.",
+    "reconciliationReminderMin": "수정본 확인 알림 대기 시간은 최소 1시간이어야 합니다.",
+    "reconciliationReminderMax": "수정본 확인 알림 대기 시간은 30일 이하여야 합니다.",
+    "reconciliationAttentionMin": "수정본 표시 기간은 최소 1일이어야 합니다.",
+    "reconciliationAttentionMax": "수정본 표시 기간은 365일 이하여야 합니다.",
     "webRulePattern": "웹 URL 규칙 {{index}}번에는 패턴이 필요합니다.",
     "slugFormat": "소문자·숫자와 단일 하이픈을 사용해 주세요."
   },
