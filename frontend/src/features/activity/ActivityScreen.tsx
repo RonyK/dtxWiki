@@ -23,6 +23,7 @@ import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { useActivityGroupLoader } from "../../shared/hooks/useActivityGroupLoader";
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
+import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { ACTIVITY_SUBTYPES } from "../../shared/lib/activityLabels";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
@@ -629,25 +630,4 @@ function defaultPeriodLabel(value: string) {
     return "Month";
   }
   return "All time";
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia(query).matches
-      : false,
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return undefined;
-    }
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener?.("change", update);
-    return () => media.removeEventListener?.("change", update);
-  }, [query]);
-
-  return matches;
 }

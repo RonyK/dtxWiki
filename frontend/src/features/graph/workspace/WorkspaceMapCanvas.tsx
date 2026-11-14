@@ -8,9 +8,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { GraphCanvasHandle, RendererStatus } from "../GraphCanvas";
 import { WORKSPACE_MAP_EDGE_KIND, workspaceMapAdmissionCounts, type WorkspaceMapColumns } from "../map/sceneColumns";
-import { sameGraphVisibleIdentity, type GraphPoint, type GraphViewport, type GraphVisibleIdentity } from "../shared/rendererTypes";
+import { sameGraphVisibleIdentity, type GraphCanvasHandle, type GraphPoint, type GraphViewport, type GraphVisibleIdentity, type RendererStatus } from "../shared/rendererTypes";
 import { readGraphTokens } from "../shared/graphTokens";
 import { sameWorkspaceMapIndexedGeometry } from "../shared/workspaceMapGeometry";
 import { assertWorkspaceMapWithinBudget, isWorkspaceMapWithinBudget, WORKSPACE_MAP_DEFAULT_BUDGET, type WorkspaceMapBudget } from "../shared/workspaceMapBudget";

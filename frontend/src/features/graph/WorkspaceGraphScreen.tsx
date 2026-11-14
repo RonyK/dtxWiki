@@ -21,6 +21,7 @@ import { CitationEvidenceSection } from "./shared/CitationEvidenceSection";
 import { useSearchParams } from "react-router-dom";
 
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
+import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 import {
   queryWorkspaceGraph,
   workspaceGraphAdmissionCounts,
@@ -41,7 +42,6 @@ import { trapTabFocus } from "../../shared/lib/trapTabFocus";
 import { clearWorkspaceGraphStorage, workspaceGraphStorageEpoch } from "../../shared/lib/workspaceGraphStorage";
 import { useWorkspaceRoute } from "../../shared/lib/workspaceRoutes";
 import { useWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
-import type { GraphCanvasHandle } from "./GraphCanvas";
 import { buildWorkspaceMapColumns, workspaceMapAdmissionCounts } from "./map/sceneColumns";
 import { canAnimateWorkspaceRelationLayout } from "./shared/workspaceLayoutPolicy";
 import { assertWorkspaceMapWithinBudget, isWorkspaceMapWithinBudget, readWorkspaceMapDeviceProfile,
@@ -77,7 +77,7 @@ import type { WorkspaceMapSafeInsets } from "./workspace/cosmosAdapter";
 import { localizeWorkspaceRenderEdges } from "./workspace/localizeRenderEdges";
 import { WorkspaceGraphFolderFilters } from "./WorkspaceGraphFolderFilters";
 import { visibleWorkspaceGraphDocumentCount, WorkspaceGraphToolbar, workspaceGraphClusterCoverage } from "./workspace/WorkspaceGraphToolbar";
-import type { GraphRenderScene, GraphViewport } from "./shared/rendererTypes";
+import type { GraphCanvasHandle, GraphRenderScene, GraphViewport } from "./shared/rendererTypes";
 import {
   DEFAULT_WORKSPACE_GRAPH_FILTERS,
   countPendingRefineFilters,
@@ -2539,21 +2539,4 @@ function isUsableModalOpener(opener: HTMLElement) {
   if (style?.display === "none" || style?.visibility === "hidden") return false;
   if (opener.offsetParent !== null || opener.getClientRects().length > 0) return true;
   return opener.ownerDocument.defaultView?.navigator.userAgent.includes("jsdom") ?? false;
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia(query).matches
-      : false,
-  );
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return undefined;
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener?.("change", update);
-    return () => media.removeEventListener?.("change", update);
-  }, [query]);
-  return matches;
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 
+import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 import { MermaidDiagram } from "../pages/MarkdownView";
 import { LOCAL_EDGE_VISUAL_KIND_ORDER, localEdgeVisualKind } from "./local/edgeKinds";
 import { decorateStaticDiagramSvg, graphSceneToMermaid, type StaticDiagramVisuals } from "./local/staticDiagram";
@@ -35,7 +36,7 @@ import { GRAPH_NODE_VISUALS, isActionEdgeVisualKind, readGraphTokens, type Graph
 import { hasSessionDetails, SessionActivityDetails } from "./shared/SessionActivityDetails";
 import { isSessionGroupNode, isSessionNode } from "./shared/sessionNodes";
 import { sessionRelationSummary, versionOutcome, withSessionLabels } from "./sessionActivity";
-import type { GraphRenderScene } from "./shared/rendererTypes";
+import type { GraphCanvasHandle, GraphRenderScene, RendererStatus } from "./shared/rendererTypes";
 import type {
   GraphEdge,
   GraphDepth,
@@ -50,11 +51,7 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
-import {
-  GraphCanvas,
-  type GraphCanvasHandle,
-  type RendererStatus,
-} from "./GraphCanvas";
+import { GraphCanvas } from "./GraphCanvas";
 import {
   coAccessSentence,
   deriveGraphScene,
@@ -1936,21 +1933,4 @@ function useLocalGraphTokens(regionRef: { current: HTMLElement | null }, forcedC
     return () => observer.disconnect();
   }, [forcedColors, regionRef]);
   return tokens;
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia(query).matches
-      : false,
-  );
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return undefined;
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener?.("change", update);
-    return () => media.removeEventListener?.("change", update);
-  }, [query]);
-  return matches;
 }

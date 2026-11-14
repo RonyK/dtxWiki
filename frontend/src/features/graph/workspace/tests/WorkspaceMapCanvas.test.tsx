@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../../../shared/i18n";
 import type { WorkspaceMapColumns } from "../../map/sceneColumns";
 import { WorkspaceMapCanvas } from "../WorkspaceMapCanvas";
-import type { GraphCanvasHandle } from "../../GraphCanvas";
+import type { GraphCanvasHandle } from "../../shared/rendererTypes";
 import { createWorkspaceCosmosAdapter, type WorkspaceCosmosOptions } from "../cosmosAdapter";
 import { WORKSPACE_MAP_DEFAULT_BUDGET, WORKSPACE_MAP_PC_10K_BUDGET } from "../../shared/workspaceMapBudget";
 

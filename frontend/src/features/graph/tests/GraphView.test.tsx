@@ -14,10 +14,9 @@ import type {
 } from "../../../shared/api/graph";
 import { GraphView } from "../GraphView";
 import { buildLocalScene } from "../local/sceneInput";
-import type { GraphRenderScene } from "../shared/rendererTypes";
+import type { GraphCanvasHandle, GraphRenderScene } from "../shared/rendererTypes";
 import { graphFixture } from "./graphFixture";
 import type { Ref } from "react";
-import type { GraphCanvasHandle } from "../GraphCanvas";
 
 const { canvasHandle } = vi.hoisted(() => ({ canvasHandle: {
   centerOn: vi.fn(), fit: vi.fn(), locate: vi.fn(), pauseLayout: vi.fn(), resumeLayout: vi.fn(),

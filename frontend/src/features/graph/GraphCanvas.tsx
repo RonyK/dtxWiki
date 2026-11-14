@@ -10,27 +10,13 @@ import { useTranslation } from "react-i18next";
 
 import type { LocalGraphAdapter } from "./local/cosmosAdapter";
 import type {
+  GraphCanvasHandle,
   GraphRenderScene,
   GraphViewport,
+  RendererStatus,
 } from "./shared/rendererTypes";
 import { readGraphTokens } from "./shared/graphTokens";
 import { detectWorkspaceMapWebGL } from "./workspace/webglSupport";
-
-export type GraphCanvasHandle = {
-  centerOn(id: string): void;
-  /** Bring a document into view; the Local map also traces the current document's ring once. */
-  locate(id: string): void;
-  fit(): void;
-  pauseLayout(): void;
-  resumeLayout(): void;
-  pin(id: string, pinned: boolean): { x: number; y: number } | null;
-  reset(): void;
-  setViewport(viewport: GraphViewport): void;
-  zoomIn(): void;
-  zoomOut(): void;
-};
-
-export type RendererStatus = "loading" | "ready" | "error";
 
 type GraphCanvasProps = {
   viewportInsets?: () => { top: number; right: number; bottom: number; left: number };

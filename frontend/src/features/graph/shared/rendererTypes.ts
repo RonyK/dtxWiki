@@ -9,6 +9,22 @@ export type GraphViewport = {
   pan: GraphPoint;
 };
 
+export type GraphCanvasHandle = {
+  centerOn(id: string): void;
+  /** Bring a document into view; the Local map also traces the current document's ring once. */
+  locate(id: string): void;
+  fit(): void;
+  pauseLayout(): void;
+  resumeLayout(): void;
+  pin(id: string, pinned: boolean): GraphPoint | null;
+  reset(): void;
+  setViewport(viewport: GraphViewport): void;
+  zoomIn(): void;
+  zoomOut(): void;
+};
+
+export type RendererStatus = "loading" | "ready" | "error";
+
 export type GraphRenderNode = {
   hidden?: boolean;
   muted?: boolean;
