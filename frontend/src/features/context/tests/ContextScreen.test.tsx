@@ -1705,8 +1705,9 @@ describe("ContextScreen", () => {
       within(alternative).getByRole("button", { name: "Reconcile" }),
     );
 
+    const dialog = await screen.findByRole("dialog", { name: "Reconcile branch" });
     expect(
-      await screen.findByRole("dialog", { name: "Architecture Notes" }),
+      await within(dialog).findByText("Base v1 → HEAD v3"),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}/versions/version-alt/reconciliation`,
