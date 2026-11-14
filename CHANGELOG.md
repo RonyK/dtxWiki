@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Context Graph timeline
+
+- Show only the days that have records. Every record gets its own column
+  under its day, in time order across both lanes, so playback steps through a
+  day one record at a time; nearby records are no longer merged into a count.
+- Draw each day as its own band in each lane, and fill the bands purple from
+  the first record up to the playhead.
+- Label every day with its date, adding the year when it changes. When the
+  days do not fit, the timeline scrolls sideways and keeps the current day in
+  view.
+
 ### Graph legends
 
 - Lay out the Context Graph and Knowledge Map legends with one rule: visible

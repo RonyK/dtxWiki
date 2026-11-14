@@ -3,10 +3,13 @@
   --history-scrubber-height: 16px;
   --history-lane-height: 28px;
   --history-lane-gap: 2px;
-  /* One mark's hit width; the component reads it to merge marks that would overlap. */
+  /* One record's column (and hit) width; the component lays records out in it. */
   --history-mark-width: 32px;
+  /* Days keep at least this gap; each day's band reaches this far past its columns. */
+  --history-day-gap: 12px;
+  --history-day-pad: 4px;
   --history-plot-height: calc(var(--history-lane-gap) + 2 * (var(--history-lane-height) + var(--history-lane-gap)));
-  /* Each lane is a grey band that runs this far past the first and last mark. */
+  /* Room beside the days for the band pad and, while the days scroll, the edge fade. */
   --history-plot-inset: 22px;
   --history-band: color-mix(in srgb, var(--ink-muted) 10%, var(--surface));
   display: grid;
@@ -44,11 +47,21 @@
 .local-history-lane-labels { display: grid; grid-template-rows: var(--history-lane-height) var(--history-lane-height); gap: var(--history-lane-gap); padding-top: var(--history-lane-gap); }
 .local-history-lane-labels > span { display: flex; align-items: center; font-size: 11px; font-weight: 600; color: var(--ink-muted); line-height: 1.4; }
 .local-history-plot { min-width: 0; padding-inline: var(--history-plot-inset); }
+/* More days than fit: lanes, scrubber and dates scroll together; lane labels stay. */
+.local-history-plot.is-scroll { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+/* A faded edge says more days lie that way. */
+.local-history-plot.has-more-left { mask-image: linear-gradient(to right, transparent, #000 var(--history-plot-inset)); }
+.local-history-plot.has-more-right { mask-image: linear-gradient(to left, transparent, #000 var(--history-plot-inset)); }
+.local-history-plot.has-more-left.has-more-right { mask-image: linear-gradient(to right, transparent, #000 var(--history-plot-inset), #000 calc(100% - var(--history-plot-inset)), transparent); }
+.local-history-track { position: relative; }
 .local-history-axis { position: relative; padding-top: var(--history-lane-gap); isolation: isolate; }
 .local-history-lane { position: relative; height: var(--history-lane-height); margin-bottom: var(--history-lane-gap); }
-.local-history-lane::before { content: ""; position: absolute; top: 2px; bottom: 2px; left: calc(-1 * var(--history-plot-inset)); right: calc(-1 * var(--history-plot-inset)); border-radius: 6px; background: var(--history-band); z-index: -1; }
+/* Each day is its own grey band in each lane. Playback fills the bands
+   purple from the first record up to the playhead. */
+.local-history-day { position: absolute; top: 2px; bottom: 2px; z-index: -1; overflow: hidden; border-radius: 6px; background: var(--history-band); pointer-events: none; }
+.local-history-day-progress { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--history-accent) 18%, var(--history-band)); }
 /* Pales the bands right of the playhead. The component sets `left` to the
-   playhead; before the first event it is unset and covers the whole band. */
+   playhead; before the first event it is unset and covers every band. */
 .local-history-future { position: absolute; top: 0; left: calc(-1 * var(--history-plot-inset)); right: calc(-1 * var(--history-plot-inset)); height: var(--history-plot-height); z-index: 0; pointer-events: none; background: color-mix(in srgb, var(--surface) 60%, transparent); }
 .local-history-playhead { position: absolute; top: 0; height: calc(var(--history-plot-height) + var(--history-scrubber-height) / 2); width: 2px; transform: translateX(-1px); background: var(--history-accent); opacity: .65; pointer-events: none; z-index: 0; }
 .local-history-playhead::after { content: ""; position: absolute; left: -3px; bottom: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--history-accent); }
@@ -67,28 +80,22 @@
 .local-history-symbol.is-added, .local-history-symbol.is-removed { border-radius: 50%; }
 .local-history-symbol.is-added { color: #168344; }
 .local-history-symbol.is-removed { color: #c43b3b; border-style: dashed; }
-.local-history-symbol.is-cluster { background: var(--surface-active); border-color: var(--border-strong, var(--border)); color: var(--ink); border-radius: 8px; }
 .local-history-mark.is-future { opacity: .45; }
 .local-history-mark.is-quiet { opacity: .3; }
 .local-history-mark.is-related .local-history-symbol { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--history-accent); }
 .local-history-mark.is-current { opacity: 1; z-index: 2; }
-.local-history-mark .local-history-symbol.is-cluster { border-radius: 6px; background: var(--surface); }
 .local-history-mark.is-current .local-history-symbol { background: var(--history-accent); border-color: var(--history-accent); color: white; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--history-accent); }
 .local-history-scrubber { appearance: none; display: block; width: 100%; height: var(--history-scrubber-height); padding: 0; margin: 0; border: 0; background: transparent; cursor: ew-resize; touch-action: none; }
 .local-history-scrubber::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--history-band); }
 .local-history-scrubber::-moz-range-track { height: 6px; border-radius: 3px; background: var(--history-band); }
 .local-history-scrubber::-webkit-slider-thumb { appearance: none; height: 20px; width: 20px; margin-top: -7px; background: transparent; }
 .local-history-scrubber::-moz-range-thumb { height: 20px; width: 20px; background: transparent; border: 0; }
-.local-history-dates { display: flex; justify-content: space-between; gap: 4px; padding: 0 0 3px; font-size: 10px; line-height: 1.5; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
-.local-history-group { padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
-.local-history-group-heading { display: flex; justify-content: space-between; align-items: center; padding-left: 6px; font-size: 12px; }
-.local-history-group-heading > button { min-height: 36px; padding: 5px 8px; color: var(--ink-muted); background: transparent; border: 0; border-radius: 6px; font: inherit; cursor: pointer; }
-.local-history .local-history-record { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 54px; padding: 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
-.local-history-record > span:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
-.local-history-record strong { font-weight: 600; }
-.local-history-record small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); }
-.local-history-record time { font-size: 10px; color: var(--ink-muted); }
-.local-history .local-history-record[aria-current="step"] { background: color-mix(in srgb, var(--history-accent) 8%, var(--surface)); border-color: color-mix(in srgb, var(--history-accent) 32%, var(--border)); }
+/* One date label under each day. */
+.local-history-dates { position: relative; height: 15px; padding: 0 0 3px; font-size: 10px; line-height: 1.5; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.local-history-dates > span { position: absolute; top: 0; display: inline-flex; flex-direction: column; align-items: center; transform: translateX(-50%); white-space: nowrap; }
+/* A hidden bold copy reserves the bold width, so the current day's label never resizes its day. */
+.local-history-dates > span::after { content: attr(data-label); height: 0; overflow: hidden; visibility: hidden; font-weight: 700; }
+.local-history-dates > span.is-current { color: var(--history-accent); font-weight: 700; }
 /* The current record is one line: title, detail (ellipsis), time, position. */
 .local-history-event { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); }
 .local-history-event > .local-history-symbol { flex-basis: 22px; width: 22px; height: 22px; }
@@ -124,9 +131,6 @@
   .local-history-start { grid-column: 1 / -1; }
   .local-history-label-long { display: none; }
   .local-history-label-short { display: inline; }
-  .local-history .local-history-record { grid-template-columns: 26px minmax(0, 1fr); }
-  .local-history-record time { grid-column: 2; }
-  .local-history-group-heading > button { min-height: 44px; min-width: 44px; }
 }
 @container graph-view (max-width: 280px) {
   .local-history-controls { display: grid; grid-template-columns: minmax(0, 1fr) 48px; }
@@ -134,12 +138,14 @@
   .local-history-latest { justify-self: start; }
   .local-history-event { grid-template-columns: 22px minmax(0, 1fr); }
   .local-history-event > button { grid-column: 2; justify-self: end; }
-  .local-history-dates > span:nth-child(2) { display: none; }
 }
 @media (forced-colors: active) {
   .local-history-mark.is-current .local-history-symbol { background: Highlight; color: HighlightText; border-color: Highlight; }
   .local-history-playhead { background: Highlight; }
   .local-history-symbol { border-color: CanvasText; }
-  /* Forced colours drop the band fill; an outline keeps each lane visible. */
-  .local-history-lane::before { border: 1px solid GrayText; }
+  /* Forced colours drop the band fill: an inner outline keeps each day band
+     visible (a border would shift the progress fill), and the fill keeps a
+     faint Highlight. */
+  .local-history-day { outline: 1px solid GrayText; outline-offset: -1px; }
+  .local-history-day-progress { forced-color-adjust: none; background: Highlight; opacity: .3; }
 }
