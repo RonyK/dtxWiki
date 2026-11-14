@@ -87,30 +87,3 @@ export function sameGraphVisibleIdentity(
     && left.selectionKey === right.selectionKey
     && left.visibleFingerprint === right.visibleFingerprint;
 }
-
-export type GraphRendererEvents<TCamera> = {
-  onHover: (id: string | null) => void;
-  onSelect: (id: string | null) => void;
-  onCameraChange: (camera: TCamera) => void;
-  onContextStatus: (status: "lost" | "restored") => void;
-};
-
-// Scene and camera types are renderer-specific: a 20k-point Map may pass
-// column buffers without materializing Cytoscape-style node objects.
-export interface GraphRendererAdapter<TScene, TCamera> {
-  ready(signal: AbortSignal): Promise<void>;
-  load(scene: TScene, identity: GraphVisibleIdentity): void;
-  update(scene: TScene, identity: GraphVisibleIdentity): void;
-  destroy(): void;
-  pause(): void;
-  resume(): void;
-  fit(): void;
-  zoomBy(factor: number): void;
-  reset(): void;
-  pin(id: string, position?: GraphPoint): GraphPoint | null;
-  unpin(id: string): void;
-  getCamera(): TCamera;
-  setCamera(camera: TCamera): void;
-  setReducedMotion(enabled: boolean): void;
-  subscribe(events: GraphRendererEvents<TCamera>): () => void;
-}

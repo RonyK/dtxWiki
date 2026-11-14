@@ -74,22 +74,3 @@ export function traceOutline(context: CanvasRenderingContext2D, outline: ShapeOu
   }
   context.closePath();
 }
-
-/**
- * Draw an emphasis ring that follows the node's own shape: a surface-coloured
- * gap, then the ring band, both outside the glyph so the glyph is untouched.
- */
-export function drawShapeRing(context: CanvasRenderingContext2D, shape: GraphNodeShape,
-  cx: number, cy: number, r: number, color: string, surface: string, extraOffset = 0) {
-  context.save();
-  context.lineJoin = "miter";
-  context.lineWidth = GRAPH_RING_GAP_PX;
-  context.strokeStyle = surface;
-  traceOutline(context, shapeOutline(shape, cx, cy, r, extraOffset + GRAPH_RING_GAP_PX / 2));
-  context.stroke();
-  context.lineWidth = GRAPH_RING_WIDTH_PX;
-  context.strokeStyle = color;
-  traceOutline(context, shapeOutline(shape, cx, cy, r, extraOffset + GRAPH_RING_GAP_PX + GRAPH_RING_WIDTH_PX / 2));
-  context.stroke();
-  context.restore();
-}

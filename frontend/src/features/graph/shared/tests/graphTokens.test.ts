@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  GRAPH_EDGE_ARROW, GRAPH_EDGE_PATTERN,
+  GRAPH_EDGE_ENDPOINTS, GRAPH_EDGE_PATTERN,
   GRAPH_NODE_RADIUS_PX,
   readGraphTokens,
 } from "../graphTokens";
@@ -115,7 +115,7 @@ describe("Graph visual tokens", () => {
       action: [1.5, 3.5],
     });
     // Direction remains visible when colour is unavailable.
-    expect(Object.entries(GRAPH_EDGE_ARROW).filter(([, arrow]) => arrow).map(([kind]) => kind))
+    expect(Object.entries(GRAPH_EDGE_ENDPOINTS).filter(([, endpoints]) => endpoints.target !== "none").map(([kind]) => kind))
       .toEqual(["link", "citation", "membership", "actionWrite", "actionCite", "actionRead", "actionReference", "action"]);
   });
 

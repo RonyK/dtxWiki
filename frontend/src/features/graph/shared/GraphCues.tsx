@@ -153,12 +153,6 @@ export function GraphSeedCue({ color, ink = "currentColor" }: { color?: string; 
 }
 
 export type GraphEdgeCueKind = GraphEdgeVisualKind | "removed" | "other";
-export type GraphEndpointKind = "link" | "citation" | "membership" | "coAccess" | "action";
-
-/** A wider relationship sample for callers that need room for both endpoints. */
-export function GraphEndpointCue({ kind }: { kind: GraphEndpointKind }) {
-  return <GraphEdgeCue className="graph-endpoint-cue" kind={kind} width={56} />;
-}
 
 /** A relationship line sample: the canvas dash pattern, colour and weight. */
 export function GraphEdgeCue({ kind, color, width = 28, className }: {

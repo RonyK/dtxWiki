@@ -2,7 +2,6 @@ import {
   createCosmosRenderer,
   CosmosWebGLError,
   type CosmosRenderer,
-  type CosmosRendererCallbacks,
   type CosmosRendererOptions,
   type CosmosLayoutStatus,
   type CosmosCoordinateSnapshot,
@@ -23,7 +22,6 @@ import { buildCosmosSceneBuffers, buildCosmosRelationColors, isDenseWorkspaceMap
 import { createWorkspaceLayoutSolver } from "./layoutSolver";
 
 export type WorkspaceCosmosAdapter = CosmosRenderer;
-export type WorkspaceCosmosCallbacks = CosmosRendererCallbacks;
 export type WorkspaceMapLayoutStatus = CosmosLayoutStatus;
 export type WorkspaceMapCoordinateSnapshot = CosmosCoordinateSnapshot;
 export type WorkspaceMapSafeInsets = CosmosSafeInsets;
