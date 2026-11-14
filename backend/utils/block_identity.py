@@ -518,6 +518,232 @@ def compute_block_map_with_ids(
     return serialized
 
 
+def compute_merged_block_map_with_ids(
+    new_body_md: str,
+    *,
+    published_body_md: str | None,
+    published_block_map: list[dict] | None,
+    draft_body_md: str | None,
+    draft_block_map: list[dict] | None,
+    identity_seed: str,
+    conflict_ranges: Sequence[tuple[int, int]] = (),
+) -> list[dict]:
+    """Assign merged identities, preferring published IDs, then draft IDs.
+
+    ``conflict_ranges`` addresses keep-both regions in the final body. Only
+    there may two similar outputs deliberately share one source identity:
+    the first inherits it. Ordinary duplicate/reorder matching remains
+    conservative, as in ``compute_block_map_with_ids``.
+    """
+
+    blocks = compute_blocks(new_body_md)
+    entries = serialize_blocks(blocks)
+    lines = split_raw_lines(new_body_md)
+    texts = _merge_block_texts(new_body_md, lines, blocks)
+    conflict_indexes = tuple(
+        tuple(
+            index
+            for index, block in enumerate(blocks)
+            if _line_char_offset(lines, block.line_start, new_body_md) < end
+            and _line_char_offset(lines, block.line_end, new_body_md) > start
+        )
+        for start, end in conflict_ranges
+        if start < end
+    )
+    source_maps = (published_block_map, draft_block_map)
+    reserved = [
+        entry
+        for block_map in source_maps
+        if isinstance(block_map, list)
+        for entry in block_map
+        if isinstance(entry, Mapping)
+    ]
+    mint = _DeterministicIdMint(
+        new_body_md=new_body_md,
+        previous_block_map=reserved,
+        identity_seed=identity_seed,
+    )
+    claimed: set[str] = set()
+    for source_body, source_map in (
+        (published_body_md, published_block_map),
+        (draft_body_md, draft_block_map),
+    ):
+        if source_body is None or not isinstance(source_map, list):
+            continue
+        source_blocks = compute_blocks(source_body)
+        # Geometry comes from the parsed source, so optional/stale position
+        # caches cannot invalidate otherwise sound content identities.
+        if not _valid_previous_map(source_map, source_blocks):
+            continue
+        source_texts = _merge_block_texts(
+            source_body, split_raw_lines(source_body), source_blocks
+        )
+        matches = (
+            dict(enumerate(range(len(blocks))))
+            if new_body_md == source_body
+            else _match_blocks(
+                new_body_md,
+                blocks,
+                source_body,
+                source_blocks,
+                new_texts=texts,
+                old_texts=source_texts,
+            )
+        )
+        _match_merged_tables(matches, blocks, source_blocks)
+        _prefer_first_conflict_copy(
+            matches,
+            conflict_indexes,
+            blocks,
+            source_blocks,
+            texts,
+            source_texts,
+        )
+        _carry_merged_ids(entries, source_map, matches, claimed)
+
+    for index, entry in enumerate(entries):
+        if "id" not in entry:
+            entry["id"] = mint.mint("b", f"block:{index}")
+        for row_index, row in enumerate(entry.get("rows") or ()):
+            if "id" not in row:
+                row["id"] = mint.mint("r", f"block:{index}:row:{row_index}")
+    return entries
+
+
+def _merge_block_texts(
+    body_md: str,
+    lines: Sequence[RawLine],
+    blocks: tuple[BlockContent, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        _raw_block_text(body_md, lines, block)[:_MAX_SIMILARITY_CHARS]
+        for block in blocks
+    )
+
+
+def _match_merged_tables(
+    matches: dict[int, int],
+    new_blocks: tuple[BlockContent, ...],
+    old_blocks: tuple[BlockContent, ...],
+) -> None:
+    """Use unique surviving rows to identify tables beyond the fuzzy window.
+
+    A merge can insert whole sections before a table without changing its
+    rows. A row occurring once in each document anchors the containing
+    tables, but splitting or combining tables produces competing anchors
+    and must not assign an arbitrary identity.
+    """
+
+    old_locations = _unique_table_row_locations(old_blocks)
+    new_locations = _unique_table_row_locations(new_blocks)
+    targets: dict[int, set[int]] = defaultdict(set)
+    sources: dict[int, set[int]] = defaultdict(set)
+    for row_hash, old_index in old_locations.items():
+        new_index = new_locations.get(row_hash)
+        if new_index is not None:
+            targets[old_index].add(new_index)
+            sources[new_index].add(old_index)
+    claimed_old = set(matches.values())
+    for new_index, old_indexes in sources.items():
+        if new_index in matches or len(old_indexes) != 1:
+            continue
+        old_index = next(iter(old_indexes))
+        if old_index not in claimed_old and len(targets[old_index]) == 1:
+            matches[new_index] = old_index
+            claimed_old.add(old_index)
+
+
+def _unique_table_row_locations(
+    blocks: tuple[BlockContent, ...],
+) -> dict[str, int]:
+    locations: dict[str, list[int]] = defaultdict(list)
+    for index, block in enumerate(blocks):
+        for row in block.rows:
+            locations[row.hash].append(index)
+    return {
+        row_hash: indexes[0]
+        for row_hash, indexes in locations.items()
+        if len(indexes) == 1
+    }
+
+
+def _carry_merged_ids(
+    entries: list[dict],
+    source_map: list[dict],
+    matches: Mapping[int, int],
+    claimed: set[str],
+) -> None:
+    for new_index, old_index in matches.items():
+        entry, old_entry = entries[new_index], source_map[old_index]
+        old_id = old_entry["id"]
+        if "id" not in entry and old_id not in claimed:
+            entry["id"] = old_id
+            claimed.add(old_id)
+        rows, old_rows = entry.get("rows") or [], old_entry.get("rows") or []
+        if entry["hash"] == old_entry["hash"]:
+            row_matches = dict(enumerate(range(len(rows))))
+        else:
+            row_matches = _match_unique_rows(rows, old_rows)
+        for row_index, old_row_index in row_matches.items():
+            row, old_row = rows[row_index], old_rows[old_row_index]
+            if "id" not in row and old_row["id"] not in claimed:
+                row["id"] = old_row["id"]
+                claimed.add(old_row["id"])
+
+
+def _prefer_first_conflict_copy(
+    matches: dict[int, int],
+    conflict_indexes: Sequence[tuple[int, ...]],
+    new_blocks: tuple[BlockContent, ...],
+    old_blocks: tuple[BlockContent, ...],
+    new_texts: tuple[str, ...],
+    old_texts: tuple[str, ...],
+) -> None:
+    """Resolve only copies within an explicit keep-both result region."""
+
+    old_by_key: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for index, block in enumerate(old_blocks):
+        old_by_key[(block.kind, block.hash)].append(index)
+    for indexes in conflict_indexes:
+        if len(indexes) < 2:
+            continue
+        scores = {
+            (new_index, old_index): SequenceMatcher(
+                None, new_texts[new_index], old_texts[old_index], autojunk=False
+            ).ratio()
+            for new_index in indexes
+            for old_index in range(
+                max(0, new_index - _FUZZY_POSITION_WINDOW),
+                min(len(old_blocks), new_index + _FUZZY_POSITION_WINDOW + 1),
+            )
+            if new_blocks[new_index].kind == old_blocks[old_index].kind
+            and len(
+                old_by_key[(old_blocks[old_index].kind, old_blocks[old_index].hash)]
+            )
+            == 1
+        }
+        copies: dict[int, list[int]] = defaultdict(list)
+        for new_index, (old_index, ratio) in _unique_best(
+            scores, key_position=0
+        ).items():
+            if ratio >= _SIMILARITY_THRESHOLD:
+                copies[old_index].append(new_index)
+        for old_index, new_indexes in copies.items():
+            if len(new_indexes) < 2:
+                continue
+            previous = next(
+                (new for new, old in matches.items() if old == old_index), None
+            )
+            if previous is not None and previous not in indexes:
+                continue
+            first = min(new_indexes)
+            if first in matches and matches[first] != old_index:
+                continue
+            if previous is not None:
+                del matches[previous]
+            matches[first] = old_index
+
+
 def try_compute_incremental_block_map_with_ids(
     new_body_md: str,
     *,
@@ -1201,6 +1427,16 @@ def _carry_rows_conservatively(
 ) -> None:
     rows = entry.get("rows") or []
     old_rows = old_entry.get("rows") or []
+    matched = _match_unique_rows(rows, old_rows)
+    for index, row in enumerate(rows):
+        old_index = matched.get(index)
+        if old_index is None:
+            row["id"] = mint.mint("r", f"{scope}:row:{index}")
+        else:
+            row["id"] = old_rows[old_index]["id"]
+
+
+def _match_unique_rows(rows: list[dict], old_rows: list[dict]) -> dict[int, int]:
     old_by_hash: dict[str, list[int]] = defaultdict(list)
     new_by_hash: dict[str, list[int]] = defaultdict(list)
     for index, row in enumerate(old_rows):
@@ -1213,12 +1449,7 @@ def _carry_rows_conservatively(
         old_indexes = old_by_hash.get(row_hash, [])
         if len(new_indexes) == len(old_indexes) == 1:
             matched[new_indexes[0]] = old_indexes[0]
-    for index, row in enumerate(rows):
-        old_index = matched.get(index)
-        if old_index is None:
-            row["id"] = mint.mint("r", f"{scope}:row:{index}")
-        else:
-            row["id"] = old_rows[old_index]["id"]
+    return matched
 
 
 def _match_blocks(
@@ -1226,6 +1457,9 @@ def _match_blocks(
     new_blocks: tuple[BlockContent, ...],
     old_body_md: str,
     old_blocks: tuple[BlockContent, ...],
+    *,
+    new_texts: tuple[str, ...] | None = None,
+    old_texts: tuple[str, ...] | None = None,
 ) -> dict[int, int]:
     """Conservative O(N * fixed-window) whole-document matching."""
 
@@ -1258,8 +1492,10 @@ def _match_blocks(
         for index in indexes
     }
 
-    new_texts = _block_texts(new_body_md, new_blocks)
-    old_texts = _block_texts(old_body_md, old_blocks)
+    if new_texts is None:
+        new_texts = _block_texts(new_body_md, new_blocks)
+    if old_texts is None:
+        old_texts = _block_texts(old_body_md, old_blocks)
     scores: dict[tuple[int, int], float] = {}
     for new_index, new_block in enumerate(new_blocks):
         if new_index in matches or new_index in ambiguous_new:

@@ -1174,10 +1174,10 @@ class EmailDeliveryService:
                     "Open the workspace Activity or Review lane to reconcile or "
                     "explicitly discard the branch. The branch has not been "
                     "deleted or applied to the page head.\n\n"
-                    "dtxWiki 워크스페이스의 화해 대기 가지가 설정된 알림 시간보다 "
-                    "오래 해결되지 않았습니다. Activity 또는 리뷰 레인에서 가지를 "
-                    "화해하거나 명시적으로 폐기하세요. 가지는 삭제되지 않았고 페이지 "
-                    "HEAD에도 적용되지 않았습니다."
+                    "dtxWiki 워크스페이스에 확인이 필요한 수정본이 설정된 알림 "
+                    "시간보다 오래 남아 있습니다. 활동 또는 리뷰 큐에서 변경 내용을 "
+                    "합치거나 수정본을 폐기하세요. 수정본은 삭제되지 않았으며 "
+                    "현재 문서에도 반영되지 않았습니다."
                 ),
             )
         token_model = (

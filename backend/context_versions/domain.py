@@ -1,6 +1,8 @@
 """Storage values shared by Context content use cases and adapters."""
 
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 
@@ -79,3 +81,84 @@ class PackResult:
 class PruneResult:
     removed_files: int = 0
     removed_bytes: int = 0
+
+
+class ContextMergeError(RuntimeError):
+    """Invalid merge input or a native calculation failure; never a resolution."""
+
+    def __init__(self, code: str) -> None:
+        self.code = self.error_code = code
+        super().__init__(code)
+
+
+MergeChoice = Literal["keep_both", "latest"]
+MergeSide = Literal["ours", "theirs"]
+
+
+@dataclass(frozen=True)
+class PageMetadata:
+    title: str = ""
+    page_type: str = ""
+    tags: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
+    placement_parent_node_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class MergeSnapshot:
+    workspace_id: UUID
+    page_id: UUID
+    version_id: UUID
+    body_md: str
+    metadata: PageMetadata
+    last_saved_at: datetime
+    block_map: list[dict] | None = None
+
+
+@dataclass(frozen=True)
+class VersionNode:
+    workspace_id: UUID
+    page_id: UUID
+    version_id: UUID
+    parents: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True)
+class TextConflict:
+    ours: str
+    theirs: str
+    keep_both_start: int
+    keep_both_end: int
+    latest_start: int
+    latest_end: int
+
+
+@dataclass(frozen=True)
+class TextMergeResult:
+    clean: str | None
+    keep_both: str
+    latest: str
+    conflicts: tuple[TextConflict, ...] = ()
+
+
+@dataclass(frozen=True)
+class MergeCandidate:
+    body_md: str
+    metadata: PageMetadata
+    block_map: list[dict]
+    result_hash: str
+    conflicts: tuple[TextConflict, ...] = ()
+
+
+@dataclass(frozen=True)
+class MergeOutcome:
+    clean: MergeCandidate | None
+    keep_both: MergeCandidate
+    latest: MergeCandidate
+    metadata_conflicts: tuple[str, ...] = ()
+    # A virtual base may itself need a choice even if the final text is clean.
+    base_conflicted: bool = False
+
+    @property
+    def requires_choice(self) -> bool:
+        return self.clean is None

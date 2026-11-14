@@ -9,9 +9,11 @@ from uuid import UUID
 from backend.context_versions.domain import (
     ContentDescriptor,
     ContentPayload,
+    MergeSnapshot,
     PackResult,
     PruneResult,
     RepositoryStats,
+    TextMergeResult,
 )
 
 
@@ -73,3 +75,25 @@ class WorkspaceRepositoryPurger(Protocol):
     def management_guard(self, workspace_id: UUID) -> AbstractContextManager: ...
 
     def purge_workspace(self, workspace_id: UUID) -> list[str]: ...
+
+
+class TextMerger(Protocol):
+    def merge(
+        self, base: str, ours: str, theirs: str, *, prefer_ours: bool
+    ) -> TextMergeResult: ...
+
+
+class BlockIdAssigner(Protocol):
+    def assign(
+        self,
+        body_md: str,
+        *,
+        published: MergeSnapshot,
+        draft: MergeSnapshot,
+        identity_seed: str,
+        conflict_ranges: Sequence[tuple[int, int]],
+    ) -> list[dict]: ...
+
+    def for_snapshot(
+        self, snapshot: MergeSnapshot, *, identity_seed: str
+    ) -> list[dict]: ...

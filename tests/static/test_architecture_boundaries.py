@@ -141,6 +141,20 @@ FORBIDDEN_IMPORTS = {
         "pygit2",
         *INNER_LAYER_CONCRETE_IMPORTS,
     ),
+    "backend/context_versions/history.py": (
+        "backend.context_versions.application",
+        "backend.context_versions.adapters",
+        "backend.context_versions.ports",
+        "pygit2",
+        *INNER_LAYER_CONCRETE_IMPORTS,
+    ),
+    "backend/context_versions/merge.py": (
+        "backend.context_versions.application",
+        "backend.context_versions.adapters",
+        "backend.context_versions.ports",
+        "pygit2",
+        *INNER_LAYER_CONCRETE_IMPORTS,
+    ),
 }
 
 CONCRETE_MEDIA_IMPORTS = (

@@ -51,6 +51,9 @@ describe("ContextReconciliationWorkbench", () => {
     renderWorkbench(onCompleted);
 
     expect(await screen.findByText("Current HEAD")).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "Reconcile branch" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Base v1 → HEAD v3")).toBeInTheDocument();
     expect(screen.getByText("Branch v4")).toBeInTheDocument();
     expect(
