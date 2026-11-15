@@ -21,6 +21,7 @@ from backend.models.workspace import Workspace
 from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
 from backend.schemas.read import ContextLinkTarget, WikilinkTarget
 from backend.services.actor_visible_read import agent_page_visible, library_item_visible
+from backend.services.browser_routes import match_browser_route, safe_browser_query
 from backend.services.context_links import (
     LinkContext,
     LinkResolutionBatch,
@@ -884,76 +885,21 @@ def _parse_workspace_navigation_reference(
         chat_match = re.fullmatch(r"/chats/([0-9a-fA-F-]{36})", parts.path)
         if chat_match is not None and not parts.query:
             return "chats", "legacy_target", UUID(chat_match[1]), None
-        if not _safe_workspace_query(parts.query, parts.path):
+        if not safe_browser_query(parts.query, parts.path):
             return None
-        overview = re.fullmatch(r"/workspaces/([0-9a-fA-F-]{36})(?:/(.*))?", parts.path)
-        suffix = overview[2] if overview is not None else None
-        valid_overviews = {
-            None,
-            "dashboard",
-            "inbox",
-            "context",
-            "library",
-            "agent",
-            "activity",
-            "review",
-            "lint",
-            "chats",
-            "ask",
-            "search",
-            "settings",
-            "setup",
-            "settings/integrations",
-            "activity/pending",
-            "activity/advisory",
-            "activity/history",
-            "context/folders/new",
-            "context/pages/new",
-            "library/items/new",
-            "library/folders/new",
-            "agent/pages/new",
-            "agent/folders/new",
-        }
-        if overview is not None and suffix in valid_overviews:
-            return (
-                (suffix or "dashboard").split("/", 1)[0],
-                "overview",
-                None,
-                UUID(overview[1]),
-            )
-        match = re.fullmatch(
-            r"/workspaces/([0-9a-fA-F-]{36})/(context|library|agent)/(items|artifacts|pages|folders)/([0-9a-fA-F-]{36})(/edit)?",
-            parts.path,
+        match = match_browser_route(parts.path)
+        if match is None:
+            return None
+        route, params = match.route, match.params
+        if route.section == "context" and route.kind == "page":
+            # Context document reads keep the existing pin/version resolver.
+            return None
+        return (
+            route.section,
+            route.kind,
+            UUID(params[route.target_param]) if route.target_param else None,
+            UUID(params["workspaceId"]) if "workspaceId" in params else None,
         )
-        if match is not None:
-            explicit_workspace_id = UUID(match[1])
-            section = match[2]
-            route_kind = match[3]
-            kind = {
-                "items": "item",
-                "artifacts": "artifact",
-                "pages": "page",
-                "folders": "folder",
-            }[route_kind]
-            if match[5]:
-                if section != "agent" or kind != "page":
-                    return None
-                kind = "page_edit"
-            if (
-                (section == "library" and kind == "page")
-                or (section == "agent" and kind in {"item", "artifact"})
-                or (section == "context" and kind != "folder")
-            ):
-                return None
-            return section, kind, UUID(match[4]), explicit_workspace_id
-        match = re.fullmatch(
-            r"/workspaces/([0-9a-fA-F-]{36})/(review|ask|chats)/([0-9a-fA-F-]{36})|/workspaces/([0-9a-fA-F-]{36})/lint/findings/([0-9a-fA-F-]{36})",
-            parts.path,
-        )
-        if match is not None:
-            if match[1] is not None:
-                return match[2], "item", UUID(match[3]), UUID(match[1])
-            return "lint", "item", UUID(match[5]), UUID(match[4])
     except (ValueError, UnicodeError):
         return None
 
@@ -1162,33 +1108,7 @@ def _navigation_batch(
 
 def _safe_workspace_query(query: str, path: str = "") -> bool:
     """Reject identity override parameters while allowing presentation state."""
-    if not query:
-        return True
-    params = parse_qs(query, keep_blank_values=True)
-    if {
-        "target",
-        "edit",
-        "review",
-        "finding",
-        "new",
-        "newFolder",
-        "parentNodeId",
-        "parentId",
-        "workspaceId",
-        "workspace_id",
-        "ws",
-    } & params.keys():
-        return False
-    parents = params.get("parent", ())
-    if not parents:
-        return True
-    if not path.endswith("/new") or len(parents) != 1:
-        return False
-    try:
-        UUID(parents[0])
-    except ValueError:
-        return False
-    return True
+    return safe_browser_query(query, path)
 
 
 def _classify_context_navigation(href: str, self_origins: frozenset[str]):

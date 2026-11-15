@@ -1,9 +1,12 @@
 import { useLocation } from "react-router-dom";
 
+import { hasConflictingBrowserQuery } from "./browserRoutes";
+import { IDENTITY_QUERY_KEYS, WORKSPACE_SECTIONS } from "./browserRoutes.gen";
+
 import type { TreeNodePayload } from "../api/workspace";
 import { formatCanonicalContextUrl, formatStableContextUrl, isWorkspaceUuid } from "./workspaceIdentity";
 
-export type WorkspaceSection = "dashboard" | "graph" | "context" | "library" | "agent" | "activity" | "review" | "lint" | "chats" | "ask" | "search" | "settings" | "setup" | "inbox";
+export type WorkspaceSection = typeof WORKSPACE_SECTIONS[number];
 export type WorkspaceRoute = {
   workspaceId: string;
   section: WorkspaceSection;
@@ -14,8 +17,8 @@ export type WorkspaceRoute = {
   suffix: string;
 };
 
-const sections = new Set<WorkspaceSection>(["dashboard", "graph", "context", "library", "agent", "activity", "review", "lint", "chats", "ask", "search", "settings", "setup", "inbox"]);
-const identityQueries = ["target", "edit", "review", "finding", "new", "newFolder", "parentNodeId", "parentId", "workspaceId", "workspace_id", "ws"];
+const sections = new Set<WorkspaceSection>(WORKSPACE_SECTIONS);
+const identityQueries = IDENTITY_QUERY_KEYS;
 
 export function workspacePath(workspaceId: string, path = ""): string {
   if (!isWorkspaceUuid(workspaceId)) throw new Error("An explicit workspace UUID is required");
@@ -105,8 +108,7 @@ export function useRouteWorkspaceId(): string {
 }
 
 export function hasConflictingWorkspaceQuery(search: string, allowParent = false): boolean {
-  const params = new URLSearchParams(search);
-  return identityQueries.some((key) => params.has(key)) || (!allowParent && params.has("parent")) || params.getAll("parent").length > 1;
+  return hasConflictingBrowserQuery(search, allowParent);
 }
 
 export function isValidWorkspaceRoute(route: WorkspaceRoute, search: string): boolean {

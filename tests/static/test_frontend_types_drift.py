@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
 
+from backend.services.browser_routes import render_typescript
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_frontend_openapi_types_include_oauth_consent_models():
+def test_frontend_generated_contracts_match_sources():
     """Fix-6 Task 3.7 (L-F5-CODEX-2): the previous version checked only a
     fixed 3-item allow-list of OAuth Consent model names as substrings.
     Strengthen the drift signal by enumerating every schema name in
@@ -38,6 +40,12 @@ def test_frontend_openapi_types_include_oauth_consent_models():
         f"Drift: {len(missing)} REST OpenAPI schema(s) absent from "
         f"types.gen.ts: {missing}. Run "
         f"`npm --workspace frontend run gen-client` to regenerate."
+    )
+    assert (ROOT / "frontend/src/shared/lib/browserRoutes.gen.ts").read_text(
+        encoding="utf-8"
+    ) == render_typescript(), (
+        "Browser routes drifted from the shared path contract. Run "
+        "`.venv/bin/python scripts/export_browser_routes.py`."
     )
 
 

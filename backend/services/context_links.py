@@ -7,7 +7,6 @@ decision per link.
 
 from __future__ import annotations
 
-import html
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -37,6 +36,12 @@ from backend.services.index_refs import (
     IndexRefInputError,
     looks_like_index_ref,
     parse_index_ref,
+)
+from backend.utils.markdown_link_rewrite import (
+    LinkRewrite,
+    LinkSource,
+    apply_link_rewrites,
+    decode_destination,
 )
 from backend.utils.request_markdown_memo import memoize_markdown_analysis
 
@@ -235,10 +240,7 @@ def classify(href: str, self_origins=()) -> Locator:
             if len(values) == 1 and (node_id := _uuid(values[0])) is not None:
                 return Locator("nav_target", node_id=node_id, **base)
         return Locator(
-            "unknown"
-            if absolute
-            or is_app_link(href, self_origins)
-            else "external",
+            "unknown" if absolute or is_app_link(href, self_origins) else "external",
             **base,
         )
     except (ValueError, UnicodeError):
@@ -880,10 +882,15 @@ class LinkOccurrence:
     slug: str | None = None
     label: str | None = None
     snippet: str = ""
+    source: LinkSource | None = None
 
     @property
     def destination_span(self) -> SourceSpan:
-        return self.span
+        return self.source.destination_span if self.source is not None else self.span
+
+    @property
+    def syntax_span(self) -> SourceSpan:
+        return self.source.syntax_span if self.source is not None else self.span
 
 
 def _span(body: str, start: int, end: int) -> SourceSpan:
@@ -1041,6 +1048,7 @@ def _extract_links(
         cursor += len(line)
 
     candidates = []
+    syntax_ranges = {}
     uses = Counter()
     reference_uses = []
     original_text = _plain_text_nodes(rendered, tokens=tokens)
@@ -1086,9 +1094,7 @@ def _extract_links(
             raw = wiki[0]
             # Replacing [[tar*get*]] with a probe FIRST would incorrectly turn
             # emphasis/text into a valid wikilink. Keep the original parse.
-            decoded = html.unescape(
-                re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", raw)
-            )
+            decoded = decode_destination(raw).text
             if decoded in eligible_wikis:
                 wiki_candidates.append(
                     (cursor, wiki.end(), raw, decoded, wiki[1], wiki[2])
@@ -1104,6 +1110,7 @@ def _extract_links(
                     if parsed:
                         start, end, syntax_end = parsed
                         if not any(masked[start:end]):
+                            syntax_ranges[(start, end)] = (cursor, syntax_end)
                             candidates.append(
                                 (
                                     start,
@@ -1176,6 +1183,7 @@ def _extract_links(
             and span not in reference_multiplicity
         ):
             reference_multiplicity[span] = reference_link_counts[label_key]
+            syntax_ranges[span] = (definition.syntax_start, definition.syntax_end)
             candidates.append(
                 (
                     definition.destination_start,
@@ -1239,20 +1247,20 @@ def _extract_links(
     pieces.append(rendered[cursor:])
     rendered_probes = Counter(_rendered_destinations("".join(pieces)))
     result = []
-    for index, (start, end, href, kind, slug, label) in enumerate(ordered):
+    for index, (start, end, _href, kind, slug, label) in enumerate(ordered):
         if index not in probes or (
             kind not in {"wikilink", "literal_autolink"}
             and rendered_probes[probes[index]]
             != reference_multiplicity.get((start, end), 1)
         ):
             continue
-        raw_href = (
-            href
-            if kind in {"autolink", "literal_autolink"}
-            else html.unescape(
-                re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", href)
-            )
+        destination_start = start + (1 if kind == "autolink" else 0)
+        destination_end = end - (1 if kind == "autolink" else 0)
+        raw_destination = rendered[destination_start:destination_end]
+        decoded = decode_destination(
+            raw_destination, markdown=kind not in {"autolink", "literal_autolink"}
         )
+        raw_href = decoded.text
         # remark-gfm gives www literals an implicit HTTP scheme. Readers see
         # that destination while the authored label and span stay unchanged.
         if kind == "literal_autolink" and raw_href.lower().startswith("www."):
@@ -1262,17 +1270,23 @@ def _extract_links(
                 raw_href,
                 kind,
                 _span(body, offset + start, offset + end),
-                html.unescape(
-                    re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", slug)
-                )
-                if slug is not None
-                else None,
-                html.unescape(
-                    re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", label)
-                )
+                decode_destination(slug).text if slug is not None else None,
+                decode_destination(label).text
                 if kind == "wikilink" and label is not None
                 else label,
                 body[max(0, offset + start - 60) : offset + end + 60],
+                LinkSource(
+                    kind,
+                    _span(
+                        body,
+                        offset + syntax_ranges.get((start, end), (start, end))[0],
+                        offset + syntax_ranges.get((start, end), (start, end))[1],
+                    ),
+                    _span(body, offset + destination_start, offset + destination_end),
+                    raw_destination,
+                    decoded,
+                    reference_multiplicity.get((start, end), 1),
+                ),
             )
         )
     return tuple(result)
@@ -1491,10 +1505,12 @@ def _workspace_route(
         # resolver is a Context-link lint/write boundary, not the readers for
         # reviews, chats, Ask, Lint, or Library artifacts. Keep their authored
         # bytes and let each route's reader decide availability and access.
-        if workspace_id is not None and (
-            kind == "overview"
-            or section in {"review", "ask", "chats", "lint"}
-            or (section == "library" and kind == "artifact")
+        if kind == "overview" or (
+            workspace_id is not None
+            and (
+                section in {"review", "ask", "chats", "lint"}
+                or (section == "library" and kind == "artifact")
+            )
         ):
             return True, href
         return False, None
@@ -1645,6 +1661,24 @@ def _citable(href: str, ctx: LinkContext) -> bool:
     return True
 
 
+def _link_rewrite(body: str, occurrence: LinkOccurrence, href: str) -> LinkRewrite:
+    source = occurrence.source
+    if source is None:
+        raw = occurrence.destination_span.text(body)
+        source = LinkSource(
+            occurrence.kind,
+            occurrence.syntax_span,
+            occurrence.destination_span,
+            raw,
+            decode_destination(raw, markdown=occurrence.kind == "markdown"),
+        )
+    return LinkRewrite(
+        source,
+        href,
+        occurrence.label or occurrence.slug or occurrence.href,
+    )
+
+
 def citation_href_decision(
     href: str, ctx: LinkContext, *, batch: LinkResolutionBatch | None = None
 ) -> tuple[Locator, Resolution | None, LinkDecision]:
@@ -1699,18 +1733,6 @@ def _rewrite_links_with_report(
             and not resolution.published
         ):
             continue
-        # A citation span is its address alone: the marker keeps its syntax.
-        replacement = decision.href
-        if occurrence.kind in {"wikilink", "autolink", "literal_autolink"}:
-            # A new [ immediately after ! would turn a visible link into an
-            # image. Keep the source and finding when this span is not safe.
-            if (
-                occurrence.span.char_start
-                and body[occurrence.span.char_start - 1] == "!"
-            ):
-                continue
-            label = occurrence.label or occurrence.slug or occurrence.href
-            replacement = f"[{escape_link_label(label)}]({decision.href})"
         after_locator = classify(decision.href, ctx.self_origins)
         if _is_context_edit_route(locator):
             from backend.services.context_link_targets import (
@@ -1729,7 +1751,7 @@ def _rewrite_links_with_report(
             after = resolve(after_locator, ctx, batch=batch)
             same_target = after.state == "ok" and after.page_id == resolution.page_id
         if same_target:
-            changes.append((occurrence.span, replacement))
+            changes.append(_link_rewrite(body, occurrence, decision.href))
             details.append(
                 {
                     "module_id": "links",
@@ -1748,22 +1770,11 @@ def _rewrite_links_with_report(
                     else "repair",
                 }
             )
-    parts = []
-    cursor = 0
-    # Citation addresses follow the ordinary links; edit them in source order.
-    order = sorted(range(len(changes)), key=lambda index: changes[index][0].char_start)
-    changes = [changes[index] for index in order]
-    details = [details[index] for index in order]
-    for span, replacement in changes:
-        if span.char_start < cursor:
-            return body, (), (), tuple(unavailable)
-        parts.extend((body[cursor : span.char_start], replacement))
-        cursor = span.char_end
-    parts.append(body[cursor:])
+    rewritten, applied = apply_link_rewrites(body, changes, parser=_markdown_parser())
     return (
-        "".join(parts),
-        tuple("link.internal-noncanonical" for _ in changes),
-        tuple(details),
+        rewritten,
+        tuple("link.internal-noncanonical" for _ in applied),
+        tuple(details[index] for index in applied),
         tuple(unavailable),
     )
 
@@ -1790,21 +1801,12 @@ def normalize_short_page_links_with_report(
         if locator.kind != "stable_short":
             continue
         canonical_path = format_stable_url(ctx.workspace_id, locator.page_id)
-        href = urlsplit(occurrence.href)._replace(
-            scheme="", netloc="", path=canonical_path
-        ).geturl()
-        raw = body[occurrence.span.char_start : occurrence.span.char_end]
-        if occurrence.kind == "autolink":
-            raw = raw[1:-1]
-        suffix = re.search(
-            r"(?:&#(?:0*(?:35|63)|[xX]0*(?:23|3[fF]));|&(?:num|quest);|\\?[?#])",
-            raw,
+        href = (
+            urlsplit(occurrence.href)
+            ._replace(scheme="", netloc="", path=canonical_path)
+            .geturl()
         )
-        replacement = canonical_path + (raw[suffix.start() :] if suffix else "")
-        if occurrence.kind in {"autolink", "literal_autolink"}:
-            label = occurrence.label or occurrence.href
-            replacement = f"[{escape_link_label(label)}](<{replacement}>)"
-        changes.append((occurrence.span, replacement))
+        changes.append(_link_rewrite(body, occurrence, href))
         details.append(
             {
                 "module_id": "links",
@@ -1814,21 +1816,11 @@ def normalize_short_page_links_with_report(
                 "category": "format",
             }
         )
-    parts = []
-    cursor = 0
-    order = sorted(range(len(changes)), key=lambda index: changes[index][0].char_start)
-    changes = [changes[index] for index in order]
-    details = [details[index] for index in order]
-    for span, replacement in changes:
-        if span.char_start < cursor:
-            return body, (), ()
-        parts.extend((body[cursor : span.char_start], replacement))
-        cursor = span.char_end
-    parts.append(body[cursor:])
+    rewritten, applied = apply_link_rewrites(body, changes, parser=_markdown_parser())
     return (
-        "".join(parts),
-        tuple("link.internal-noncanonical" for _ in changes),
-        tuple(details),
+        rewritten,
+        tuple("link.internal-noncanonical" for _ in applied),
+        tuple(details[index] for index in applied),
     )
 
 

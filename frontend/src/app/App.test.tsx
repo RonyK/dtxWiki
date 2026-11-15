@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "../shared/auth/AuthContext";
 import { setLocale } from "../shared/i18n";
+import { BROWSER_ROUTES } from "../shared/lib/browserRoutes.gen";
 import { WorkspaceGraphGate } from "../features/graph/WorkspaceGraphGate";
 import {
   appRoutes,
@@ -546,6 +547,10 @@ describe("appRoutes role gating", () => {
   });
 
   it("keeps workspace discovery behind a browser session", () => {
+    // Compare the complete registered workspace surface, so a new app route
+    // cannot silently bypass the browser-link grammar or remain undeclared.
+    expect(routePaths(appRoutes).filter((path) => path.startsWith("/workspaces/")).sort())
+      .toEqual(Object.values(BROWSER_ROUTES).map((route) => route.path).sort());
     const route = findRoute(appRoutes, "/workspaces/find");
     expect(route).not.toBeNull();
     const element = route?.element;
@@ -634,6 +639,13 @@ describe("appRoutes role gating", () => {
     ).toHaveAttribute("href", "/workspaces/find");
   });
 });
+
+function routePaths(routes: RouteObject[]): string[] {
+  return routes.flatMap((route) => [
+    ...(route.path ? [route.path] : []),
+    ...routePaths(route.children ?? []),
+  ]);
+}
 
 function findRoute(routes: RouteObject[], path: string): RouteObject | null {
   for (const route of routes) {

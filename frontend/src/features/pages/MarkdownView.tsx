@@ -57,10 +57,10 @@ import { useTranslation } from "react-i18next";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
-import { CONTEXT_HEADING_ID_PREFIX as CLOBBER_PREFIX, withContextHeadingFragment, classifyContextLink, formatContextPageUrl, isAppLink, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
+import { CONTEXT_HEADING_ID_PREFIX as CLOBBER_PREFIX, withContextHeadingFragment, classifyContextLink, contextNavigationHref, formatContextPageUrl, isAppLink, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
 import { canPreservePageHref } from "../../shared/lib/customPageHref";
 import { createReferenceReturnState } from "../../shared/lib/navigationRecovery";
-import { hasConflictingWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { workspacePath } from "../../shared/lib/workspaceRoutes";
 
 import type { PageInlineComment } from "../../shared/api/pages";
 import {
@@ -669,7 +669,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
       // Unsupported app paths cannot be resolved by probing the server. Other
       // authored URLs keep their existing external-link behavior.
       const unsupportedAppLink = classification.kind === "unknown" && isAppLink(locator)
-        && !referenceNavigationHref(locator, options.workspaceId ?? "");
+        && !contextNavigationHref(locator, options.workspaceId ?? "");
       const internal = target || wikilink || unsupportedAppLink || locator.startsWith(SYSTEM_INDEX_REF_PREFIX) || [
         "page_id", "stable_full", "stable_short", "canonical_route",
         "nav_target", "resource_uri", "workspace_navigation",
@@ -1492,7 +1492,7 @@ function MarkdownLink({
       );
     }
     const navigationHref = behavior?.authenticatedAuthored && behavior.sourceWorkspaceId
-      ? referenceNavigationHref(href, behavior.sourceWorkspaceId)
+      ? contextNavigationHref(href, behavior.sourceWorkspaceId)
       : null;
     const renderedHref = navigationHref ?? href;
     const knownNavigation = classifyContextLink(renderedHref, {
@@ -1535,34 +1535,6 @@ function MarkdownLink({
   return renderLink(children);
 }
 
-function referenceNavigationHref(href: string, workspaceId: string): string | null {
-  if (/[\\\u0000-\u0020\u007f]/.test(href) || href !== href.trim() || href.startsWith("//")) return null;
-  const options = {
-    workspaceId,
-    allowWorkspaceNavigation: true,
-  };
-  let classification = classifyContextLink(href, options);
-  const hashAt = href.indexOf("#");
-  const queryAt = href.indexOf("?");
-  if (classification.kind === "unknown" && queryAt >= 0 && (hashAt < 0 || queryAt < hashAt)) {
-    const query = href.slice(queryAt, hashAt < 0 ? undefined : hashAt);
-    if (!hasConflictingWorkspaceQuery(query)) {
-      const withoutQuery = href.slice(0, queryAt) + (hashAt < 0 ? "" : href.slice(hashAt));
-      const route = classifyContextLink(withoutQuery, options);
-      if (["stable_full", "stable_short", "canonical_route"].includes(route.kind)) classification = route;
-    }
-  }
-  const recognized = classification.kind === "workspace_navigation" ||
-    classification.kind === "canonical_route" ||
-    classification.kind === "stable_full" ||
-    classification.kind === "stable_short";
-  if (!recognized) return null;
-  // Classify the authored path before stripping the origin: URL.pathname
-  // would silently normalize dot segments that must remain rejected.
-  return /^https?:\/\//i.test(href)
-    ? /^https?:\/\/[^/?#]*(.*)$/i.exec(href)?.[1] || "/"
-    : href;
-}
 
 function MarkdownLinkedContent({
   children,

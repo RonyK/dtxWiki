@@ -1,4 +1,4 @@
-.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas bundle-frontend build-wheel docker-image docker-build check-frontend test-backend test-backend-scale test-backend-serial test-backend-benchmarks test-migrations test-graph-view test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
+.PHONY: install dev-db-up dev-db-down migrate seed backend-dev frontend-dev export-schemas gen-client verify-gen-client verify-generated-schemas verify-browser-routes bundle-frontend build-wheel docker-image docker-build check-frontend test-backend test-backend-scale test-backend-serial test-backend-benchmarks test-migrations test-graph-view test-frontend test-e2e test-packaged test-acceptance test-static test-release-gate test lint check-i18n sync-csp
 
 PYTHON ?= python3
 VENV ?= .venv
@@ -77,6 +77,10 @@ verify-generated-schemas:
 	$(MAKE) export-schemas
 	@drift=$$(git status --porcelain --untracked-files=all -- shared/schemas/rest/v1/openapi.json shared/schemas/mcp/v1) || { printf '%s\n' 'Could not read git status; the generated-artifact gate cannot certify anything.' >&2; exit 1; }; if [ -n "$$drift" ]; then printf '%s\n' 'Generated schema artifacts are not current:' "$$drift" 'Run `make export-schemas` and commit the result.' >&2; exit 1; fi
 	$(MAKE) verify-gen-client
+	$(MAKE) verify-browser-routes
+
+verify-browser-routes:
+	$(VENV_PYTHON) scripts/export_browser_routes.py --check
 
 # --fresh: this destination becomes a wheel, and a wheel must contain exactly
 # the bundle it was built from. Deploying to a directory that is being served

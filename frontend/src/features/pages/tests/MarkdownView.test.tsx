@@ -1237,6 +1237,8 @@ describe("MarkdownView", () => {
     const absoluteStableHref = `${window.location.origin}${stableHref}`;
     const externalHref = `https://other.example${itemHref}`;
     const publicHref = `${window.location.origin}/w/sales/pages/launch`;
+    const directoryHref = "/workspaces/find";
+    const graphHref = `/workspaces/${workspaceId}/graph?view=map`;
     const sourceHref = `/workspaces/${sourceWorkspaceId}/context/pages/${sourcePageId}`;
     const { rerender } = render(
       <MemoryRouter initialEntries={[{
@@ -1252,7 +1254,9 @@ describe("MarkdownView", () => {
                 body={[
                   `[Library item](${itemHref})`,
                   `[Spoofed target](${itemHref}&target=other)`,
-                  `[Unknown route](/workspaces/${workspaceId}/admin)`,
+                  `[Unknown route](/workspaces/${workspaceId}/graph/arbitrary)`,
+                  `[Workspaces](${directoryHref})`,
+                  `[Knowledge Map](${graphHref})`,
                   `[Absolute item](${absoluteItemHref})`,
                   `[Absolute stable page](${absoluteStableHref})`,
                   `[Other origin](${externalHref})`,
@@ -1272,6 +1276,8 @@ describe("MarkdownView", () => {
     );
 
     expect(screen.getByRole("link", { name: /Library item/ })).toHaveAttribute("href", itemHref);
+    expect(screen.getByRole("link", { name: "Workspaces" })).toHaveAttribute("href", directoryHref);
+    expect(screen.getByRole("link", { name: /Knowledge Map/ })).toHaveAttribute("href", graphHref);
     // Unsupported app paths remain visible as unavailable references.
     expect(screen.queryByRole("link", { name: "Spoofed target" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Unknown route" })).not.toBeInTheDocument();
@@ -1298,41 +1304,41 @@ describe("MarkdownView", () => {
       <MemoryRouter>
         <MarkdownView
           allowWorkspaceNavigationLinks
-          body={`[Library item](${itemHref})`}
+          body={`[Knowledge Map](${graphHref})`}
           renderPolicy="confirmed-links"
           workspaceId={workspaceId}
         />
       </MemoryRouter>,
     );
-    expect(screen.queryByRole("link", { name: "Library item" })).not.toBeInTheDocument();
-    const askReference = screen.getByRole("button", { name: "Library item" });
+    expect(screen.queryByRole("link", { name: "Knowledge Map" })).not.toBeInTheDocument();
+    const askReference = screen.getByRole("button", { name: "Knowledge Map" });
     await userEvent.click(askReference);
     const askDialog = screen.getByRole("dialog");
     expect(askDialog).toHaveTextContent("This reference could not be confirmed.");
     expect(askDialog.querySelector("code")).toBeNull();
-    expect(askDialog).not.toHaveTextContent(itemHref);
-    expect(askDialog).not.toHaveTextContent(itemId);
+    expect(askDialog).not.toHaveTextContent(graphHref);
+    expect(askDialog).not.toHaveTextContent(workspaceId);
     expect(within(askDialog).queryByRole("button", { name: "Copy authored reference" })).toBeNull();
     await userEvent.click(within(askDialog).getByRole("button", { name: "Close explanation" }));
 
     rerender(
       <MemoryRouter>
         <MarkdownView
-          body={`[Library item](${itemHref})\n\n<a class="inline-tag" data-tag="forged" href="${itemHref}">Forged internal</a>`}
+          body={`[Knowledge Map](${graphHref})\n\n<a class="inline-tag" data-tag="forged" href="${graphHref}">Forged internal</a>`}
           wikilinkMode="plain"
           workspaceId={sourceWorkspaceId}
         />
       </MemoryRouter>,
     );
-    const publicReference = screen.getByRole("button", { name: "Library item" });
+    const publicReference = screen.getByRole("button", { name: "Knowledge Map" });
     expect(screen.queryByRole("link", { name: "Forged internal" })).not.toBeInTheDocument();
     expect(screen.getByText("Forged internal")).toBeInTheDocument();
     await userEvent.click(publicReference);
     const publicDialog = screen.getByRole("dialog");
     expect(publicDialog).toHaveTextContent("This reference cannot be opened from this view.");
     expect(publicDialog.querySelector("code")).toBeNull();
-    expect(publicDialog).not.toHaveTextContent(itemHref);
-    expect(publicDialog).not.toHaveTextContent(itemId);
+    expect(publicDialog).not.toHaveTextContent(graphHref);
+    expect(publicDialog).not.toHaveTextContent(workspaceId);
     expect(within(publicDialog).queryByRole("button", { name: "Copy authored reference" })).toBeNull();
   });
 

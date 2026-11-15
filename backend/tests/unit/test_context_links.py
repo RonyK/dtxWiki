@@ -8,6 +8,7 @@ from backend.services.context_links import (
     LinkContext,
     Resolution,
     extract_links,
+    normalize_short_page_links_with_report,
     rewrite_links_with_report,
 )
 
@@ -153,3 +154,75 @@ def test_index_normalizer_preserves_source_and_aggregates_general_link_fixes(
     assert result.module_fix_counts == (("links", 3),)
     assert len(result.fix_details) == 3
     assert result.failed_module_ids == ()
+
+
+def _rendered_link_state(body):
+    from markdown_it import MarkdownIt
+
+    parser = MarkdownIt("commonmark", {"html": True}).enable("table")
+    children = [child for token in parser.parse(body) for child in token.children or ()]
+    return (
+        [child.type for child in children if child.type in {"link_open", "image"}],
+        [child.attrGet("href") for child in children if child.type == "link_open"],
+        "".join(child.content for child in children if child.type == "text"),
+    )
+
+
+def test_short_autolink_expansion_preserves_visible_bang_and_link_kind():
+    # Budget exception: this pure source-boundary input is independent of the
+    # existing PR's cached-link DB traversal and shared-reference input. Those
+    # cannot expose a mandatory rewrite turning a link into an image after !.
+    workspace_id = UUID("11111111-1111-4111-8111-111111111111")
+    page_id = "22222222-2222-4222-8222-222222222222"
+    href = f"https://wiki.example/p/{page_id}?tab=history#details"
+    body = f"Before !<{href}> after.\n"
+    ctx = LinkContext(
+        object(), workspace_id, None, self_origins=frozenset({"https://wiki.example"})
+    )
+
+    normalized, _, _ = normalize_short_page_links_with_report(body, ctx)
+
+    before_kinds, _, before_text = _rendered_link_state(body)
+    after_kinds, after_hrefs, after_text = _rendered_link_state(normalized)
+    assert before_kinds == after_kinds == ["link_open"]
+    assert after_hrefs == [f"/p/{workspace_id}/{page_id}?tab=history#details"]
+    assert before_text == after_text
+    assert normalize_short_page_links_with_report(normalized, ctx) == (
+        normalized,
+        (),
+        (),
+    )
+
+
+def test_short_link_source_mapping_matches_rendered_character_references():
+    # Budget exception: two distinct lexical inputs are required here. An
+    # ordinary numeric entity exposes a false suffix boundary; an escaped
+    # entity exposes double decoding and a false page identity. Neither the
+    # previous ! adjacency input nor DB fixtures exercise either mechanism.
+    workspace_id = UUID("11111111-1111-4111-8111-111111111111")
+    page_id = "22222222-2222-4222-8222-222222222222"
+    encoded_id = "&#50;" + page_id[1:]
+    suffix = "?tab=history&amp;view=read&#35;details"
+    definition = f'[target]: </p/{encoded_id}{suffix}> "Kept title"'
+    escaped = f"[Escaped](/p/\\{encoded_id}#untouched)"
+    body = f"[Entity][target]\n\n{escaped}\n\n{definition}\n"
+    ctx = LinkContext(object(), workspace_id, None)
+
+    normalized, _, _ = normalize_short_page_links_with_report(body, ctx)
+
+    assert normalized == body.replace(
+        definition, f'[target]: </p/{workspace_id}/{page_id}{suffix}> "Kept title"'
+    )
+    before_kinds, before_hrefs, before_text = _rendered_link_state(body)
+    after_kinds, after_hrefs, after_text = _rendered_link_state(normalized)
+    assert before_kinds == after_kinds == ["link_open", "link_open"]
+    assert after_hrefs == [
+        f"/p/{workspace_id}/{page_id}?tab=history&view=read#details",
+        before_hrefs[1],
+    ]
+    assert before_text == after_text
+    assert normalize_short_page_links_with_report(normalized, ctx) == (
+        normalized,
+        (),
+        (),
+    )

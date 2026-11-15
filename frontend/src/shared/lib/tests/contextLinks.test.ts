@@ -47,6 +47,22 @@ describe("Context link locators", () => {
       kind: "workspace_navigation", stableUrl: inbox,
     });
     expect(classifyContextLink(inbox).kind).toBe("unknown");
+    const directory = "/workspaces/FIND";
+    const graph = `/workspaces/${workspaceId}/graph?view=map`;
+    expect(classifyContextLink(directory, { allowWorkspaceNavigation: true })).toMatchObject({
+      kind: "workspace_navigation", stableUrl: directory,
+    });
+    expect(classifyContextLink(graph, { allowWorkspaceNavigation: true })).toMatchObject({
+      kind: "workspace_navigation", stableUrl: graph,
+    });
+    expect(classifyContextLink(
+      `/workspaces/${workspaceId}/graph/arbitrary`,
+      { allowWorkspaceNavigation: true },
+    ).kind).toBe("unknown");
+    expect(classifyContextLink(
+      `${directory}?target=${pageId}`,
+      { allowWorkspaceNavigation: true },
+    ).kind).toBe("unknown");
   });
 
   it("keeps authored opaque schemes external and rejects normalization into trusted routes", () => {
