@@ -98,7 +98,7 @@
       "title": "제목",
       "page_type": "페이지 유형",
       "outline": "개요",
-      "concept_path": "개념 경로",
+      "stable_url": "문서 URL",
       "queries": "평가 질의",
       "similarity": "유사도",
       "session_count": "함께 읽은 AI 대화(최근 30일)",

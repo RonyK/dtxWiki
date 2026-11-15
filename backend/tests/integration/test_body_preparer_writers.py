@@ -7,6 +7,7 @@ by the normalizer or preparer under test.
 """
 
 from unicodedata import normalize
+from uuid import uuid4
 
 from sqlalchemy import func, select
 
@@ -560,7 +561,9 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             page_service,
             workspace_slug="default",
             bundle={
-                f"context/{slug}.md": "---\ntitle: Golden\ntype: concept\n---\n" + RAW
+                f"/p/{workspace_id}/{uuid4()}": (
+                    f"---\ntitle: Golden\nslug: {slug}\ntype: concept\n---\n" + RAW
+                )
             },
             actor_id=ACTOR_ID,
             actor_provenance="browser_session",

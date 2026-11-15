@@ -2248,8 +2248,26 @@ def test_trace_capture_normalizes_nested_resource_ids_to_surface_ids(
             payload={
                 "data": {
                     "ranked_results": [
-                        {"id": str(claim.id), "type": "context_claim"},
-                        {"id": str(artifact.id), "type": "library_artifact"},
+                        {
+                            "id": str(claim.id),
+                            "type": "context_claim",
+                            "source_ref": {
+                                "kind": "context_page",
+                                "id": str(page.id),
+                            },
+                        },
+                        {
+                            "id": str(artifact.id),
+                            "type": "library_artifact",
+                            "source_ref": {
+                                "kind": "library_artifact",
+                                "id": str(artifact.id),
+                            },
+                            "entity_ref": {
+                                "kind": "library_item",
+                                "id": str(source.id),
+                            },
+                        },
                     ]
                 }
             },

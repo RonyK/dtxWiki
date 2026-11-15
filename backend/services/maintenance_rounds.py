@@ -28,6 +28,7 @@ from backend.services.actor_visible_read import (
     context_page_visible,
 )
 from backend.services.client_round_state import ClientRoundStateCodec
+from backend.services.context_links import format_stable_url
 from backend.services.coverage_service import coverage_candidate_visible
 from backend.services.delegated_tasks import (
     expire_stale_leases,
@@ -37,6 +38,7 @@ from backend.services.library_canonical import (
     get_canonical_library_version,
     get_canonical_markdown_artifact,
 )
+from backend.services.maintenance_answer_contracts import answer_schema, validate_answer
 from backend.services.okf import EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
 
 if TYPE_CHECKING:
@@ -398,7 +400,16 @@ def submit_answers(
             continue
         validator = TASK_VALIDATORS.get(task.task_type)
         stager = stagers.get(task.task_type)
-        normalized = validator(answer) if validator is not None else None
+        try:
+            # Validators are pure; an internal failure must not roll back
+            # valid answers already staged in this batch.
+            normalized = validator(answer) if validator is not None else None
+        except Exception:
+            logger.exception("Failed to validate delegated task %s", task_id)
+            transition_task(session, task, "pending")
+            task.lease_expires_at = None
+            rejected.append((task_id, "staging_failed"))
+            continue
         if normalized is None or stager is None:
             transition_task(session, task, "pending")
             task.lease_expires_at = None
@@ -512,19 +523,7 @@ def _build_folder_nav_summary_card(
             "that belongs in sibling folders."
         ),
         untrusted_context="\n".join(lines),
-        response_schema={
-            "type": "object",
-            "properties": {
-                "nav_summary": {"type": "string", "minLength": 1, "maxLength": 160},
-                "negative_cues": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "maxItems": 5,
-                },
-            },
-            "required": ["nav_summary"],
-            "additionalProperties": False,
-        },
+        response_schema=answer_schema(task.task_type),
     )
 
 
@@ -559,27 +558,7 @@ def _build_coverage_gap_card(
             f"{UNTRUSTED_CONTEXT_NOTICE}\n"
             f"{json.dumps(context, ensure_ascii=False, sort_keys=True, default=str)}"
         ),
-        response_schema={
-            "type": "object",
-            "properties": {
-                "verdict": {
-                    "enum": ["compile_candidate", "augment_existing", "dismiss"]
-                },
-                "rationale": {"type": "string", "maxLength": 500},
-                "proposal": {
-                    "type": ["object", "null"],
-                    "properties": {
-                        "title": {"type": "string"},
-                        "outline": {"type": "string"},
-                    },
-                    "required": ["title", "outline"],
-                    "additionalProperties": False,
-                },
-                "concept_path": {"type": ["string", "null"]},
-            },
-            "required": ["verdict", "rationale"],
-            "additionalProperties": False,
-        },
+        response_schema=answer_schema(task.task_type),
     )
 
 
@@ -627,24 +606,7 @@ def _build_page_meta_refresh_card(
             "aliases": list(page.aliases or []),
             "body_excerpt": version.body_md[:6000],
         },
-        response_schema={
-            "type": "object",
-            "properties": {
-                "aliases": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": ALIAS_MAX_LENGTH,
-                    },
-                    "maxItems": 5,
-                },
-                "nav_description": {"type": "string", "maxLength": 200},
-                "placement_hint": {"enum": ["keep", "move", "unsure", None]},
-            },
-            "required": ["aliases", "nav_description"],
-            "additionalProperties": False,
-        },
+        response_schema=answer_schema(task.task_type),
     )
 
 
@@ -693,25 +655,7 @@ def _build_folder_overview_card(
                 for title, kind, nav_summary in children
             ],
         },
-        response_schema={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "minLength": 1, "maxLength": 200},
-                "outline": {
-                    "type": "array",
-                    "minItems": 3,
-                    "maxItems": 10,
-                    "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 200,
-                    },
-                },
-                "body_md": {"type": "string", "minLength": 1},
-            },
-            "required": ["title", "outline", "body_md"],
-            "additionalProperties": False,
-        },
+        response_schema=answer_schema(task.task_type),
     )
 
 
@@ -791,33 +735,7 @@ def _build_near_duplicate_card(
             },
             "similarity": task.payload.get("similarity"),
         },
-        response_schema={
-            "type": "object",
-            "properties": {
-                "verdict": {"enum": ["merge", "distinct"]},
-                "rationale": {"type": "string", "maxLength": 500},
-                "negative_cues": {
-                    "type": "array",
-                    "maxItems": 5,
-                    "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 200,
-                    },
-                },
-            },
-            "required": ["verdict", "rationale"],
-            "additionalProperties": False,
-            "allOf": [
-                {
-                    "if": {"properties": {"verdict": {"const": "distinct"}}},
-                    "then": {
-                        "required": ["negative_cues"],
-                        "properties": {"negative_cues": {"minItems": 1}},
-                    },
-                }
-            ],
-        },
+        response_schema=answer_schema(task.task_type),
     )
 
 
@@ -867,16 +785,7 @@ def _build_import_classify_card(
             **dict(task.payload or {}),
             "text_excerpt": artifact.conversion_detail.index_text[:6000],
         },
-        response_schema={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "minLength": 1, "maxLength": 120},
-                "page_type": {"enum": list(CONTEXT_PAGE_TYPES)},
-                "placement_hint": {"type": "string", "maxLength": 500},
-            },
-            "required": ["title", "page_type", "placement_hint"],
-            "additionalProperties": False,
-        },
+        response_schema=answer_schema(task.task_type),
     )
 
 
@@ -914,15 +823,7 @@ def _build_stale_contradiction_card(
             "source. This is advisory; do not edit either page."
         ),
         context={**dict(task.payload or {}), "dependent_title": page.title},
-        response_schema={
-            "type": "object",
-            "properties": {
-                "contradicts": {"enum": ["yes", "no", "unclear"]},
-                "rationale": {"type": "string", "maxLength": 1000},
-            },
-            "required": ["contradicts", "rationale"],
-            "additionalProperties": False,
-        },
+        response_schema=answer_schema(task.task_type),
     )
 
 
@@ -960,7 +861,7 @@ def _visible_golden_samples(
             {
                 "page_id": str(page.id),
                 "title": page.title,
-                "concept_path": f"/context/{page.slug}.md",
+                "stable_url": f"/p/{workspace_id}/{page.id}",
                 "citation_count": sample.get("citation_count"),
             }
         )
@@ -975,7 +876,7 @@ def _build_golden_query_card(
         payload["page_samples"] = _visible_golden_samples(
             session, task.workspace_id, payload.get("page_samples")
         )
-    # Drop the operator golden set entirely: neither the expected concept paths
+    # Drop the operator golden set: neither expected document kinds and UUIDs
     # nor the free-text query (which can name an archived/hidden page, codename,
     # or customer) can be re-authorized against the leasing actor after the fact.
     # page_samples (re-resolved above) already give the client enough context to
@@ -985,41 +886,16 @@ def _build_golden_query_card(
     return _payload_card(
         task,
         instruction=(
-            "Propose retrieval evaluation queries and expected concept paths. "
+            "Propose retrieval evaluation queries with expected document kinds "
+            "and UUIDs. "
             "Return candidates only; never modify the golden-set file."
         ),
         context=payload,
-        response_schema={
-            "type": "object",
-            "properties": {
-                "queries": {
-                    "type": "array",
-                    "maxItems": 10,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": SEARCH_QUERY_MAX_LENGTH,
-                            },
-                            "expected_concept_path": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 512,
-                            },
-                        },
-                        "required": ["query", "expected_concept_path"],
-                        "additionalProperties": False,
-                    },
-                }
-            },
-            "required": ["queries"],
-            "additionalProperties": False,
-        },
+        response_schema=answer_schema(task.task_type),
     )
 
 
+@validate_answer("folder_nav_summary")
 def _validate_folder_nav_summary(answer: dict[str, Any]) -> dict[str, Any] | None:
     if set(answer) - {"nav_summary", "negative_cues"}:
         return None
@@ -1037,8 +913,9 @@ def _validate_folder_nav_summary(answer: dict[str, Any]) -> dict[str, Any] | Non
     return {"nav_summary": summary.strip(), "negative_cues": cues}
 
 
+@validate_answer("coverage_gap_review")
 def _validate_coverage_gap(answer: dict[str, Any]) -> dict[str, Any] | None:
-    if set(answer) - {"verdict", "rationale", "proposal", "concept_path"}:
+    if set(answer) - {"verdict", "rationale", "proposal", "page_id"}:
         return None
     verdict = answer.get("verdict")
     rationale = answer.get("rationale")
@@ -1052,19 +929,23 @@ def _validate_coverage_gap(answer: dict[str, Any]) -> dict[str, Any] | None:
             return None
         if not all(isinstance(proposal[key], str) for key in ("title", "outline")):
             return None
-    concept_path = answer.get("concept_path")
-    if concept_path is not None and not isinstance(concept_path, str):
-        return None
-    if verdict == "augment_existing" and not concept_path:
+    page_id = answer.get("page_id")
+    if page_id is not None:
+        try:
+            page_id = str(UUID(page_id))
+        except (ValueError, TypeError, AttributeError):
+            return None
+    if verdict == "augment_existing" and not page_id:
         return None
     return {
         "verdict": verdict,
         "rationale": rationale,
         "proposal": proposal,
-        **({"concept_path": concept_path} if concept_path is not None else {}),
+        **({"page_id": page_id} if page_id is not None else {}),
     }
 
 
+@validate_answer("page_meta_refresh")
 def _validate_page_meta(answer: dict[str, Any]) -> dict[str, Any] | None:
     if set(answer) - {"aliases", "nav_description", "placement_hint"}:
         return None
@@ -1093,6 +974,7 @@ def _validate_page_meta(answer: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+@validate_answer("folder_overview_draft")
 def _validate_folder_overview(answer: dict[str, Any]) -> dict[str, Any] | None:
     if set(answer) != {"title", "outline", "body_md"}:
         return None
@@ -1121,6 +1003,7 @@ def _validate_folder_overview(answer: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+@validate_answer("near_duplicate_verdict")
 def _validate_near_duplicate(answer: dict[str, Any]) -> dict[str, Any] | None:
     if set(answer) - {"verdict", "rationale", "negative_cues"}:
         return None
@@ -1148,6 +1031,7 @@ def _validate_near_duplicate(answer: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+@validate_answer("import_batch_classify")
 def _validate_import_classification(
     answer: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -1165,6 +1049,7 @@ def _validate_import_classification(
     return dict(answer)
 
 
+@validate_answer("stale_contradiction_check")
 def _validate_stale_contradiction(
     answer: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -1184,6 +1069,7 @@ def _validate_stale_contradiction(
     }
 
 
+@validate_answer("golden_query_candidates")
 def _validate_golden_queries(answer: dict[str, Any]) -> dict[str, Any] | None:
     if set(answer) != {"queries"} or not isinstance(answer["queries"], list):
         return None
@@ -1193,22 +1079,27 @@ def _validate_golden_queries(answer: dict[str, Any]) -> dict[str, Any] | None:
     for candidate in answer["queries"]:
         if not isinstance(candidate, dict) or set(candidate) != {
             "query",
-            "expected_concept_path",
+            "expected_kind",
+            "expected_id",
         }:
             return None
         if (
             not isinstance(candidate["query"], str)
             or not candidate["query"].strip()
             or len(candidate["query"].strip()) > SEARCH_QUERY_MAX_LENGTH
-            or not isinstance(candidate["expected_concept_path"], str)
-            or not candidate["expected_concept_path"].strip()
-            or len(candidate["expected_concept_path"].strip()) > 512
+            or candidate["expected_kind"]
+            not in {"context_page", "library_item", "agent_page"}
         ):
+            return None
+        try:
+            expected_id = str(UUID(candidate["expected_id"]))
+        except (ValueError, TypeError, AttributeError):
             return None
         normalized.append(
             {
                 "query": candidate["query"].strip(),
-                "expected_concept_path": candidate["expected_concept_path"].strip(),
+                "expected_kind": candidate["expected_kind"],
+                "expected_id": expected_id,
             }
         )
     return {"queries": normalized}
@@ -1251,6 +1142,11 @@ def _stage_coverage_gap_verdict(
     )
     if gap is None:
         raise ValueError("coverage gap not found")
+    if answer["verdict"] == "augment_existing":
+        answer = {
+            **answer,
+            "stable_url": format_stable_url(task.workspace_id, answer["page_id"]),
+        }
     if answer["verdict"] == "dismiss":
         gap.status = "dismissed"
         gap.resolved_at = now

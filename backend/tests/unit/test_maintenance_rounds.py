@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import func, select
 
 from backend.models.coverage import KnowledgeCoverageGap
@@ -28,6 +29,7 @@ from backend.services.maintenance_rounds import (
     lease_round,
     submit_answers,
 )
+from backend.tests.conftest import captured_log_records
 
 NOW = datetime(2026, 7, 12, 1, 0, tzinfo=UTC)
 
@@ -302,7 +304,7 @@ def test_task_target_visible_gates_coverage_gap_with_restricted_candidate(
                     "id": str(item.id),
                     "kind": "library_item",
                     "title": "Restricted Candidate",
-                    "concept_path": "",
+                    "page_id": None,
                     "match_reason": "trigram",
                 }
             ],
@@ -366,7 +368,7 @@ def test_coverage_candidate_dangling_agent_fails_closed(session_factory):
                     "id": str(uuid4()),  # no such agent page (deleted)
                     "kind": "agent_page",
                     "title": "Deleted Secret Persona",
-                    "concept_path": "",
+                    "page_id": None,
                     "match_reason": "trigram",
                 }
             ],
@@ -1336,7 +1338,8 @@ def test_generated_answer_string_limits_match_wire_schema_contract():
                 "queries": [
                     {
                         "query": "q" * 2049,
-                        "expected_concept_path": "/context/page.md",
+                        "expected_kind": "context_page",
+                        "expected_id": "00000000-0000-4000-8000-000000000001",
                     }
                 ]
             }
@@ -1349,7 +1352,22 @@ def test_generated_answer_string_limits_match_wire_schema_contract():
                 "queries": [
                     {
                         "query": "valid query",
-                        "expected_concept_path": "/" + "p" * 512,
+                        "expected_kind": "context_page",
+                        "expected_id": "invalid",
+                    }
+                ]
+            }
+        )
+        is None
+    )
+    assert (
+        golden(
+            {
+                "queries": [
+                    {
+                        "query": "valid query",
+                        "expected_kind": [],
+                        "expected_id": "00000000-0000-4000-8000-000000000001",
                     }
                 ]
             }
@@ -1442,10 +1460,15 @@ def test_answer_for_task_outside_signed_batch_is_rejected(session_factory):
         assert outside_task.status == "pending"
 
 
-def test_stager_exception_never_leaves_task_staged(
+@pytest.mark.parametrize("failure_stage", ["stager", "validator"])
+def test_task_exception_does_not_abort_valid_sibling(
     session_factory,
     monkeypatch,
+    failure_stage,
 ):
+    # The validator parameter adds one DB case: a pre-staging exception must
+    # preserve the batch, which the stager SAVEPOINT and pure input validation
+    # cannot prove. The original stager failure remains covered separately.
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         task = _seed_folder_task(session, workspace_id)
@@ -1456,11 +1479,20 @@ def test_stager_exception_never_leaves_task_staged(
         token = round_.resume_token
         task_id = task.id
 
-    def fail_stager(*_args, **_kwargs):
-        raise RuntimeError("staging failed")
+    failure = RuntimeError(f"{failure_stage} failed")
 
-    monkeypatch.setitem(TASK_STAGERS, "folder_nav_summary", fail_stager)
-    with session_factory.begin() as session:
+    def fail_step(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setitem(
+        TASK_STAGERS if failure_stage == "stager" else TASK_VALIDATORS,
+        "folder_nav_summary",
+        fail_step,
+    )
+    with (
+        captured_log_records("backend.services.maintenance_rounds") as records,
+        session_factory.begin() as session,
+    ):
         outcome = submit_answers(
             session,
             workspace_id=workspace_id,
@@ -1480,11 +1512,19 @@ def test_stager_exception_never_leaves_task_staged(
         )
         assert outcome.staged == (sibling.id,)
         assert outcome.rejected == ((task_id, "staging_failed"),)
+        assert any(
+            str(task_id) in record.getMessage()
+            and record.exc_info
+            and record.exc_info[1] is failure
+            for record in records
+        )
     with session_factory() as session:
         task = session.get(ClientDelegatedTask, task_id)
         sibling = session.get(ClientDelegatedTask, sibling.id)
         assert task.status == "pending"
+        assert task.lease_expires_at is None
         assert sibling.status == "staged"
+        assert sibling.lease_expires_at is None
         assert session.scalar(select(func.count(LintFinding.id))) == 1
 
 
@@ -1543,7 +1583,7 @@ def test_expired_submission_returns_task_to_pending_immediately(session_factory)
         assert task.lease_expires_at is None
 
 
-def test_dismiss_coverage_gap_stages_verdict_and_resolves_gap(session_factory):
+def test_coverage_gap_stages_dismissal_and_selected_augmentation(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         task = _seed_gap(session, workspace_id, 99)
@@ -1574,6 +1614,41 @@ def test_dismiss_coverage_gap_stages_verdict_and_resolves_gap(session_factory):
         assert gap.status == "dismissed"
         assert gap.resolved_at == NOW
         assert finding.rule_id == "maintenance.coverage_gap_verdict"
+
+        page_id = uuid4()
+        augment_task = _seed_gap(session, workspace_id, 100)
+        augment_round = lease_round(
+            session, workspace_id=workspace_id, codec=_codec(), now=NOW
+        )
+        augmentation = submit_answers(
+            session,
+            workspace_id=workspace_id,
+            resume_token=augment_round.resume_token,
+            answers={
+                str(augment_task.id): {
+                    "verdict": "augment_existing",
+                    "rationale": "Extend the selected page.",
+                    "page_id": str(page_id),
+                }
+            },
+            codec=_codec(),
+            actor_kind="mcp_client",
+            actor_id="client-1",
+            now=NOW,
+        )
+        augment_finding = session.scalar(
+            select(LintFinding).where(
+                LintFinding.fingerprint == f"cdt:{augment_task.id}"
+            )
+        )
+        action = json.loads(augment_finding.suggested_action)
+        assert augmentation.staged == (augment_task.id,)
+        assert action["page_id"] == str(page_id)
+        assert action["stable_url"] == f"/p/{workspace_id}/{page_id}"
+        assert (augment_finding.target_type, augment_finding.target_id) == (
+            "knowledge_coverage_gap",
+            augment_task.target_id,
+        )
 
 
 def test_maintenance_finding_survives_regular_lint_reconciliation(session_factory):

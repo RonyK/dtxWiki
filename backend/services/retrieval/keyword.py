@@ -40,6 +40,7 @@ from backend.services.actor_visible_read import (
     actor_can_read_feedback,
     change_set_visible,
 )
+from backend.services.context_links import format_stable_url
 from backend.services.context_visibility import visible_search_version_ids
 from backend.services.library_canonical import (
     get_canonical_library_version,
@@ -47,7 +48,7 @@ from backend.services.library_canonical import (
     get_effective_library_markdown,
     list_canonical_library_artifacts,
 )
-from backend.services.okf import context_concept_path, library_concept_path
+from backend.services.okf import library_stable_url
 from backend.services.retrieval.outline_location import (
     heading_location_for_query,
     public_heading_path,
@@ -288,7 +289,7 @@ class KeywordRetriever:
                         citation_available=True,
                         summary_markdown=version.body_md,
                         archived=page.lifecycle_status == "archived",
-                        concept_path=context_concept_path(page.slug),
+                        stable_url=format_stable_url(page.workspace_id, page.id),
                         concept_type=page.page_type,
                         heading_path=public_heading_path(location),
                         section_id=(
@@ -354,7 +355,7 @@ class KeywordRetriever:
                         summary_markdown=version.body_md,
                         citation_available=True,
                         archived=claim.status != "active",
-                        concept_path=context_concept_path(page.slug),
+                        stable_url=format_stable_url(page.workspace_id, page.id),
                         concept_type=page.page_type,
                         heading_path=public_heading_path(location),
                         section_id=(
@@ -425,7 +426,7 @@ class KeywordRetriever:
                         title=item.title or item.uri,
                         summary_markdown=body_md,
                         citation_available=canonical_artifact is not None,
-                        concept_path=library_concept_path(item.id),
+                        stable_url=library_stable_url(item.workspace_id, item.id),
                         concept_type="library_item",
                         heading_path=public_heading_path(location),
                         section_id=(
@@ -503,7 +504,7 @@ class KeywordRetriever:
                         citation_available=True,
                         summary_markdown=artifact.conversion_detail.index_text,
                         location_fallback=("library_item", item.id),
-                        concept_path=library_concept_path(item.id),
+                        stable_url=library_stable_url(item.workspace_id, item.id),
                         concept_type="library_artifact",
                         heading_path=public_heading_path(location),
                         section_id=(
@@ -513,6 +514,7 @@ class KeywordRetriever:
                             "kind": "library_artifact",
                             "id": str(artifact.id),
                         },
+                        entity_ref={"kind": "library_item", "id": str(item.id)},
                     ),
                 )
             )
@@ -1061,12 +1063,13 @@ def _ranked(
     summary_markdown: str | None = None,
     location_fallback: tuple[str, UUID] | None = None,
     archived: bool = False,
-    concept_path: str | None = None,
+    stable_url: str | None = None,
     concept_type: str | None = None,
     heading_path: list[str] | None = None,
     section_id: str | None = None,
     version_id: UUID | None = None,
     source_ref: dict[str, str] | None = None,
+    entity_ref: dict[str, str] | None = None,
 ) -> RankedResult:
     result = RankedResult(
         id=result_id,
@@ -1076,12 +1079,13 @@ def _ranked(
         score=1000.0 - hit.rank,
         citation_available=citation_available,
         archived=archived,
-        concept_path=concept_path,
+        stable_url=stable_url,
         concept_type=concept_type,
         version_id=version_id or hit.version_id,
         heading_path=heading_path,
         section_id=section_id,
         source_ref=source_ref,
+        entity_ref=entity_ref,
         match_reason="keyword",
     )
     result._summary_markdown = summary_markdown

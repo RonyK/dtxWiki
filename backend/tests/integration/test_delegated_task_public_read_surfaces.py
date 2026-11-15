@@ -249,7 +249,7 @@ def test_bundle_hash_changes_on_publish(page_service, session_factory):
         )
     assert hash_before == hash_again  # stable without changes
 
-    page_service.write_page(
+    published = page_service.write_page(
         workspace_slug="default",
         slug="bundle-invalidate",
         title="Bundle Invalidate",
@@ -264,7 +264,7 @@ def test_bundle_hash_changes_on_publish(page_service, session_factory):
             session, workspace_id, actor=None, workspace_slug="default"
         )
     assert hash_after != hash_before  # the CAG invalidation signal
-    assert "<!-- dtxwiki:file context/bundle-invalidate.md -->" in markdown
+    assert f"<!-- dtxwiki:file /p/{workspace_id}/{published.id} -->" in markdown
 
 
 # --- guide routing (E-3) ---------------------------------------------------------

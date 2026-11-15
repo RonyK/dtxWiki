@@ -169,7 +169,8 @@ def test_entity_name_collision_golden_returns_all_ranked_matches(session_factory
             )
             assert len(payload.ranked_results) == payload.total_count == 2, query
             assert [hit.match_reason for hit in payload.ranked_results] == [
-                "exact_title", "exact_alias"
+                "exact_title",
+                "exact_alias",
             ], query
 
 
@@ -263,17 +264,17 @@ def test_per_lane_golden_baselines_are_green(session_factory):
     golden = [
         GoldenQuery(
             "Lane Exact Guide",
-            [f"/context/{exact.slug}.md"],
+            [f"context_page:{exact.id}"],
             lane="entity",
         ),
         GoldenQuery(
             "Lane Deploymnt Checklis",
-            [f"/context/{trigram.slug}.md"],
+            [f"context_page:{trigram.id}"],
             lane="trigram",
         ),
         GoldenQuery(
             "photon calibration",
-            [f"/context/{bm25.slug}.md"],
+            [f"context_page:{bm25.id}"],
             lane="bm25",
         ),
     ]
@@ -300,6 +301,5 @@ def test_per_lane_golden_baselines_are_green(session_factory):
             limit=3,
         )
     assert all(
-        result.match_reason != "trigram"
-        for result in below_threshold.ranked_results
+        result.match_reason != "trigram" for result in below_threshold.ranked_results
     )

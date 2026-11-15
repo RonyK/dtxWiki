@@ -834,7 +834,7 @@ describe("GraphView", () => {
     expect(within(details!).getByText("Published")).toBeInTheDocument();
     await user.click(rowByLabel(contents, "Architecture Notes"));
     expect(within(details!).getByRole("link", { name: "Open" }))
-      .toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+      .toHaveAttribute("href", "/p/00000000-0000-4000-8000-000000000001/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
   });
 
   it("scopes Escape to Graph View and restores root focus for DOM and Canvas selections", async () => {
@@ -1092,7 +1092,7 @@ describe("GraphView", () => {
       const controls = details.querySelector(".graph-detail-actions");
       const title = details.querySelector("h5")!;
       expect(within(details).getByRole("link", { name: i18n.t("graph:graph.open") }))
-        .toHaveAttribute("href", `/workspaces/${workspaceId}/context/pages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`);
+        .toHaveAttribute("href", `/p/${workspaceId}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`);
       expect(controls).not.toBeNull();
       expect(controls!.querySelectorAll("a,button")).toHaveLength(5);
       expect(title.compareDocumentPosition(controls!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1167,7 +1167,7 @@ describe("GraphView", () => {
     const canvas = screen.getByTestId("mock-graph-canvas");
     const related = rowByLabel(list, "Architecture Notes").closest("li")!;
     const open = within(related).getByRole("link", { name: "Open document: Architecture Notes" });
-    expect(open).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    expect(open).toHaveAttribute("href", "/p/00000000-0000-4000-8000-000000000001/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     expect(open).toHaveAttribute("tabindex", "-1");
     expect(within(list).getByRole("button", { name: /^Two or more steps away/ })).toHaveAttribute("aria-expanded", "false");
 

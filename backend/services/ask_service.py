@@ -616,7 +616,7 @@ class AskService:
                     "title": result.title,
                     "score": f"{result.score:.2f}",
                     "match_reason": result.match_reason or "",
-                    "concept_path": result.concept_path or "",
+                    "stable_url": result.stable_url or "",
                 }
             )
         pack_text = "\n".join(lines)

@@ -420,18 +420,6 @@
             "title": "Kind",
             "type": "string"
           },
-          "path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Path"
-          },
           "score": {
             "title": "Score",
             "type": "integer"

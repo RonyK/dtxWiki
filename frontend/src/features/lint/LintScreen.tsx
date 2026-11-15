@@ -1747,7 +1747,7 @@ const DISPLAY_ACTION_FIELDS = new Set([
   "title",
   "page_type",
   "outline",
-  "concept_path",
+  "stable_url",
   "queries",
   "similarity",
   "session_count",

@@ -1,5 +1,4 @@
 import type { RankedSearchResult } from "../../shared/api/operations";
-import { displayConceptPath } from "../../shared/lib/conceptPath";
 
 // Shared by Search and the reference picker so a result reads the same way.
 
@@ -8,14 +7,7 @@ export function normalizedText(value: string) {
 }
 
 export function resultLocation(result: RankedSearchResult): string[] {
-  if (result.location?.length) return result.location;
-  if (!result.concept_path) return [];
-  const path = displayConceptPath(result.concept_path);
-  // Generated Context slugs are storage identifiers. Human slugs remain useful
-  // as a fallback when the server has no tree placement for the result.
-  if ((result.type === "context_page" || result.type === "context_claim") &&
-    /^\/?context\/p-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(path)) return [];
-  return [path];
+  return result.location ?? [];
 }
 
 export function presentLocation(location: string[]) {

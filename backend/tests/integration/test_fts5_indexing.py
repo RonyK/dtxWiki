@@ -88,7 +88,7 @@ def test_context_write_projects_contextual_header_and_stripped_body(
 
     assert "Title: Quasar Operations" in row["context_header"]
     assert "Aliases: QSR Runbook" in row["context_header"]
-    assert "Path: /context/fts-context-header.md" in row["context_header"]
+    assert "Path:" not in row["context_header"]
     assert "Summary: The quasar rollout procedure" in row["context_header"]
     assert "Heading: Quasar Operations" in row["context_header"]
     assert row["body"].startswith("# Quasar Operations")

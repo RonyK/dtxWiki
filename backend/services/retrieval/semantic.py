@@ -26,6 +26,7 @@ from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
 )
 from backend.schemas.read import RankedResult, SearchFilters
+from backend.services.context_links import format_stable_url
 from backend.services.context_visibility import visible_search_version_ids
 from backend.services.entity_ref import (
     EntityKind,
@@ -37,7 +38,7 @@ from backend.services.library_canonical import (
     get_canonical_markdown_artifact,
     get_effective_library_markdown,
 )
-from backend.services.okf import context_concept_path, library_concept_path
+from backend.services.okf import library_stable_url
 from backend.services.retrieval.keyword import (
     EXCLUDED_LIBRARY_LIFECYCLE_STATUSES,
     RESTRICTED_LIBRARY_TRUST_LEVELS,
@@ -211,7 +212,7 @@ class SemanticRetriever:
                 return None
             title = item.title or item.uri
             concept_type = "library_item"
-            concept_path = library_concept_path(item.id)
+            stable_url = library_stable_url(item.workspace_id, item.id)
             result_id = item.id
             result_kind = EntityKind.LIBRARY_ITEM
             entity_ref = library_item_entity_ref(
@@ -248,7 +249,7 @@ class SemanticRetriever:
                 return None
             title = page.title
             concept_type = page.page_type
-            concept_path = context_concept_path(page.slug)
+            stable_url = format_stable_url(page.workspace_id, page.id)
             result_id = page.id
             result_kind = EntityKind.CONTEXT_PAGE
             entity_ref = context_page_entity_ref(
@@ -276,7 +277,7 @@ class SemanticRetriever:
             snippet=" ".join(chunk.chunk_text.split())[:_SNIPPET_CHARS],
             score=similarity,
             citation_available=True,
-            concept_path=concept_path,
+            stable_url=stable_url,
             concept_type=concept_type,
             version_id=chunk.source_version_id,
             heading_path=public_heading_path(location),

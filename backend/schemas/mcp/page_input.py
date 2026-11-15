@@ -53,10 +53,14 @@ def validate_read_concept_path_input(value: object) -> str:
                 "read_concept accepts exact dtxwiki://index/context/<id> or "
                 "dtxwiki://index/library/<id> refs; pass folder refs to get_index.node."
             )
-    elif raw.startswith("/library/"):
-        suffix = raw[len("/library/") :]
-        if not suffix.endswith(".md") or not suffix[: -len(".md")]:
-            raise ValueError("Invalid Library path")
+    elif raw.startswith("/workspaces/"):
+        from backend.services.context_link_targets import (
+            _parse_workspace_navigation_reference,
+        )
+
+        parsed = _parse_workspace_navigation_reference(raw)
+        if parsed is None or parsed[:2] != ("library", "item"):
+            raise ValueError("Expected a canonical Library item URL")
     else:
         validate_page_input(value)
     return raw
@@ -74,7 +78,7 @@ MCPReadConceptPathInput = Annotated[
                 "Exact dtxwiki://index/context/<id> or dtxwiki://index/library/<id> "
                 "Markdown destination from get_index, unchanged with the same "
                 "workspace_id; or a Context page UUID, stable URL, or "
-                "/library/<id>.md lookup path."
+                "Library /workspaces/<workspace_id>/library/items/<id> URL."
             ),
         }
     ),

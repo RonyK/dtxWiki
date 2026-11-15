@@ -528,19 +528,6 @@
             "default": null,
             "title": "Matched Name"
           },
-          "path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "Library lookup path only.",
-            "title": "Path"
-          },
           "score": {
             "title": "Score",
             "type": "number"

@@ -378,7 +378,10 @@ def test_citation_source_neighbors_name_the_library_item(session_factory, page_s
             direction="out",
         )
         assert [n.title for n in neighbors] == ["Cited Source"]
-        assert neighbors[0].path == f"/library/{item.id}.md"
+        assert (
+            neighbors[0].stable_url
+            == f"/workspaces/{workspace_id}/library/items/{item.id}"
+        )
 
 
 def test_restricted_citation_source_hidden_from_viewer(session_factory, page_service):

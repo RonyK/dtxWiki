@@ -3,7 +3,7 @@ import { isWorkspaceUuid } from "./workspaceIdentity";
 export type SearchResultLinkInput = {
   id: string;
   type: string;
-  concept_path?: string | null;
+  stable_url?: string | null;
   source_ref?: Record<string, string> | null;
 };
 
@@ -27,6 +27,17 @@ export function searchResultLink<T extends SearchResultLinkInput>(
   workspaceId: string,
 ): SearchResultLink | null {
   if (!isWorkspaceUuid(workspaceId)) return null;
+  if (result.stable_url) {
+    const prefix = `/workspaces/${workspaceId}/library/items/`;
+    if (["library_item", "library_artifact", "library_item_version", "source"].includes(result.type) &&
+        result.stable_url.startsWith(prefix)) {
+      return { href: result.stable_url, destination: "library" };
+    }
+    if ((result.type === "context_page" || result.type === "context_claim") &&
+        result.stable_url.startsWith(`/p/${workspaceId}/`)) {
+      return { href: result.stable_url, destination: "context" };
+    }
+  }
   if (result.type === "feedback") {
     return sourceRefHref(result.source_ref ?? {}, workspaceId);
   }
@@ -112,7 +123,7 @@ function resultDocumentId(result: SearchResultLinkInput): string | null {
     if (sourceRef.kind === "library_item" && sourceRef.id) {
       return sourceRef.id;
     }
-    return libraryItemIdFromConceptPath(result.concept_path);
+    return null;
   }
   if (result.type === "context_claim") {
     return sourceRef.kind === "context_page" && sourceRef.id
@@ -123,9 +134,4 @@ function resultDocumentId(result: SearchResultLinkInput): string | null {
     return sourceRef.id;
   }
   return result.id;
-}
-
-function libraryItemIdFromConceptPath(path: string | null | undefined) {
-  const match = path?.match(/^\/?library\/([^/]+)\.md$/);
-  return match?.[1] ?? null;
 }

@@ -12,7 +12,7 @@ from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.context import ContextClaim, ContextPage, ContextPageVersion
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
-from backend.services.entity_ref import context_concept_path, library_concept_path
+from backend.services.entity_ref import library_stable_url
 from backend.services.library_canonical import (
     get_canonical_library_version,
     get_effective_library_markdown,
@@ -54,7 +54,6 @@ def compose_context_doc_source(
     header = _header(
         title=page.title,
         aliases=page.aliases or [],
-        path=context_concept_path(page.slug),
         breadcrumb=breadcrumb,
         nav_description=(
             version.nav_description
@@ -148,7 +147,6 @@ def compose_library_item_doc_source(
         category=item.connector_type,
         context_header=_header(
             title=title,
-            path=library_concept_path(item.id),
             first_heading=None,
             aliases=[],
             breadcrumb=[],
@@ -174,7 +172,7 @@ def compose_library_artifact_doc_source(
         visibility_scope="published",
         category=artifact.kind,
         context_header=(
-            f"Title: {title}\nPath: {library_concept_path(item.id)}\n"
+            f"Title: {title}\nPath: {library_stable_url(item.workspace_id, item.id)}\n"
             f"Artifact: {artifact.kind}"
         ),
         body=body_override
@@ -340,12 +338,11 @@ def _header(
     *,
     title: str,
     aliases: list[str],
-    path: str,
     breadcrumb: list[str],
     nav_description: str | None,
     first_heading: str | None,
 ) -> str:
-    fields = [f"Title: {title}", f"Path: {path}"]
+    fields = [f"Title: {title}"]
     if aliases:
         fields.append(f"Aliases: {', '.join(aliases)}")
     if breadcrumb:

@@ -90,7 +90,8 @@ def make_client(page_service, email: str = "test@example.com") -> TestClient:
     )
     with page_service.session_factory.begin() as session:
         session.get(Workspace, UUID(workspace_id)).labs_policy = {
-            "ask_enabled": True, "agent_enabled": True,
+            "ask_enabled": True,
+            "agent_enabled": True,
         }
     return client
 
@@ -755,7 +756,7 @@ def test_read_api_exposes_context_changes_and_search(page_service):
                 "kind": "context_page",
                 "id": linked["id"],
                 "title": "API Context Linker",
-                "path": "/context/api-context-linker.md",
+                "stable_url": f"/p/{workspace_id}/{linked['id']}",
                 "edge_kind": "wikilink",
                 "direction": "in",
             }

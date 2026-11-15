@@ -53,7 +53,6 @@ AGENT_PAGE_PROMPT_PREFIX = "dtxwiki.agent_page."
 CONTEXT_WORKFLOW_PROMPT_NAME = "dtxwiki.context_workflow"
 RESOURCE_SCHEME = "dtxwiki"
 RESOURCE_AUTHORITY = "workspaces"
-LEGACY_RESOURCE_AUTHORITY = "workspace"
 SENSITIVE_RESOURCE_ERROR = "workspace_role_insufficient:sensitive_resource"
 PROMPT_RESOURCE_REQUIRED_SCOPES = ("guide", "workspace-read", "read", "agent-page-read")
 
@@ -481,7 +480,8 @@ def list_dtxwiki_resource_templates(
                     "/context/pages/{slug}"
                 ),
                 description=(
-                    "Read one actor-visible Context page by slug. Set workspace_id "
+                    "Read one actor-visible Context page by slug. "
+                    "This URI breaks when the slug changes. Set workspace_id "
                     "to an authorized workspace UUID."
                 ),
                 mimeType="text/markdown",
@@ -537,7 +537,8 @@ def list_dtxwiki_resource_templates(
                 "/context/pages/{slug}"
             ),
             description=(
-                "Read one actor-visible Context page by slug. Use search or the "
+                "Read one actor-visible Context page by slug. "
+                "This URI breaks when the slug changes. Use search or the "
                 "workspace index to discover the slug."
             ),
             mimeType="text/markdown",
@@ -820,7 +821,6 @@ def _parse_resource_uri(raw_uri: str) -> tuple[UUID, str, str | None]:
     parts = [part for part in parsed.path.split("/") if part]
     if parsed.scheme != RESOURCE_SCHEME or parsed.netloc not in {
         RESOURCE_AUTHORITY,
-        LEGACY_RESOURCE_AUTHORITY,
     }:
         raise ValueError("unsupported resource uri")
     if len(parts) == 2 and parts[1] in {

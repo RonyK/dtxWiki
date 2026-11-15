@@ -24,6 +24,7 @@ from backend.schemas.read import (
     SearchFilters,
     SearchPayload,
 )
+from backend.services.context_links import format_stable_url
 from backend.services.context_visibility import searchable_context_version_id
 from backend.services.entity_ref import (
     EntityKind,
@@ -32,7 +33,6 @@ from backend.services.entity_ref import (
     ranked_result_entity_ref,
 )
 from backend.services.graph_ppr import context_page_trust_priors
-from backend.services.okf import context_concept_path
 from backend.services.page_name_lookup import (
     NAME_KIND_PRIORITY,
     VisiblePageNameMatch,
@@ -205,9 +205,7 @@ class SearchService:
             if symbolic_lane_eligible
             else []
         )
-        explicit_direct = (
-            plan.direct_page_id is not None or plan.explicit_context_slug is not None
-        )
+        explicit_direct = plan.direct_page_id is not None
         if direct_results:
             tried_lanes.append("direct")
             ranked = sorted(
@@ -495,6 +493,8 @@ class SearchService:
             return []
         page_id = plan.direct_page_id
         if page_id is not None:
+            if plan.direct_workspace_id not in {None, workspace_id}:
+                return []
             page = session.get(ContextPage, page_id)
             if (
                 page is None
@@ -533,19 +533,18 @@ class SearchService:
             context_types=filters.context_type,
             statuses=filters.status,
         )
-        if plan.explicit_context_slug is None:
-            same_name_pages = best_match_per_page(
-                visible_page_name_matches(
-                    session,
-                    workspace_id,
-                    name_norm=plan.query_norm,
-                    actor=actor,
-                    context_types=filters.context_type,
-                    statuses=filters.status,
-                )
+        same_name_pages = best_match_per_page(
+            visible_page_name_matches(
+                session,
+                workspace_id,
+                name_norm=plan.query_norm,
+                actor=actor,
+                context_types=filters.context_type,
+                statuses=filters.status,
             )
-            if len(same_name_pages) != 1:
-                return []
+        )
+        if len(same_name_pages) != 1:
+            return []
         results = [
             _ranked_context_match(
                 match,
@@ -813,7 +812,7 @@ def _ranked_context_page(
         score=score,
         citation_available=True,
         archived=False,
-        concept_path=context_concept_path(page.slug),
+        stable_url=format_stable_url(page.workspace_id, page.id),
         concept_type=page.page_type,
         version_id=version.id,
         source_ref={"kind": EntityKind.CONTEXT_PAGE.value, "id": str(page.id)},
@@ -862,7 +861,7 @@ def _coverage_candidate(result: RankedResult) -> dict[str, str]:
         "id": str(ref.id or result.id),
         "kind": ref.kind.value,
         "title": result.title,
-        "concept_path": result.concept_path or "",
+        "stable_url": result.stable_url or "",
         "match_reason": result.match_reason or "trigram",
     }
 

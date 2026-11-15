@@ -162,7 +162,7 @@ class GraphNode(BaseModel):
     family: GraphNodeFamily
     label: str = Field(min_length=1, max_length=200)
     status: str | None = Field(default=None, max_length=64)
-    path: str | None = Field(default=None, max_length=512)
+    stable_url: str | None = Field(default=None, max_length=512)
     is_seed: bool = False
     occurred_at: datetime | None = None
     # A person, or the client of an MCP chat, in display form.

@@ -472,7 +472,7 @@ def test_semantic_retriever_finds_relevant_concept(session_factory):
     assert results[0].id == alpha.id
     assert results[0].entity_ref["kind"] == "context_page"
     assert results[0].entity_ref["id"] == str(alpha.id)
-    assert results[0].concept_path == "/context/alpha.md"
+    assert results[0].stable_url == f"/p/{wsid}/{alpha.id}"
     assert results[0].heading_path
     assert results[0].source_ref["kind"] == "content_chunk"
 
@@ -501,8 +501,8 @@ def test_semantic_retriever_draft_visibility(session_factory):
         viewer_hits = _retrieve(
             semantic, session, wsid, "confidential draft alpha", _actor("viewer")
         )
-    assert any(h.concept_path == "/context/wip.md" for h in editor_hits)
-    assert all(h.concept_path != "/context/wip.md" for h in viewer_hits)
+    assert any(h.id == draft.id for h in editor_hits)
+    assert all(h.id != draft.id for h in viewer_hits)
 
 
 def test_hybrid_fuses_keyword_and_semantic(session_factory):
@@ -526,9 +526,9 @@ def test_hybrid_fuses_keyword_and_semantic(session_factory):
         indexer.index(session=session, source_kind="context_page", source_id=page.id)
         results = _retrieve(hybrid, session, wsid, "needle", _actor())
     # The page is found by both lanes and collapses to one boosted concept hit.
-    paths = [r.concept_path for r in results]
-    assert "/context/needle.md" in paths
-    assert paths.count("/context/needle.md") == 1
+    paths = [r.id for r in results]
+    assert page.id in paths
+    assert paths.count(page.id) == 1
 
 
 def test_keyword_result_carries_outline_location_identity(session_factory):
@@ -542,9 +542,7 @@ def test_keyword_result_carries_outline_location_identity(session_factory):
             "Keyword Location",
             "# Root\n\nintro\n\n## Keyword Section\n\nuniquelexicalmarker body",
         )
-        results = _retrieve(
-            keyword, session, wsid, "uniquelexicalmarker", _actor()
-        )
+        results = _retrieve(keyword, session, wsid, "uniquelexicalmarker", _actor())
 
     [result] = [item for item in results if item.id == page.id]
     assert result.heading_path == ["Root", "Keyword Section"]
@@ -574,9 +572,7 @@ def test_hybrid_keyword_representative_keeps_outline_location(session_factory):
             "# Root\n\nintro\n\n## Hybrid Section\n\nhybridlocationmarker body",
         )
         indexer.index(session=session, source_kind="context_page", source_id=page.id)
-        results = _retrieve(
-            hybrid, session, wsid, "hybridlocationmarker", _actor()
-        )
+        results = _retrieve(hybrid, session, wsid, "hybridlocationmarker", _actor())
 
     [result] = [item for item in results if item.id == page.id]
     assert result.source_ref["kind"] == "context_page_version"
@@ -839,7 +835,7 @@ def test_keyword_hides_draft_context_from_viewer(session_factory):
     keyword = KeywordRetriever()
     with session_factory.begin() as session:
         wsid = _ws(session)
-        _publish(
+        draft = _publish(
             session,
             wsid,
             "wip2",
@@ -854,9 +850,9 @@ def test_keyword_hides_draft_context_from_viewer(session_factory):
             keyword, session, wsid, "secret draft marker", _actor("viewer")
         )
         anon_hits = _retrieve(keyword, session, wsid, "secret draft marker", None)
-    assert any(h.concept_path == "/context/wip2.md" for h in editor_hits)
-    assert all(h.concept_path != "/context/wip2.md" for h in viewer_hits)
-    assert all(h.concept_path != "/context/wip2.md" for h in anon_hits)
+    assert any(h.id == draft.id for h in editor_hits)
+    assert all(h.id != draft.id for h in viewer_hits)
+    assert all(h.id != draft.id for h in anon_hits)
 
 
 def test_semantic_warns_when_index_holds_only_a_different_model(session_factory):
@@ -966,9 +962,9 @@ def test_semantic_retrieval_applies_context_filters(session_factory):
             limit=10,
             actor=_actor(),
         )
-    paths = [h.concept_path for h in hits]
-    assert "/context/ov.md" in paths
-    assert "/context/co.md" not in paths
+    paths = [h.id for h in hits]
+    assert overview.id in paths
+    assert concept.id not in paths
 
 
 def test_semantic_retrieval_applies_library_filters(session_factory):
@@ -1051,10 +1047,10 @@ def test_hybrid_retrieval_does_not_leak_semantic_filter_misses(session_factory):
             limit=10,
             actor=_actor(),
         )
-    paths = [h.concept_path for h in hits]
-    assert "/context/h-ov.md" in paths
+    paths = [h.id for h in hits]
+    assert overview.id in paths
     # The concept page would leak through the semantic lane without the fix.
-    assert "/context/h-co.md" not in paths
+    assert concept.id not in paths
 
 
 # --- I2 (Codex F2): services must be built from the app/server's resolved

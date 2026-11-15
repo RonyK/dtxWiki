@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Document identifiers and URLs
+
+- Identify documents by kind and ID and use `stable_url` and `link_markdown`
+  across REST, MCP, search, graph and Ask results. Remove `concept_path` and
+  use canonical Library URLs in place of `/library/<id>.md` lookup inputs.
+- OKF bundle keys, index links and `dtxwiki:file` separators now use canonical
+  Context and Library URLs. Import bundles using these same URLs.
+- Convert stored maintenance findings and response locators and refresh search
+  index headers without changing Context draft states or publication behavior.
+- MCP contract revision 33 changes document locators. Refresh cached
+  `tools/list` results and schemas before using the updated inputs and results.
+
 ### Context Graph timeline
 
 - Show only the days that have records. Every record gets its own column

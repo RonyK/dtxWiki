@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.policy.auth import ActorContext
+from backend.services.context_links import format_stable_url
 from backend.services.context_visibility import searchable_context_version_id
-from backend.services.okf import context_concept_path
 from backend.utils.markdown_outline import parse_outline
 
 
@@ -21,7 +21,7 @@ class GrepWikiMatch:
     page_id: UUID
     version_id: UUID
     title: str
-    concept_path: str
+    stable_url: str
     line_number: int
     line: str
     context: str
@@ -32,7 +32,7 @@ class GrepWikiMatch:
             "page_id": str(self.page_id),
             "version_id": str(self.version_id),
             "title": self.title,
-            "concept_path": self.concept_path,
+            "stable_url": self.stable_url,
             "line_number": self.line_number,
             "line": self.line,
             "context": self.context,
@@ -90,13 +90,11 @@ def grep_wiki(
                     page_id=page.id,
                     version_id=version.id,
                     title=page.title,
-                    concept_path=context_concept_path(page.slug),
+                    stable_url=format_stable_url(workspace_id, page.id),
                     line_number=index + 1,
                     line=line,
                     context="\n".join(lines[start:end]),
-                    heading_path=(
-                        " > ".join(heading_path) if heading_path else None
-                    ),
+                    heading_path=(" > ".join(heading_path) if heading_path else None),
                 )
             )
             if len(matches) >= max_matches:

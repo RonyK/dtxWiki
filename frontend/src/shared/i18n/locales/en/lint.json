@@ -98,7 +98,7 @@
       "title": "Title",
       "page_type": "Page type",
       "outline": "Outline",
-      "concept_path": "Concept path",
+      "stable_url": "Document URL",
       "queries": "Evaluation queries",
       "similarity": "Similarity",
       "session_count": "AI conversations that read both (last 30 days)",

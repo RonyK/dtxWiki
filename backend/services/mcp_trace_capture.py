@@ -649,8 +649,13 @@ def _search_links(
     for result in ranked_results[:5]:
         if not isinstance(result, dict):
             continue
-        result_id = ranked_result_document_id(result)
         result_type = result.get("type")
+        # Nested hits need their own ID for the parent lookup below.
+        result_id = (
+            _uuid_or_none(result.get("id"))
+            if result_type in {"context_claim", "library_artifact"}
+            else ranked_result_document_id(result)
+        )
         if result_type == "context_claim" and result_id is not None:
             result_id = _page_id_for_claim(session, result_id)
             result_type = "context_page"

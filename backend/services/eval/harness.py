@@ -149,9 +149,10 @@ def load_golden(raw: object) -> list[GoldenQuery]:
 
 
 def result_identifier(result: RankedResult) -> str:
-    """Identifier used to match a hit against the golden set: the OKF concept
-    pointer when present, else a stable ``type:id`` fallback."""
-    return result.concept_path or f"{result.type}:{result.id}"
+    """Use document identities for content and result identities for audits."""
+    from backend.services.retrieval.fusion import ranked_result_key
+
+    return ranked_result_key(result)
 
 
 def _predicted_identifiers(payload: SearchPayload) -> list[str]:

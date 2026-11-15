@@ -281,13 +281,17 @@ def test_export_manifest_is_never_truncated(large_workspace):
             workspace_slug="default",
             sections=("context",),
         )
-    # every one of the 210 seeded pages is present
-    for i in range(60):
-        assert f"/context/pay-{i:03d}.md" in manifest
-    for i in range(150):
-        assert f"/context/gen-{i:03d}.md" in manifest
+    # Every one of the 210 seeded pages has its title and canonical URL.
+    with session_factory() as session:
+        pages = session.scalars(
+            select(ContextPage).where(ContextPage.workspace_id == ids["workspace_id"])
+        ).all()
+    assert len(pages) == 210
+    for page in pages:
+        assert page.title in manifest
+        assert f"/p/{ids['workspace_id']}/{page.id}" in manifest
     assert "…and" not in manifest
-    # File exports keep their own relative concept paths, not MCP web hints.
+    # The manifest links documents without duplicating per-entry wire metadata.
     assert "stable_url:" not in manifest
 
 

@@ -289,7 +289,7 @@ def test_mcp_read_concept_reads_published_default_with_neighbors(page_service, a
     # hold is that the actor can read the neighbour, which hydration enforces.
     assert [item.id for item in redirected.neighbors.co_access] == [beta.id]
     assert redirected.neighbors.co_access[0].kind == "context_page"
-    assert redirected.neighbors.co_access[0].path is None
+    assert "path" not in type(redirected.neighbors.co_access[0]).model_fields
     assert (
         redirected.neighbors.co_access[0].stable_url == f"/p/{workspace_id}/{beta.id}"
     )
@@ -951,7 +951,7 @@ def test_read_concept_resolves_library_paths(
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": f"dtxwiki://index/library/{item_id}",
+            "path": f"/workspaces/{workspace_id}/library/items/{item_id}",
         },
         actor=actor,
         page_service=page_service,
@@ -1017,7 +1017,7 @@ def test_read_concept_library_gates_return_not_found(page_service, actor):
         "read_concept",
         {
             "workspace_id": str(workspace_id),
-            "path": f"/library/{item_id}.md",
+            "path": f"/workspaces/{workspace_id}/library/items/{item_id}",
         },
         actor=actor,
         page_service=page_service,

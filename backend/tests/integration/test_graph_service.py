@@ -714,7 +714,7 @@ def test_neighbors_panel_hydrates_library_artifact_citation_to_item_path(
     assert citation.kind == "library_item"
     assert citation.id == item_id
     assert citation.title == "Deployment Runbook"
-    assert citation.path == f"/library/{item_id}.md"
+    assert citation.stable_url == f"/workspaces/{workspace_id}/library/items/{item_id}"
 
 
 def test_tree_neighbor_does_not_name_hidden_parent(session_factory, page_service):

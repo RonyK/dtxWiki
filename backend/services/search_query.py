@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
+from backend.services.context_links import parse_page_input
 from backend.services.entity_ref import normalize_entity_name
-from backend.utils.uuid import parse_uuid_or_none
 
 SearchIntent = Literal[
     "direct_path",
@@ -18,10 +18,6 @@ SearchIntent = Literal[
     "fallback",
 ]
 
-_CONTEXT_PATH = re.compile(
-    r"^/?context/(?P<slug>[^/?#]+?)(?:\.md)?$",
-    re.IGNORECASE,
-)
 _SLUG_TOKEN = re.compile(r"^[^\s/\\]+$")
 _CODE_TOKEN = re.compile(r"(?=.*[A-Z])(?=.*(?:\d|[-_.]))^[A-Z0-9_.-]+$")
 _OVERVIEW_MARKERS = (
@@ -68,9 +64,6 @@ class QueryPlan:
 
     @property
     def context_slug(self) -> str | None:
-        explicit = self.explicit_context_slug
-        if explicit is not None:
-            return explicit
         if self.intent != "direct_path":
             return None
         candidate = _strip_balanced_quotes(self.lane_query)
@@ -79,13 +72,18 @@ class QueryPlan:
         return None
 
     @property
-    def explicit_context_slug(self) -> str | None:
-        match = _CONTEXT_PATH.fullmatch(self.lane_query)
-        return match.group("slug") if match is not None else None
+    def direct_page_id(self) -> UUID | None:
+        try:
+            return parse_page_input(self.lane_query).page_id
+        except ValueError:
+            return None
 
     @property
-    def direct_page_id(self) -> UUID | None:
-        return parse_uuid_or_none(self.lane_query)
+    def direct_workspace_id(self) -> UUID | None:
+        try:
+            return parse_page_input(self.lane_query).workspace_id
+        except ValueError:
+            return None
 
 
 def _classify_intent(
@@ -95,7 +93,11 @@ def _classify_intent(
 ) -> SearchIntent:
     if not query_norm:
         return "fallback"
-    if parse_uuid_or_none(stripped) is not None or _CONTEXT_PATH.fullmatch(stripped):
+    try:
+        parse_page_input(stripped)
+    except ValueError:
+        pass
+    else:
         return "direct_path"
     normalized_tokens = tuple(normalize_entity_name(token) for token in tokens)
     if any(

@@ -10171,7 +10171,7 @@
             "title": "Kind",
             "type": "string"
           },
-          "path": {
+          "stable_url": {
             "anyOf": [
               {
                 "type": "string"
@@ -10180,7 +10180,7 @@
                 "type": "null"
               }
             ],
-            "title": "Path"
+            "title": "Stable Url"
           },
           "title": {
             "title": "Title",
@@ -10371,18 +10371,6 @@
             ],
             "title": "Occurred At"
           },
-          "path": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Path"
-          },
           "records": {
             "items": {
               "$ref": "#/components/schemas/GraphNodeRecord"
@@ -10402,6 +10390,18 @@
               }
             ],
             "title": "Review Status"
+          },
+          "stable_url": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stable Url"
           },
           "status": {
             "anyOf": [
@@ -19818,17 +19818,6 @@
             "title": "Citation Available",
             "type": "boolean"
           },
-          "concept_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Concept Path"
-          },
           "concept_type": {
             "anyOf": [
               {
@@ -19872,6 +19861,17 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "link_markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Markdown"
           },
           "location": {
             "anyOf": [
@@ -19952,6 +19952,17 @@
               }
             ],
             "title": "Source Ref"
+          },
+          "stable_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stable Url"
           },
           "stale": {
             "default": false,

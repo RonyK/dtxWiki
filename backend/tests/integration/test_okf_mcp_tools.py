@@ -142,7 +142,10 @@ def test_read_concept_tool_returns_frontmatter_and_body(session_factory):
 
     # Library concepts are not served here (use the `read` tool).
     lib = read_concept(
-        {"workspace_id": str(wsid), "path": "/library/x.md"},
+        {
+            "workspace_id": str(wsid),
+            "path": f"/workspaces/{wsid}/library/items/{uuid4()}",
+        },
         _ctx(_actor(wsid, "viewer"), session_factory),
     )
     assert lib.envelope.error_code == "not_found"

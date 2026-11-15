@@ -1547,7 +1547,7 @@ def test_search_service_entity_lane_uses_page_name_index_and_warnings():
     ]
     assert results.ranked_results[0].match_reason == "exact_alias"
     assert results.ranked_results[0].matched_name == "Symbolic Shortcut"
-    assert results.ranked_results[0].concept_path == "/context/entity-lane-runbook.md"
+    assert results.ranked_results[0].stable_url.startswith(f"/p/{workspace.id}/")
     # §6.2: a single exact hit short-circuits — no fallback lane runs.
     assert results.tried_lanes == ["entity"]
     assert results.raw_query == "Symbolic Shortcut"
@@ -1675,7 +1675,7 @@ def test_zero_hit_payload_includes_low_confidence_nearest_candidates(monkeypatch
                 snippet="",
                 score=0.2,
                 citation_available=True,
-                concept_path="/context/nearby-concept.md",
+                stable_url=f"/p/{workspace.id}/{candidate_id}",
                 match_reason="trigram",
             )
         ]
@@ -1696,7 +1696,7 @@ def test_zero_hit_payload_includes_low_confidence_nearest_candidates(monkeypatch
             "id": str(candidate_id),
             "kind": "context_page",
             "title": "Nearby concept",
-            "concept_path": "/context/nearby-concept.md",
+            "stable_url": f"/p/{workspace.id}/{candidate_id}",
             "match_reason": "trigram",
         }
     ]
@@ -1836,7 +1836,7 @@ def test_search_result_carries_okf_concept_pointer():
         )
 
     hit = next(r for r in results.ranked_results if r.type == "context_page")
-    assert hit.concept_path == "/context/pointer-page.md"
+    assert hit.stable_url == f"/p/{workspace.id}/{hit.id}"
     assert hit.concept_type is not None
     assert hit.version_id is not None
     assert hit.source_ref == {

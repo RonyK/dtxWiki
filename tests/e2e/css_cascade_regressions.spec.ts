@@ -379,7 +379,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
           summary: "**Embedding** policy explains [retrieval](https://example.com).",
           matched_name: title, match_reason: "exact_title", location,
           source_ref: { kind: "context_page", id: pageId },
-          concept_path: `/context/p-${pageId}.md`,
+          stable_url: `/p/${workspace.id}/${pageId}`,
           score: 1, stale: true, archived: false, citation_available: false,
         }],
         total_count: 1, supported_retrieval_modes: ["keyword"],
@@ -391,7 +391,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
       await page.goto(`${workspaceUrl(workspace.id, "search")}?q=embedding`);
       const row = page.getByRole("link", { name: `Open ${title}`, exact: true });
       await expect(row).toBeVisible();
-      await expect(row).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${pageId}`);
+      await expect(row).toHaveAttribute("href", `/p/${workspace.id}/${pageId}`);
       await expect(row).toHaveAccessibleDescription(`${location.join(" › ")}. Title match`);
       await expect(row.locator(".search-result-kind")).toHaveAttribute("data-identity", "context");
       await expect(row.locator(".search-result-chevron")).toHaveAttribute("aria-hidden", "true");

@@ -1,5 +1,5 @@
 import json
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from pydantic import ValidationError
@@ -87,13 +87,13 @@ def test_golden_page_samples_rank_inbound_citations(page_service):
         {
             "page_id": str(cited.id),
             "title": "Z Cited Page",
-            "concept_path": "/context/z-cited-page.md",
+            "stable_url": f"/p/{workspace_id}/{cited.id}",
             "citation_count": 1,
         },
         {
             "page_id": str(citing.id),
             "title": "A Citing Page",
-            "concept_path": "/context/a-citing-page.md",
+            "stable_url": f"/p/{workspace_id}/{citing.id}",
             "citation_count": 0,
         },
     ]
@@ -143,13 +143,12 @@ def _ranked(
     result_type: str = "context_page",
 ) -> RankedResult:
     return RankedResult(
-        id=uuid4(),
+        id=uuid5(NAMESPACE_URL, identifier),
         type=result_type,
         title=identifier,
         snippet="",
         score=score,
         citation_available=False,
-        concept_path=identifier,
         match_reason=match_reason,
     )
 
@@ -174,8 +173,16 @@ class _StubSearchService:
 
 def test_evaluate_aggregates_metrics_across_queries():
     golden = [
-        GoldenQuery(query="q1", expected=["doc-a"]),
-        GoldenQuery(query="q2", expected=["doc-b", "doc-c"]),
+        GoldenQuery(
+            query="q1", expected=[f"context_page:{uuid5(NAMESPACE_URL, 'doc-a')}"]
+        ),
+        GoldenQuery(
+            query="q2",
+            expected=[
+                f"context_page:{uuid5(NAMESPACE_URL, value)}"
+                for value in ("doc-b", "doc-c")
+            ],
+        ),
     ]
     stub = _StubSearchService({"q1": ["doc-a", "doc-x"], "q2": ["doc-z", "doc-b"]})
     [metrics] = evaluate(stub, None, None, golden, modes=["keyword"], k=8)
@@ -217,9 +224,19 @@ def test_evaluate_lanes_separates_match_reason_families():
             )
 
     golden = [
-        GoldenQuery("entity query", ["/entity"], lane="entity"),
-        GoldenQuery("trigram query", ["/trigram"], lane="trigram"),
-        GoldenQuery("bm25 query", ["/bm25"], lane="bm25"),
+        GoldenQuery(
+            "entity query",
+            [f"context_page:{uuid5(NAMESPACE_URL, '/entity')}"],
+            lane="entity",
+        ),
+        GoldenQuery(
+            "trigram query",
+            [f"context_page:{uuid5(NAMESPACE_URL, '/trigram')}"],
+            lane="trigram",
+        ),
+        GoldenQuery(
+            "bm25 query", [f"context_page:{uuid5(NAMESPACE_URL, '/bm25')}"], lane="bm25"
+        ),
     ]
     metrics = evaluate_lanes(LaneStub(), None, None, golden, k=3)
 
@@ -330,7 +347,7 @@ def test_eval_cli_prints_mode_and_lane_tables(tmp_path):
     session_factory = make_session_factory(engine)
     with session_factory.begin() as session:
         seed_default_workspace(session)
-    PageService(session_factory).write_page(
+    created = PageService(session_factory).write_page(
         workspace_slug="default",
         slug="cli-lane-guide",
         title="CLI Lane Guide",
@@ -345,7 +362,7 @@ def test_eval_cli_prints_mode_and_lane_tables(tmp_path):
             [
                 {
                     "query": "CLI Lane Guide",
-                    "expected": ["/context/cli-lane-guide.md"],
+                    "expected": [f"context_page:{created.id}"],
                     "lane": "entity",
                 }
             ]
@@ -393,9 +410,8 @@ def test_eval_cli_prints_mode_and_lane_tables(tmp_path):
             )
         )
         assert task is not None
-        assert task.payload["page_samples"][0]["concept_path"] == (
-            "/context/cli-lane-guide.md"
-        )
+        sample = task.payload["page_samples"][0]
+        assert sample["stable_url"] == f"/p/{task.workspace_id}/{sample['page_id']}"
     assert golden_path.read_bytes() == golden_before
 
     failing_baseline = tmp_path / "baseline.json"

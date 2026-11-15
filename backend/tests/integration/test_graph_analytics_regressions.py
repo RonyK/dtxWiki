@@ -1480,7 +1480,7 @@ def test_mermaid_projection_escapes_labels_and_is_opt_in():
         kind="context_page",
         id=uuid4(),
         title='Injected "]\nclick evil',
-        path="/context/target.md",
+        stable_url=f"/p/{uuid4()}/{uuid4()}",
         edge_kind="wikilink",
         direction="out",
     )

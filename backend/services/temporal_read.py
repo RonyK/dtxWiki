@@ -317,7 +317,7 @@ def resolve_version_as_of(
 
 @dataclass(frozen=True)
 class WhatChangedEntry:
-    concept_path: str
+    stable_url: str
     title: str
     change_kind: str  # created | updated | archived | unpublished
     page_id: UUID
@@ -351,8 +351,8 @@ def what_changed(
     archive. An undone first publication emits unpublished for actors who
     can still see the draft. Returns (entries, has_more).
     """
+    from backend.services.context_links import format_stable_url
     from backend.services.context_visibility import visible_context_version_id
-    from backend.services.entity_ref import context_concept_path
 
     naive_since = _naive_utc(since)
     # One ordered snapshot query: the OFFSET-batched form re-sorted skipped
@@ -413,7 +413,7 @@ def what_changed(
             continue
         entries.append(
             WhatChangedEntry(
-                concept_path=context_concept_path(page.slug),
+                stable_url=format_stable_url(page.workspace_id, page.id),
                 title=page.title,
                 change_kind=change_kind,
                 page_id=page.id,
