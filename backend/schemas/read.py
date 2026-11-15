@@ -141,7 +141,7 @@ class HotConceptEntry(BaseModel):
     kind: str
     id: UUID
     title: str
-    path: str
+    stable_url: str
     score: int
 
     model_config = ConfigDict(extra="forbid")
@@ -566,7 +566,6 @@ class ListChangesPayload(BaseModel):
 class DisambiguationCandidate(BaseModel):
     id: UUID
     title: str
-    concept_path: str | None = None
     match_reason: str
 
     model_config = ConfigDict(extra="forbid")
@@ -871,7 +870,7 @@ class GraphNeighborEntry(BaseModel):
     kind: str
     id: UUID
     title: str
-    path: str | None = None
+    stable_url: str | None = None
     edge_kind: str
     direction: Literal["in", "out"]
 

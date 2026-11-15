@@ -635,7 +635,7 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
             "title": "Needle Context",
             "score": "1.00",
             "match_reason": "",
-            "concept_path": "",
+            "stable_url": "",
         }
     ]
     assert lanes == []

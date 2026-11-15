@@ -1008,9 +1008,10 @@ MCP clients first call `list_my_workspaces`, then `guide` with the chosen
 Context page inputs accept UUIDs and stable `/p/<workspace_id>/<page_id>` links.
 Short `/p/<page_id>` locators resolve only inside the supplied workspace and
 are not browser permalinks. Use a read result's `link_markdown` in responses.
-Library `/library/<id>.md` paths remain lookup identifiers; the index format
-is unchanged. MCP-only projections replace Context `concept_path` and
-`resource_uri` with document links; shared REST schemas retain those fields.
+Library inputs use canonical `/workspaces/<workspace_id>/library/items/<item_id>`
+URLs. Documents are identified by kind and ID throughout REST and MCP; use
+`stable_url` for browser links. `read_concept.path` also accepts the exact
+Context or Library discovery ref returned by `get_index`.
 
 Reference metadata named `link_targets`, when provided by a read surface,
 means server-confirmed links, not permission to activate arbitrary authored

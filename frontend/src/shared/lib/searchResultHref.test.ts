@@ -15,20 +15,20 @@ describe("searchResultHref", () => {
     ).toBe("/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000101");
   });
 
-  it("opens library artifacts by their own identity", () => {
+  it("opens library artifact hits with their canonical document URL", () => {
     expect(
       searchResultHref(
         result(
           "artifact-1",
           "library_artifact",
           { kind: "library_artifact", id: "artifact-1" },
-          "/library/item-1.md",
+          "/workspaces/00000000-0000-4000-8000-000000000001/library/items/item-1",
         ), "00000000-0000-4000-8000-000000000001"
       ),
-    ).toBe("/workspaces/00000000-0000-4000-8000-000000000001/library/artifacts/artifact-1");
+    ).toBe("/workspaces/00000000-0000-4000-8000-000000000001/library/items/item-1");
   });
 
-  it("opens an artifact directly without inferring its parent from a concept path", () => {
+  it("opens an artifact directly when no canonical document URL is supplied", () => {
     expect(
       searchResultHref(
         result("artifact-1", "library_artifact", {
@@ -47,7 +47,7 @@ describe("searchResultHref", () => {
       searchResultHref({
         id: "version-1",
         type: "library_item_version",
-        concept_path: "/library/item-1.md",
+        stable_url: "/workspaces/00000000-0000-4000-8000-000000000001/library/items/item-1",
         source_ref: { kind: "library_item_version", id: "version-1" },
       }, "00000000-0000-4000-8000-000000000001"),
     ).toBe("/workspaces/00000000-0000-4000-8000-000000000001/library/items/item-1");
@@ -180,18 +180,18 @@ describe("searchResultHref", () => {
       ).toBe("/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000101");
     });
 
-    it("builds an explicit artifact URL for non-Context targets", () => {
+    it("uses the canonical Library URL supplied by a result", () => {
       expect(
         searchResultHref(
           result(
             "artifact-1",
             "library_artifact",
             { kind: "library_artifact", id: "artifact-1" },
-            "/library/item-1.md",
+            "/workspaces/00000000-0000-4000-8000-000000000001/library/items/item-1",
           ),
           "00000000-0000-4000-8000-000000000001",
         ),
-      ).toBe("/workspaces/00000000-0000-4000-8000-000000000001/library/artifacts/artifact-1");
+      ).toBe("/workspaces/00000000-0000-4000-8000-000000000001/library/items/item-1");
     });
   });
 });
@@ -200,7 +200,7 @@ function result(
   id: string,
   type: RankedSearchResult["type"],
   sourceRef?: Record<string, string>,
-  conceptPath?: string,
+  stableUrl?: string,
 ): RankedSearchResult {
   return {
     id,
@@ -212,6 +212,6 @@ function result(
     stale: false,
     archived: false,
     source_ref: sourceRef,
-    concept_path: conceptPath,
+    stable_url: stableUrl,
   };
 }

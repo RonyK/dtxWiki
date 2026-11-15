@@ -113,7 +113,8 @@ class RankedResult(BaseModel):
     archived: bool = False
     summary: str | None = None
     location: list[str] | None = None
-    concept_path: str | None = None
+    stable_url: str | None = None
+    link_markdown: str | None = None
     concept_type: str | None = None
     version_id: UUID | None = None
     heading_path: list[str] | None = None

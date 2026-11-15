@@ -373,7 +373,7 @@ describe("ContextScreen", () => {
                 kind: "context_page",
                 id: SECOND_PAGE_ID,
                 title: "Architecture Notes",
-                path: "/context/architecture-notes.md",
+                stable_url: `/p/${WORKSPACE_ID}/${SECOND_PAGE_ID}`,
                 edge_kind: "wikilink",
                 direction: "in",
               },
@@ -384,7 +384,7 @@ describe("ContextScreen", () => {
                 kind: "library_artifact",
                 id: "artifact-1",
                 title: "Deployment Runbook",
-                path: "/library/library-1.md",
+                stable_url: `/workspaces/${WORKSPACE_ID}/library/items/library-1`,
                 edge_kind: "citation_source",
                 direction: "out",
               },
@@ -394,7 +394,7 @@ describe("ContextScreen", () => {
                 kind: "context_page",
                 id: SECOND_PAGE_ID,
                 title: "Architecture Notes",
-                path: "/context/architecture-notes.md",
+                stable_url: `/p/${WORKSPACE_ID}/${SECOND_PAGE_ID}`,
                 edge_kind: "co_access",
                 direction: "out",
               },
@@ -410,7 +410,7 @@ describe("ContextScreen", () => {
                 kind: "context_page",
                 id: SECOND_PAGE_ID,
                 title: "Architecture Notes",
-                path: "/context/architecture-notes.md",
+                stable_url: `/p/${WORKSPACE_ID}/${SECOND_PAGE_ID}`,
                 edge_kind: "wikilink",
                 direction: "in",
               },
@@ -421,7 +421,7 @@ describe("ContextScreen", () => {
                 kind: "library_artifact",
                 id: "artifact-1",
                 title: "Deployment Runbook",
-                path: "/library/library-1.md",
+                stable_url: `/workspaces/${WORKSPACE_ID}/library/items/library-1`,
                 edge_kind: "citation_source",
                 direction: "out",
               },
@@ -431,7 +431,7 @@ describe("ContextScreen", () => {
                 kind: "context_page",
                 id: SECOND_PAGE_ID,
                 title: "Architecture Notes",
-                path: "/context/architecture-notes.md",
+                stable_url: `/p/${WORKSPACE_ID}/${SECOND_PAGE_ID}`,
                 edge_kind: "co_access",
                 direction: "out",
               },
@@ -1793,11 +1793,11 @@ describe("ContextScreen", () => {
       inspector.getAllByRole("link", { name: /Architecture Notes/ })[0],
     ).toHaveAttribute(
       "href",
-      `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`,
+      `/p/${WORKSPACE_ID}/${SECOND_PAGE_ID}`,
     );
     expect(
       inspector.getByRole("link", { name: /Deployment Runbook/ }),
-    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/artifacts/artifact-1`);
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/items/library-1`);
     expect(inspector.getByText("CITATIONS")).toBeInTheDocument();
     expect(inspector.getByText("OFTEN READ TOGETHER")).toBeInTheDocument();
     const citations = inspector.getByLabelText("CITATIONS");
@@ -1900,7 +1900,7 @@ describe("ContextScreen", () => {
       const inspector = within(screen.getByRole("region", { name: "Context detail" }));
       await userEvent.click(inspector.getByRole("tab", { name: /Backlinks/ }));
       expect(await inspector.findByRole("link", { name: /Deployment Runbook/ }))
-        .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/artifacts/artifact-1`);
+        .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/items/library-1`);
       expect(inspector.getAllByRole("link", { name: /Architecture Notes/ })).toHaveLength(2);
       await userEvent.click(within(await screen.findByRole("tablist", { name: "Context reader views" }))
         .getByRole("tab", { name: "View" }));
@@ -2255,12 +2255,12 @@ describe("ContextScreen", () => {
     ).toBeInTheDocument();
     const architectureDetails = await selectGraphNodeDetails(graph, "Architecture Notes");
     expect(within(architectureDetails).getByRole("link", { name: "Open" })).toHaveAttribute(
-      "href", `/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}`,
+      "href", `/p/${WORKSPACE_ID}/${SECOND_PAGE_ID}`,
     );
     const libraryDetails = await selectGraphNodeDetails(graph, "Deployment Runbook");
     expect(
       within(libraryDetails).getByRole("link", { name: "Open" }),
-    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/artifacts/artifact-1`);
+    ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library/items/library-1`);
     expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute(
       "data-nodes",
       "3",
@@ -2661,7 +2661,7 @@ describe("ContextScreen", () => {
     }
   });
 
-  it("maps canonical Library version paths to their Library-item Knowledge Map focus", async () => {
+  it("maps canonical Library version URLs to their Library-item Knowledge Map focus", async () => {
     workspaceGraphEnabled.current = true;
     labs.knowledgeMap = true;
     await renderDecisionLog({ libraryGraphNodeKind: "library_item_version" });
@@ -6500,9 +6500,7 @@ function contextGraphPayload(
     family: "document",
     label: seedTitle,
     status: "published",
-    path: isDecisionLog
-      ? "/context/decision-log.md"
-      : "/context/architecture-notes.md",
+    stable_url: `/p/${WORKSPACE_ID}/${pageId}`,
     is_seed: true,
     occurred_at: "2026-05-09T00:00:00Z",
     actor_label: null,
@@ -6518,7 +6516,7 @@ function contextGraphPayload(
           family: "document",
           label: "Architecture Notes",
           status: "draft",
-          path: "/context/architecture-notes.md",
+          stable_url: `/p/${WORKSPACE_ID}/${SECOND_PAGE_ID}`,
           is_seed: false,
           occurred_at: "2026-05-09T00:01:00Z",
           actor_label: null,
@@ -6531,7 +6529,7 @@ function contextGraphPayload(
           family: "document",
           label: "Deployment Runbook",
           status: "published",
-          path: "/library/library-1.md",
+          stable_url: `/workspaces/${WORKSPACE_ID}/library/items/library-1`,
           is_seed: false,
           occurred_at: "2026-05-09T00:02:00Z",
           actor_label: null,

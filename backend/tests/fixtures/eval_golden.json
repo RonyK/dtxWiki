@@ -1,22 +1,30 @@
 [
   {
     "query": "Gate Exact Guide",
-    "expected": ["/context/gate-exact-guide.md"],
+    "expected": [
+      "context_page:58e59346-683b-5ee5-bd85-39d89b72d780"
+    ],
     "lane": "entity"
   },
   {
     "query": "Gate Deploymnt Checklis",
-    "expected": ["/context/gate-deployment-checklist.md"],
+    "expected": [
+      "context_page:779fa3fe-b4fa-5339-aa14-333f3cbfd9a1"
+    ],
     "lane": "trigram"
   },
   {
     "query": "photon calibration",
-    "expected": ["/context/gate-body-source.md"],
+    "expected": [
+      "context_page:a346b25f-e716-55ec-80f8-7eb2fe196113"
+    ],
     "lane": "bm25"
   },
   {
     "query": "Gate Associative Source",
-    "expected": ["/context/gate-associative-related.md"],
+    "expected": [
+      "context_page:fbc3f4e7-daae-568d-b3e2-b44c62295d3d"
+    ],
     "lane": "associative"
   }
 ]

@@ -39,7 +39,7 @@ describe("SearchScreen", () => {
                 location: ["Team", "Decisions"],
               }),
               result("source-1", "library_item", "Library Source", "Supporting hit", 0.7, {
-                concept_path: "/library/source-1.md",
+                stable_url: `/workspaces/${WORKSPACE_ID}/library/items/source-1`,
                 match_reason: "keyword",
               }),
               result("00000000-0000-4000-8000-000000000108", "context_page", "Decision Log", "Another document with the same title", 0.6, {
@@ -103,11 +103,10 @@ describe("SearchScreen", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("RAW BACKEND PERMISSION NOTE")).not.toBeInTheDocument();
     expect(screen.queryByText("Keyword", { exact: true })).not.toBeInTheDocument();
-    // M-11 (260908 UI audit): ".md" is a backend identifier, not a real file.
     expect(
       screen.getByRole("link", { name: "Open Library Source" })
         .querySelector(".search-result-location"),
-    ).toHaveTextContent("/library/source-1");
+    ).toBeNull();
     expect(screen.queryByText("/library/source-1.md")).not.toBeInTheDocument();
     expect(screen.getByText("4 results")).toBeInTheDocument();
     // The header states the result count; the rows themselves carry no chips.
@@ -270,7 +269,7 @@ describe("SearchScreen", () => {
                 source_ref: { kind: "review_item", id: "review-1" },
               }),
               result("artifact-1", "library_artifact", "Artifact Hit", "Artifact hit", 0.7, {
-                concept_path: "/workspaces/00000000-0000-4000-8000-000000000001/library/item-1.md",
+                stable_url: null,
                 source_ref: { kind: "library_artifact", id: "artifact-1" },
               }),
             ],
@@ -333,14 +332,14 @@ describe("SearchScreen", () => {
           ranked_results: [
             result(pageId, "context_page", "Embedding policy", "", 1, {
               source_ref: { kind: "context_page", id: pageId },
-              concept_path: `/workspaces/00000000-0000-4000-8000-000000000001/context/p-${pageId}.md`,
+              stable_url: `/p/${WORKSPACE_ID}/${pageId}`,
               matched_name: "Embedding policy", match_reason: "exact_title",
               summary: "**Embedding** policy explains [retrieval](https://example.com).",
               location: ["Product", "Research", "Very long document title kept in the accessible description", "Search", "Policies"],
               stale: true, citation_available: false,
             }),
             result("00000000-0000-4000-8000-000000000109", "context_page", "Search handbook", "A **clean** `snippet`. model_name and model_version. Keep x < 10 and y > 2. `a*b*c` and _emphasis_. vector<T>.", 0.8, {
-              concept_path: "/context/search-handbook.md", match_reason: "keyword",
+              stable_url: `/p/${WORKSPACE_ID}/00000000-0000-4000-8000-000000000109`, match_reason: "keyword",
               heading_path: ["Search handbook", "Storage"],
             }),
             // Old API responses and explicit audit scopes may still carry
@@ -363,7 +362,7 @@ describe("SearchScreen", () => {
     );
 
     const row = await screen.findByRole("link", { name: "Open Embedding policy" });
-    expect(row).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/${pageId}`);
+    expect(row).toHaveAttribute("href", `/p/${WORKSPACE_ID}/${pageId}`);
     expect(row.querySelector(".search-result-kind")).toHaveAttribute("data-identity", "context");
     expect(row.querySelector(".search-result-chevron")).toHaveAttribute("aria-hidden", "true");
     expect(within(row).queryByText("Open unavailable")).not.toBeInTheDocument();
@@ -385,7 +384,7 @@ describe("SearchScreen", () => {
     expect(row.querySelector("nav, a, button")).toBeNull();
     expect(container.textContent).not.toContain(`/workspaces/00000000-0000-4000-8000-000000000001/context/p-${pageId}`);
     const handbook = screen.getByRole("link", { name: "Open Search handbook" });
-    expect(handbook).toHaveTextContent("/context/search-handbook");
+    expect(handbook.querySelector(".search-result-location")).toBeNull();
     expect(handbook).toHaveTextContent("A clean snippet.");
     expect(handbook).toHaveTextContent("model_name and model_version. Keep x < 10 and y > 2. a*b*c and emphasis. vector<T>.");
     expect(handbook.querySelector(".search-result-snippet strong")).toHaveTextContent("Storage");

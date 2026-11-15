@@ -156,7 +156,6 @@ import { TreeRail } from "../../shared/components/TreeRail";
 import { WorkspaceLayout } from "../../shared/components/WorkspaceLayout";
 import { targetBreadcrumbs } from "../../shared/components/treeBreadcrumbs";
 import { isSemanticSectionRoot } from "../../shared/components/treeSectionRoot";
-import { displayConceptPath } from "../../shared/lib/conceptPath";
 import { readContextPublishNotice } from "../../shared/lib/contextPublishNavigation";
 import {
   contextNewHref,
@@ -5088,13 +5087,13 @@ function graphNeighborItem(
         {
           id: entry.id,
           type: entry.kind,
-          concept_path: entry.path,
+          stable_url: entry.stable_url,
           source_ref: { kind: entry.kind, id: entry.id },
         },
         workspaceId,
       ) ?? undefined,
     title: entry.title,
-    meta: entry.path ? displayConceptPath(entry.path) : humanizeEnum(entry.edge_kind),
+    meta: humanizeEnum(entry.edge_kind),
   };
 }
 
@@ -5114,7 +5113,7 @@ function workspaceGraphFocusId(graphNode: GraphNode) {
   // Local Graph artifacts and versions are version-grain nodes, whereas the
   // Workspace Knowledge Map has one canonical node per Library item. Its
   // public canonical path is the safe bridge between those projections.
-  const itemMatch = /^\/library\/([^/?#]+)\.md$/u.exec(graphNode.path ?? "");
+  const itemMatch = /^\/workspaces\/[^/]+\/library\/items\/([^/?#]+)$/u.exec(graphNode.stable_url ?? "");
   if (!itemMatch) {
     return null;
   }

@@ -53,7 +53,6 @@ import { WorkspaceLayout } from "../../shared/components/WorkspaceLayout";
 import { WorkspacePanelChrome } from "../../shared/components/WorkspacePanelChrome";
 import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { resolveInitialLocale } from "../../shared/i18n";
-import { displayConceptPath } from "../../shared/lib/conceptPath";
 import type { TimeBucketKey } from "../../shared/lib/datetime";
 import {
   formatGroupHeader,
@@ -1561,12 +1560,9 @@ function EvidencePack({ copy, turn }: { copy: AskCopy; turn: AskTurnDetail }) {
           const href = searchResultHref({
             id: item.id,
             type: item.type,
-            concept_path: item.concept_path || null,
+            stable_url: item.stable_url || null,
           }, workspaceId);
-          const title =
-            item.title ||
-            (item.concept_path ? displayConceptPath(item.concept_path) : null) ||
-            item.id;
+          const title = item.title || item.id;
           const reason = item.match_reason || "keyword";
           return (
             <li className="ask-evidence-item" key={`${item.type}-${item.id}-${index}`}>
@@ -1578,11 +1574,6 @@ function EvidencePack({ copy, turn }: { copy: AskCopy; turn: AskTurnDetail }) {
                   status={reason}
                 />
               </div>
-              {item.concept_path ? (
-                <code className="ask-evidence-path">
-                  {displayConceptPath(item.concept_path)}
-                </code>
-              ) : null}
             </li>
           );
         })}
@@ -1613,11 +1604,7 @@ function SearchTrace({ copy, turn }: { copy: AskCopy; turn: AskTurnDetail }) {
           {turn.retrieval_trace.map((item, index) => (
             <li key={`${item.type}-${item.id}-${index}`}>
               <span>
-                {item.title ||
-                  (item.concept_path
-                    ? displayConceptPath(item.concept_path)
-                    : null) ||
-                  item.id}
+                {item.title || item.id}
               </span>
               {item.match_reason ? <StatusPill compact status={item.match_reason} label={copy.evidence.matchReasons[item.match_reason] ?? item.match_reason} /> : null}
             </li>
@@ -1771,17 +1758,12 @@ function AskInspector({
               const href = searchResultHref({
                 id: entry.id,
                 type: entry.kind,
-                concept_path: entry.path,
+                stable_url: entry.stable_url,
                 source_ref: { kind: entry.kind, id: entry.id },
               }, workspaceId);
               const content = (
                 <>
                   <span className="page-backlink-title">{entry.title}</span>
-                  {entry.path ? (
-                    <span className="page-backlink-meta">
-                      {displayConceptPath(entry.path)}
-                    </span>
-                  ) : null}
                 </>
               );
               const key = `${entry.kind}:${entry.id}`;

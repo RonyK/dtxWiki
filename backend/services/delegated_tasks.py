@@ -208,7 +208,7 @@ def produce_page_meta_refresh_task(
     page_id: UUID,
     published_version_id: UUID,
     title: str,
-    concept_path: str,
+    stable_url: str,
     reason: str | None,
 ) -> ClientDelegatedTask | None:
     """Q-2 producer (publish hook): fingerprint = published version id, so a
@@ -225,7 +225,8 @@ def produce_page_meta_refresh_task(
         payload={
             "published_version_id": str(published_version_id),
             "title": title,
-            "concept_path": concept_path,
+            "page_id": str(page_id),
+            "stable_url": stable_url,
             "reason": reason,
         },
     )

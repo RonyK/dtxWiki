@@ -55,7 +55,7 @@ def test_list_coverage_gaps_filters_restricted_candidates_by_actor():
                         "id": str(item.id),
                         "kind": "library_item",
                         "title": "Restricted Coverage Source",
-                        "concept_path": "",
+                        "stable_url": "",
                         "match_reason": "trigram",
                     }
                 ],

@@ -10,7 +10,6 @@ from backend.policy.auth import ActorContext
 from backend.services.index_refs import format_index_ref
 from backend.services.okf import (
     build_workspace_index,
-    parse_concept_path,
     project_context_frontmatter,
     render_context_concept,
     render_frontmatter,
@@ -170,13 +169,6 @@ def test_render_frontmatter_quotes_yaml_special_values():
     assert parsed["resource"] == "/w/x/context/y"  # simple value stays unquoted
 
 
-def test_parse_concept_path():
-    assert parse_concept_path("/context/my-page.md") == ("context", "my-page")
-    assert parse_concept_path("library/abc.md") == ("library", "abc")
-    assert parse_concept_path("/context/no-extension") is None
-    assert parse_concept_path("/agent/x.md") is None
-
-
 def test_render_context_concept_has_frontmatter_and_body(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
@@ -191,7 +183,7 @@ def test_render_context_concept_has_frontmatter_and_body(session_factory):
     assert "The body." in doc
     fm = project_context_frontmatter(page, version, workspace_slug="default")
     assert fm["type"] == "concept"
-    assert fm["resource"] == "/w/default/context/api"
+    assert fm["resource"] == f"/p/{workspace_id}/{page.id}"
 
 
 # --- index per-actor visibility ---------------------------------------------

@@ -35,7 +35,7 @@ def _golden_page_samples(
             # title/path is never disclosed (Codex round-9).
             "page_id": str(page_id),
             "title": title,
-            "concept_path": f"/context/{slug}.md",
+            "stable_url": f"/p/{workspace_id}/{page_id}",
             "citation_count": citation_count,
         }
         for page_id, title, slug, citation_count in session.execute(

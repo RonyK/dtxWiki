@@ -84,6 +84,7 @@ from backend.services.context_link_targets import (
     legacy_wikilink_targets,
     page_link_target_condition,
 )
+from backend.services.context_links import format_stable_url
 from backend.services.context_review_disposition import (
     context_version_review_disposition,
     context_version_review_metadata,
@@ -113,8 +114,7 @@ from backend.services.list_pagination import (
 from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
     EXCLUDED_LIBRARY_LIFECYCLE_STATUSES,
-    context_concept_path,
-    library_concept_path,
+    library_stable_url,
 )
 from backend.services.read_errors import (
     ReadNotFoundError,
@@ -1397,7 +1397,7 @@ class DomainReadService:
             )
             if version is None:
                 return None
-            concept_path = context_concept_path(page.slug)
+            stable_url = format_stable_url(page.workspace_id, page.id)
             record_served_read("context_page", page.id, version)
             return {
                 "id": page.id,
@@ -1408,7 +1408,7 @@ class DomainReadService:
                 "metadata": {
                     "type": entity_type,
                     "version_id": str(version.id),
-                    "concept_path": concept_path,
+                    "stable_url": stable_url,
                     "page_type": page.page_type,
                     "version_status": version.version_status,
                     "draft": (
@@ -1459,7 +1459,7 @@ class DomainReadService:
                 or not context_version_is_visible(version, actor)
             ):
                 return None
-            concept_path = context_concept_path(page.slug)
+            stable_url = format_stable_url(page.workspace_id, page.id)
             record_served_read("context_page", page.id, version)
             return {
                 "id": claim.id,
@@ -1470,7 +1470,7 @@ class DomainReadService:
                     "type": entity_type,
                     "version_id": str(version.id),
                     "page_id": str(page.id),
-                    "concept_path": concept_path,
+                    "stable_url": stable_url,
                     "claim_type": claim.claim_type,
                     "status": claim.status,
                     "location_in_page": claim.location_in_page,
@@ -1506,7 +1506,7 @@ class DomainReadService:
                 "metadata": {
                     "type": entity_type,
                     "version_id": str(version.id) if version is not None else None,
-                    "concept_path": library_concept_path(item.id),
+                    "stable_url": library_stable_url(item.workspace_id, item.id),
                     "uri": item.uri,
                     "connector_type": item.connector_type,
                 },
@@ -1567,7 +1567,7 @@ class DomainReadService:
                     "type": entity_type,
                     "version_id": str(version.id),
                     "library_item_id": str(item.id),
-                    "concept_path": library_concept_path(item.id),
+                    "stable_url": library_stable_url(item.workspace_id, item.id),
                     "artifact_type": artifact.kind,
                 },
             }

@@ -452,7 +452,8 @@ TOOL_META = {
         "Read concept",
         "Read a Context page or Library item by a dtxwiki://index/context or "
         "dtxwiki://index/library ref from get_index (unchanged), a Context page "
-        "UUID or stable_url, or '/library/<id>.md'. Returns YAML frontmatter "
+        "UUID or stable_url, or its canonical Library item URL. Returns YAML "
+        "frontmatter "
         "and Markdown with per-actor visibility, plus link_markdown to use in "
         "answers.",
         True,

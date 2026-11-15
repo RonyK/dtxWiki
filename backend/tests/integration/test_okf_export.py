@@ -58,8 +58,12 @@ def test_export_workspace_bundle_respects_visibility(session_factory):
         workspace_id = session.scalar(
             select(Workspace).where(Workspace.slug == "default")
         ).id
-        _add_page(session, workspace_id, "alpha", "Alpha", "# Alpha\n\nAlpha body.")
-        _add_page(session, workspace_id, "wip", "Wip", "Draft only.", published=False)
+        alpha = _add_page(
+            session, workspace_id, "alpha", "Alpha", "# Alpha\n\nAlpha body."
+        )
+        wip = _add_page(
+            session, workspace_id, "wip", "Wip", "Draft only.", published=False
+        )
 
     with session_factory() as session:
         viewer_bundle = export_workspace_bundle(
@@ -70,14 +74,14 @@ def test_export_workspace_bundle_respects_visibility(session_factory):
         )
 
     assert "index.md" in viewer_bundle
-    assert "context/alpha.md" in viewer_bundle
-    concept = viewer_bundle["context/alpha.md"]
+    assert f"/p/{workspace_id}/{alpha.id}" in viewer_bundle
+    concept = viewer_bundle[f"/p/{workspace_id}/{alpha.id}"]
     assert concept.startswith("---\n")
     assert "type: concept" in concept
     assert "Alpha body." in concept
     # Draft-only concept is excluded for a viewer, included for an editor.
-    assert "context/wip.md" not in viewer_bundle
-    assert "context/wip.md" in editor_bundle
+    assert f"/p/{workspace_id}/{wip.id}" not in viewer_bundle
+    assert f"/p/{workspace_id}/{wip.id}" in editor_bundle
 
 
 def test_import_okf_bundle_is_liberal(session_factory):
@@ -85,14 +89,16 @@ def test_import_okf_bundle_is_liberal(session_factory):
     from backend.services.page_service import PageService
 
     page_service = PageService(session_factory)
+    imported_url, weird_url = (f"/p/{uuid4()}/{uuid4()}" for _ in range(2))
     bundle = {
         "index.md": "# index (skipped)",
-        "context/imported.md": (
-            "---\ntype: concept\ntitle: Imported Title\ntags: [a, b]\n---\n\n"
+        imported_url: (
+            "---\ntype: concept\ntitle: Imported Title\n"
+            "slug: imported\ntags: [a, b]\n---\n\n"
             "Imported body content."
         ),
-        "context/weird.md": (
-            "---\ntype: BigQuery Table\ntitle: Weird\n---\n\nWeird body."
+        weird_url: (
+            "---\ntype: BigQuery Table\ntitle: Weird\nslug: weird\n---\n\nWeird body."
         ),
     }
     slugs = import_okf_bundle(
@@ -107,9 +113,7 @@ def test_import_okf_bundle_is_liberal(session_factory):
         imported = session.scalar(
             select(ContextPage).where(ContextPage.slug == "imported")
         )
-        weird = session.scalar(
-            select(ContextPage).where(ContextPage.slug == "weird")
-        )
+        weird = session.scalar(select(ContextPage).where(ContextPage.slug == "weird"))
     assert imported.title == "Imported Title"
     assert imported.page_type == "concept"
     # An unknown OKF type is accepted (liberal consumption) and mapped to default.
@@ -124,7 +128,9 @@ def test_import_okf_bundle_skips_existing_slugs(session_factory):
 
     page_service = PageService(session_factory)
     bundle = {
-        "context/dup.md": "---\ntype: concept\ntitle: Dup\n---\n\nBody one.",
+        f"/p/{uuid4()}/{uuid4()}": (
+            "---\ntype: concept\ntitle: Dup\nslug: dup\n---\n\nBody one."
+        ),
     }
     first = import_okf_bundle(
         page_service,
@@ -178,7 +184,7 @@ def test_rendered_concept_has_exactly_one_frontmatter_block(page_service):
         bundle = export_workspace_bundle(
             session, workspace_id, actor=None, workspace_slug="default"
         )
-    doc = bundle["context/a2-page.md"]
+    doc = next(body for url, body in bundle.items() if url != "index.md")
     assert doc.count("---\n") + doc.count("\n---") >= 2  # opening+closing exist
     # exactly one frontmatter block: after the first closing '---', no more
     head, _, rest = doc.partition("\n---\n")
@@ -213,7 +219,9 @@ def test_export_import_roundtrip_preserves_aliases(page_service, session_factory
         )
     renamed = {
         "index.md": bundle["index.md"],
-        "context/roundtrip-dst.md": bundle["context/roundtrip-src.md"],
+        f"/p/{workspace_id}/{uuid4()}": next(
+            body for url, body in bundle.items() if url != "index.md"
+        ).replace("slug: roundtrip-src", "slug: roundtrip-dst"),
     }
     imported = import_okf_bundle(
         page_service,

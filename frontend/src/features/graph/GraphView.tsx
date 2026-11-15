@@ -1576,7 +1576,7 @@ function nodeHref(node: GraphNode, workspaceId: string | null) {
     {
       id: node.entity_id,
       type: node.entity_kind,
-      concept_path: node.path,
+      stable_url: node.stable_url,
       source_ref: { kind: node.entity_kind, id: node.entity_id },
     },
     workspaceId,

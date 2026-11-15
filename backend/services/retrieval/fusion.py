@@ -36,6 +36,16 @@ def reciprocal_rank_fusion(
 
 
 def ranked_result_key(result: RankedResult) -> str:
-    """Dedup identity for fusion: the OKF concept (document) when present, so a
-    document found by both keyword and semantic is boosted, not duplicated."""
-    return result.concept_path or f"{result.type}:{result.id}"
+    """Deduplicate search hits by document kind and UUID."""
+    from backend.services.entity_ref import ranked_result_entity_ref
+
+    if result.type not in {
+        "context_page",
+        "context_claim",
+        "library_item",
+        "library_artifact",
+        "agent_page",
+    }:
+        return f"{result.type}:{result.id}"
+    ref = ranked_result_entity_ref(result)
+    return f"{ref.kind}:{ref.id or result.id}"

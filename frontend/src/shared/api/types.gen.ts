@@ -7343,8 +7343,8 @@ export interface components {
             id: string;
             /** Kind */
             kind: string;
-            /** Path */
-            path?: string | null;
+            /** Stable Url */
+            stable_url?: string | null;
             /** Title */
             title: string;
         };
@@ -7404,12 +7404,12 @@ export interface components {
             label: string;
             /** Occurred At */
             occurred_at?: string | null;
-            /** Path */
-            path?: string | null;
             /** Records */
             records?: components["schemas"]["GraphNodeRecord"][];
             /** Review Status */
             review_status?: string | null;
+            /** Stable Url */
+            stable_url?: string | null;
             /** Status */
             status?: string | null;
         };
@@ -10726,8 +10726,6 @@ export interface components {
             archived: boolean;
             /** Citation Available */
             citation_available: boolean;
-            /** Concept Path */
-            concept_path?: string | null;
             /** Concept Type */
             concept_type?: string | null;
             /** Entity Ref */
@@ -10741,6 +10739,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Link Markdown */
+            link_markdown?: string | null;
             /** Location */
             location?: string[] | null;
             /** Match Reason */
@@ -10757,6 +10757,8 @@ export interface components {
             source_ref?: {
                 [key: string]: string;
             } | null;
+            /** Stable Url */
+            stable_url?: string | null;
             /**
              * Stale
              * @deprecated

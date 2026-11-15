@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from sqlalchemy import select
@@ -23,6 +23,7 @@ FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 def _page(session, workspace_id, slug, title, body=None):
     page = ContextPage(
+        id=uuid5(NAMESPACE_URL, slug),
         workspace_id=workspace_id,
         slug=slug,
         title=title,

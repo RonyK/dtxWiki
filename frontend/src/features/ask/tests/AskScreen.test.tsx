@@ -254,7 +254,7 @@ describe("AskScreen", () => {
                   kind: "context_page",
                   id: "00000000-0000-4000-8000-000000000102",
                   title: "Linked Context",
-                  path: "/context/linked-context.md",
+                  stable_url: `/p/${WORKSPACE_ID}/00000000-0000-4000-8000-000000000102`,
                   edge_kind: "wikilink",
                   direction: "out",
                 },
@@ -276,7 +276,7 @@ describe("AskScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Show Details" }));
     expect(screen.getByText("Linked documents")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Linked Context/ }))
-      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/00000000-0000-4000-8000-000000000102`);
+      .toHaveAttribute("href", `/p/${WORKSPACE_ID}/00000000-0000-4000-8000-000000000102`);
   });
 
   it("renders the assistant answer as markdown instead of raw syntax (M-9)", async () => {
@@ -1590,7 +1590,7 @@ describe("AskScreen", () => {
           title: "Deployment Guide",
           score: "1.00",
           match_reason: "exact_title",
-          concept_path: "/context/deployment-guide.md",
+          stable_url: `/p/${WORKSPACE_ID}/00000000-0000-4000-8000-000000000103`,
         },
       ],
       tried_lanes: ["entity", "library_fallback"],
@@ -1624,14 +1624,9 @@ describe("AskScreen", () => {
     expect(await screen.findByRole("heading", { name: "Cited evidence" }))
       .toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Deployment Guide" }))
-      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/00000000-0000-4000-8000-000000000103`);
+      .toHaveAttribute("href", `/p/${WORKSPACE_ID}/00000000-0000-4000-8000-000000000103`);
     expect(screen.getAllByText("Exact title")).toHaveLength(2);
-    // M-11 (260908 UI audit): the ".md" suffix is a backend identifier
-    // (concept_path), not a real file the user can open -- it must not leak.
-    expect(screen.getByText("/context/deployment-guide")).toBeInTheDocument();
-    expect(
-      screen.queryByText("/context/deployment-guide.md"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("/context/deployment-guide.md")).not.toBeInTheDocument();
     expect(screen.getByText("Search path")).toBeInTheDocument();
     expect(
       screen.getByText("Context had no match, so Library evidence was used."),

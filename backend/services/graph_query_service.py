@@ -261,7 +261,7 @@ class GraphQueryService:
                 family="document",
                 label=page.title[:200],
                 status=page.lifecycle_status,
-                path=hydrated.path,
+                stable_url=hydrated.path,
                 is_seed=True,
                 occurred_at=page.created_at,
             )
@@ -3257,7 +3257,7 @@ def _node_from_projection(edge: VisibleProjectionEdge) -> GraphNode:
         entity_id=edge.neighbor_id,
         family=family,
         label=edge.neighbor_title[:200],
-        path=edge.neighbor_path,
+        stable_url=edge.neighbor_path,
     )
 
 
@@ -3271,7 +3271,7 @@ def _node_from_hydrated(kind: str, entity_id: UUID, hydrated) -> GraphNode:
         entity_id=entity_id,
         family=family,
         label=hydrated.title[:200],
-        path=hydrated.path,
+        stable_url=hydrated.path,
     )
 
 

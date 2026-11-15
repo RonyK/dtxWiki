@@ -241,7 +241,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        read_concept and partial reads take UUID or /p/ links (read_concept
 #        also get_index refs and /library/<id>.md); read_concept no longer
 #        returns redirected/ambiguous status or candidates.
-MCP_TOOL_CONTRACT_REVISION = 32
+#  33 -- Document locators use kind/UUID and canonical URLs throughout reads,
+#        search, neighbors, OKF and maintenance; Library read input accepts
+#        its canonical URL. Refresh cached tool catalogs and result schemas.
+MCP_TOOL_CONTRACT_REVISION = 33
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

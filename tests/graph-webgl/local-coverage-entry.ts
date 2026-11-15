@@ -102,13 +102,13 @@ if (scenario === "folder" || scenario === "folder-long") {
     family: index % 31 === 29 ? "chat" as const : "document" as const,
     label: `Boundary document ${String(index).padStart(3, "0")}`,
     is_seed: index === 0,
-    path: `/context/boundary-${index}.md`,
+    stable_url: `/p/00000000-0000-4000-8000-000000000001/${index === 0 ? documentTemplate.entity_id : `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`}`,
     evidence: null,
   }));
   const folders = ["a", "b"].map((name) => ({
     ...documentTemplate, id: `node:folder:${name}`, entity_id: `boundary-folder-${name}`,
     entity_kind: "workspace_tree_node", family: "structural" as const,
-    label: `Boundary folder ${name.toUpperCase()}`, path: null,
+    label: `Boundary folder ${name.toUpperCase()}`, stable_url: null,
     is_seed: false, evidence: null,
   }));
   const relation = (id: string, source: string, target: string, edge_kind: string) => ({

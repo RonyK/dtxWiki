@@ -56,7 +56,7 @@ class EntityRef:
     id: UUID | None = None
     workspace_id: UUID | None = None
     version_id: UUID | None = None
-    concept_path: str | None = None
+    stable_url: str | None = None
     resource_uri: str | None = None
 
     def source_ref(self) -> dict[str, str]:
@@ -65,8 +65,8 @@ class EntityRef:
             data["id"] = str(self.id)
         if self.version_id is not None:
             data["version_id"] = str(self.version_id)
-        if self.concept_path:
-            data["concept_path"] = self.concept_path
+        if self.stable_url:
+            data["stable_url"] = self.stable_url
         if self.resource_uri:
             data["resource_uri"] = self.resource_uri
         return data
@@ -90,12 +90,8 @@ def context_resource_uri(workspace_id: UUID, slug: str) -> str:
     return f"dtxwiki://workspaces/{workspace_id}/context/pages/{quote(slug, safe='')}"
 
 
-def context_concept_path(slug: str) -> str:
-    return f"/context/{slug}.md"
-
-
-def library_concept_path(item_id: UUID) -> str:
-    return f"/library/{item_id}.md"
+def library_stable_url(workspace_id: UUID | str, item_id: UUID | str) -> str:
+    return f"/workspaces/{workspace_id}/library/items/{item_id}"
 
 
 def parse_context_resource_uri(uri: str) -> tuple[UUID, str] | None:
@@ -120,7 +116,7 @@ def context_page_entity_ref(
         id=page_id,
         workspace_id=workspace_id,
         version_id=version_id,
-        concept_path=context_concept_path(slug),
+        stable_url=f"/p/{workspace_id}/{page_id}",
         resource_uri=context_resource_uri(workspace_id, slug),
     )
 
@@ -136,7 +132,7 @@ def library_item_entity_ref(
         id=item_id,
         workspace_id=workspace_id,
         version_id=version_id,
-        concept_path=library_concept_path(item_id),
+        stable_url=library_stable_url(workspace_id, item_id),
     )
 
 
@@ -147,17 +143,23 @@ def ranked_result_entity_ref(result: RankedResult | dict[str, Any]) -> EntityRef
     if isinstance(result, RankedResult):
         result_type = result.type
         result_version_id = result.version_id
-        concept_path = result.concept_path
+        stable_url = result.stable_url
     else:
         result_type = result.get("type")
-        result_version_id = parse_uuid_or_none(
-            str(result.get("version_id") or "")
-        )
-        concept_path = result.get("concept_path")
+        result_version_id = parse_uuid_or_none(str(result.get("version_id") or ""))
+        stable_url = result.get("stable_url")
     version_id = (
-        parse_uuid_or_none(str(source_ref.get("version_id") or ""))
-        or result_version_id
+        parse_uuid_or_none(str(source_ref.get("version_id") or "")) or result_version_id
     )
+    if result_type in {"feedback", "change"}:
+        # Audit source refs describe navigation targets, not result identities.
+        return EntityRef(
+            kind=EntityKind.FEEDBACK
+            if result_type == "feedback"
+            else EntityKind.CHANGE_SET,
+            id=document_id,
+            version_id=result_version_id,
+        )
     if source_kind == EntityKind.CONTENT_CHUNK:
         kind = coerce_entity_kind(
             str(source_ref.get("document_kind") or result_type or "")
@@ -175,7 +177,7 @@ def ranked_result_entity_ref(result: RankedResult | dict[str, Any]) -> EntityRef
         kind=kind,
         id=document_id,
         version_id=version_id,
-        concept_path=str(concept_path) if concept_path else None,
+        stable_url=str(stable_url) if stable_url else None,
     )
 
 
@@ -184,9 +186,22 @@ def ranked_result_document_id(
 ) -> UUID | None:
     """Return the stable document id behind a ranked result."""
 
-    source_ref = _source_ref(result)
+    result_type = (
+        result.type if isinstance(result, RankedResult) else result.get("type")
+    )
+    source_ref = (
+        _source_ref(result) if result_type not in {"feedback", "change"} else {}
+    )
     if source_ref.get("kind") == EntityKind.CONTENT_CHUNK:
         return parse_uuid_or_none(str(source_ref.get("document_id") or ""))
+    if source_ref.get("kind") in {
+        EntityKind.CONTEXT_PAGE,
+        EntityKind.LIBRARY_ITEM,
+        EntityKind.AGENT_PAGE,
+    }:
+        document_id = parse_uuid_or_none(str(source_ref.get("id") or ""))
+        if document_id is not None:
+            return document_id
     value = result.id if isinstance(result, RankedResult) else result.get("id")
     if isinstance(value, UUID):
         return value
@@ -195,7 +210,7 @@ def ranked_result_document_id(
 
 def _source_ref(result: RankedResult | dict[str, Any]) -> dict[str, Any]:
     if isinstance(result, RankedResult):
-        value = result.source_ref
+        value = result.entity_ref or result.source_ref
     else:
-        value = result.get("source_ref")
+        value = result.get("entity_ref") or result.get("source_ref")
     return dict(value) if isinstance(value, dict) else {}

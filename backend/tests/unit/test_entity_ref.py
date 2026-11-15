@@ -20,6 +20,15 @@ def test_entity_ref_uses_validated_kind_and_serializes_string_value():
     assert ref.source_ref() == {"kind": "feedback", "id": str(entity_id)}
     assert coerce_entity_kind("change_set") is EntityKind.CHANGE_SET
 
+    audit_ref = ranked_result_entity_ref(
+        {
+            "type": "feedback",
+            "id": str(entity_id),
+            "source_ref": {"kind": "context_page", "id": str(uuid4())},
+        }
+    )
+    assert (audit_ref.kind, audit_ref.id) == (EntityKind.FEEDBACK, entity_id)
+
 
 def test_ranked_result_resolves_content_chunk_to_document_kind():
     document_id = uuid4()

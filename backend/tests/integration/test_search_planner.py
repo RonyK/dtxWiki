@@ -84,7 +84,7 @@ def test_query_plan_preserves_raw_query_and_classifies_intent():
     assert entity.tokens == ("PAY-401",)
     assert entity.intent == "entity_lookup"
 
-    assert QueryPlan.build("/context/deploy-runbook.md").intent == "direct_path"
+    assert QueryPlan.build("/context/deploy-runbook.md").intent == "concept_lookup"
     assert QueryPlan.build(str(uuid4())).intent == "direct_path"
     assert QueryPlan.build("결제 시스템 전체 구조").intent == "overview"
     assert QueryPlan.build("배포 롤백 정책").intent == "concept_lookup"
@@ -114,7 +114,7 @@ def test_direct_path_slug_and_uuid_short_circuit_fallback(session_factory):
         by_path = service.search(
             session=session,
             workspace_id=workspace_id,
-            query="/context/direct-runbook.md",
+            query=f"/p/{workspace_id}/{page.id}",
             scope="context_page",
         )
         by_slug = service.search(
@@ -134,7 +134,7 @@ def test_direct_path_slug_and_uuid_short_circuit_fallback(session_factory):
     assert [result.id for result in by_path.ranked_results] == [page.id]
     assert [result.id for result in by_slug.ranked_results] == [page.id]
     assert [result.id for result in by_id.ranked_results] == [page.id]
-    assert by_path.ranked_results[0].match_reason == "exact_slug"
+    assert by_path.ranked_results[0].match_reason == "exact_id"
     assert by_slug.ranked_results[0].match_reason == "exact_slug"
     assert by_id.ranked_results[0].match_reason == "exact_id"
     assert by_path.tried_lanes == by_slug.tried_lanes == by_id.tried_lanes == [
@@ -183,7 +183,7 @@ def test_bare_slug_collision_returns_ranked_matches_but_explicit_path_stays_dire
         explicit = service.search(
             session=session,
             workspace_id=workspace_id,
-            query="/context/pipeline.md",
+            query=str(slug_page.id),
             scope="context_page",
         )
 
@@ -196,7 +196,7 @@ def test_bare_slug_collision_returns_ranked_matches_but_explicit_path_stays_dire
         "exact_slug", "exact_title"
     ]
     assert [result.id for result in explicit.ranked_results] == [slug_page.id]
-    assert explicit.ranked_results[0].match_reason == "exact_slug"
+    assert explicit.ranked_results[0].match_reason == "exact_id"
     assert explicit.tried_lanes == ["direct"]
     assert retriever.calls == 0
 

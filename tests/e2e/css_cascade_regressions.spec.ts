@@ -379,7 +379,7 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
           summary: "**Embedding** policy explains [retrieval](https://example.com).",
           matched_name: title, match_reason: "exact_title", location,
           source_ref: { kind: "context_page", id: pageId },
-          concept_path: `/context/p-${pageId}.md`,
+          stable_url: `/p/${workspace.id}/${pageId}`,
           score: 1, stale: true, archived: false, citation_available: false,
         }],
         total_count: 1, supported_retrieval_modes: ["keyword"],

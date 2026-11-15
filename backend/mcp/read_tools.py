@@ -106,7 +106,6 @@ from backend.services.mcp_context_projection import (
 from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
     build_workspace_index_document,
-    parse_concept_path,
     project_context_frontmatter,
     render_context_concept,
     render_library_concept,
@@ -868,6 +867,7 @@ def _concept_neighbors(session, ctx, page, actor):
     hydrators, parent folder included for leaf seeds.
     """
     from backend.schemas.mcp.read_tools import ConceptNeighbors, NeighborEntry
+    from backend.services.context_links import escape_link_label
     from backend.services.entity_ref import EntityKind
 
     graph = ctx.services.graph_service
@@ -879,12 +879,20 @@ def _concept_neighbors(session, ctx, page, actor):
                 kind=edge.kind,
                 id=edge.id,
                 title=edge.title,
-                path=None if edge.kind == EntityKind.CONTEXT_PAGE else edge.path,
                 edge_kind=edge.edge_kind,
                 direction=edge.direction,
                 **(
                     page_links(ctx.workspace_id, edge.id, edge.title)
                     if edge.kind == EntityKind.CONTEXT_PAGE
+                    else library_links(ctx.workspace_id, edge.id, edge.title)
+                    if edge.kind == EntityKind.LIBRARY_ITEM
+                    else {
+                        "stable_url": edge.stable_url,
+                        "link_markdown": (
+                            f"[{escape_link_label(edge.title)}]({edge.stable_url})"
+                        ),
+                    }
+                    if edge.stable_url
                     else {}
                 ),
             )
@@ -961,8 +969,8 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
     """Read one Context page or Library item as frontmatter + body.
 
     Context pages are addressed by UUID, stable URL, or get_index ref and honor
-    per-actor draft visibility; "/library/<id>.md" resolves the extracted
-    source text (A-8)."""
+    per-actor draft visibility; canonical Library item URLs resolve extracted
+    source text."""
     try:
         request = ReadConceptInput.model_validate(payload)
     except ValidationError as exc:
@@ -977,30 +985,29 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         if index_ref is not None and index_ref.kind == "context"
         else request.path
     )
-    library_match = (index_ref is not None and index_ref.kind == "library") or (
-        request.path.startswith("/library/") and request.path.endswith(".md")
+    from backend.services.context_link_targets import (
+        _parse_workspace_navigation_reference,
+    )
+
+    library_url = _parse_workspace_navigation_reference(request.path)
+    library_ref = index_ref is not None and index_ref.kind == "library"
+    library_match = library_ref or (
+        library_url is not None and library_url[:2] == ("library", "item")
     )
     try:
         locator = None if library_match else parse_page_input(page_path)
     except ValueError:
         locator = None
-    parsed = (
-        ("library", str(index_ref.target_id))
-        if index_ref is not None and index_ref.kind == "library"
-        else parse_concept_path(request.path)
-        if library_match
-        else None
-    )
     if not library_match and locator is None:
         return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
     if library_match:
-        if parsed is None:
-            return ReadConceptOutput(
-                envelope=error_envelope(actor, "validation_failed")
-            )
-        section, slug = parsed
-        # A-8: get_index advertises /library/<id>.md — read_concept must
-        # resolve it instead of dead-ending half the catalog.
+        if library_ref:
+            slug = str(index_ref.target_id)
+        else:
+            _section, _kind, item_id, url_workspace_id = library_url
+            if url_workspace_id != ctx.workspace_id:
+                return ReadConceptOutput(envelope=error_envelope(actor, "not_found"))
+            slug = str(item_id)
         with session_factory() as session:
             item, status = resolve_library_concept(
                 session, ctx.workspace_id, identifier=slug, actor=actor
@@ -1016,7 +1023,6 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         return ReadConceptOutput(
             envelope=ok_envelope(actor),
             status="found",
-            path=request.path,
             target_kind="library_item",
             target_id=item_id,
             **library_links(ctx.workspace_id, item.id, item.title or item.uri),
@@ -1120,7 +1126,6 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
     return ReadConceptOutput(
         envelope=ok_envelope(actor),
         status="found",
-        path=request.path,
         target_kind="context_page",
         target_id=page.id,
         page_id=page.id,

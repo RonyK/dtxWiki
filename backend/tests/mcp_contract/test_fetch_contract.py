@@ -74,7 +74,7 @@ SEARCH_SCOPE_RESULT_TYPES = {
 
 # OpenAI's read/fetch compatibility result, carried beside dtxWiki's existing
 # MCPResultEnvelope.  ``metadata`` is the extension point for dtxWiki-specific
-# values such as type, version_id, and concept_path; no new top-level field is
+# values such as type, version_id, and stable_url; no new top-level field is
 # permitted without changing this contract first.
 FETCH_RESULT_FIELDS = frozenset({"id", "title", "text", "url", "metadata"})
 FETCH_OUTPUT_FIELDS = frozenset({"envelope", "references", *FETCH_RESULT_FIELDS})

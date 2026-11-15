@@ -19,7 +19,6 @@ class MCPRankedResult(BaseModel):
     archived: bool = False
     summary: str | None = None
     location: list[str] | None = None
-    path: str | None = Field(default=None, description="Library lookup path only.")
     concept_type: str | None = None
     version_id: UUID | None = None
     heading_path: list[str] | None = None
@@ -46,7 +45,6 @@ class MCPHotConceptEntry(BaseModel):
     kind: str
     id: UUID
     title: str
-    path: str | None = None
     stable_url: str | None = None
     score: int
     model_config = ConfigDict(extra="forbid")

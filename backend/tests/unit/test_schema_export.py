@@ -392,8 +392,8 @@ def test_mcp_schema_export_covers_all_advertised_tools(mcp_schemas):
     ranked_ref = search_payload["properties"]["ranked_results"]["items"]["$ref"]
     assert ranked_ref.startswith("#/$defs/")
     ranked = search_output["$defs"][ranked_ref.removeprefix("#/$defs/")]
-    assert {"stable_url", "link_markdown", "path"}.issubset(ranked["properties"])
-    assert {"concept_path", "resource_uri"}.isdisjoint(ranked["properties"])
+    assert {"stable_url", "link_markdown"}.issubset(ranked["properties"])
+    assert {"concept_path", "resource_uri", "path"}.isdisjoint(ranked["properties"])
     assert {"summary", "location"}.issubset(ranked["properties"])
     assert {"summary", "location"}.isdisjoint(ranked.get("required", []))
     assert ranked["properties"]["stale"]["deprecated"] is True

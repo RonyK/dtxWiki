@@ -1047,7 +1047,7 @@ def test_ask_session_turn_uses_context_first_search(page_service):
         "title",
         "score",
         "match_reason",
-        "concept_path",
+        "stable_url",
     }
 
     reread = client.get(

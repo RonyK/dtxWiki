@@ -56,9 +56,7 @@ def test_api_reranker_accepts_tei_list_shape():
             200, json=[{"index": 1, "score": 0.8}, {"index": 0, "score": 0.1}]
         )
 
-    response = _reranker(handler).rerank(
-        RerankRequest(query="q", documents=["a", "b"])
-    )
+    response = _reranker(handler).rerank(RerankRequest(query="q", documents=["a", "b"]))
     assert [result.index for result in response.results] == [1, 0]
 
 
@@ -69,9 +67,7 @@ def test_api_reranker_rejects_out_of_range_index():
         )
 
     with pytest.raises(RuntimeError):
-        _reranker(handler).rerank(
-            RerankRequest(query="q", documents=["a", "b"])
-        )
+        _reranker(handler).rerank(RerankRequest(query="q", documents=["a", "b"]))
 
 
 def test_api_reranker_empty_documents_skips_http_call():
@@ -110,7 +106,6 @@ def _result(title: str, score: float) -> RankedResult:
         snippet="",
         score=score,
         citation_available=False,
-        concept_path=f"/c/{title}",
     )
 
 
@@ -145,7 +140,7 @@ class _FakeReranker:
 
 
 def _paths(payload) -> list[str]:
-    return [result.concept_path for result in payload.ranked_results]
+    return [result.title for result in payload.ranked_results]
 
 
 def _search(service: SearchService):
@@ -164,7 +159,7 @@ def test_search_reranks_candidate_order():
         retrievers=[_FakeRetriever(results)],
         reranker=_FakeReranker(order=[2, 0, 1]),
     )
-    assert _paths(_search(service)) == ["/c/c", "/c/a", "/c/b"]
+    assert _paths(_search(service)) == ["c", "a", "b"]
 
 
 def test_search_without_reranker_keeps_fusion_order():
@@ -172,7 +167,35 @@ def test_search_without_reranker_keeps_fusion_order():
     service = SearchService(
         retrievers=[_FakeRetriever([_result("b", 0.8), _result("a", 0.9)])]
     )
-    assert _paths(_search(service)) == ["/c/a", "/c/b"]
+    assert _paths(_search(service)) == ["a", "b"]
+
+    from backend.services.retrieval.fusion import (
+        ranked_result_key,
+        reciprocal_rank_fusion,
+    )
+
+    # Audit source refs are navigation targets, so separate feedback on one
+    # page must retain separate identities when retrieval lanes are fused.
+    target_id = uuid4()
+    feedback = [
+        _result("first", 0.9).model_copy(
+            update={
+                "type": "feedback",
+                "source_ref": {"kind": "context_page", "id": str(target_id)},
+            }
+        ),
+        _result("second", 0.8).model_copy(
+            update={
+                "type": "feedback",
+                "source_ref": {"kind": "context_page", "id": str(target_id)},
+            }
+        ),
+    ]
+    fused = reciprocal_rank_fusion([feedback, []], key=ranked_result_key)
+    assert [result.id for result in fused] == [result.id for result in feedback]
+    from backend.services.eval.harness import result_identifier
+
+    assert result_identifier(feedback[0]) == f"feedback:{feedback[0].id}"
 
 
 def test_search_rerank_failure_falls_back_to_fusion_order():
@@ -180,7 +203,7 @@ def test_search_rerank_failure_falls_back_to_fusion_order():
         retrievers=[_FakeRetriever([_result("a", 0.9), _result("b", 0.8)])],
         reranker=_FakeReranker(order=[1, 0], fail=True),
     )
-    assert _paths(_search(service)) == ["/c/a", "/c/b"]
+    assert _paths(_search(service)) == ["a", "b"]
 
 
 def test_search_rerank_top_n_truncation_keeps_all_results():
@@ -196,4 +219,4 @@ def test_search_rerank_top_n_truncation_keeps_all_results():
         rerank_top_n=2,
     )
     # reranked [d, c] first, then the dropped candidates in fusion order [a, b].
-    assert _paths(_search(service)) == ["/c/d", "/c/c", "/c/a", "/c/b"]
+    assert _paths(_search(service)) == ["d", "c", "a", "b"]

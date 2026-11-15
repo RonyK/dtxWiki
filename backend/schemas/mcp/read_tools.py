@@ -261,7 +261,7 @@ class GetIndexOutput(BaseModel):
 
 class ReadConceptInput(MCPConversationInput):
     # Read one Context page (UUID, stable URL or get_index ref) or Library
-    # item ("/library/<id>.md"), returning frontmatter + Markdown body of the
+    # item (canonical item URL), returning frontmatter + Markdown body of the
     # actor-visible version.
     # include_neighbors adds the 1-hop block (design 5.5); set false to save
     # tokens on pure content reads.
@@ -272,7 +272,7 @@ class ReadConceptInput(MCPConversationInput):
     # Point-in-time read (design 17.2-B): resolve the version PUBLISHED at
     # this instant (superseded snapshots included). Names resolve at present;
     # neighbors are omitted (a historical graph would be dishonest).
-    # CONTEXT concepts only — /library/<id>.md reads are always current and
+    # CONTEXT concepts only — Library canonical URL reads are always current and
     # echo as_of=null so a point-in-time caller can detect the downgrade.
     as_of: datetime | None = None
     format: Literal["structured", "mermaid"] = "structured"
@@ -284,7 +284,6 @@ class NeighborEntry(BaseModel):
     kind: str
     id: UUID
     title: str
-    path: str | None = None
     edge_kind: str
     direction: Literal["in", "out"]
     stable_url: str | None = None
@@ -294,7 +293,7 @@ class NeighborEntry(BaseModel):
 
 
 class ConceptNeighbors(BaseModel):
-    # 1-hop graph expansion (design 5.5): title+path one-liners only, hard
+    # 1-hop graph expansion: title and canonical URL, with hard
     # caps per class, all entries actor-visible.
     outbound: list[NeighborEntry] = Field(default_factory=list, max_length=10)
     backlinks: list[NeighborEntry] = Field(default_factory=list, max_length=10)
@@ -317,7 +316,6 @@ class ReadConceptOutput(BaseModel):
     )
     envelope: MCPResultEnvelope
     status: Literal["found", "not_found"] | None = None
-    path: str | None = None
     # Concept identity across sections (A-8): context pages fill
     # target_kind="context_page" (target_id == page_id); library sources
     # fill target_kind="library_item".

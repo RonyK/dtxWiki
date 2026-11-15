@@ -575,7 +575,7 @@ def _build_coverage_gap_card(
                     "required": ["title", "outline"],
                     "additionalProperties": False,
                 },
-                "concept_path": {"type": ["string", "null"]},
+                "page_id": {"type": ["string", "null"], "format": "uuid"},
             },
             "required": ["verdict", "rationale"],
             "additionalProperties": False,
@@ -960,7 +960,7 @@ def _visible_golden_samples(
             {
                 "page_id": str(page.id),
                 "title": page.title,
-                "concept_path": f"/context/{page.slug}.md",
+                "stable_url": f"/p/{workspace_id}/{page.id}",
                 "citation_count": sample.get("citation_count"),
             }
         )
@@ -975,7 +975,7 @@ def _build_golden_query_card(
         payload["page_samples"] = _visible_golden_samples(
             session, task.workspace_id, payload.get("page_samples")
         )
-    # Drop the operator golden set entirely: neither the expected concept paths
+    # Drop the operator golden set: neither expected document kinds and UUIDs
     # nor the free-text query (which can name an archived/hidden page, codename,
     # or customer) can be re-authorized against the leasing actor after the fact.
     # page_samples (re-resolved above) already give the client enough context to
@@ -985,7 +985,8 @@ def _build_golden_query_card(
     return _payload_card(
         task,
         instruction=(
-            "Propose retrieval evaluation queries and expected concept paths. "
+            "Propose retrieval evaluation queries with expected document kinds "
+            "and UUIDs. "
             "Return candidates only; never modify the golden-set file."
         ),
         context=payload,
@@ -1003,13 +1004,12 @@ def _build_golden_query_card(
                                 "minLength": 1,
                                 "maxLength": SEARCH_QUERY_MAX_LENGTH,
                             },
-                            "expected_concept_path": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 512,
+                            "expected_kind": {
+                                "enum": ["context_page", "library_item", "agent_page"]
                             },
+                            "expected_id": {"type": "string", "format": "uuid"},
                         },
-                        "required": ["query", "expected_concept_path"],
+                        "required": ["query", "expected_kind", "expected_id"],
                         "additionalProperties": False,
                     },
                 }
@@ -1038,7 +1038,7 @@ def _validate_folder_nav_summary(answer: dict[str, Any]) -> dict[str, Any] | Non
 
 
 def _validate_coverage_gap(answer: dict[str, Any]) -> dict[str, Any] | None:
-    if set(answer) - {"verdict", "rationale", "proposal", "concept_path"}:
+    if set(answer) - {"verdict", "rationale", "proposal", "page_id"}:
         return None
     verdict = answer.get("verdict")
     rationale = answer.get("rationale")
@@ -1052,16 +1052,19 @@ def _validate_coverage_gap(answer: dict[str, Any]) -> dict[str, Any] | None:
             return None
         if not all(isinstance(proposal[key], str) for key in ("title", "outline")):
             return None
-    concept_path = answer.get("concept_path")
-    if concept_path is not None and not isinstance(concept_path, str):
-        return None
-    if verdict == "augment_existing" and not concept_path:
+    page_id = answer.get("page_id")
+    if page_id is not None:
+        try:
+            page_id = str(UUID(page_id))
+        except (ValueError, TypeError, AttributeError):
+            return None
+    if verdict == "augment_existing" and not page_id:
         return None
     return {
         "verdict": verdict,
         "rationale": rationale,
         "proposal": proposal,
-        **({"concept_path": concept_path} if concept_path is not None else {}),
+        **({"page_id": page_id} if page_id is not None else {}),
     }
 
 
@@ -1193,22 +1196,27 @@ def _validate_golden_queries(answer: dict[str, Any]) -> dict[str, Any] | None:
     for candidate in answer["queries"]:
         if not isinstance(candidate, dict) or set(candidate) != {
             "query",
-            "expected_concept_path",
+            "expected_kind",
+            "expected_id",
         }:
             return None
         if (
             not isinstance(candidate["query"], str)
             or not candidate["query"].strip()
             or len(candidate["query"].strip()) > SEARCH_QUERY_MAX_LENGTH
-            or not isinstance(candidate["expected_concept_path"], str)
-            or not candidate["expected_concept_path"].strip()
-            or len(candidate["expected_concept_path"].strip()) > 512
+            or candidate["expected_kind"]
+            not in {"context_page", "library_item", "agent_page"}
         ):
+            return None
+        try:
+            expected_id = str(UUID(candidate["expected_id"]))
+        except (ValueError, TypeError, AttributeError):
             return None
         normalized.append(
             {
                 "query": candidate["query"].strip(),
-                "expected_concept_path": candidate["expected_concept_path"].strip(),
+                "expected_kind": candidate["expected_kind"],
+                "expected_id": expected_id,
             }
         )
     return {"queries": normalized}

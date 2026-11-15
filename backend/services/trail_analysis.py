@@ -31,8 +31,7 @@ from backend.services.context_visibility import visible_context_version_id
 from backend.services.delegated_tasks import create_task
 from backend.services.entity_ref import (
     EntityKind,
-    context_concept_path,
-    library_concept_path,
+    library_stable_url,
 )
 from backend.services.graph_rank import pagerank_weight
 from backend.services.indexing.edge_registry import (
@@ -142,7 +141,7 @@ def list_hot_concepts(
                 "kind": kind,
                 "id": entity_id,
                 "title": title,
-                "path": path,
+                "stable_url": path,
                 "score": int(score or 0),
             }
         )
@@ -576,7 +575,7 @@ def _hot_concept_identities(
                 continue
             hydrated[(EntityKind.CONTEXT_PAGE.value, page.id)] = (
                 page.title,
-                context_concept_path(page.slug),
+                f"/p/{workspace_id}/{page.id}",
             )
 
     library_ids = ids_by_kind.get(EntityKind.LIBRARY_ITEM.value, set())
@@ -595,7 +594,7 @@ def _hot_concept_identities(
                 continue
             hydrated[(EntityKind.LIBRARY_ITEM.value, item.id)] = (
                 item.title or item.uri,
-                library_concept_path(item.id),
+                library_stable_url(workspace_id, item.id),
             )
 
     agent_ids = ids_by_kind.get(EntityKind.AGENT_PAGE.value, set())

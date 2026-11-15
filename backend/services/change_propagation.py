@@ -11,11 +11,11 @@ from sqlalchemy.orm import Session
 from backend.models.context import ContextPage, EdgeProjection, PageLink
 from backend.models.delegated_task import ClientDelegatedTask
 from backend.models.lint import LintFinding, LintRun
+from backend.services.context_links import format_stable_url
 from backend.services.delegated_tasks import (
     create_task,
     produce_page_meta_refresh_task,
 )
-from backend.services.entity_ref import context_concept_path
 from backend.services.page_link_ordering import page_link_snippet_order
 
 _LIVE_FINDING_STATUSES = ("open", "acknowledged")
@@ -46,7 +46,7 @@ def process_page_publish_maintenance(
         page_id=page.id,
         published_version_id=published_version_id,
         title=page.title,
-        concept_path=context_concept_path(page.slug),
+        stable_url=format_stable_url(page.workspace_id, page.id),
         reason=reason,
     )
     return created
@@ -105,8 +105,7 @@ def mark_dependent_pages_stale(
             .where(
                 PageLink.workspace_id == workspace_id,
                 PageLink.source_page_id == dependent.id,
-                PageLink.source_version_id
-                == dependent.current_published_version_id,
+                PageLink.source_version_id == dependent.current_published_version_id,
                 PageLink.target_page_id == published_page_id,
             )
             .order_by(*page_link_snippet_order())
@@ -178,9 +177,7 @@ def mark_dependent_pages_stale(
                 rule_id="kb.dependent_maybe_stale",
                 severity="info",
                 status="open",
-                suggested_action=json.dumps(
-                    action, ensure_ascii=False, sort_keys=True
-                ),
+                suggested_action=json.dumps(action, ensure_ascii=False, sort_keys=True),
                 fingerprint=fingerprint,
             )
             session.add(finding)

@@ -62,14 +62,13 @@ def _context_references(
         result[field] = {
             key: item
             for key, item in reference.items()
-            if key not in {"concept_path", "resource_uri", "link_markdown"}
+            if key not in {"resource_uri", "link_markdown"}
         }
         result[field]["stable_url"] = format_stable_url(workspace_id, page_id)
 
 
 def context_record(value: dict, workspace_id: UUID, page_id: UUID, title: str) -> dict:
     result = dict(value)
-    result.pop("concept_path", None)
     result.pop("resource_uri", None)
     result.update(page_links(workspace_id, page_id, title))
     _context_references(result, workspace_id, page_id)
@@ -86,14 +85,17 @@ def search_payload(data: BaseModel, workspace_id: UUID) -> dict:
                 else (row.get("source_ref") or {})["id"]
             )
             row.update(context_record(row, workspace_id, UUID(page_id), row["title"]))
-            row.pop("concept_path", None)
         else:
-            row["path"] = row.pop("concept_path", None)
+            if row["type"] in {"library_item", "library_artifact"}:
+                ref = row.get("entity_ref") or row.get("source_ref") or {}
+                item_id = ref.get("document_id") or ref.get("id") or row["id"]
+                row.update(
+                    library_links(workspace_id, UUID(str(item_id)), row["title"])
+                )
         _context_references(row, workspace_id)
     for row in result.get("nearest_candidates", []):
         if row.get("kind") == "context_page":
             row.update(context_record(row, workspace_id, UUID(row["id"]), row["title"]))
-            row.pop("concept_path", None)
     return result
 
 
@@ -101,6 +103,5 @@ def guide_payload(data: BaseModel, workspace_id: UUID) -> dict:
     result = data.model_dump(mode="json")
     for row in result["hot_concepts"]:
         if row["kind"] == "context_page":
-            row["path"] = None
             row["stable_url"] = format_stable_url(workspace_id, UUID(row["id"]))
     return result

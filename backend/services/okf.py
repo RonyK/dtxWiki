@@ -31,14 +31,13 @@ from backend.policy.auth import ActorContext
 from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
 )
+from backend.services.context_links import format_stable_url, parse_page_input
 from backend.services.context_visibility import visible_context_version_ids
-from backend.services.entity_ref import (  # canonical (G0-1)
-    context_concept_path,
-    library_concept_path,
-)
+from backend.services.entity_ref import library_stable_url
 from backend.services.index_refs import format_index_ref, index_line
 from backend.services.mcp_read_projection import record_served_read
 from backend.utils.page_frontmatter import (
+    _parse_scalar,
     derive_nav_description,
     parse_page_frontmatter,
 )
@@ -52,23 +51,6 @@ EXCLUDED_LIBRARY_LIFECYCLE_STATUSES = {"archived", "hidden"}
 _DESCRIPTION_MAX = 200
 
 logger = logging.getLogger("dtxwiki.okf")
-
-
-# --- paths (a file path is the concept identity in OKF) ---------------------
-# context_concept_path / library_concept_path are re-exported from
-# backend.services.entity_ref (canonical since G0-1).
-
-
-def parse_concept_path(path: str) -> tuple[str, str] | None:
-    """Parse an OKF concept path into (section, identifier), or None."""
-    cleaned = path.strip().strip("/")
-    if not cleaned.endswith(".md"):
-        return None
-    cleaned = cleaned[: -len(".md")]
-    section, _, identifier = cleaned.partition("/")
-    if not identifier or section not in {"context", "library"}:
-        return None
-    return section, identifier
 
 
 def resolve_workspace_slug(session: Session, workspace_id: UUID) -> str | None:
@@ -103,8 +85,9 @@ def project_context_frontmatter(
     return {
         "type": page.page_type,
         "title": page.title,
+        "slug": page.slug,
         "description": _nav_description_for(version),
-        "resource": f"/w/{workspace_slug}/context/{page.slug}",
+        "resource": format_stable_url(page.workspace_id, page.id),
         "tags": list(page.tags or []),
         "aliases": list(page.aliases or []),
         # Never omit this signal. render_frontmatter drops None/empty values,
@@ -333,7 +316,7 @@ def _context_index_lines(
                 )
             )
             continue
-        line = f"* [{page.title}]({context_concept_path(page.slug)})"
+        line = f"* [{page.title}]({format_stable_url(workspace_id, page.id)})"
         if description:
             line += f" — {description}"
         line += " *(draft)*" if is_draft else ""
@@ -364,7 +347,9 @@ def _library_index_lines(
         lines.append(
             index_line(format_index_ref("library", item.id), title, summary=item.uri)
             if index_refs
-            else f"* [{title}]({library_concept_path(item.id)}) — {item.uri}"
+            else (
+                f"* [{title}]({library_stable_url(workspace_id, item.id)}) — {item.uri}"
+            )
         )
     return lines
 
@@ -394,8 +379,8 @@ def export_workspace_bundle(
     self_origins: frozenset[str] | None = None,
 ) -> dict[str, str]:
     """Serialize a workspace's visible Context concepts as an OKF bundle
-    (``path -> markdown``): an ``index.md`` catalog plus one
-    ``context/<slug>.md`` per concept (frontmatter + body). Reuses the same
+    (``stable_url -> markdown``): an ``index.md`` catalog plus one
+    canonical Context URL per document (frontmatter + body). Reuses the same
     per-actor visibility as the catalog, so an export never leaks restricted
     or unreviewed content. Round-trippable with a consumer (import)."""
     bundle: dict[str, str] = {
@@ -432,7 +417,7 @@ def export_workspace_bundle(
             )
             if references:
                 markdown += _export_reference_footer(references)
-        bundle[f"context/{page.slug}.md"] = markdown
+        bundle[format_stable_url(workspace_id, page.id)] = markdown
     return bundle
 
 
@@ -443,7 +428,7 @@ def resolve_library_concept(
     identifier: str,
     actor: ActorContext | None,
 ) -> tuple[LibraryItem | None, str]:
-    """Resolve a ``/library/<id>.md`` concept to its LibraryItem (A-8).
+    """Resolve an item UUID to its actor-visible LibraryItem.
 
     Every gate returns ``not_found`` — absence must not disclose existence
     (design §3.3): archived/hidden lifecycle and restricted trust read the
@@ -578,7 +563,7 @@ def import_okf_bundle(
     actor_kind: str = "human",
     default_page_type: str = "concept",
 ) -> list[str]:
-    """Consume an OKF bundle into a workspace: each ``context/<slug>.md`` concept
+    """Consume an OKF bundle into a workspace: each canonical Context URL document
     becomes a Context page via ``page_service.write_page``. Liberal consumption —
     an unknown OKF ``type`` falls back to ``default_page_type`` instead of
     rejecting the bundle. ``page_service`` is injected to avoid a service-import
@@ -600,18 +585,22 @@ def import_okf_bundle(
     skipped: list[str] = []
     failed: list[str] = []
     for path in sorted(bundle):
-        if path == "index.md" or not path.startswith("context/"):
+        if path == "index.md":
             continue
-        if not path.endswith(".md"):
+        try:
+            locator = parse_page_input(path)
+        except ValueError:
             continue
-        slug = path[len("context/") : -len(".md")]
-        if not slug or "/" in slug:
+        if locator.kind != "stable_full":
             continue
+        parsed = parse_page_frontmatter(bundle[path])
+        header = bundle[path].split("\n---", 1)[0] if parsed.has_frontmatter else ""
+        slug_match = re.search(r"(?m)^slug:\s*([^\n]+)$", header)
+        slug = _parse_scalar(slug_match[1]) if slug_match else f"p-{locator.page_id}"
         try:
             if _page_exists(page_service, workspace_slug, slug):
                 skipped.append(slug)
                 continue
-            parsed = parse_page_frontmatter(bundle[path])
             title = parsed.title or slug
             page_type = parsed.page_type
             if page_type not in CONTEXT_PAGE_TYPES:

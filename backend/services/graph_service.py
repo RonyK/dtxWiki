@@ -51,10 +51,10 @@ from backend.services.actor_visible_read import (
     context_page_visible,
     library_item_visible,
 )
+from backend.services.context_links import format_stable_url
 from backend.services.entity_ref import (
     EntityKind,
-    context_concept_path,
-    library_concept_path,
+    library_stable_url,
 )
 from backend.services.graph_rank import (
     DENOMINATOR_KINDS,
@@ -121,7 +121,7 @@ class NeighborEdge:
     kind: str
     id: UUID
     title: str
-    path: str | None
+    stable_url: str | None
     edge_kind: str
     weight: float
     direction: str  # "out" | "in"
@@ -334,7 +334,7 @@ def _hydrate_context_pages(
         if not context_page_visible(page, ctx.actor):
             continue
         result[page.id] = _Hydrated(
-            title=page.title, path=context_concept_path(page.slug)
+            title=page.title, path=format_stable_url(page.workspace_id, page.id)
         )
     return result
 
@@ -347,7 +347,8 @@ def _hydrate_library_items(
         return result
     for item in _visible_library_items(ctx, set(ids)).values():
         result[item.id] = _Hydrated(
-            title=item.title or item.uri, path=library_concept_path(item.id)
+            title=item.title or item.uri,
+            path=library_stable_url(item.workspace_id, item.id),
         )
     return result
 
@@ -432,7 +433,8 @@ def _hydrate_library_artifacts(
         ):
             continue
         result[artifact.id] = _Hydrated(
-            title=item.title or item.uri, path=library_concept_path(item.id)
+            title=item.title or item.uri,
+            path=library_stable_url(item.workspace_id, item.id),
         )
     return result
 
@@ -456,7 +458,8 @@ def _hydrate_library_item_versions(
         if canonical is None or version.id != canonical.id:
             continue
         result[version.id] = _Hydrated(
-            title=item.title or item.uri, path=library_concept_path(item.id)
+            title=item.title or item.uri,
+            path=library_stable_url(item.workspace_id, item.id),
         )
     return result
 
@@ -1819,7 +1822,7 @@ class GraphService:
                     kind=ref[0],
                     id=ref[1],
                     title=info.title,
-                    path=info.path,
+                    stable_url=info.path,
                     edge_kind="associative",
                     weight=score,
                     direction="out",
@@ -2044,7 +2047,7 @@ class GraphService:
                 kind=kind,
                 id=entity_id,
                 title=info.title,
-                path=info.path,
+                stable_url=info.path,
                 edge_kind=edge_kind,
                 weight=weight,
                 direction=direction,
@@ -2122,7 +2125,7 @@ class GraphService:
                     kind=edge.neighbor_kind,
                     id=edge.neighbor_id,
                     title=edge.neighbor_title,
-                    path=edge.neighbor_path,
+                    stable_url=edge.neighbor_path,
                     edge_kind=edge.edge_kind,
                     weight=edge.weight,
                     direction=edge.direction,
@@ -2184,7 +2187,7 @@ def _neighbor_entry(edge: NeighborEdge) -> GraphNeighborEntry:
         kind=edge.kind,
         id=edge.id,
         title=edge.title,
-        path=edge.path,
+        stable_url=edge.stable_url,
         edge_kind=edge.edge_kind,
         direction=edge.direction,
     )
