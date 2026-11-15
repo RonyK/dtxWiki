@@ -1545,7 +1545,7 @@ def test_expired_submission_returns_task_to_pending_immediately(session_factory)
         assert task.lease_expires_at is None
 
 
-def test_dismiss_coverage_gap_stages_verdict_and_resolves_gap(session_factory):
+def test_coverage_gap_stages_dismissal_and_selected_augmentation(session_factory):
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         task = _seed_gap(session, workspace_id, 99)
@@ -1576,6 +1576,41 @@ def test_dismiss_coverage_gap_stages_verdict_and_resolves_gap(session_factory):
         assert gap.status == "dismissed"
         assert gap.resolved_at == NOW
         assert finding.rule_id == "maintenance.coverage_gap_verdict"
+
+        page_id = uuid4()
+        augment_task = _seed_gap(session, workspace_id, 100)
+        augment_round = lease_round(
+            session, workspace_id=workspace_id, codec=_codec(), now=NOW
+        )
+        augmentation = submit_answers(
+            session,
+            workspace_id=workspace_id,
+            resume_token=augment_round.resume_token,
+            answers={
+                str(augment_task.id): {
+                    "verdict": "augment_existing",
+                    "rationale": "Extend the selected page.",
+                    "page_id": str(page_id),
+                }
+            },
+            codec=_codec(),
+            actor_kind="mcp_client",
+            actor_id="client-1",
+            now=NOW,
+        )
+        augment_finding = session.scalar(
+            select(LintFinding).where(
+                LintFinding.fingerprint == f"cdt:{augment_task.id}"
+            )
+        )
+        action = json.loads(augment_finding.suggested_action)
+        assert augmentation.staged == (augment_task.id,)
+        assert action["page_id"] == str(page_id)
+        assert action["stable_url"] == f"/p/{workspace_id}/{page_id}"
+        assert (augment_finding.target_type, augment_finding.target_id) == (
+            "knowledge_coverage_gap",
+            augment_task.target_id,
+        )
 
 
 def test_maintenance_finding_survives_regular_lint_reconciliation(session_factory):

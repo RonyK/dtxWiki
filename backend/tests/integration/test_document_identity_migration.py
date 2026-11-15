@@ -107,6 +107,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
             )
             session.add(run)
             session.flush()
+            lint_run_id = run.id
             mixed = {
                 "concept_path": "/context/old-page.md",
                 "nested": [
@@ -116,6 +117,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                         "note": "retained evidence",
                     },
                     {"expected_concept_path": f"/library/{library_id}.md"},
+                    {"page_id": str(page_id), "note": "identity only"},
                 ],
             }
             session.add_all(
@@ -133,7 +135,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                     LintFinding(
                         id=finding_id,
                         workspace_id=workspace_id,
-                        lint_run_id=run.id,
+                        lint_run_id=lint_run_id,
                         target_type="context_page",
                         target_id=page_id,
                         rule_id="maintenance.page_meta_suggestion",
@@ -142,13 +144,15 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                             {
                                 "concept_path": "/context/old-page.md",
                                 "aliases": ["Keep"],
-                            }
+                            },
+                            separators=(",", ":"),
+                            indent=2,
                         ),
                     ),
                     LintFinding(
                         id=library_finding_id,
                         workspace_id=workspace_id,
-                        lint_run_id=run.id,
+                        lint_run_id=lint_run_id,
                         target_type="library_item",
                         target_id=library_id,
                         rule_id="maintenance.import_batch_classification",
@@ -162,7 +166,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                     LintFinding(
                         id=orphan_id,
                         workspace_id=workspace_id,
-                        lint_run_id=run.id,
+                        lint_run_id=lint_run_id,
                         target_type="context_page",
                         target_id=uuid4(),
                         rule_id="maintenance.page_meta_suggestion",
@@ -188,6 +192,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                             "concept_path": "/context/old-page.md",
                             "stable_url": f"/p/{workspace_id}/{page_id}",
                             "latest_draft_version_id": str(version_id),
+                            "body_md": "PRIVATE RECEIPT BODY",
                         },
                         created_at=now,
                         expires_at=now + timedelta(days=1),
@@ -224,6 +229,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                             "concept_path": "/context/old-page.md",
                             "title": "Kept title",
                             "score": "1.0",
+                            "debug": "PRIVATE TRACE BODY",
                         },
                         {
                             "type": "library_item",
@@ -266,7 +272,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                     LintFinding(
                         id=augment_id,
                         workspace_id=workspace_id,
-                        lint_run_id=run.id,
+                        lint_run_id=lint_run_id,
                         target_type="knowledge_coverage_gap",
                         target_id=gap_id,
                         rule_id="maintenance.coverage_gap_verdict",
@@ -281,7 +287,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                     LintFinding(
                         id=missing_augment_id,
                         workspace_id=workspace_id,
-                        lint_run_id=run.id,
+                        lint_run_id=lint_run_id,
                         target_type="knowledge_coverage_gap",
                         target_id=gap_id,
                         rule_id="maintenance.coverage_gap_verdict",
@@ -310,6 +316,36 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                         "workspace": str(workspace_id),
                     },
                 )
+
+        def stored_state():
+            with engine.connect() as connection:
+                names = (
+                    "client_delegated_task",
+                    "lint_finding",
+                    "knowledge_coverage_gap",
+                    "ask_turn",
+                    "mcp_write_idempotency",
+                    "job",
+                )
+                state = {}
+                for name in names:
+                    table = sa.Table(name, sa.MetaData(), autoload_with=connection)
+                    state[name] = [
+                        dict(row)
+                        for row in connection.execute(
+                            sa.select(table).order_by(table.c.id)
+                        ).mappings()
+                    ]
+                if dialect == "sqlite":
+                    state["fts"] = connection.execute(
+                        sa.text(
+                            "SELECT rowid, context_header FROM search_doc_fts "
+                            "ORDER BY rowid"
+                        )
+                    ).all()
+                return state
+
+        original = stored_state()
         command.upgrade(config, REVISION)
         with Session(engine) as session:
             task = session.get(ClientDelegatedTask, task_id)
@@ -359,6 +395,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                     "stable_url": f"/p/{workspace_id}/{page_id}",
                     "title": "Kept title",
                     "score": "1.0",
+                    "debug": "PRIVATE TRACE BODY",
                 },
                 {
                     "type": "library_item",
@@ -399,6 +436,7 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                 "version_status": "editing",
                 "stable_url": f"/p/{workspace_id}/{page_id}",
                 "latest_draft_version_id": str(version_id),
+                "body_md": "PRIVATE RECEIPT BODY",
             }
             assert (
                 session.get(ContextPageVersion, version_id).version_status == "editing"
@@ -425,27 +463,194 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                     )
                     == "Title: Page\nTags: keep"
                 )
-        # Original locator text cannot be reconstructed after renames. Verify
-        # the explicit rollback boundary, then replay the data conversion to
-        # exercise restart safety within this same dialect traversal.
-        with pytest.raises(RuntimeError, match="pre-upgrade dtxWiki backup"):
-            command.downgrade(config, PARENT)
+        # The private journal contains locator deltas rather than copies of
+        # unrelated receipts, Ask bodies or trace content.
+        with engine.connect() as connection:
+            journal = sa.Table(
+                "document_locator_rollback", sa.MetaData(), autoload_with=connection
+            )
+            private_state = json.dumps(
+                [
+                    dict(row)
+                    for row in connection.execute(sa.select(journal)).mappings()
+                ],
+                default=str,
+            )
+            assert "PRIVATE RECEIPT BODY" not in private_state
+            assert "PRIVATE TRACE BODY" not in private_state
+            assert "Kept question" not in private_state
+            assert "Kept answer" not in private_state
+        command.downgrade(config, PARENT)
+        assert "document_locator_rollback" not in sa.inspect(engine).get_table_names()
+        assert stored_state() == original
         command.upgrade(config, REVISION)
-        from backend.migrations.revision_modules.unreleased._e4f7a2c901bd_locators import (  # noqa: E501
-            conversion,
-        )
+        # Later authored metadata survives reversal, and canonical objects
+        # appended to an existing trace still get the previous wire fields.
+        with Session(engine) as session:
+            task = session.get(ClientDelegatedTask, task_id)
+            task.payload = {**task.payload, "later_note": "Preserve later edit"}
+            turn = session.get(AskTurn, ask_turn_id)
+            turn.retrieval_trace = [
+                {
+                    "type": "library_item",
+                    "id": str(library_id),
+                    "stable_url": (
+                        f"/workspaces/{workspace_id}/library/items/{library_id}"
+                    ),
+                    "title": "Retargeted",
+                },
+                turn.retrieval_trace[1],
+                {
+                    "type": "context_page",
+                    "id": str(page_id),
+                    "stable_url": f"/p/{workspace_id}/{page_id}",
+                    "title": "New hit",
+                },
+            ]
+            turn.assistant_message = "Later answer"
+            new_turn_id = uuid4()
+            session.add(
+                AskTurn(
+                    id=new_turn_id,
+                    workspace_id=workspace_id,
+                    ask_session_id=ask_session_id,
+                    turn_no=2,
+                    user_message="New question",
+                    assistant_message="New answer",
+                    retrieval_trace=[
+                        {
+                            "type": "library_item",
+                            "id": str(library_id),
+                            "stable_url": (
+                                f"/workspaces/{workspace_id}/library/items/{library_id}"
+                            ),
+                        }
+                    ],
+                )
+            )
+            new_receipt_id = uuid4()
+            new_receipt = {
+                "page_id": str(page_id),
+                "version_id": str(version_id),
+                "citation_id": str(uuid4()),
+            }
+            session.add(
+                MCPWriteIdempotency(
+                    id=new_receipt_id,
+                    workspace_id=workspace_id,
+                    actor_kind="human",
+                    actor_id="kept-author",
+                    tool_name="cite",
+                    idempotency_key="new-cite-key",
+                    request_fingerprint="new-cite-fingerprint",
+                    result_payload=new_receipt,
+                    created_at=now,
+                    expires_at=now + timedelta(days=1),
+                )
+            )
+            from backend.models.agent import AgentPage
 
+            agent_id = session.scalar(
+                sa.select(AgentPage.id)
+                .where(AgentPage.workspace_id == workspace_id)
+                .limit(1)
+            )
+            new_golden_id = uuid4()
+            session.add(
+                LintFinding(
+                    id=new_golden_id,
+                    workspace_id=workspace_id,
+                    lint_run_id=lint_run_id,
+                    target_type="agent_page",
+                    target_id=agent_id,
+                    rule_id="maintenance.golden_query_candidates",
+                    suggested_action=json.dumps(
+                        {
+                            "queries": [
+                                {
+                                    "query": "New agent",
+                                    "expected_kind": "agent_page",
+                                    "expected_id": str(agent_id),
+                                }
+                            ]
+                        }
+                    ),
+                )
+            )
+            session.commit()
         with engine.begin() as connection:
-            conversion.convert_locators(connection)
-            conversion.convert_command_receipts(connection)
-            conversion.enqueue_reindex(connection)
+            completed_job_id = connection.scalar(
+                sa.select(jobs.c.id)
+                .where(jobs.c.idempotency_key.like("locator-index:%"))
+                .limit(1)
+            )
+            connection.execute(
+                jobs.update()
+                .where(jobs.c.id == completed_job_id)
+                .values(status="completed", progress=100)
+            )
+        command.downgrade(config, PARENT)
+        with Session(engine) as session:
+            assert session.get(ClientDelegatedTask, task_id).payload == {
+                **original["client_delegated_task"][0]["payload"],
+                "later_note": "Preserve later edit",
+            }
+            turn = session.get(AskTurn, ask_turn_id)
+            assert turn.assistant_message == "Later answer"
+            assert turn.retrieval_trace[0] == {
+                "type": "library_item",
+                "id": str(library_id),
+                "concept_path": f"/library/{library_id}.md",
+                "title": "Retargeted",
+            }
+            assert (
+                turn.retrieval_trace[1] == original["ask_turn"][0]["retrieval_trace"][1]
+            )
+            assert (
+                session.get(MCPWriteIdempotency, new_receipt_id).result_payload
+                == new_receipt
+            )
+            assert json.loads(
+                session.get(LintFinding, new_golden_id).suggested_action
+            ) == {
+                "queries": [
+                    {
+                        "query": "New agent",
+                        "expected_concept_path": f"agent_page:{agent_id}",
+                    }
+                ]
+            }
+            assert turn.retrieval_trace[2] == {
+                "type": "context_page",
+                "id": str(page_id),
+                "concept_path": "/context/renamed-page.md",
+                "title": "New hit",
+            }
+            assert session.get(AskTurn, new_turn_id).retrieval_trace == [
+                {
+                    "type": "library_item",
+                    "id": str(library_id),
+                    "concept_path": f"/library/{library_id}.md",
+                }
+            ]
+        command.upgrade(config, REVISION)
+        with engine.connect() as connection:
             assert (
                 connection.scalar(
                     sa.select(sa.func.count())
                     .select_from(jobs)
-                    .where(jobs.c.idempotency_key.like("locator-index:%"))
+                    .where(
+                        jobs.c.idempotency_key.like("locator-index:%"),
+                        jobs.c.status == "queued",
+                    )
                 )
                 == 2
+            )
+            assert (
+                connection.scalar(
+                    sa.select(jobs.c.status).where(jobs.c.id == completed_job_id)
+                )
+                == "completed"
             )
         assert "context_version_parent" not in sa.inspect(engine).get_table_names()
         assert "uq_cpv_current_editing_per_author" in {

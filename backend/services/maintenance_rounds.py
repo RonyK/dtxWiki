@@ -28,6 +28,7 @@ from backend.services.actor_visible_read import (
     context_page_visible,
 )
 from backend.services.client_round_state import ClientRoundStateCodec
+from backend.services.context_links import format_stable_url
 from backend.services.coverage_service import coverage_candidate_visible
 from backend.services.delegated_tasks import (
     expire_stale_leases,
@@ -1259,6 +1260,11 @@ def _stage_coverage_gap_verdict(
     )
     if gap is None:
         raise ValueError("coverage gap not found")
+    if answer["verdict"] == "augment_existing":
+        answer = {
+            **answer,
+            "stable_url": format_stable_url(task.workspace_id, answer["page_id"]),
+        }
     if answer["verdict"] == "dismiss":
         gap.status = "dismissed"
         gap.resolved_at = now

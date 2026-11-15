@@ -38,6 +38,12 @@ def convert_locators(connection):
             locator = f"/context/{row.slug}.md" if kind == "context_page" else row.uri
             paths[workspace_id, locator] = kind, identity
 
+    agents = sa.Table("agent_page", metadata, autoload_with=connection)
+    for row in connection.execute(sa.select(agents.c.workspace_id, agents.c.id)):
+        workspace_id, identity = str(_id(row.workspace_id)), str(_id(row.id))
+        identities[workspace_id, "agent_page", identity] = ""
+        paths[workspace_id, f"agent_page:{identity}"] = "agent_page", identity
+
     def resolve(locator, workspace_id, preferred=None):
         # Durable target IDs survive a title/slug rename. Only a same-workspace
         # existing target can supply a canonical replacement.
@@ -102,7 +108,8 @@ def convert_locators(connection):
             try:
                 preferred = (
                     (own_kind, str(_id(own_id)))
-                    if own_id and own_kind in ("context_page", "library_item")
+                    if own_id
+                    and own_kind in ("context_page", "library_item", "agent_page")
                     else target
                 )
             except (ValueError, TypeError):
@@ -317,7 +324,7 @@ def convert_command_receipts(connection):
             )
 
 
-def enqueue_reindex(connection):
+def enqueue_reindex(connection, *, generation=None):
     """Use the existing embed worker to refresh each changed document."""
     metadata = sa.MetaData()
     jobs = sa.Table("job", metadata, autoload_with=connection)
@@ -333,7 +340,8 @@ def enqueue_reindex(connection):
         table = sa.Table(table_name, metadata, autoload_with=connection)
         for row in connection.execute(sa.select(table.c.id, table.c.workspace_id)):
             identity = str(_id(row.id))
-            job_key = f"locator-index:{kind}:{identity}"
+            prefix = f"locator-index:{generation}:" if generation else "locator-index:"
+            job_key = f"{prefix}{kind}:{identity}"
             exists = connection.scalar(
                 sa.select(jobs.c.id)
                 .where(

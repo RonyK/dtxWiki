@@ -1278,7 +1278,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             graphDetails.getByRole("link", { name: "Open", exact: true }),
           ).toHaveAttribute(
             "href",
-            `/workspaces/${workspace.id}/context/pages/${related.id}`,
+            `/p/${workspace.id}/${related.id}`,
           );
           await expect(
             graphPanel.getByTestId("graph-canvas").locator(".."),
@@ -1448,7 +1448,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expect(graphDetails.locator("h5.graph-details-title")).toHaveText(relatedTitle);
           await expect(
             graphDetails.getByRole("link", { name: "Open", exact: true }),
-          ).toHaveAttribute("href", `/workspaces/${workspace.id}/context/pages/${related.id}`);
+          ).toHaveAttribute("href", `/p/${workspace.id}/${related.id}`);
 
           await graphPanel.getByText("Static graph view", { exact: true }).click();
           await expect(

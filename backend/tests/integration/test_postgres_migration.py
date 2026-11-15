@@ -28,7 +28,7 @@ def _postgres_url() -> str | None:
     _postgres_url() is None,
     reason="requires a dedicated PostgreSQL migration test database",
 )
-def test_postgres_alembic_upgrade_reversible_boundary_and_downgrade_base():
+def test_postgres_alembic_upgrade_head_and_downgrade_base():
     """Execute the real migration chain against PostgreSQL, not a compiler stub."""
 
     database_url = _postgres_url()
@@ -99,7 +99,7 @@ def test_postgres_alembic_upgrade_reversible_boundary_and_downgrade_base():
 
         repair_input(database_url, "user", user_id, "display_name", "Ａlice Smith")
         repair_input(database_url, "workspace", workspace_id, "title", "Ｔeam Straße")
-        command.upgrade(config, "872d9c3e104b")
+        command.upgrade(config, "head")
         inspector = inspect(engine)
         assert {
             "users",
@@ -330,13 +330,12 @@ def test_downgrade_refuses_when_oauth_sessions_exist():
                     created_at=now,
                 )
             )
-        command.upgrade(config, "872d9c3e104b")
+        command.upgrade(config, "head")
 
         with pytest.raises(RuntimeError, match="oauth_refresh_tokens still holds"):
             command.downgrade(config, "bd62193d5cf6")
 
-        # The refusal must leave the reversible boundary intact. A partially
-        # reverted schema would lose the grant ownership column below.
+        # The refusal must leave head intact, not a half-reverted schema.
         assert "grant_id" in {
             column["name"]
             for column in inspect(engine).get_columns("oauth_refresh_tokens")
