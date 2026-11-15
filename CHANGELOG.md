@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Context body links
+
+- Expand short `/p/<page_id>` Markdown destinations to workspace-qualified
+  `/p/<workspace_id>/<page_id>` URLs on save, including fragments, even when
+  optional lint fixes are disabled. Expansion uses the source workspace and
+  does not require the target to exist.
+- Stop interpreting `/context/<name>.md` and `/pages/<slug>` as document links.
+  Unsupported app destinations remain in the body, appear unavailable and
+  produce unresolved-link findings without blocking saves. Previously stored
+  legacy links no longer contribute to backlinks or current graph relations.
+- Apply the same link classification to Markdown rendering and editor paste.
+- Keep registered workspace navigation links, including workspace discovery and
+  Knowledge Map, available under the existing route access checks. Context read
+  and edit routes also accept a trailing slash while retaining view state and
+  fragments. Preserve link/image structure and character-reference semantics
+  during normalization.
+- Preserve the existing session-relative `/context` landing link and keep
+  generated link labels literal under the page renderer's math and GFM rules.
+- Match registered Context permalinks and workspace routes with the same
+  browser case and trailing-slash rules, retaining query and fragment state.
+
 ### Document identifiers and URLs
 
 - Identify documents by kind and ID and use `stable_url` and `link_markdown`

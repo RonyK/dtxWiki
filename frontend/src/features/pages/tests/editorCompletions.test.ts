@@ -104,7 +104,7 @@ describe("editor completions", () => {
       expect(acceptCompletion(view)).toBe(true);
       expect(pickedLabel).toBe(title);
       expect(view.state.doc.toString()).toBe(
-        'See [Road\\[map\\] \\\\ \\*draft\\* \\_note\\_ \\`code\\` \\<x\\> \\! \\&amp; \\~old\\~](/p/workspace-1/p1)',
+        'See [Road\\[map\\] \\\\ \\*draft\\* \\_note\\_ \\`code\\` \\<x\\> \\! \\&amp\\; \\~old\\~](/p/workspace-1/p1)',
       );
       // The picker does not intercept hand-authored legacy wikilinks.
       expect(source(completionContext("[[release-notes|Legacy]]"))).toBeNull();

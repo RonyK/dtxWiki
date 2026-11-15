@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 from backend.models.context import ContextPage, EdgeProjection, PageLink
 from backend.models.delegated_task import ClientDelegatedTask
 from backend.models.lint import LintFinding, LintRun
+from backend.repositories.page_links import (
+    active_page_link_condition,
+    active_page_link_edge_condition,
+)
 from backend.services.context_links import format_stable_url
 from backend.services.delegated_tasks import (
     create_task,
@@ -79,6 +83,7 @@ def mark_dependent_pages_stale(
                 EdgeProjection.target_id == published_page_id,
                 EdgeProjection.edge_kind.in_(("wikilink", "citation_page")),
                 EdgeProjection.source_id != published_page_id,
+                active_page_link_edge_condition(EdgeProjection),
             )
             .distinct()
         ).all()
@@ -104,6 +109,7 @@ def mark_dependent_pages_stale(
             select(PageLink.first_snippet)
             .where(
                 PageLink.workspace_id == workspace_id,
+                active_page_link_condition(),
                 PageLink.source_page_id == dependent.id,
                 PageLink.source_version_id == dependent.current_published_version_id,
                 PageLink.target_page_id == published_page_id,

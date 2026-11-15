@@ -6,6 +6,7 @@ import { parsePageDocument } from "./pageFrontmatter";
 
 import type { DocumentReferenceKind, DocumentReferenceTarget, ReferenceView } from "../../shared/api/references";
 import { classifyContextLink, formatContextPageUrl, isContextId } from "../../shared/lib/contextLinks";
+import { matchBrowserRoute } from "../../shared/lib/browserRoutes";
 
 export function referenceKey(ref: { target_kind: DocumentReferenceKind; target_id?: string | null; metadata_id?: string | null; number?: number }): string {
   return `${ref.target_kind}:${ref.target_id ?? ref.metadata_id ?? `unavailable-${ref.number}`}`;
@@ -51,9 +52,13 @@ export function referenceTarget(href: string, workspaceId: string): DocumentRefe
   if (context.pageId && (context.workspaceId ?? workspaceId) === workspaceId) {
     return { target_kind: "context_page", target_id: context.pageId };
   }
-  const match = /^\/workspaces\/([^/]+)\/(library\/items|agent\/pages)\/([^/#?]+)(?:#[^\s{}]*)?$/.exec(context.stableUrl ?? href);
-  if (!match || match[1].toLowerCase() !== workspaceId.toLowerCase() || !isContextId(match[3])) return null;
-  return { target_kind: match[2] === "library/items" ? "library_item" : "agent_page", target_id: match[3].toLowerCase() };
+  if (context.kind !== "workspace_navigation") return null;
+  const match = matchBrowserRoute((context.stableUrl ?? href).split(/[?#]/, 1)[0]);
+  if (!match || match.params.workspaceId !== workspaceId.toLowerCase() || !match.route.targetParam) return null;
+  const targetId = match.params[match.route.targetParam];
+  if (match.route.section === "library" && match.route.kind === "item") return { target_kind: "library_item", target_id: targetId };
+  if (match.route.section === "agent" && match.route.kind === "page") return { target_kind: "agent_page", target_id: targetId };
+  return null;
 }
 
 function citationMarkdown(body: string) {

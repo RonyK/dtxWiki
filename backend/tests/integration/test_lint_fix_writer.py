@@ -76,7 +76,8 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             workspace.lint_policy = {"link_fix_mode": "suggest"}
             workspace.auto_fix_enabled = False
         body_md = (
-            "# Lint Source\n\n[Target](/context/lint-target.md)\n \n"
+            f"# Lint Source\n\n[Target](/workspaces/{workspace_id}"
+            f"/context/pages/{target.id})\n \n"
             + draft_links
             + f"[Missing](/p/{workspace_id}/{missing_id})\n"
             + "\nEvidence line  \ncontinues here.\n"
@@ -198,7 +199,8 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         fixed = session.get(ContextPageVersion, fixed_id)
         assert fixed.body_md == (
             source.body_md.replace(
-                "/context/lint-target.md", f"/p/{workspace_id}/{target.id}"
+                f"/workspaces/{workspace_id}/context/pages/{target.id}",
+                f"/p/{workspace_id}/{target.id}",
             ).replace("\n \n", "\n\n")
         )
         assert draft_links in fixed.body_md

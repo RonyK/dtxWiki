@@ -92,7 +92,7 @@ def test_unresolved_and_healthy_links(session_factory):
         external = "https://example.test/paper"
         cited = (
             f"@cite{{{format_index_ref('context', target.id)}}} "
-            f"@cite{{/pages/{target.slug}}} @cite{{{external}}}\n"
+            f"@cite{{{canonical}}} @cite{{{external}}}\n"
         )
         assert rewrite_links_with_report(
             cited,

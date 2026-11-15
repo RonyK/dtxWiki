@@ -113,8 +113,9 @@ def test_context_url_links_are_resolved_and_aggregated(page_service):
             "[absolute](http://testserver/context?view=history&target="
             f"{target_id_upper}&tab=graph)\n\n"
             f"<http://testserver/context?target={target.id}#history>\n\n"
-            "[canonical](/workspaces/"
-            f"{workspace_id}/context/pages/{target.id})"
+            # Reuse this positive URL to prove the ordinary indexer includes
+            # a browser-valid permalink with harmless presentation state.
+            f"[canonical](/p/{workspace_id}/{target.id}///?view=source#details)"
         ),
     )
 

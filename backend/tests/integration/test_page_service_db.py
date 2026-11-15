@@ -570,12 +570,10 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         }
         assert set(keyed) == {
             "wikilink:한글-문서",
-            "concept_path:한글-문서",
             f"page_id:{target.id}",
         }
         assert keyed[f"page_id:{target.id}"].target_slug is None
         assert keyed[f"page_id:{target.id}"].occurrence_count == 3
-        assert keyed["concept_path:한글-문서"].occurrence_count == 2
         session.get(ContextPage, target.id).slug = "renamed-korean-page"
     replacement = service.write_page(
         workspace_slug="default",
@@ -587,6 +585,73 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         actor_provenance="browser_session",
     )
     assert replacement.id != target.id
+
+    # One additional DB regression traversal reuses these legacy destinations
+    # and pages: reads must hide an old cached-only relation, then remove its
+    # retired occurrences from a mixed cached relation before any rescan.
+    # A parser/unit check cannot expose stale persisted PageLink/edge reads.
+    from backend.services.graph_service import GraphService
+
+    with service.session_factory.begin() as session:
+        retired = PageLink(
+            workspace_id=target.workspace_id,
+            source_page_id=linked.id,
+            source_version_id=linked.version_id,
+            link_syntax="context_url",
+            locator_key="concept_path:한글-문서",
+            target_slug="한글-문서",
+            target_page_id=replacement.id,
+            occurrence_count=2,
+        )
+        cached = EdgeProjection(
+            workspace_id=target.workspace_id,
+            source_kind="context_page",
+            source_id=linked.id,
+            target_kind="context_page",
+            target_id=replacement.id,
+            edge_kind="wikilink",
+            provenance="curated",
+            weight=2.0,
+            source_ref={"table": "page_links"},
+        )
+        session.add_all((retired, cached))
+        session.flush()
+        retired_id, cached_id = retired.id, cached.id
+    assert service.list_backlinks(page_id=replacement.id) == []
+    with service.session_factory.begin() as session:
+        neighbors = GraphService().neighbors(
+            session,
+            target.workspace_id,
+            kind="context_page",
+            entity_id=linked.id,
+            actor=None,
+            edge_kinds=("wikilink",),
+            direction="out",
+        )
+        assert [(entry.id, entry.weight) for entry in neighbors] == [(target.id, 4.0)]
+        session.delete(session.get(EdgeProjection, cached_id))
+        session.get(PageLink, retired_id).target_page_id = target.id
+        active_cached = session.scalar(
+            select(EdgeProjection).where(
+                EdgeProjection.workspace_id == target.workspace_id,
+                EdgeProjection.source_id == linked.id,
+                EdgeProjection.target_id == target.id,
+                EdgeProjection.edge_kind == "wikilink",
+            )
+        )
+        active_cached.weight = 6.0
+    assert service.list_backlinks(page_id=target.id)[0].occurrence_count == 4
+    with service.session_factory() as session:
+        neighbors = GraphService().neighbors(
+            session,
+            target.workspace_id,
+            kind="context_page",
+            entity_id=linked.id,
+            actor=None,
+            edge_kinds=("wikilink",),
+            direction="out",
+        )
+        assert [(entry.id, entry.weight) for entry in neighbors] == [(target.id, 4.0)]
 
     duplicate = service.write_page(
         workspace_slug="default",
@@ -649,13 +714,14 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
     assert detail.wikilink_targets[0].target_page_id == target.id
     assert detail.wikilink_targets[0].current_slug == "renamed-korean-page"
 
-    assert len(detail.link_targets) == 6
-    assert all(entry.state == "ok" for entry in detail.link_targets)
-    assert all(entry.target_page_id == target.id for entry in detail.link_targets)
+    assert len(detail.link_targets) == 5
+    assert [entry.state for entry in detail.link_targets].count("unavailable") == 2
+    supported_targets = [entry for entry in detail.link_targets if entry.state == "ok"]
+    assert all(entry.target_page_id == target.id for entry in supported_targets)
     assert restored.body_md == linked.body_md
     backlinks = service.list_backlinks(page_id=target.id)
     assert [entry.id for entry in backlinks] == [linked.id]
-    assert backlinks[0].occurrence_count == 6
+    assert backlinks[0].occurrence_count == 4
 
     # Budget exception: one additional logical DB input covers source-bound
     # authored preparation. The earlier rename/restore checks have one pin per
@@ -700,7 +766,8 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
         base_version_id=restored.version_id,
         base_content_hash=restored.content_hash,
     )
-    assert f"[Legacy](/p/{target.workspace_id}/{target.id})" in updated.body_md
+    assert "[Legacy](/context/한글-문서.md)" in updated.body_md
+    assert f"[Full](/p/{target.workspace_id}/{target.id})" in updated.body_md
     assert f"/p/{target.workspace_id}/{replacement.id}" not in updated.body_md
 
 

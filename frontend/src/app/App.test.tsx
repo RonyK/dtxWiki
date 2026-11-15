@@ -13,6 +13,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "../shared/auth/AuthContext";
 import { setLocale } from "../shared/i18n";
+import { isSafeBrowserQuery, matchBrowserRoute, type BrowserRouteMatch } from "../shared/lib/browserRoutes";
+import { APP_LINK_NAMESPACES, AUTHORING_ROUTES, BROWSER_ROUTES, LEGACY_WORKSPACE_ROUTES } from "../shared/lib/browserRoutes.gen";
+import { classifyContextLink } from "../shared/lib/contextLinks";
+import { parseWorkspaceRoute } from "../shared/lib/workspaceRoutes";
 import { WorkspaceGraphGate } from "../features/graph/WorkspaceGraphGate";
 import {
   appRoutes,
@@ -546,6 +550,50 @@ describe("appRoutes role gating", () => {
   });
 
   it("keeps workspace discovery behind a browser session", () => {
+    // Compare the complete registered workspace surface, so a new app route
+    // cannot silently bypass the browser-link grammar or remain undeclared.
+    const appLinkNamespace = (path: string) => APP_LINK_NAMESPACES.some(
+      (namespace) => path === namespace || path.startsWith(`${namespace}/`),
+    );
+    // The short browser declaration deliberately rejects shorthand accepted
+    // by authoring; its path still comes from that explicit input contract.
+    const declaredPaths = [
+      ...Object.values(BROWSER_ROUTES).map((route) => route.path),
+      ...Object.values(LEGACY_WORKSPACE_ROUTES).map((route) => route.path),
+      ...Object.values(AUTHORING_ROUTES).map((route) => route.path),
+    ];
+    expect(routePaths(appRoutes).filter(appLinkNamespace).sort())
+      .toEqual(declaredPaths.filter(appLinkNamespace).sort());
+    // One composite path variant per declared browser route checks the shared
+    // normalization rule against the real router, including multiple slashes.
+    for (const browserRoute of Object.values(BROWSER_ROUTES) as readonly BrowserRouteMatch["route"][]) {
+      const pathname = browserRoute.path.split("/").map((part) => {
+        if (!part.startsWith(":")) return part.toUpperCase();
+        const parameter = part.slice(1);
+        const value = browserRoute.choices[parameter]?.[0] ?? "11111111-1111-4111-8111-111111111111";
+        return browserRoute.choices[parameter]
+          ? value
+          : `${value.slice(0, -1)}%${value.charCodeAt(value.length - 1).toString(16)}`;
+      }).join("/") + "///";
+      const matches = matchRoutes(appRoutes, { pathname, search: "?view=source", hash: "#section" });
+      expect(matches?.at(-1)?.route.path, pathname).toBe(browserRoute.path);
+      const matched = matchBrowserRoute(pathname);
+      expect(matched?.route.path, pathname).toBe(browserRoute.path);
+      expect(isSafeBrowserQuery("?view=source", pathname), pathname).toBe(true);
+      if (browserRoute.path.startsWith("/workspaces/") && matched?.params.workspaceId) {
+        expect(parseWorkspaceRoute(pathname), pathname).toMatchObject({
+          workspaceId: matched.params.workspaceId,
+          section: browserRoute.section,
+          create: browserRoute.create,
+          edit: browserRoute.edit,
+        });
+      }
+      if (browserRoute.section === "context" && browserRoute.kind === "page") {
+        const document = classifyContextLink(`${pathname}?view=source#section`, { allowWorkspaceNavigation: true });
+        expect(document.pageId, pathname).toBe(matched?.params.pageId);
+        expect(["stable_full", "canonical_route"], pathname).toContain(document.kind);
+      }
+    }
     const route = findRoute(appRoutes, "/workspaces/find");
     expect(route).not.toBeNull();
     const element = route?.element;
@@ -634,6 +682,13 @@ describe("appRoutes role gating", () => {
     ).toHaveAttribute("href", "/workspaces/find");
   });
 });
+
+function routePaths(routes: RouteObject[]): string[] {
+  return routes.flatMap((route) => [
+    ...(route.path ? [route.path] : []),
+    ...routePaths(route.children ?? []),
+  ]);
+}
 
 function findRoute(routes: RouteObject[], path: string): RouteObject | null {
   for (const route of routes) {

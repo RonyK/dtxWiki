@@ -1,6 +1,8 @@
+import { isAppLinkPath, isSafeBrowserQuery, isWorkspaceNavigationPath, legacyWorkspaceEntryPath, matchBrowserRoute, matchContextReference } from "./browserRoutes";
+
 export type ContextLinkKind =
   | "page_id" | "stable_full" | "stable_short" | "canonical_route"
-  | "nav_target" | "concept_path" | "slug" | "resource_uri" | "wikilink"
+  | "nav_target" | "resource_uri" | "wikilink"
   | "workspace_navigation" | "unknown" | "external" | "public_reader" | "local" | "media";
 
 // The REST projection as served: an omitted href/target_page_id means null.
@@ -26,85 +28,19 @@ export type ContextLink = {
   pageId: string | null;
   fragment: string | null;
   stableUrl: string | null;
+  navigationHref: string | null;
   lookup: string | null;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const WORKSPACE_IDENTITY_QUERIES = new Set([
-  "target", "edit", "review", "finding", "new", "newFolder", "parentNodeId",
-  "parentId", "workspaceId", "workspace_id", "ws",
-]);
-
-function isWorkspaceNavigationPath(pathname: string, query: string): boolean {
-  if (pathname.includes("//")) return false;
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts[0] !== "workspaces" || !UUID.test(parts[1] ?? "")) return false;
-  const suffix = parts.slice(2);
-  if (suffix.length === 0) suffix.push("dashboard");
-  const [section, group, target, extra] = suffix;
-  const id = (value: string | undefined) => Boolean(value && UUID.test(value));
-  let createRoute = false;
-  let valid = false;
-  switch (section) {
-    case "dashboard":
-    case "context":
-    case "library":
-    case "agent":
-    case "activity":
-    case "review":
-    case "lint":
-    case "chats":
-    case "ask":
-    case "search":
-    case "settings":
-    case "setup":
-    case "inbox":
-      valid = suffix.length === 1;
-      break;
-  }
-  if (section === "context") {
-    createRoute = group === "pages" && target === "new" || group === "folders" && target === "new";
-    valid = suffix.length === 1 ||
-      (createRoute && suffix.length === 3) ||
-      (group === "pages" && id(target) && (suffix.length === 3 || suffix.length === 4 && extra === "edit")) ||
-      (group === "folders" && (target === "new" && suffix.length === 3 || id(target) && suffix.length === 3));
-  } else if (section === "library") {
-    createRoute = (group === "items" || group === "folders") && target === "new";
-    valid = suffix.length === 1 ||
-      ((group === "items" || group === "artifacts" || group === "folders") && id(target) && suffix.length === 3) ||
-      (createRoute && suffix.length === 3);
-  } else if (section === "agent") {
-    createRoute = (group === "pages" || group === "folders") && target === "new";
-    valid = suffix.length === 1 ||
-      (createRoute && suffix.length === 3) ||
-      (group === "pages" && id(target) && (suffix.length === 3 || suffix.length === 4 && extra === "edit")) ||
-      (group === "folders" && (target === "new" && suffix.length === 3 || id(target) && suffix.length === 3));
-  } else if (section === "activity") {
-    valid = suffix.length === 1 || suffix.length === 2 && ["pending", "advisory", "history"].includes(group ?? "");
-  } else if (section === "review" || section === "ask" || section === "chats") {
-    valid = suffix.length === 1 || suffix.length === 2 && id(group);
-  } else if (section === "lint") {
-    valid = suffix.length === 1 || suffix.length === 3 && group === "findings" && id(target);
-  } else if (section === "settings") {
-    valid = suffix.length === 1 || suffix.length === 2 && group === "integrations";
-  }
-  if (!valid) return false;
-
-  const params = new URLSearchParams(query);
-  for (const key of WORKSPACE_IDENTITY_QUERIES) {
-    if (params.has(key)) return false;
-  }
-  const parents = params.getAll("parent");
-  if (parents.length > 0 && (!createRoute || parents.length !== 1 || !id(parents[0]))) return false;
-  return true;
-}
-
 export function isContextId(value: string): boolean {
   return UUID.test(value);
 }
 
 export function escapeContextLinkLabel(title: string): string {
-  return title.replace(/[\\`*_[\]<>!&~]/g, "\\$&");
+  // CommonMark backslash escapes keep label text literal in the page's
+  // extended Markdown profile too, including dollar-delimited inline math.
+  return title.replace(/[!-/:-@[-`{-~]/g, "\\$&");
 }
 
 export function normalizeContextHeading(value: string): string {
@@ -147,10 +83,35 @@ export function formatContextPageMarkdown(title: string, workspaceId: string, pa
   return `[${escapeContextLinkLabel(title)}](${formatContextPageUrl(workspaceId, pageId, fragment)})`;
 }
 
+/** Identify authored app paths without turning invalid paths into locators. */
+export function isAppLink(value: string, options: ContextLinkOptions = {}): boolean {
+  // Match URI parsing for recognition only; classifyContextLink still rejects
+  // authored whitespace, controls and encoded separators as valid locators.
+  const href = value.replace(/^[\u0000-\u0020]+/, "").replace(/[\r\n\t]/g, "");
+  let pathname = href;
+  if (/^https?:\/\//i.test(href)) {
+    let url: URL;
+    try { url = new URL(href); } catch { return false; }
+    const selfOrigins = options.selfOrigins ?? (typeof window === "undefined" ? [] : [window.location.origin]);
+    if (!selfOrigins.some((origin) => {
+      try { return new URL(origin).origin === url.origin; } catch { return false; }
+    })) return false;
+    pathname = /^https?:\/\/[^/?#]*(.*)$/i.exec(href)?.[1] || "/";
+  } else if (!href.startsWith("/") || href.startsWith("//")) {
+    return false;
+  }
+  pathname = pathname.split(/[?#]/, 1)[0];
+  try {
+    // URI decoding preserves malformed percent escapes, but rejects bad UTF-8.
+    pathname = decodeURIComponent(pathname.replace(/%(?![0-9a-f]{2})/gi, "%25"));
+  } catch { return false; }
+  return isAppLinkPath(pathname);
+}
+
 export function classifyContextLink(value: string, options: ContextLinkOptions = {}): ContextLink {
   const empty: ContextLink = {
     kind: "unknown", workspaceId: null, pageId: null, fragment: null,
-    stableUrl: null, lookup: null,
+    stableUrl: null, navigationHref: null, lookup: null,
   };
   const result = (kind: ContextLinkKind, extra: Partial<ContextLink> = {}): ContextLink => ({ ...empty, kind, ...extra });
   const wiki = /^\[\[([^\]|\n]+)(?:\|[^\]\n]*)?\]\]$/.exec(value);
@@ -192,6 +153,7 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   const withoutHash = hashAt < 0 ? input : input.slice(0, hashAt);
   const queryAt = withoutHash.indexOf("?");
   let pathname = queryAt < 0 ? withoutHash : withoutHash.slice(0, queryAt);
+  const rawPathname = pathname;
   const query = queryAt < 0 ? "" : withoutHash.slice(queryAt + 1);
   if (/^dtxwiki:\/\//i.test(input) && queryAt >= 0) {
     return result("unknown", { fragment });
@@ -203,38 +165,50 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   if (input.startsWith("#")) return result("local", { fragment });
   if (/^\/w\/[^/]+\/pages\/[^/]+$/.test(pathname)) return result("public_reader", { fragment });
   if (/^\/(?:api|uploads)\//.test(pathname)) return result("media", { fragment });
-  if (options.allowWorkspaceNavigation && query && isWorkspaceNavigationPath(pathname, query)) {
-    return result("workspace_navigation", { stableUrl: input, fragment });
-  }
-  if (query && pathname !== "/context" && /^\/(?:p|context|workspaces|pages)\//.test(pathname)) return result("unknown", { fragment });
   const withPage = (kind: ContextLinkKind, workspaceId: string | null, pageId: string): ContextLink => {
     const resolvedWorkspaceId = workspaceId ?? options.workspaceId;
     return result(kind, {
       workspaceId, pageId: pageId.toLowerCase(), fragment,
-      stableUrl: resolvedWorkspaceId ? formatContextPageUrl(resolvedWorkspaceId, pageId.toLowerCase(), fragment) : null,
+      stableUrl: resolvedWorkspaceId
+        ? formatContextPageUrl(resolvedWorkspaceId, pageId.toLowerCase()) + (query ? `?${query}` : "") + fragmentSuffix(fragment)
+        : null,
+      navigationHref: matchBrowserRoute(rawPathname) ? input : null,
     });
   };
-  let match = /^\/p\/([^/]+)\/([^/]+)$/.exec(pathname);
-  if (match && UUID.test(match[1]) && UUID.test(match[2])) return withPage("stable_full", match[1].toLowerCase(), match[2]);
-  match = /^\/p\/([^/]+)$/.exec(pathname);
-  if (match && UUID.test(match[1])) return withPage("stable_short", null, match[1]);
-  match = /^\/workspaces\/([^/]+)\/context\/pages\/([^/]+)(?:\/edit)?$/.exec(pathname);
-  if (match && UUID.test(match[1]) && UUID.test(match[2])) return withPage("canonical_route", match[1].toLowerCase(), match[2]);
-  if (options.allowWorkspaceNavigation && isWorkspaceNavigationPath(pathname, query)) {
-    return result("workspace_navigation", { stableUrl: input, fragment });
+  const documentRoute = matchContextReference(rawPathname);
+  if (documentRoute?.route.locatorKind) {
+    if ((query && !options.allowWorkspaceNavigation) || !isSafeBrowserQuery(query, rawPathname)) return result("unknown", { fragment });
+    return withPage(documentRoute.route.locatorKind, documentRoute.params.workspaceId ?? null, documentRoute.params.pageId);
+  }
+  if (options.allowWorkspaceNavigation && isWorkspaceNavigationPath(rawPathname, query)) {
+    return result("workspace_navigation", {
+      stableUrl: input, fragment,
+      navigationHref: legacyWorkspaceEntryPath(rawPathname, query) !== null ? input : null,
+    });
   }
   if (pathname === "/context" && query) {
     const targets = new URLSearchParams(query).getAll("target");
     if (targets.length === 1 && UUID.test(targets[0])) return result("nav_target", { lookup: targets[0].toLowerCase(), fragment });
   }
-  match = /^\/context\/(?:[^/]+\/)*([^/]+)\.md$/.exec(pathname);
-  if (match) return result("concept_path", { lookup: match[1].normalize("NFKC").trim(), fragment });
-  match = /^\/pages\/([^/]+)$/.exec(pathname);
-  if (match) return result("slug", { lookup: match[1].normalize("NFKC").trim(), fragment });
-  match = /^dtxwiki:\/\/workspaces\/([^/]+)\/context\/pages\/([^/]+)$/.exec(pathname);
+  const match = /^dtxwiki:\/\/workspaces\/([^/]+)\/context\/pages\/([^/]+)$/.exec(pathname);
   if (match && UUID.test(match[1])) return result("resource_uri", {
     workspaceId: match[1].toLowerCase(), lookup: match[2].normalize("NFKC").trim(), fragment,
   });
   return result(absolute || /^\/(?:p|context|workspaces|pages|library|agent|review|chats|ask|lint|dashboard|search|activity|settings|setup)(?:\/|$)/.test(pathname) || input.startsWith("dtxwiki:")
     ? "unknown" : "external", { fragment });
+}
+
+export function contextNavigationHref(href: string, workspaceId: string): string | null {
+  if (/[\\\u0000-\u0020\u007f]/.test(href) || href !== href.trim() || href.startsWith("//")) return null;
+  const options = {
+    workspaceId,
+    allowWorkspaceNavigation: true,
+  };
+  const classification = classifyContextLink(href, options);
+  const recognized = classification.kind === "workspace_navigation" ||
+    classification.kind === "canonical_route" ||
+    classification.kind === "stable_full" ||
+    classification.kind === "stable_short";
+  if (!recognized) return null;
+  return classification.navigationHref ?? classification.stableUrl;
 }

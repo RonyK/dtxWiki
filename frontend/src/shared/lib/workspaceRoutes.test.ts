@@ -21,7 +21,7 @@ describe("workspaceRoutes", () => {
     );
     expect(() => contextPageHref(WORKSPACE_ID, "page-a")).toThrow("Context URLs require workspace and page UUIDs");
     expect(stableContextPageHref(WORKSPACE_ID, PAGE_ID)).toBe(`/p/${WORKSPACE_ID}/${PAGE_ID}`);
-    expect(parseWorkspaceRoute(`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/edit`)).toMatchObject({
+    expect(parseWorkspaceRoute(`/WORKSPACES/${WORKSPACE_ID.slice(0, -1)}%31/CONTEXT/PAGES/${PAGE_ID.slice(0, -1)}%33/%65DIT///`)).toMatchObject({
       workspaceId: WORKSPACE_ID,
       section: "context",
       targetId: PAGE_ID,
@@ -41,7 +41,7 @@ describe("workspaceRoutes", () => {
   });
 
   it("extracts only a valid workspace UUID prefix for route-aware recovery", () => {
-    expect(workspaceIdFromPathname(`/workspaces/${WORKSPACE_ID}/unknown/suffix`)).toBe(WORKSPACE_ID);
+    expect(workspaceIdFromPathname(`/WORKSPACES/${WORKSPACE_ID.slice(0, -1)}%31/unknown/suffix`)).toBe(WORKSPACE_ID);
     expect(workspaceIdFromPathname("/workspaces/not-a-uuid/context")).toBeNull();
     expect(workspaceIdFromPathname("/context")).toBeNull();
   });

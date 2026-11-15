@@ -1,9 +1,12 @@
 import { useLocation } from "react-router-dom";
 
+import { hasConflictingBrowserQuery, legacyWorkspaceEntryPath, matchBrowserRoute } from "./browserRoutes";
+import { IDENTITY_QUERY_KEYS, WORKSPACE_SECTIONS } from "./browserRoutes.gen";
+
 import type { TreeNodePayload } from "../api/workspace";
 import { formatCanonicalContextUrl, formatStableContextUrl, isWorkspaceUuid } from "./workspaceIdentity";
 
-export type WorkspaceSection = "dashboard" | "graph" | "context" | "library" | "agent" | "activity" | "review" | "lint" | "chats" | "ask" | "search" | "settings" | "setup" | "inbox";
+export type WorkspaceSection = typeof WORKSPACE_SECTIONS[number];
 export type WorkspaceRoute = {
   workspaceId: string;
   section: WorkspaceSection;
@@ -14,8 +17,8 @@ export type WorkspaceRoute = {
   suffix: string;
 };
 
-const sections = new Set<WorkspaceSection>(["dashboard", "graph", "context", "library", "agent", "activity", "review", "lint", "chats", "ask", "search", "settings", "setup", "inbox"]);
-const identityQueries = ["target", "edit", "review", "finding", "new", "newFolder", "parentNodeId", "parentId", "workspaceId", "workspace_id", "ws"];
+const sections = new Set<WorkspaceSection>(WORKSPACE_SECTIONS);
+const identityQueries = IDENTITY_QUERY_KEYS;
 
 export function workspacePath(workspaceId: string, path = ""): string {
   if (!isWorkspaceUuid(workspaceId)) throw new Error("An explicit workspace UUID is required");
@@ -56,6 +59,13 @@ export function treeNodeHref(workspaceId: string, node: TreeNodePayload): string
 }
 
 export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
+  const registered = matchBrowserRoute(pathname);
+  if (registered?.params.workspaceId && registered.route.path.startsWith("/workspaces/")) {
+    // Registered URL variants enter the UI with the same canonical identity.
+    // Keep the broader fallback below for unknown routes' workspace context.
+    pathname = registered.route.path.split("/").map((part) => part.startsWith(":")
+      ? registered.params[part.slice(1)] : part).join("/");
+  }
   const match = /^\/workspaces\/([^/]+)(?:\/(.*))?$/.exec(pathname.replace(/\/+$/, ""));
   if (!match) return null;
   let workspaceId: string;
@@ -84,7 +94,7 @@ export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
 
 /** Read only a valid workspace UUID prefix, even when the rest of the route is unknown. */
 export function workspaceIdFromPathname(pathname: string): string | null {
-  const match = /^\/workspaces\/([^/]+)(?:\/|$)/.exec(pathname);
+  const match = /^\/workspaces\/([^/]+)(?:\/|$)/i.exec(pathname);
   if (!match) return null;
   try {
     const workspaceId = decodeURIComponent(match[1]);
@@ -105,8 +115,7 @@ export function useRouteWorkspaceId(): string {
 }
 
 export function hasConflictingWorkspaceQuery(search: string, allowParent = false): boolean {
-  const params = new URLSearchParams(search);
-  return identityQueries.some((key) => params.has(key)) || (!allowParent && params.has("parent")) || params.getAll("parent").length > 1;
+  return hasConflictingBrowserQuery(search, allowParent);
 }
 
 export function isValidWorkspaceRoute(route: WorkspaceRoute, search: string): boolean {
@@ -133,11 +142,5 @@ export function workspaceSwitchHref(workspaceId: string, pathname: string): stri
 
 /** Only target-free legacy entry points can use the last-used landing hint. */
 export function legacyWorkspaceEntry(pathname: string, search: string): string | null {
-  if (hasConflictingWorkspaceQuery(search)) return null;
-  const path = pathname.replace(/\/+$/, "") || "/";
-  if (path === "/") return "dashboard";
-  if (path === "/settings/integrations") return "settings/integrations";
-  if (/^\/activity\/(?:pending|advisory|history)$/.test(path)) return path.slice(1);
-  const section = path.slice(1) as WorkspaceSection;
-  return sections.has(section) ? section : null;
+  return legacyWorkspaceEntryPath(pathname, search);
 }

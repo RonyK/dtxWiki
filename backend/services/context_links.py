@@ -7,7 +7,6 @@ decision per link.
 
 from __future__ import annotations
 
-import html
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -27,13 +26,31 @@ from backend.models.context import (
     PageLink,
     PageNameIndex,
 )
+from backend.repositories.page_links import (
+    active_page_link_condition as active_page_link_condition,
+)
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
+from backend.services.browser_routes import (
+    is_app_link_path,
+    match_browser_route,
+    match_context_reference,
+    safe_browser_query,
+)
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.index_refs import (
     PAGE_INPUT_REF_GUIDANCE,
     IndexRefInputError,
     looks_like_index_ref,
     parse_index_ref,
+)
+from backend.utils.markdown_link_rewrite import (
+    LinkRewrite,
+    LinkSource,
+    apply_link_rewrites,
+    decode_destination,
+)
+from backend.utils.markdown_link_rewrite import (
+    escape_link_label as escape_link_label,
 )
 from backend.utils.request_markdown_memo import memoize_markdown_analysis
 
@@ -47,10 +64,6 @@ def format_stable_url(
 ) -> str:
     href = f"/p/{workspace_id}/{page_id}"
     return href + (f"#{fragment.lstrip('#')}" if fragment else "")
-
-
-def escape_link_label(title: str) -> str:
-    return re.sub(r"([\\`*_\[\]<>!&~])", r"\\\1", title)
 
 
 def link_markdown(
@@ -73,6 +86,7 @@ class Locator:
     fragment: str | None = None
     href: str = ""
     absolute: bool = False
+    edit: bool = False
 
     @property
     def key(self) -> str:
@@ -202,28 +216,27 @@ def classify(href: str, self_origins=()) -> Locator:
                     **base,
                 )
             return Locator("unknown", **base)
+        browser_route = match_browser_route(path)
+        document_route = match_context_reference(path)
         if (
             parts.query
             and decoded != "/context"
-            and decoded.startswith(("/p/", "/context/", "/workspaces/", "/pages/"))
-        ):
-            return Locator("unknown", **base)
-        if match := re.fullmatch(rf"/p/({_UUID})/({_UUID})", decoded):
-            return Locator(
-                "stable_full",
-                workspace_id=UUID(match[1]),
-                page_id=UUID(match[2]),
-                **base,
+            and (
+                decoded.startswith(("/p/", "/context/", "/workspaces/", "/pages/"))
+                or browser_route is not None
             )
-        if match := re.fullmatch(rf"/p/({_UUID})", decoded):
-            return Locator("stable_short", page_id=UUID(match[1]), **base)
-        if match := re.fullmatch(
-            rf"/workspaces/({_UUID})/context/pages/({_UUID})(?:/edit)?", decoded
         ):
+            if not (
+                document_route is not None and safe_browser_query(parts.query, path)
+            ):
+                return Locator("unknown", **base)
+        if document_route is not None:
+            workspace_id = document_route.params.get("workspaceId")
             return Locator(
-                "canonical_route",
-                workspace_id=UUID(match[1]),
-                page_id=UUID(match[2]),
+                document_route.route.locator_kind,
+                workspace_id=UUID(workspace_id) if workspace_id else None,
+                page_id=UUID(document_route.params["pageId"]),
+                edit=document_route.route.edit,
                 **base,
             )
         if decoded == "/context":
@@ -231,19 +244,33 @@ def classify(href: str, self_origins=()) -> Locator:
             values = query.get("target", [])
             if len(values) == 1 and (node_id := _uuid(values[0])) is not None:
                 return Locator("nav_target", node_id=node_id, **base)
-        if match := re.fullmatch(r"/context/(?:[^/]+/)*([^/]+)\.md", decoded):
-            return Locator("concept_path", slug=_slug(match[1]), **base)
-        if match := re.fullmatch(r"/pages/([^/]+)", decoded):
-            return Locator("slug", slug=_slug(match[1]), **base)
         return Locator(
-            "unknown"
-            if absolute
-            or decoded.startswith(("/p/", "/context", "/workspaces/", "/pages/"))
-            else "external",
+            "unknown" if absolute or is_app_link(href, self_origins) else "external",
             **base,
         )
     except (ValueError, UnicodeError):
         return Locator("unknown", href=href)
+
+
+def is_app_link(href: str, self_origins=()) -> bool:
+    """Recognize unsupported app destinations without resolving a target."""
+    href = re.sub(r"^[\x00-\x20]+", "", href)
+    href = href.replace("\r", "").replace("\n", "").replace("\t", "")
+    if href.startswith("//"):
+        return False
+    try:
+        parts = urlsplit(href)
+        if parts.scheme.lower() not in {"", "http", "https"}:
+            return False
+        if parts.netloc and (
+            parts.scheme.lower() not in {"http", "https"}
+            or not _self_origin(parts, self_origins)
+        ):
+            return False
+        path = unquote(parts.path, errors="strict")
+    except (ValueError, UnicodeError):
+        return False
+    return is_app_link_path(path)
 
 
 def parse_page_input(value: str | UUID) -> Locator:
@@ -252,6 +279,15 @@ def parse_page_input(value: str | UUID) -> Locator:
     locator = classify(str(value))
     if locator.kind not in {"page_id", "stable_full", "stable_short"}:
         raise ValueError("Expected a Context page UUID or permanent page URL")
+    # Browser navigation accepts case and trailing-slash variants. Page inputs
+    # retain their existing exact identity syntax through the same path grammar.
+    if locator.kind != "page_id":
+        parts = urlsplit(str(value))
+        if (
+            parts.query
+            or match_context_reference(parts.path, identity_input=True) is None
+        ):
+            raise ValueError("Expected a Context page UUID or permanent page URL")
     return locator
 
 
@@ -637,6 +673,8 @@ def resolve(
     preserved_pins: Mapping[str, UUID] | None = None,
     batch: LinkResolutionBatch | None = None,
 ) -> Resolution:
+    if locator.kind in {"unknown", "concept_path", "slug"}:
+        return Resolution("unavailable")
     if locator.workspace_id is not None and locator.workspace_id != ctx.workspace_id:
         return Resolution("foreign")
     if locator.kind in {"external", "public_reader", "local", "media"}:
@@ -859,10 +897,15 @@ class LinkOccurrence:
     slug: str | None = None
     label: str | None = None
     snippet: str = ""
+    source: LinkSource | None = None
 
     @property
     def destination_span(self) -> SourceSpan:
-        return self.span
+        return self.source.destination_span if self.source is not None else self.span
+
+    @property
+    def syntax_span(self) -> SourceSpan:
+        return self.source.syntax_span if self.source is not None else self.span
 
 
 def _span(body: str, start: int, end: int) -> SourceSpan:
@@ -904,11 +947,24 @@ def _plain_text_nodes(body: str, *, tokens: Sequence[Token] | None = None) -> li
 
 @memoize_markdown_analysis
 def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
+    """Verified authored links, excluding shared reference definitions."""
+    return _extract_links(body)
+
+
+@memoize_markdown_analysis
+def _normalizable_links(body: str) -> tuple[LinkOccurrence, ...]:
+    return _extract_links(body, allow_shared_link_definitions=True)
+
+
+def _extract_links(
+    body: str, *, allow_shared_link_definitions: bool = False
+) -> tuple[LinkOccurrence, ...]:
     """Verify exact source destinations against the original rendered structure.
 
-    Shared reference definitions are deliberately not rewritable: a definition
-    may serve an image or another link. The probe never creates eligibility;
-    original text-node membership is checked before probing a wikilink.
+    Shared definitions are excluded by default. The short-link normalizer may
+    include one only when every rendered use is an ordinary link. The probe
+    never creates eligibility; original text-node membership is checked before
+    probing a wikilink.
     """
     from collections import Counter
     from hashlib import sha256
@@ -1007,6 +1063,7 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
         cursor += len(line)
 
     candidates = []
+    syntax_ranges = {}
     uses = Counter()
     reference_uses = []
     original_text = _plain_text_nodes(rendered, tokens=tokens)
@@ -1052,9 +1109,7 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
             raw = wiki[0]
             # Replacing [[tar*get*]] with a probe FIRST would incorrectly turn
             # emphasis/text into a valid wikilink. Keep the original parse.
-            decoded = html.unescape(
-                re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", raw)
-            )
+            decoded = decode_destination(raw).text
             if decoded in eligible_wikis:
                 wiki_candidates.append(
                     (cursor, wiki.end(), raw, decoded, wiki[1], wiki[2])
@@ -1070,6 +1125,7 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
                     if parsed:
                         start, end, syntax_end = parsed
                         if not any(masked[start:end]):
+                            syntax_ranges[(start, end)] = (cursor, syntax_end)
                             candidates.append(
                                 (
                                     start,
@@ -1125,9 +1181,24 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
         if any(marker in node for node in qualified_nodes):
             candidates.append((start, end, raw, "wikilink", slug, label))
 
+    reference_link_counts = Counter(key for key, _ in reference_uses)
+    reference_multiplicity = {}
     for label_key, label in reference_uses:
         definition = definitions[label_key]
-        if uses[label_key] == 1 and definition_counts[label_key] == 1:
+        span = (definition.destination_start, definition.destination_end)
+        if (
+            definition_counts[label_key] == 1
+            and (
+                uses[label_key] == 1
+                or (
+                    allow_shared_link_definitions
+                    and uses[label_key] == reference_link_counts[label_key]
+                )
+            )
+            and span not in reference_multiplicity
+        ):
+            reference_multiplicity[span] = reference_link_counts[label_key]
+            syntax_ranges[span] = (definition.syntax_start, definition.syntax_end)
             candidates.append(
                 (
                     definition.destination_start,
@@ -1191,19 +1262,20 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
     pieces.append(rendered[cursor:])
     rendered_probes = Counter(_rendered_destinations("".join(pieces)))
     result = []
-    for index, (start, end, href, kind, slug, label) in enumerate(ordered):
+    for index, (start, end, _href, kind, slug, label) in enumerate(ordered):
         if index not in probes or (
             kind not in {"wikilink", "literal_autolink"}
-            and rendered_probes[probes[index]] != 1
+            and rendered_probes[probes[index]]
+            != reference_multiplicity.get((start, end), 1)
         ):
             continue
-        raw_href = (
-            href
-            if kind in {"autolink", "literal_autolink"}
-            else html.unescape(
-                re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", href)
-            )
+        destination_start = start + (1 if kind == "autolink" else 0)
+        destination_end = end - (1 if kind == "autolink" else 0)
+        raw_destination = rendered[destination_start:destination_end]
+        decoded = decode_destination(
+            raw_destination, markdown=kind not in {"autolink", "literal_autolink"}
         )
+        raw_href = decoded.text
         # remark-gfm gives www literals an implicit HTTP scheme. Readers see
         # that destination while the authored label and span stay unchanged.
         if kind == "literal_autolink" and raw_href.lower().startswith("www."):
@@ -1213,17 +1285,23 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
                 raw_href,
                 kind,
                 _span(body, offset + start, offset + end),
-                html.unescape(
-                    re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", slug)
-                )
-                if slug is not None
-                else None,
-                html.unescape(
-                    re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", label)
-                )
+                decode_destination(slug).text if slug is not None else None,
+                decode_destination(label).text
                 if kind == "wikilink" and label is not None
                 else label,
                 body[max(0, offset + start - 60) : offset + end + 60],
+                LinkSource(
+                    kind,
+                    _span(
+                        body,
+                        offset + syntax_ranges.get((start, end), (start, end))[0],
+                        offset + syntax_ranges.get((start, end), (start, end))[1],
+                    ),
+                    _span(body, offset + destination_start, offset + destination_end),
+                    raw_destination,
+                    decoded,
+                    reference_multiplicity.get((start, end), 1),
+                ),
             )
         )
     return tuple(result)
@@ -1238,9 +1316,7 @@ class LinkDecision:
 
 
 def _is_context_edit_route(locator: Locator) -> bool:
-    return locator.kind == "canonical_route" and unquote(
-        urlsplit(locator.href).path
-    ).endswith("/edit")
+    return locator.kind == "canonical_route" and locator.edit
 
 
 def decide(
@@ -1274,7 +1350,8 @@ def decide(
             return LinkDecision("fix", relative, "link.internal-noncanonical")
         return LinkDecision("keep")
     noncanonical = (
-        locator.kind not in {"stable_full", "wikilink", "page_id"} or locator.absolute
+        locator.kind not in {"stable_full", "stable_short", "wikilink", "page_id"}
+        or locator.absolute
     )
     if locator.kind == "wikilink" and locator.slug != resolution.target_slug:
         noncanonical = True
@@ -1441,10 +1518,12 @@ def _workspace_route(
         # resolver is a Context-link lint/write boundary, not the readers for
         # reviews, chats, Ask, Lint, or Library artifacts. Keep their authored
         # bytes and let each route's reader decide availability and access.
-        if workspace_id is not None and (
-            kind == "overview"
-            or section in {"review", "ask", "chats", "lint"}
-            or (section == "library" and kind == "artifact")
+        if kind == "overview" or (
+            workspace_id is not None
+            and (
+                section in {"review", "ask", "chats", "lint"}
+                or (section == "library" and kind == "artifact")
+            )
         ):
             return True, href
         return False, None
@@ -1539,6 +1618,8 @@ def decide_link(
                     else LinkDecision("finding", finding="link.unresolved")
                 ),
             )
+        if is_app_link(href, ctx.self_origins):
+            return locator, None, LinkDecision("finding", finding="link.unresolved")
     resolution = resolve(locator, ctx, batch=batch)
     return (
         locator,
@@ -1591,6 +1672,24 @@ def _citable(href: str, ctx: LinkContext) -> bool:
     except ReadNotFoundError:
         return False
     return True
+
+
+def _link_rewrite(body: str, occurrence: LinkOccurrence, href: str) -> LinkRewrite:
+    source = occurrence.source
+    if source is None:
+        raw = occurrence.destination_span.text(body)
+        source = LinkSource(
+            occurrence.kind,
+            occurrence.syntax_span,
+            occurrence.destination_span,
+            raw,
+            decode_destination(raw, markdown=occurrence.kind == "markdown"),
+        )
+    return LinkRewrite(
+        source,
+        href,
+        occurrence.label or occurrence.slug or occurrence.href,
+    )
 
 
 def citation_href_decision(
@@ -1647,18 +1746,6 @@ def _rewrite_links_with_report(
             and not resolution.published
         ):
             continue
-        # A citation span is its address alone: the marker keeps its syntax.
-        replacement = decision.href
-        if occurrence.kind in {"wikilink", "autolink", "literal_autolink"}:
-            # A new [ immediately after ! would turn a visible link into an
-            # image. Keep the source and finding when this span is not safe.
-            if (
-                occurrence.span.char_start
-                and body[occurrence.span.char_start - 1] == "!"
-            ):
-                continue
-            label = occurrence.label or occurrence.slug or occurrence.href
-            replacement = f"[{escape_link_label(label)}]({decision.href})"
         after_locator = classify(decision.href, ctx.self_origins)
         if _is_context_edit_route(locator):
             from backend.services.context_link_targets import (
@@ -1677,7 +1764,7 @@ def _rewrite_links_with_report(
             after = resolve(after_locator, ctx, batch=batch)
             same_target = after.state == "ok" and after.page_id == resolution.page_id
         if same_target:
-            changes.append((occurrence.span, replacement))
+            changes.append(_link_rewrite(body, occurrence, decision.href))
             details.append(
                 {
                     "module_id": "links",
@@ -1696,22 +1783,11 @@ def _rewrite_links_with_report(
                     else "repair",
                 }
             )
-    parts = []
-    cursor = 0
-    # Citation addresses follow the ordinary links; edit them in source order.
-    order = sorted(range(len(changes)), key=lambda index: changes[index][0].char_start)
-    changes = [changes[index] for index in order]
-    details = [details[index] for index in order]
-    for span, replacement in changes:
-        if span.char_start < cursor:
-            return body, (), (), tuple(unavailable)
-        parts.extend((body[cursor : span.char_start], replacement))
-        cursor = span.char_end
-    parts.append(body[cursor:])
+    rewritten, applied = apply_link_rewrites(body, changes, parser=_markdown_parser())
     return (
-        "".join(parts),
-        tuple("link.internal-noncanonical" for _ in changes),
-        tuple(details),
+        rewritten,
+        tuple("link.internal-noncanonical" for _ in applied),
+        tuple(details[index] for index in applied),
         tuple(unavailable),
     )
 
@@ -1723,6 +1799,42 @@ def rewrite_links_with_report(
         body, ctx, index_refs_only=index_refs_only
     )
     return rewritten, fixes, details
+
+
+def normalize_short_page_links_with_report(
+    body: str, ctx: LinkContext
+) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
+    """Expand MCP page shorthand using only the source workspace identity."""
+    from backend.services.context_link_targets import _classify_context_navigation
+
+    changes = []
+    details = []
+    for occurrence in _normalizable_links(body):
+        locator = _classify_context_navigation(occurrence.href, ctx.self_origins)
+        if locator.kind != "stable_short":
+            continue
+        canonical_path = format_stable_url(ctx.workspace_id, locator.page_id)
+        href = (
+            urlsplit(occurrence.href)
+            ._replace(scheme="", netloc="", path=canonical_path)
+            .geturl()
+        )
+        changes.append(_link_rewrite(body, occurrence, href))
+        details.append(
+            {
+                "module_id": "links",
+                "rule_id": "link.internal-noncanonical",
+                "before": occurrence.href,
+                "after": href,
+                "category": "format",
+            }
+        )
+    rewritten, applied = apply_link_rewrites(body, changes, parser=_markdown_parser())
+    return (
+        rewritten,
+        tuple("link.internal-noncanonical" for _ in applied),
+        tuple(details[index] for index in applied),
+    )
 
 
 def normalize_index_refs_with_report(

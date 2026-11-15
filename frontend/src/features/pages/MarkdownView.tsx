@@ -57,10 +57,10 @@ import { useTranslation } from "react-i18next";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
-import { CONTEXT_HEADING_ID_PREFIX as CLOBBER_PREFIX, withContextHeadingFragment, classifyContextLink, formatContextPageUrl, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
+import { CONTEXT_HEADING_ID_PREFIX as CLOBBER_PREFIX, withContextHeadingFragment, classifyContextLink, contextNavigationHref, formatContextPageUrl, isAppLink, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
 import { canPreservePageHref } from "../../shared/lib/customPageHref";
 import { createReferenceReturnState } from "../../shared/lib/navigationRecovery";
-import { hasConflictingWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { workspacePath } from "../../shared/lib/workspaceRoutes";
 
 import type { PageInlineComment } from "../../shared/api/pages";
 import {
@@ -656,27 +656,32 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         }) as typeof child.data;
         return [child];
       };
-      if (options.confirmedOnly) {
-        if (!target || target.state !== "ok" || !target.href || !target.href.startsWith("/") || target.href.startsWith("//")) return unavailable();
-        props.href = withContextHeadingFragment(target.href);
-        return [child];
-      }
       const classification = classifyContextLink(locator, {
         workspaceId: options.workspaceId,
         allowWorkspaceNavigation: true,
       });
+      // Landing aliases carry UI navigation state rather than document
+      // heading IDs in both normal and server-confirmed reader policies.
+      const referenceHref = (destination: string) => classification.kind === "workspace_navigation" && classification.navigationHref !== null
+        ? destination
+        : withContextHeadingFragment(destination);
+      if (options.confirmedOnly) {
+        if (!target || target.state !== "ok" || !target.href || !target.href.startsWith("/") || target.href.startsWith("//")) return unavailable();
+        props.href = referenceHref(target.href);
+        return [child];
+      }
       const wikilink = reference?.wikilink === true;
-      // An unrecognized href belongs to its author. Only a positively known
-      // app locator or a server-resolved target can acquire internal policy.
-      // A system index ref is known but never a browser URL: without a server
-      // target it stays an unavailable reference.
-      const internal = target || wikilink || locator.startsWith(SYSTEM_INDEX_REF_PREFIX) || [
+      // The server resolves app paths the browser does not recognize, such as
+      // trailing-slash aliases, so it decides them like any other app link:
+      // they wait for its answer and are unavailable only without a target.
+      const appLink = classification.kind === "unknown" && isAppLink(locator);
+      const internal = target || wikilink || appLink || locator.startsWith(SYSTEM_INDEX_REF_PREFIX) || [
         "page_id", "stable_full", "stable_short", "canonical_route",
-        "nav_target", "concept_path", "slug", "resource_uri", "workspace_navigation",
+        "nav_target", "resource_uri", "workspace_navigation",
       ].includes(classification.kind);
       // The server also resolves supported routes the browser classifies as
       // unknown, such as legacy `/library?target=` links. Ask about them too,
-      // but keep rendering them as authored until a target arrives.
+      // but keep rendering non-app paths as authored until a target arrives.
       if (reference && (internal || classification.kind === "unknown")) linksToCheck.add(locator);
       if (!internal) return [child];
       delete props.dataContextLinkLocator;
@@ -687,10 +692,11 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         : wikilink && classification.lookup === "" && href.startsWith("#") && href !== "#" ? href
         : options.publicReader ? null
         : classification.kind === "workspace_navigation" && !options.allowWorkspaceNavigation ? null
+        : options.allowWorkspaceNavigation && classification.navigationHref ? classification.navigationHref
         : classification.stableUrl ?? (wikilink && legacyPageId && href !== "#" ? href : null);
       if (options.publicReader && !resolvedHref) return unavailable();
       if (resolvedHref) {
-        props.href = withContextHeadingFragment(resolvedHref);
+        props.href = referenceHref(resolvedHref);
         if (wikilink) props.className = ["wikilink"];
         const pageId = target?.target_page_id ?? classification.pageId ?? legacyPageId;
         if (!options.publicReader && pageId) props.dataInternalPageId = pageId;
@@ -1491,7 +1497,7 @@ function MarkdownLink({
       );
     }
     const navigationHref = behavior?.authenticatedAuthored && behavior.sourceWorkspaceId
-      ? referenceNavigationHref(href, behavior.sourceWorkspaceId)
+      ? contextNavigationHref(href, behavior.sourceWorkspaceId)
       : null;
     const renderedHref = navigationHref ?? href;
     const knownNavigation = classifyContextLink(renderedHref, {
@@ -1534,33 +1540,6 @@ function MarkdownLink({
   return renderLink(children);
 }
 
-function referenceNavigationHref(href: string, workspaceId: string): string | null {
-  if (/[\\\u0000-\u0020\u007f]/.test(href) || href !== href.trim() || href.startsWith("//")) return null;
-  const options = {
-    workspaceId,
-    allowWorkspaceNavigation: true,
-  };
-  let classification = classifyContextLink(href, options);
-  const hashAt = href.indexOf("#");
-  const queryAt = href.indexOf("?");
-  if (classification.kind === "unknown" && queryAt >= 0 && (hashAt < 0 || queryAt < hashAt)) {
-    const query = href.slice(queryAt, hashAt < 0 ? undefined : hashAt);
-    if (!hasConflictingWorkspaceQuery(query)) {
-      const withoutQuery = href.slice(0, queryAt) + (hashAt < 0 ? "" : href.slice(hashAt));
-      const route = classifyContextLink(withoutQuery, options);
-      if (route.kind === "stable_full") classification = route;
-    }
-  }
-  const recognized = classification.kind === "workspace_navigation" ||
-    classification.kind === "canonical_route" ||
-    classification.kind === "stable_full";
-  if (!recognized) return null;
-  // Classify the authored path before stripping the origin: URL.pathname
-  // would silently normalize dot segments that must remain rejected.
-  return /^https?:\/\//i.test(href)
-    ? /^https?:\/\/[^/?#]*(.*)$/i.exec(href)?.[1] || "/"
-    : href;
-}
 
 function MarkdownLinkedContent({
   children,

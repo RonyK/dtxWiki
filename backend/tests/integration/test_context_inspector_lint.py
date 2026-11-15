@@ -2,12 +2,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.models.base import Base
+from backend.models.context import ContextPageVersion
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.domain_read import DomainReadService
 from backend.services.page_service import PageService
 from backend.tests.utils.context_git import configure_test_context_storage
+from backend.utils.content_hash import content_hash
 
 UNCLOSED_FENCE_BODY = "# Title\n\n```python\nx = 1\n"
 CLEAN_BODY = "# Title\n\nA clean paragraph.\n"
@@ -79,10 +81,17 @@ def test_inspector_warnings_are_version_aware_and_skippable(tmp_path):
     # must resolve a configured-origin link to their own unpublished version;
     # format-only fixtures cannot detect lost actor/origin context, and a unit
     # wiring assertion cannot prove the real target-visibility decision.
-    body = "[This draft](https://docs.example/pages/ver)\n\n" + UNCLOSED_FENCE_BODY
-    page = _write(session_factory, slug="ver", body=body)
+    page = _write(session_factory, slug="ver", body=UNCLOSED_FENCE_BODY)
     with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
+        # Seed a supported self-link once the page UUID is allocated, retaining
+        # this reader fixture's configured-origin and unpublished-target checks.
+        stored = session.get(ContextPageVersion, page.version_id)
+        stored.body_md = (
+            f"[This draft](https://docs.example/workspaces/{workspace.id}"
+            f"/context/pages/{page.id})\n\n" + UNCLOSED_FENCE_BODY
+        )
+        stored.content_hash = content_hash(stored.body_md)
         explicit = read_service.read_context_page(
             session=session,
             workspace_id=workspace.id,

@@ -17,6 +17,10 @@ from sqlalchemy.orm import aliased, registry
 from backend.models.context import EdgeProjection
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
+from backend.repositories.page_links import (
+    active_page_link_edge_condition,
+    active_page_link_edge_weight,
+)
 from backend.repositories.workspace_scoped import (
     join_correlated_workspace_projection,
     join_in_workspace,
@@ -156,7 +160,14 @@ def _document_edges(
     )
     has_document_container = container.id.is_not(None)
     ordinary = join_correlated_workspace_projection(
-        select(*raw.c).select_from(raw),
+        select(
+            *[
+                active_page_link_edge_weight(raw.c).label(column.name)
+                if column.name == "weight"
+                else column
+                for column in raw.c
+            ]
+        ).select_from(raw),
         raw.c.workspace_id,
         container,
         on=document_container,
@@ -164,6 +175,7 @@ def _document_edges(
         raw.c.workspace_id == workspace_id,
         ~library_citation,
         ~has_document_container,
+        active_page_link_edge_condition(raw.c),
     )
     if source_ids is not None:
         ordinary = ordinary.where(raw.c.source_id.in_(source_ids))

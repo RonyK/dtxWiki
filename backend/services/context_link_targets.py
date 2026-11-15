@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from sqlalchemy import or_
@@ -21,14 +21,22 @@ from backend.models.workspace import Workspace
 from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
 from backend.schemas.read import ContextLinkTarget, WikilinkTarget
 from backend.services.actor_visible_read import agent_page_visible, library_item_visible
+from backend.services.browser_routes import (
+    is_app_link_path,
+    legacy_workspace_entry,
+    match_browser_route,
+    safe_browser_query,
+)
 from backend.services.context_links import (
     LinkContext,
     LinkResolutionBatch,
     Locator,
     _visible_index_route,
+    active_page_link_condition,
     classify,
     configured_self_origins,
     extract_links,
+    is_app_link,
     resolve,
 )
 from backend.services.index_refs import parse_index_ref
@@ -57,13 +65,16 @@ def page_link_target_condition(page: ContextPage):
     slug_locator = or_(
         *(
             PageLink.locator_key.startswith(kind + ":")
-            for kind in ("wikilink", "concept_path", "slug", "resource_uri")
+            for kind in ("wikilink", "resource_uri")
         )
     )
-    return (PageLink.target_page_id == page.id) | (
-        PageLink.target_page_id.is_(None)
-        & (PageLink.target_slug == page.slug)
-        & slug_locator
+    return active_page_link_condition() & (
+        (PageLink.target_page_id == page.id)
+        | (
+            PageLink.target_page_id.is_(None)
+            & (PageLink.target_slug == page.slug)
+            & slug_locator
+        )
     )
 
 
@@ -222,10 +233,16 @@ def markdown_link_targets(
                 )
             )
             continue
-        # A locator outside the supported URL grammar is opaque authored text,
-        # not a failed internal destination. In particular, do not probe the
-        # source workspace for unknown/custom paths or protocols.
+        # An app path outside the supported URL grammar is retired, and this
+        # answer is what readers show. Other unknown locators are opaque
+        # authored text; do not probe the source workspace for them.
         if locator.kind == "unknown":
+            if is_app_link(occurrence.href, context.self_origins):
+                targets.append(
+                    ContextLinkTarget(
+                        locator=occurrence.href, href=None, state="unavailable"
+                    )
+                )
             continue
         resolution = _resolve_context_locator(locator, context, resolution_batch)
         if resolution.state == "ignored":
@@ -256,12 +273,13 @@ def markdown_link_targets(
         href = resolution.href if target_id is not None else None
         if (
             target_id is not None
-            and locator.kind == "canonical_route"
-            and urlsplit(occurrence.href).path.endswith("/edit")
+            and locator.edit
             and not public
             and _actor_can_edit_workspace(actor)
         ):
-            href = f"{workspace_path(workspace_id)}/context/pages/{target_id}/edit"
+            href = urlsplit(href)._replace(
+                path=f"{workspace_path(workspace_id)}/context/pages/{target_id}/edit"
+            ).geturl()
         href = _preserve_workspace_view_query(
             href, occurrence.href, preserve_fragment=False
         )
@@ -369,8 +387,6 @@ def ask_context_link_targets(
         "stable_short",
         "canonical_route",
         "nav_target",
-        "concept_path",
-        "slug",
         "wikilink",
         "resource_uri",
         "index_ref",
@@ -827,7 +843,7 @@ def _parse_workspace_navigation_reference(
     self_origins: frozenset[str] = frozenset(),
 ) -> tuple[str, str, UUID | None, UUID | None] | None:
     try:
-        if href != href.strip() or any(
+        if href.startswith("//") or href != href.strip() or any(
             ord(char) < 32 or ord(char) == 127 for char in href
         ):
             return None
@@ -838,14 +854,18 @@ def _parse_workspace_navigation_reference(
             locator = classify(href, self_origins)
             if not locator.absolute:
                 return None
+            if parts.path.startswith("//"):
+                return None
             href = f"{parts.path}?{parts.query}" if parts.query else parts.path
             parts = urlsplit(href)
         if parts.scheme or parts.netloc or parts.username or parts.password:
             return None
-        if "//" in parts.path:
+        landing = legacy_workspace_entry(parts.path, parts.query)
+        if landing is not None and is_app_link_path(parts.path):
+            return landing.split("/", 1)[0], "overview", None, None
+        navigation_path = parts.path.rstrip("/")
+        if "//" in navigation_path:
             return None
-        if parts.path.endswith("/"):
-            parts = parts._replace(path=parts.path[:-1])
         legacy_sections = {
             "/context": "context",
             "/library": "library",
@@ -854,7 +874,7 @@ def _parse_workspace_navigation_reference(
             "/ask": "ask",
             "/lint": "lint",
         }
-        if parts.path in legacy_sections:
+        if navigation_path in legacy_sections:
             query = parse_qs(parts.query, strict_parsing=True)
             expected_query = {
                 "context": "target",
@@ -863,88 +883,33 @@ def _parse_workspace_navigation_reference(
                 "review": "review",
                 "ask": "target",
                 "lint": "finding",
-            }[legacy_sections[parts.path]]
+            }[legacy_sections[navigation_path]]
             if set(query) != {expected_query} or len(query[expected_query]) != 1:
                 return None
             return (
-                legacy_sections[parts.path],
+                legacy_sections[navigation_path],
                 "legacy_target",
                 UUID(query[expected_query][0]),
                 None,
             )
-        chat_match = re.fullmatch(r"/chats/([0-9a-fA-F-]{36})", parts.path)
+        chat_match = re.fullmatch(r"/chats/([0-9a-fA-F-]{36})", navigation_path)
         if chat_match is not None and not parts.query:
             return "chats", "legacy_target", UUID(chat_match[1]), None
-        if not _safe_workspace_query(parts.query, parts.path):
+        if not safe_browser_query(parts.query, parts.path):
             return None
-        overview = re.fullmatch(r"/workspaces/([0-9a-fA-F-]{36})(?:/(.*))?", parts.path)
-        suffix = overview[2] if overview is not None else None
-        valid_overviews = {
-            None,
-            "dashboard",
-            "inbox",
-            "context",
-            "library",
-            "agent",
-            "activity",
-            "review",
-            "lint",
-            "chats",
-            "ask",
-            "search",
-            "settings",
-            "setup",
-            "settings/integrations",
-            "activity/pending",
-            "activity/advisory",
-            "activity/history",
-            "context/folders/new",
-            "context/pages/new",
-            "library/items/new",
-            "library/folders/new",
-            "agent/pages/new",
-            "agent/folders/new",
-        }
-        if overview is not None and suffix in valid_overviews:
-            return (
-                (suffix or "dashboard").split("/", 1)[0],
-                "overview",
-                None,
-                UUID(overview[1]),
-            )
-        match = re.fullmatch(
-            r"/workspaces/([0-9a-fA-F-]{36})/(context|library|agent)/(items|artifacts|pages|folders)/([0-9a-fA-F-]{36})(/edit)?",
-            parts.path,
+        match = match_browser_route(parts.path)
+        if match is None:
+            return None
+        route, params = match.route, match.params
+        if route.locator_kind is not None:
+            # Context document reads keep the existing pin/version resolver.
+            return None
+        return (
+            route.section,
+            route.kind,
+            UUID(params[route.target_param]) if route.target_param else None,
+            UUID(params["workspaceId"]) if "workspaceId" in params else None,
         )
-        if match is not None:
-            explicit_workspace_id = UUID(match[1])
-            section = match[2]
-            route_kind = match[3]
-            kind = {
-                "items": "item",
-                "artifacts": "artifact",
-                "pages": "page",
-                "folders": "folder",
-            }[route_kind]
-            if match[5]:
-                if section != "agent" or kind != "page":
-                    return None
-                kind = "page_edit"
-            if (
-                (section == "library" and kind == "page")
-                or (section == "agent" and kind in {"item", "artifact"})
-                or (section == "context" and kind != "folder")
-            ):
-                return None
-            return section, kind, UUID(match[4]), explicit_workspace_id
-        match = re.fullmatch(
-            r"/workspaces/([0-9a-fA-F-]{36})/(review|ask|chats)/([0-9a-fA-F-]{36})|/workspaces/([0-9a-fA-F-]{36})/lint/findings/([0-9a-fA-F-]{36})",
-            parts.path,
-        )
-        if match is not None:
-            if match[1] is not None:
-                return match[2], "item", UUID(match[3]), UUID(match[1])
-            return "lint", "item", UUID(match[5]), UUID(match[4])
     except (ValueError, UnicodeError):
         return None
 
@@ -1151,39 +1116,8 @@ def _navigation_batch(
     )
 
 
-def _safe_workspace_query(query: str, path: str = "") -> bool:
-    """Reject identity override parameters while allowing presentation state."""
-    if not query:
-        return True
-    params = parse_qs(query, keep_blank_values=True)
-    if {
-        "target",
-        "edit",
-        "review",
-        "finding",
-        "new",
-        "newFolder",
-        "parentNodeId",
-        "parentId",
-        "workspaceId",
-        "workspace_id",
-        "ws",
-    } & params.keys():
-        return False
-    parents = params.get("parent", ())
-    if not parents:
-        return True
-    if not path.endswith("/new") or len(parents) != 1:
-        return False
-    try:
-        UUID(parents[0])
-    except ValueError:
-        return False
-    return True
-
-
 def _classify_context_navigation(href: str, self_origins: frozenset[str]):
-    """Classify typed Context links after validating harmless UI query state."""
+    """Classify a body link, reading system index refs as their typed targets."""
     ref = parse_index_ref(href)
     if ref is not None:
         return Locator(
@@ -1191,21 +1125,7 @@ def _classify_context_navigation(href: str, self_origins: frozenset[str]):
             href=href,
             page_id=ref.target_id if ref.kind == "context" else None,
         )
-    try:
-        parts = urlsplit(href)
-        if not parts.query or not parts.path.startswith(("/p/", "/workspaces/")):
-            return classify(href, self_origins)
-        if not _safe_workspace_query(parts.query, parts.path):
-            return classify(href, self_origins)
-        stripped = urlunsplit(
-            (parts.scheme, parts.netloc, parts.path, "", parts.fragment)
-        )
-        locator = classify(stripped, self_origins)
-        if locator.kind not in {"stable_full", "stable_short", "canonical_route"}:
-            return classify(href, self_origins)
-        return replace(locator, href=href)
-    except ValueError:
-        return classify(href, self_origins)
+    return classify(href, self_origins)
 
 
 def _preserve_workspace_view_query(
@@ -1218,7 +1138,7 @@ def _preserve_workspace_view_query(
         return None
     original_parts = urlsplit(original)
     query = original_parts.query
-    if query and not _safe_workspace_query(query, original_parts.path):
+    if query and not safe_browser_query(query, original_parts.path):
         return destination
     destination_parts = urlsplit(destination)
     fragment = (

@@ -4,6 +4,7 @@ import { Suspense, startTransition, useState } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import rewriteVectors from "../../../../../shared/fixtures/context_link_rewrite_vectors.json";
 import { MarkdownView } from "../MarkdownView";
 import { i18n } from "../../../shared/i18n";
 
@@ -577,14 +578,19 @@ describe("MarkdownView", () => {
 
   it("renders heading anchors, GFM alerts, and safe link behavior", async () => {
     const user = userEvent.setup();
+    const onLinksToCheck = vi.fn();
     render(
       <MemoryRouter>
         <MarkdownView
           workspaceId="11111111-1111-4111-8111-111111111111"
+          onLinksToCheck={onLinksToCheck}
           linkTargets={[
-            { locator: "/pages/release-notes", href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222", target_page_id: "22222222-2222-4222-8222-222222222222", state: "ok" },
+            { locator: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222", href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222", target_page_id: "22222222-2222-4222-8222-222222222222", state: "ok" },
+            { locator: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/?view=source#section", href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222?view=source#section", target_page_id: "22222222-2222-4222-8222-222222222222", state: "ok" },
             { locator: "/context/missing.md", href: null, target_page_id: null, state: "unavailable" },
             { locator: "/context/missing-image.md", href: null, target_page_id: null, state: "unavailable" },
+            { locator: "/context?view=source#section", href: "/context?view=source#section", target_page_id: null, state: "ok" },
+            { locator: "/context/?target=44444444-4444-4444-8444-444444444444", href: "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/44444444-4444-4444-8444-444444444444", target_page_id: null, state: "ok" },
           ]}
           body={[
             "# Release Notes",
@@ -594,9 +600,9 @@ describe("MarkdownView", () => {
             "",
             "[Missing](/context/missing.md), [Short](/p/22222222-2222-4222-8222-222222222222#details), [Reference][target],",
             "",
-            "[target]: /pages/release-notes",
+            "[target]: /p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
             "",
-            "[Internal](/pages/release-notes), [Hash](#user-content-release-notes), [External](https://example.com), and [Protocol](//example.com)",
+            "[Internal](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/?view=source#section), [Hash](#user-content-release-notes), [External](https://example.com), and [Protocol](//example.com)",
             '[![Linked image](https://images.example.test/linked.png)](/context/missing-image.md)',
             '<div><a href="https://raw-html.example.test"data-dtx-unavailable-reference="true" data-dtx-reference-wikilink="true" data-dtx-reference-locator="/context/missing.md">Raw HTML link</a></div>',
             '',
@@ -605,6 +611,10 @@ describe("MarkdownView", () => {
             '[Script link](javascript:alert(1)) [VB script link](vbscript:msgbox(1)) [Data link](data:text/html,unsafe)',
             '<a href="java&#x73;cript:alert(1)">Entity script link</a> <a href="java&#x0a;script:alert(1)">Control script link</a>',
             '',
+            '[Retired page](/pages/release-notes)',
+            '[Context entry](/context?view=source#section)',
+            '[Folder alias](/context/?target=44444444-4444-4444-8444-444444444444)',
+            `[Own docs](${window.location.origin}/manual/topic?view=print#raw-anchor)`,
             '[Parent relative](../manual/topic?view=print#raw-anchor)',
             '[Unrecognized root](/unregistered/path?x=1#raw-anchor)',
             '[Unrecognized own URI](dtxwiki://different-namespace/topic?x=1#raw-anchor)',
@@ -613,6 +623,7 @@ describe("MarkdownView", () => {
             '<a href="odd format:value with spaces">Opaque syntax</a>',
             '',
             '[Empty href]()',
+            ...rewriteVectors.vectors.flatMap((vector) => ["", vector.source, "", vector.normalized]),
           ].join("\n")}
         />
       </MemoryRouter>,
@@ -628,7 +639,7 @@ describe("MarkdownView", () => {
     expect(screen.getByText("Keep this cited.").closest(".markdown-alert"))
       .toHaveClass("markdown-alert-note");
     expect(screen.getByRole("link", { name: "Internal" }))
-      .toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222");
+      .toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222?view=source#user-content-section");
     expect(screen.getByRole("link", { name: "Internal" }))
       .not.toHaveAttribute("node");
     expect(screen.getByRole("link", { name: "Hash" }))
@@ -638,6 +649,20 @@ describe("MarkdownView", () => {
       .toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "External" }))
       .toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByRole("link", { name: "Context entry" })).toHaveAttribute("href", "/context?view=source#section");
+    // One shared backend/frontend vector exercises actual page plugins, so
+    // CommonMark-preserving rewrites cannot silently activate inline math.
+    for (const vector of rewriteVectors.vectors) {
+      const links = screen.getAllByRole("link", { name: vector.label });
+      expect(links).toHaveLength(2);
+      expect(links[0]).toHaveAttribute("href", vector.label);
+      expect(links[1]).toHaveAttribute("href", vector.href);
+      for (const link of links) {
+        expect(link.textContent).toBe(vector.label);
+        expect(link.querySelector("*")).toBeNull();
+      }
+    }
+    expect(document.querySelector(".katex")).toBeNull();
     // Address formats are not an allowlist: authored navigation survives both
     // sanitizer and ReactMarkdown. Executable schemes remain blocked after
     // HTML entity/control decoding, and restored hrefs cannot restore events.
@@ -648,6 +673,7 @@ describe("MarkdownView", () => {
       ["Raw custom protocol", "s://service/raw"],
       ["Protocol", "//example.com"],
       ["Parent relative", "../manual/topic?view=print#raw-anchor"],
+      ["Own docs", `${window.location.origin}/manual/topic?view=print#raw-anchor`],
       ["Unrecognized root", "/unregistered/path?x=1#raw-anchor"],
       ["Unrecognized own URI", "dtxwiki://different-namespace/topic?x=1#raw-anchor"],
       ["Encoded path", "/unregistered/%2e%2e/topic"],
@@ -668,7 +694,17 @@ describe("MarkdownView", () => {
     expect(screen.queryByRole("link", { name: "Index ref" })).toBeNull();
     expect(screen.getByRole("button", { name: "Index ref" }))
       .toHaveClass("unavailable-reference__trigger");
-    // Budget exception: legacy destination pins, short preview inheritance,
+    expect(screen.getByRole("button", { name: "Retired page" })).toBeInTheDocument();
+    // The server decides app paths the browser grammar does not recognize: a
+    // confirmed alias opens its target, and the rest are asked about.
+    expect(screen.getByRole("link", { name: /Folder alias/ })).toHaveAttribute(
+      "href", "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/44444444-4444-4444-8444-444444444444",
+    );
+    expect(onLinksToCheck).toHaveBeenCalled();
+    expect(onLinksToCheck.mock.calls.at(-1)?.[0]).toEqual(expect.arrayContaining([
+      "/pages/release-notes", "/context/missing.md", "/context/?target=44444444-4444-4444-8444-444444444444",
+    ]));
+    // Budget exception: explicit destination pins, short preview inheritance,
     // reference links, and unavailable navigation are distinct render paths.
     expect(screen.queryByRole("link", { name: "Missing" })).not.toBeInTheDocument();
     const missing = screen.getByRole("button", { name: "Missing" });
@@ -1189,11 +1225,16 @@ describe("MarkdownView", () => {
     render(
       <MemoryRouter>
         <MarkdownView
-          body={'[Confirmed](/pages/known) [External](https://example.test) [Custom](s://service/reference) ![Image](/x.png) <a href="/raw">Raw</a>'}
+          body={'[Confirmed](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/?view=source#section) [Confirmed landing](/context?view=source#section) [External](https://example.test) [Custom](s://service/reference) ![Image](/x.png) <a href="/raw">Raw</a>'}
           linkTargets={[{
-            locator: "/pages/known",
-            href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+            locator: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/?view=source#section",
+            href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222?view=source#section",
             target_page_id: "22222222-2222-4222-8222-222222222222",
+            state: "ok",
+          }, {
+            locator: "/context?view=source#section",
+            href: "/context?view=source#section",
+            target_page_id: null,
             state: "ok",
           }]}
           renderPolicy="confirmed-links"
@@ -1205,8 +1246,10 @@ describe("MarkdownView", () => {
 
     expect(screen.getByRole("link", { name: "Confirmed" })).toHaveAttribute(
       "href",
-      "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222?view=source#user-content-section",
     );
+    expect(screen.getByRole("link", { name: "Confirmed landing" }))
+      .toHaveAttribute("href", "/context?view=source#section");
     expect(document.querySelector('a[href="https://example.test"]')).not.toBeInTheDocument();
     expect(document.querySelector('a[href="s://service/reference"]')).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Custom" })).toBeInTheDocument();
@@ -1224,10 +1267,15 @@ describe("MarkdownView", () => {
     const itemId = "22222222-2222-4222-8222-222222222222";
     const itemHref = `/workspaces/${workspaceId}/library/items/${itemId}?page=2`;
     const absoluteItemHref = `${window.location.origin}${itemHref}#details`;
-    const stableHref = `/p/${workspaceId}/${itemId}?tab=history#overview`;
+    const stableHref = `/p/${workspaceId}/${itemId}/?view=source#section`;
     const absoluteStableHref = `${window.location.origin}${stableHref}`;
     const externalHref = `https://other.example${itemHref}`;
     const publicHref = `${window.location.origin}/w/sales/pages/launch`;
+    const directoryHref = "/workspaces/find";
+    const graphHref = `/workspaces/${workspaceId}/graph?view=map`;
+    const readerHref = `/workspaces/${workspaceId}/context/pages/${itemId}/?tab=history#overview`;
+    const editorHref = `/workspaces/${workspaceId}/context/pages/${itemId}/edit/?view=source#details`;
+    const absoluteEditorHref = `${window.location.origin}${editorHref}`;
     const sourceHref = `/workspaces/${sourceWorkspaceId}/context/pages/${sourcePageId}`;
     const { rerender } = render(
       <MemoryRouter initialEntries={[{
@@ -1243,9 +1291,16 @@ describe("MarkdownView", () => {
                 body={[
                   `[Library item](${itemHref})`,
                   `[Spoofed target](${itemHref}&target=other)`,
-                  `[Unknown route](/workspaces/${workspaceId}/admin)`,
+                  `[Unknown route](/workspaces/${workspaceId}/context/pages/${itemId}/edit/arbitrary)`,
+                  `[Workspaces](${directoryHref})`,
+                  "[Context landing](/context?view=source#section)",
+                  `[Knowledge Map](${graphHref})`,
+                  `[Context reader](${readerHref})`,
+                  `[Context editor](${absoluteEditorHref})`,
                   `[Absolute item](${absoluteItemHref})`,
                   `[Absolute stable page](${absoluteStableHref})`,
+                  `[Raw stable page](${stableHref})`,
+                  `[Short stable page](/p/${itemId}?view=source#section)`,
                   `[Other origin](${externalHref})`,
                   `[Public reader](${publicHref})`,
                 ].join(" ")}
@@ -1263,18 +1318,28 @@ describe("MarkdownView", () => {
     );
 
     expect(screen.getByRole("link", { name: /Library item/ })).toHaveAttribute("href", itemHref);
-    // Out-of-contract addresses keep their href; the destination router owns
-    // rejecting an invalid route or identity query when it is actually opened.
-    expect(screen.getByRole("link", { name: "Spoofed target" })).toHaveAttribute("href", `${itemHref}&target=other`);
-    expect(screen.getByRole("link", { name: "Unknown route" })).toHaveAttribute("href", `/workspaces/${workspaceId}/admin`);
-    expect(screen.queryByRole("button", { name: "Spoofed target" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Unknown route" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workspaces" })).toHaveAttribute("href", directoryHref);
+    expect(screen.getByRole("link", { name: "Context landing" })).toHaveAttribute("href", "/context?view=source#section");
+    expect(screen.getByRole("link", { name: /Knowledge Map/ })).toHaveAttribute("href", graphHref);
+    expect(screen.getByRole("link", { name: /Context reader/ }))
+      .toHaveAttribute("href", readerHref.replace("#overview", "#user-content-overview"));
+    expect(screen.getByRole("link", { name: /Context editor/ }))
+      .toHaveAttribute("href", editorHref.replace("#details", "#user-content-details"));
+    // Unsupported app paths remain visible as unavailable references.
+    expect(screen.queryByRole("link", { name: "Spoofed target" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Unknown route" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Spoofed target" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unknown route" })).toBeInTheDocument();
     const absoluteItem = screen.getByRole("link", { name: /Absolute item/ });
     expect(absoluteItem).toHaveAttribute("href", `${itemHref}#user-content-details`);
     expect(absoluteItem).not.toHaveAttribute("target");
     expect(within(absoluteItem).getByText("Other workspace")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Absolute stable page/ }))
-      .toHaveAttribute("href", stableHref.replace("#overview", "#user-content-overview"));
+      .toHaveAttribute("href", stableHref.replace("#section", "#user-content-section"));
+    expect(screen.getByRole("link", { name: /Raw stable page/ }))
+      .toHaveAttribute("href", stableHref.replace("#section", "#user-content-section"));
+    expect(screen.getByRole("link", { name: "Short stable page" }))
+      .toHaveAttribute("href", `/p/${sourceWorkspaceId}/${itemId}?view=source#user-content-section`);
     for (const [name, href] of [["Other origin", externalHref], ["Public reader", publicHref]]) {
       const link = screen.getByRole("link", { name });
       expect(link).toHaveAttribute("href", href);
@@ -1290,48 +1355,48 @@ describe("MarkdownView", () => {
       <MemoryRouter>
         <MarkdownView
           allowWorkspaceNavigationLinks
-          body={`[Library item](${itemHref})`}
+          body="[Context landing](/context?view=source#section)"
           renderPolicy="confirmed-links"
           workspaceId={workspaceId}
         />
       </MemoryRouter>,
     );
-    expect(screen.queryByRole("link", { name: "Library item" })).not.toBeInTheDocument();
-    const askReference = screen.getByRole("button", { name: "Library item" });
+    expect(screen.queryByRole("link", { name: "Context landing" })).not.toBeInTheDocument();
+    const askReference = screen.getByRole("button", { name: "Context landing" });
     await userEvent.click(askReference);
     const askDialog = screen.getByRole("dialog");
     expect(askDialog).toHaveTextContent("This reference could not be confirmed.");
     expect(askDialog.querySelector("code")).toBeNull();
-    expect(askDialog).not.toHaveTextContent(itemHref);
-    expect(askDialog).not.toHaveTextContent(itemId);
+    expect(askDialog).not.toHaveTextContent("/context");
+    expect(askDialog).not.toHaveTextContent(workspaceId);
     expect(within(askDialog).queryByRole("button", { name: "Copy authored reference" })).toBeNull();
     await userEvent.click(within(askDialog).getByRole("button", { name: "Close explanation" }));
 
     rerender(
       <MemoryRouter>
         <MarkdownView
-          body={`[Library item](${itemHref})\n\n<a class="inline-tag" data-tag="forged" href="${itemHref}">Forged internal</a>`}
+          body={'[Context landing](/context?view=source#section)\n\n<a class="inline-tag" data-tag="forged" href="/context?view=source#section">Forged internal</a>'}
           wikilinkMode="plain"
           workspaceId={sourceWorkspaceId}
         />
       </MemoryRouter>,
     );
-    const publicReference = screen.getByRole("button", { name: "Library item" });
+    const publicReference = screen.getByRole("button", { name: "Context landing" });
     expect(screen.queryByRole("link", { name: "Forged internal" })).not.toBeInTheDocument();
     expect(screen.getByText("Forged internal")).toBeInTheDocument();
     await userEvent.click(publicReference);
     const publicDialog = screen.getByRole("dialog");
     expect(publicDialog).toHaveTextContent("This reference cannot be opened from this view.");
     expect(publicDialog.querySelector("code")).toBeNull();
-    expect(publicDialog).not.toHaveTextContent(itemHref);
-    expect(publicDialog).not.toHaveTextContent(itemId);
+    expect(publicDialog).not.toHaveTextContent("/context");
+    expect(publicDialog).not.toHaveTextContent(workspaceId);
     expect(within(publicDialog).queryByRole("button", { name: "Copy authored reference" })).toBeNull();
   });
 
   it("prefixes fragments on confirmed internal links before sanitization", () => {
     const workspaceId = "11111111-1111-4111-8111-111111111111";
     const pageId = "22222222-2222-4222-8222-222222222222";
-    const locator = "/pages/known#details";
+    const locator = `/p/${workspaceId}/${pageId}#details`;
     render(
       <MemoryRouter>
         <MarkdownView

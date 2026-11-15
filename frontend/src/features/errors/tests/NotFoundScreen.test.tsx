@@ -98,19 +98,20 @@ describe("NotFoundScreen", () => {
   });
 
   it("accepts a trusted prior page only when its Workspace is in the current membership list, then clears it on return", async () => {
+    const previousPathname = `/WORKSPACES/${WORKSPACE_A}/CONTEXT/PAGES/${OTHER_PAGE_ID.slice(0, -1)}%34/`;
     renderNotFound(
       `/workspaces/${WORKSPACE_C}/context/pages/${PAGE_ID}`,
       [
         { id: WORKSPACE_A, title: "Research" },
         { id: WORKSPACE_B, title: "Operations" },
       ],
-      createReferenceReturnState(`/workspaces/${WORKSPACE_A}/context/pages/${OTHER_PAGE_ID}?tab=history#v3`),
+      createReferenceReturnState(`${previousPathname}?tab=history#v3`),
       WORKSPACE_B,
     );
 
     expect(screen.getByRole("link", { name: "Return to previous page" })).toHaveAttribute(
       "href",
-      `/workspaces/${WORKSPACE_A}/context/pages/${OTHER_PAGE_ID}?tab=history#v3`,
+      `${previousPathname}?tab=history#v3`,
     );
     await userEvent.click(screen.getByRole("button", { name: "Select a workspace" }));
     const recoveryDialog = screen.getByRole("dialog", { name: "Select a workspace" });
@@ -121,7 +122,7 @@ describe("NotFoundScreen", () => {
     await userEvent.click(within(recoveryDialog).getByRole("button", { name: "Close workspace chooser" }));
     await userEvent.click(screen.getByRole("link", { name: "Return to previous page" }));
     expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "{}")).toEqual({
-      pathname: `/workspaces/${WORKSPACE_A}/context/pages/${OTHER_PAGE_ID}`,
+      pathname: previousPathname,
       search: "?tab=history",
       hash: "#v3",
       state: null,

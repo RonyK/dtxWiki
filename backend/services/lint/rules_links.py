@@ -12,6 +12,7 @@ from backend.services.context_links import (
     extract_links,
     link_decision_batch,
     normalize_index_refs_with_report,
+    normalize_short_page_links_with_report,
     rewrite_links_with_report,
 )
 from backend.services.lint.base import (
@@ -203,8 +204,13 @@ class _IndexRefNormalizer:
         context = link_context(ctx)
         if context is None:
             return FixResult(body)
-        rewritten, fixes, details, _ = normalize_index_refs_with_report(body, context)
-        return FixResult(rewritten, fixes, details)
+        expanded, short_fixes, short_details = normalize_short_page_links_with_report(
+            body, context
+        )
+        rewritten, fixes, details, _ = normalize_index_refs_with_report(
+            expanded, context
+        )
+        return FixResult(rewritten, short_fixes + fixes, short_details + details)
 
 
 MODULE = LintModule(

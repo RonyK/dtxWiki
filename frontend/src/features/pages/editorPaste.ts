@@ -1290,7 +1290,7 @@ function renderLink(node: HTMLElement, context: RenderContext) {
   const internalPageId = node.getAttribute("data-internal-page-id");
   const locator = classifyContextLink(node.getAttribute("href") ?? "", context.linkOptions);
   if (internalPageId && isContextId(internalPageId) && context.linkOptions?.workspaceId &&
-      ["concept_path", "slug", "nav_target", "wikilink"].includes(locator.kind)) {
+      ["nav_target", "wikilink"].includes(locator.kind)) {
     return formatContextPageMarkdown(rawText, context.linkOptions.workspaceId, internalPageId, locator.fragment);
   }
   const href = safeMarkdownDestination(node.getAttribute("href") ?? "", "link");

@@ -27,6 +27,7 @@ from backend.models.context import (
 )
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
+from backend.repositories.page_links import active_page_link_condition
 from backend.services.entity_ref import EntityKind
 from backend.services.graph_cache import (
     bump_edge_version,
@@ -269,6 +270,7 @@ def _wikilink_rows(
         )
         .join(ContextPage, PageLink.source_page_id == ContextPage.id)
         .where(PageLink.workspace_id == workspace_id)
+        .where(active_page_link_condition())
         .where(PageLink.target_page_id.is_not(None))
         .where(PageLink.source_version_id == ContextPage.current_published_version_id)
         .group_by(PageLink.source_page_id, PageLink.target_page_id)

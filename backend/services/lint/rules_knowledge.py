@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import exists, func, select
 
 from backend.models.context import ContextPage, PageLink, PageNameIndex
+from backend.repositories.page_links import active_page_link_condition
 from backend.services.lint.base import (
     LintContext,
     LintFindingDraft,
@@ -61,6 +62,7 @@ class _OrphanPageRule:
             .join(ContextPage, ContextPage.id == PageLink.source_page_id)
             .where(
                 PageLink.workspace_id == workspace_id,
+                active_page_link_condition(),
                 PageLink.target_page_id == target.id,
                 PageLink.source_page_id != target.id,
                 PageLink.source_version_id == ContextPage.current_published_version_id,
@@ -96,6 +98,7 @@ class _MissingBacklinkRule:
             return []
         outbound_ids = select(PageLink.target_page_id).where(
             PageLink.workspace_id == workspace_id,
+            active_page_link_condition(),
             PageLink.source_page_id == target.id,
             PageLink.source_version_id == target.current_published_version_id,
             PageLink.target_page_id.is_not(None),
@@ -104,6 +107,7 @@ class _MissingBacklinkRule:
         reciprocal = exists(
             select(PageLink.id).where(
                 PageLink.workspace_id == workspace_id,
+                active_page_link_condition(),
                 PageLink.source_page_id == ContextPage.id,
                 PageLink.source_version_id == ContextPage.current_published_version_id,
                 PageLink.target_page_id == target.id,

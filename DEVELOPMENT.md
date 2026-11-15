@@ -592,6 +592,19 @@ make export-schemas
 make gen-client
 ```
 
+Workspace 브라우저 경로와 등록된 landing alias는
+`backend/services/browser_routes.py`에서 정의합니다.
+경로를 변경한 뒤 `.venv/bin/python scripts/export_browser_routes.py`로 프런트엔드
+계약을 재생성합니다. 라우터와 본문 링크 판정은 이 계약을 사용하며,
+`make check-frontend`가 생성물의 일치를 검사합니다. 경로 판정과 접근 권한 검사는
+분리되어 있고, 기존 화면의 인증·권한 gate가 접근 여부를 결정합니다.
+등록 경로는 permalink를 포함해 대소문자·trailing slash·UUID decoding 규칙을
+같이 적용합니다. 브라우저 이동과 저장 시 확장하는 짧은 참조는 같은 매처를 쓰되,
+workspace가 없는 짧은 참조는 브라우저 진입 경로로 허용하지 않습니다.
+MCP/OKF의 page 입력은 기존의 정확한 identity 형식을 유지합니다.
+생성 링크 label의 문자 보존은 `shared/fixtures/context_link_rewrite_vectors.json`을
+backend 정규화 테스트와 실제 MarkdownView 렌더링 테스트가 함께 검증합니다.
+
 ## Frontend 변경 반영
 
 개발 서버로 보는 화면은 Vite dev server가 source 변경을 바로 반영합니다.
@@ -1008,6 +1021,10 @@ MCP clients first call `list_my_workspaces`, then `guide` with the chosen
 Context page inputs accept UUIDs and stable `/p/<workspace_id>/<page_id>` links.
 Short `/p/<page_id>` locators resolve only inside the supplied workspace and
 are not browser permalinks. Use a read result's `link_markdown` in responses.
+Context saves expand short `/p/<page_id>` Markdown destinations using the source
+workspace ID, independently of optional lint fixes. Legacy `/context/<name>.md`
+and `/pages/<slug>` body destinations remain authored text and are reported as
+unavailable links; unresolved links do not block saving.
 Library inputs use canonical `/workspaces/<workspace_id>/library/items/<item_id>`
 URLs. Documents are identified by kind and ID throughout REST and MCP; use
 `stable_url` for browser links. `read_concept.path` also accepts the exact

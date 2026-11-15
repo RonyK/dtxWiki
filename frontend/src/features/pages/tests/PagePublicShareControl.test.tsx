@@ -14,7 +14,7 @@ vi.mock("../../../shared/api/pages", async (importOriginal) => ({
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sourcePageId = "22222222-2222-4222-8222-222222222222";
 const policyPageId = "33333333-3333-4333-8333-333333333333";
-const legacyPageId = "44444444-4444-4444-8444-444444444444";
+const linkedPageId = "44444444-4444-4444-8444-444444444444";
 const publishedVersionId = "55555555-5555-4555-8555-555555555555";
 const assetId = "66666666-6666-4666-8666-666666666666";
 
@@ -24,7 +24,7 @@ beforeEach(() => {
 
 it("renders exact published-version link and media projections in its preview", async () => {
   const body = [
-    "See [[policy]] and [legacy](/context/legacy-policy.md).",
+    `See [[policy]] and [Linked](/context?target=${linkedPageId}).`,
     "[Denied](/context/hidden-policy.md)",
     `![Diagram](dtx-media://asset/${assetId})`,
   ].join("\n\n");
@@ -41,9 +41,9 @@ it("renders exact published-version link and media projections in its preview", 
         state: "ok",
       },
       {
-        locator: "/context/legacy-policy.md",
-        href: `/p/${workspaceId}/${legacyPageId}`,
-        target_page_id: legacyPageId,
+        locator: `/context?target=${linkedPageId}`,
+        href: `/p/${workspaceId}/${linkedPageId}`,
+        target_page_id: linkedPageId,
         state: "ok",
       },
       {
@@ -87,9 +87,9 @@ it("renders exact published-version link and media projections in its preview", 
     "href",
     `/p/${workspaceId}/${policyPageId}`,
   );
-  expect(screen.getByRole("link", { name: "legacy" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "Linked" })).toHaveAttribute(
     "href",
-    `/p/${workspaceId}/${legacyPageId}`,
+    `/p/${workspaceId}/${linkedPageId}`,
   );
   expect(screen.getByRole("button", { name: /Denied/ })).toBeInTheDocument();
   expect(

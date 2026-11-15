@@ -6437,7 +6437,7 @@ describe("PageEditor", () => {
         files: [],
         getData: (type: string) =>
           type === "text/html"
-            ? '<p><strong>Pasted</strong> <a data-internal-slug="hello" data-internal-page-id="22222222-2222-4222-8222-222222222222" href="/pages/hello">Hello</a></p>'
+            ? '<p><strong>Pasted</strong> <a data-internal-page-id="22222222-2222-4222-8222-222222222222" href="/p/22222222-2222-4222-8222-222222222222">Hello</a></p>'
             : "",
       },
     });
