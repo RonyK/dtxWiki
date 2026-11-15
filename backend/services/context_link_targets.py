@@ -268,12 +268,13 @@ def markdown_link_targets(
         href = resolution.href if target_id is not None else None
         if (
             target_id is not None
-            and locator.kind == "canonical_route"
-            and urlsplit(occurrence.href).path.endswith("/edit")
+            and locator.edit
             and not public
             and _actor_can_edit_workspace(actor)
         ):
-            href = f"{workspace_path(workspace_id)}/context/pages/{target_id}/edit"
+            href = urlsplit(href)._replace(
+                path=f"{workspace_path(workspace_id)}/context/pages/{target_id}/edit"
+            ).geturl()
         href = _preserve_workspace_view_query(
             href, occurrence.href, preserve_fragment=False
         )
@@ -1122,7 +1123,7 @@ def _classify_context_navigation(href: str, self_origins: frozenset[str]):
         )
     try:
         parts = urlsplit(href)
-        if not parts.query or not parts.path.startswith(("/p/", "/workspaces/")):
+        if not parts.query:
             return classify(href, self_origins)
         if not _safe_workspace_query(parts.query, parts.path):
             return classify(href, self_origins)

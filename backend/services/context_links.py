@@ -30,6 +30,7 @@ from backend.repositories.page_links import (
     active_page_link_condition as active_page_link_condition,
 )
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
+from backend.services.browser_routes import match_browser_route
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.index_refs import (
     PAGE_INPUT_REF_GUIDANCE,
@@ -81,6 +82,7 @@ class Locator:
     fragment: str | None = None
     href: str = ""
     absolute: bool = False
+    edit: bool = False
 
     @property
     def key(self) -> str:
@@ -210,10 +212,14 @@ def classify(href: str, self_origins=()) -> Locator:
                     **base,
                 )
             return Locator("unknown", **base)
+        browser_route = match_browser_route(path)
         if (
             parts.query
             and decoded != "/context"
-            and decoded.startswith(("/p/", "/context/", "/workspaces/", "/pages/"))
+            and (
+                decoded.startswith(("/p/", "/context/", "/workspaces/", "/pages/"))
+                or browser_route is not None
+            )
         ):
             return Locator("unknown", **base)
         if match := re.fullmatch(rf"/p/({_UUID})/({_UUID})", decoded):
@@ -225,13 +231,16 @@ def classify(href: str, self_origins=()) -> Locator:
             )
         if match := re.fullmatch(rf"/p/({_UUID})", decoded):
             return Locator("stable_short", page_id=UUID(match[1]), **base)
-        if match := re.fullmatch(
-            rf"/workspaces/({_UUID})/context/pages/({_UUID})(?:/edit)?", decoded
+        if (
+            browser_route is not None
+            and browser_route.route.section == "context"
+            and browser_route.route.kind == "page"
         ):
             return Locator(
                 "canonical_route",
-                workspace_id=UUID(match[1]),
-                page_id=UUID(match[2]),
+                workspace_id=UUID(browser_route.params["workspaceId"]),
+                page_id=UUID(browser_route.params["pageId"]),
+                edit=browser_route.route.edit,
                 **base,
             )
         if decoded == "/context":
@@ -1301,9 +1310,7 @@ class LinkDecision:
 
 
 def _is_context_edit_route(locator: Locator) -> bool:
-    return locator.kind == "canonical_route" and unquote(
-        urlsplit(locator.href).path
-    ).endswith("/edit")
+    return locator.kind == "canonical_route" and locator.edit
 
 
 def decide(

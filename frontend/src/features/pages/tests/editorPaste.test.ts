@@ -79,6 +79,7 @@ describe("editor paste conversion", () => {
     const markdown = htmlToMarkdown(`
       <p><a data-internal-slug="release-notes" data-internal-page-id="22222222-2222-4222-8222-222222222222" href="/pages/release-notes">Release Notes</a></p>
       <p><a href="https://wiki.example/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit#details">Editor target</a></p>
+      <p><a href="https://wiki.example/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit/?view=source#details">Editor view</a></p>
       <p><a data-internal-page-id="22222222-2222-4222-8222-222222222222" data-internal-slug="external" href="https://external.example/p/22222222-2222-4222-8222-222222222222">External</a></p>
       <p><a data-internal-page-id="22222222-2222-4222-8222-222222222222" href="/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222">Foreign Wiki</a></p>
       <table>
@@ -89,6 +90,7 @@ describe("editor paste conversion", () => {
 
     expect(markdown).toContain("[Release Notes](/pages/release-notes)");
     expect(markdown).toContain("[Editor target](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#details)");
+    expect(markdown).toContain("[Editor view](https://wiki.example/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit/?view=source#details)");
     expect(markdown).toContain("[External](https://external.example/p/22222222-2222-4222-8222-222222222222)");
     // A full copied href carries authority even when legacy page metadata exists.
     expect(markdown).toContain("[Foreign Wiki](/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222)");

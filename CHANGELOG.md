@@ -14,8 +14,10 @@
   legacy links no longer contribute to backlinks or current graph relations.
 - Apply the same link classification to Markdown rendering and editor paste.
 - Keep registered workspace navigation links, including workspace discovery and
-  Knowledge Map, available under the existing route access checks. Preserve
-  link/image structure and character-reference semantics during normalization.
+  Knowledge Map, available under the existing route access checks. Context read
+  and edit routes also accept a trailing slash while retaining view state and
+  fragments. Preserve link/image structure and character-reference semantics
+  during normalization.
 
 ### Document identifiers and URLs
 

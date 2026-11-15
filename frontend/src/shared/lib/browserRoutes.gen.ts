@@ -8,6 +8,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "workspace_home": {
@@ -16,6 +17,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "workspace_graph": {
@@ -24,6 +26,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "workspace_dashboard": {
@@ -32,6 +35,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "context": {
@@ -40,6 +44,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "context_folder_new": {
@@ -48,6 +53,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": true,
+    "edit": false,
     "choices": {}
   },
   "context_folder": {
@@ -56,6 +62,7 @@ export const BROWSER_ROUTES = {
     "kind": "folder",
     "targetParam": "nodeId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "context_page_new": {
@@ -64,6 +71,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": true,
+    "edit": false,
     "choices": {}
   },
   "context_page": {
@@ -72,6 +80,7 @@ export const BROWSER_ROUTES = {
     "kind": "page",
     "targetParam": "pageId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "context_page_edit": {
@@ -80,6 +89,7 @@ export const BROWSER_ROUTES = {
     "kind": "page",
     "targetParam": "pageId",
     "create": false,
+    "edit": true,
     "choices": {}
   },
   "library": {
@@ -88,6 +98,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "library_item_new": {
@@ -96,6 +107,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": true,
+    "edit": false,
     "choices": {}
   },
   "library_item": {
@@ -104,6 +116,7 @@ export const BROWSER_ROUTES = {
     "kind": "item",
     "targetParam": "itemId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "library_artifact": {
@@ -112,6 +125,7 @@ export const BROWSER_ROUTES = {
     "kind": "artifact",
     "targetParam": "artifactId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "library_folder_new": {
@@ -120,6 +134,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": true,
+    "edit": false,
     "choices": {}
   },
   "library_folder": {
@@ -128,6 +143,7 @@ export const BROWSER_ROUTES = {
     "kind": "folder",
     "targetParam": "nodeId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "agent": {
@@ -136,6 +152,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "agent_page_new": {
@@ -144,6 +161,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": true,
+    "edit": false,
     "choices": {}
   },
   "agent_page": {
@@ -152,6 +170,7 @@ export const BROWSER_ROUTES = {
     "kind": "page",
     "targetParam": "agentPageId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "agent_page_edit": {
@@ -160,6 +179,7 @@ export const BROWSER_ROUTES = {
     "kind": "page_edit",
     "targetParam": "agentPageId",
     "create": false,
+    "edit": true,
     "choices": {}
   },
   "agent_folder_new": {
@@ -168,6 +188,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": true,
+    "edit": false,
     "choices": {}
   },
   "agent_folder": {
@@ -176,6 +197,7 @@ export const BROWSER_ROUTES = {
     "kind": "folder",
     "targetParam": "nodeId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "activity": {
@@ -184,6 +206,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "activity_lane": {
@@ -192,6 +215,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {
       "lane": [
         "pending",
@@ -206,6 +230,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "review_item": {
@@ -214,6 +239,7 @@ export const BROWSER_ROUTES = {
     "kind": "item",
     "targetParam": "reviewItemId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "lint": {
@@ -222,6 +248,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "lint_finding": {
@@ -230,6 +257,7 @@ export const BROWSER_ROUTES = {
     "kind": "item",
     "targetParam": "findingId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "chats": {
@@ -238,6 +266,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "chat": {
@@ -246,6 +275,7 @@ export const BROWSER_ROUTES = {
     "kind": "item",
     "targetParam": "chatId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "ask": {
@@ -254,6 +284,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "ask_session": {
@@ -262,6 +293,7 @@ export const BROWSER_ROUTES = {
     "kind": "item",
     "targetParam": "askSessionId",
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "search": {
@@ -270,6 +302,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "settings": {
@@ -278,6 +311,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "settings_integrations": {
@@ -286,6 +320,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "setup": {
@@ -294,6 +329,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   },
   "inbox": {
@@ -302,6 +338,7 @@ export const BROWSER_ROUTES = {
     "kind": "overview",
     "targetParam": null,
     "create": false,
+    "edit": false,
     "choices": {}
   }
 } as const;

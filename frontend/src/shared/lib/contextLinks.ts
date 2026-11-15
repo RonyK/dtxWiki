@@ -1,4 +1,4 @@
-import { isSafeBrowserQuery, isWorkspaceNavigationPath } from "./browserRoutes";
+import { isSafeBrowserQuery, isWorkspaceNavigationPath, matchBrowserRoute } from "./browserRoutes";
 
 export type ContextLinkKind =
   | "page_id" | "stable_full" | "stable_short" | "canonical_route"
@@ -28,6 +28,8 @@ export type ContextLink = {
   pageId: string | null;
   fragment: string | null;
   stableUrl: string | null;
+  navigationHref: string | null;
+  edit: boolean;
   lookup: string | null;
 };
 
@@ -108,7 +110,7 @@ export function isAppLink(value: string, options: ContextLinkOptions = {}): bool
 export function classifyContextLink(value: string, options: ContextLinkOptions = {}): ContextLink {
   const empty: ContextLink = {
     kind: "unknown", workspaceId: null, pageId: null, fragment: null,
-    stableUrl: null, lookup: null,
+    stableUrl: null, navigationHref: null, edit: false, lookup: null,
   };
   const result = (kind: ContextLinkKind, extra: Partial<ContextLink> = {}): ContextLink => ({ ...empty, kind, ...extra });
   const wiki = /^\[\[([^\]|\n]+)(?:\|[^\]\n]*)?\]\]$/.exec(value);
@@ -150,6 +152,7 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   const withoutHash = hashAt < 0 ? input : input.slice(0, hashAt);
   const queryAt = withoutHash.indexOf("?");
   let pathname = queryAt < 0 ? withoutHash : withoutHash.slice(0, queryAt);
+  const rawPathname = pathname;
   const query = queryAt < 0 ? "" : withoutHash.slice(queryAt + 1);
   if (/^dtxwiki:\/\//i.test(input) && queryAt >= 0) {
     return result("unknown", { fragment });
@@ -161,24 +164,28 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   if (input.startsWith("#")) return result("local", { fragment });
   if (/^\/w\/[^/]+\/pages\/[^/]+$/.test(pathname)) return result("public_reader", { fragment });
   if (/^\/(?:api|uploads)\//.test(pathname)) return result("media", { fragment });
-  if (options.allowWorkspaceNavigation && query && isWorkspaceNavigationPath(pathname, query)) {
+  const withPage = (kind: ContextLinkKind, workspaceId: string | null, pageId: string, edit = false): ContextLink => {
+    const resolvedWorkspaceId = workspaceId ?? options.workspaceId;
+    return result(kind, {
+      workspaceId, pageId: pageId.toLowerCase(), fragment, edit,
+      stableUrl: resolvedWorkspaceId ? formatContextPageUrl(resolvedWorkspaceId, pageId.toLowerCase(), fragment) : null,
+      navigationHref: kind === "canonical_route" ? input : null,
+    });
+  };
+  const browserRoute = matchBrowserRoute(rawPathname);
+  if (browserRoute?.route.section === "context" && browserRoute.route.kind === "page") {
+    if ((query && !options.allowWorkspaceNavigation) || !isSafeBrowserQuery(query, rawPathname)) return result("unknown", { fragment });
+    return withPage("canonical_route", browserRoute.params.workspaceId, browserRoute.params.pageId, browserRoute.route.edit);
+  }
+  if (options.allowWorkspaceNavigation && query && isWorkspaceNavigationPath(rawPathname, query)) {
     return result("workspace_navigation", { stableUrl: input, fragment });
   }
   if (query && pathname !== "/context" && /^\/(?:p|context|workspaces|pages)\//.test(pathname)) return result("unknown", { fragment });
-  const withPage = (kind: ContextLinkKind, workspaceId: string | null, pageId: string): ContextLink => {
-    const resolvedWorkspaceId = workspaceId ?? options.workspaceId;
-    return result(kind, {
-      workspaceId, pageId: pageId.toLowerCase(), fragment,
-      stableUrl: resolvedWorkspaceId ? formatContextPageUrl(resolvedWorkspaceId, pageId.toLowerCase(), fragment) : null,
-    });
-  };
   let match = /^\/p\/([^/]+)\/([^/]+)$/.exec(pathname);
   if (match && UUID.test(match[1]) && UUID.test(match[2])) return withPage("stable_full", match[1].toLowerCase(), match[2]);
   match = /^\/p\/([^/]+)$/.exec(pathname);
   if (match && UUID.test(match[1])) return withPage("stable_short", null, match[1]);
-  match = /^\/workspaces\/([^/]+)\/context\/pages\/([^/]+)(?:\/edit)?$/.exec(pathname);
-  if (match && UUID.test(match[1]) && UUID.test(match[2])) return withPage("canonical_route", match[1].toLowerCase(), match[2]);
-  if (options.allowWorkspaceNavigation && isWorkspaceNavigationPath(pathname, query)) {
+  if (options.allowWorkspaceNavigation && isWorkspaceNavigationPath(rawPathname, query)) {
     return result("workspace_navigation", { stableUrl: input, fragment });
   }
   if (pathname === "/context" && query) {
@@ -215,6 +222,7 @@ export function contextNavigationHref(href: string, workspaceId: string): string
     classification.kind === "stable_full" ||
     classification.kind === "stable_short";
   if (!recognized) return null;
+  if (classification.navigationHref) return classification.navigationHref;
   // Classify the authored path before stripping the origin: URL.pathname
   // would silently normalize dot segments that must remain rejected.
   return /^https?:\/\//i.test(href)

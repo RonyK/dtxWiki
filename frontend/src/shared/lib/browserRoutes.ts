@@ -7,6 +7,7 @@ type BrowserRoute = {
   readonly kind: string;
   readonly targetParam: string | null;
   readonly create: boolean;
+  readonly edit: boolean;
   readonly choices: Readonly<Record<string, readonly string[]>>;
 };
 

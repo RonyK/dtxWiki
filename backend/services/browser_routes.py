@@ -37,6 +37,7 @@ class BrowserRoute:
     kind: str = "overview"
     target_param: str | None = None
     create: bool = False
+    edit: bool = False
     choices: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
@@ -60,7 +61,7 @@ BROWSER_ROUTES = {
         f"{_WS}/context/pages/:pageId", "context", "page", "pageId"
     ),
     "context_page_edit": BrowserRoute(
-        f"{_WS}/context/pages/:pageId/edit", "context", "page", "pageId"
+        f"{_WS}/context/pages/:pageId/edit", "context", "page", "pageId", edit=True
     ),
     "library": BrowserRoute(f"{_WS}/library", "library"),
     "library_item_new": BrowserRoute(
@@ -84,7 +85,11 @@ BROWSER_ROUTES = {
         f"{_WS}/agent/pages/:agentPageId", "agent", "page", "agentPageId"
     ),
     "agent_page_edit": BrowserRoute(
-        f"{_WS}/agent/pages/:agentPageId/edit", "agent", "page_edit", "agentPageId"
+        f"{_WS}/agent/pages/:agentPageId/edit",
+        "agent",
+        "page_edit",
+        "agentPageId",
+        edit=True,
     ),
     "agent_folder_new": BrowserRoute(f"{_WS}/agent/folders/new", "agent", create=True),
     "agent_folder": BrowserRoute(
@@ -186,6 +191,7 @@ def render_typescript() -> str:
             "kind": route.kind,
             "targetParam": route.target_param,
             "create": route.create,
+            "edit": route.edit,
             "choices": dict(route.choices),
         }
         for name, route in BROWSER_ROUTES.items()

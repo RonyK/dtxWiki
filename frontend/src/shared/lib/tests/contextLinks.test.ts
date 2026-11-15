@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyContextLink,
+  contextNavigationHref,
   formatContextPageMarkdown,
   formatContextPageUrl,
   isAppLink,
@@ -17,8 +18,16 @@ describe("Context link locators", () => {
       kind: "stable_short", pageId, stableUrl: href,
     });
     expect(classifyContextLink(`/p/${pageId}#details`).stableUrl).toBeNull();
-    expect(classifyContextLink(`/workspaces/${workspaceId}/context/pages/${pageId}/edit#details`))
-      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: href });
+    const editorHref = `/workspaces/${workspaceId}/context/pages/${pageId}/edit/?view=source#details`;
+    const readerHref = `/workspaces/${workspaceId}/context/pages/${pageId}/?tab=history#details`;
+    expect(classifyContextLink(editorHref, { allowWorkspaceNavigation: true }))
+      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: href, edit: true, navigationHref: editorHref });
+    expect(classifyContextLink(readerHref, { allowWorkspaceNavigation: true }))
+      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: href, edit: false, navigationHref: readerHref });
+    expect(contextNavigationHref(editorHref, workspaceId)).toBe(editorHref);
+    expect(contextNavigationHref(readerHref, workspaceId)).toBe(readerHref);
+    expect(classifyContextLink(`${readerHref.split("?")[0]}?target=${pageId}`).kind).toBe("unknown");
+    expect(classifyContextLink(`/workspaces/${workspaceId}/context/pages/${pageId}/edit/arbitrary`).kind).toBe("unknown");
     expect(classifyContextLink(`https://wiki.example${href}`, { selfOrigins: ["https://wiki.example"] }))
       .toMatchObject({ kind: "stable_full", workspaceId, pageId, stableUrl: href });
     expect(classifyContextLink(`https://other.example${href}`, { selfOrigins: ["https://wiki.example"] }).kind)

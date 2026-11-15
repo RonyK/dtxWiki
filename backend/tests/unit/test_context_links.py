@@ -19,11 +19,11 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
     workspace_id = UUID("11111111-1111-4111-8111-111111111111")
     target_id = UUID("22222222-2222-4222-8222-222222222222")
     page_href = f"/workspaces/{workspace_id}/context/pages/{target_id}"
-    edit_href = page_href + "/%65dit"
+    edit_href = page_href + "/%65dit/"
     edit_view = page_href + "/edit?view=source#section"
     absolute_edit = "https://wiki.example" + edit_view
     body = (
-        f"한글 [normal]({page_href}#part) [[known|Label]] [reference][r].\n\n"
+        f"한글 [normal]({page_href}/#part) [[known|Label]] [reference][r].\n\n"
         f"[Edit document]({edit_href})\n\n"
         f"[Edit view]({absolute_edit})\n\n"
         "`[inline code](/context/inline-code.md)`\n\n"
@@ -39,7 +39,7 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
     occurrences = extract_links(body)
 
     assert [item.href for item in occurrences] == [
-        f"{page_href}#part",
+        f"{page_href}/#part",
         "[[known|Label]]",
         edit_href,
         absolute_edit,
@@ -77,13 +77,13 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
     rewritten, fixes, details = rewrite_links_with_report(body, ctx)
     canonical = f"/p/{workspace_id}/{target_id}"
     assert rewritten == (
-        body.replace(f"{page_href}#part", canonical + "#part")
+        body.replace(f"{page_href}/#part", canonical + "#part")
         .replace("[[known|Label]]", f"[Label]({canonical})")
         .replace(f"[r]: {page_href}", f"[r]: {canonical}")
         .replace(absolute_edit, edit_view)
     )
     assert len(fixes) == len(details) == 4
-    assert details[0]["before"] == f"{page_href}#part"
+    assert details[0]["before"] == f"{page_href}/#part"
     assert details[0]["after"] == canonical + "#part"
     assert rewrite_links_with_report(rewritten, ctx) == (rewritten, (), ())
 

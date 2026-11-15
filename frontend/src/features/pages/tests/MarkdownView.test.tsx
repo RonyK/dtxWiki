@@ -1239,6 +1239,9 @@ describe("MarkdownView", () => {
     const publicHref = `${window.location.origin}/w/sales/pages/launch`;
     const directoryHref = "/workspaces/find";
     const graphHref = `/workspaces/${workspaceId}/graph?view=map`;
+    const readerHref = `/workspaces/${workspaceId}/context/pages/${itemId}/?tab=history#overview`;
+    const editorHref = `/workspaces/${workspaceId}/context/pages/${itemId}/edit/?view=source#details`;
+    const absoluteEditorHref = `${window.location.origin}${editorHref}`;
     const sourceHref = `/workspaces/${sourceWorkspaceId}/context/pages/${sourcePageId}`;
     const { rerender } = render(
       <MemoryRouter initialEntries={[{
@@ -1254,9 +1257,11 @@ describe("MarkdownView", () => {
                 body={[
                   `[Library item](${itemHref})`,
                   `[Spoofed target](${itemHref}&target=other)`,
-                  `[Unknown route](/workspaces/${workspaceId}/graph/arbitrary)`,
+                  `[Unknown route](/workspaces/${workspaceId}/context/pages/${itemId}/edit/arbitrary)`,
                   `[Workspaces](${directoryHref})`,
                   `[Knowledge Map](${graphHref})`,
+                  `[Context reader](${readerHref})`,
+                  `[Context editor](${absoluteEditorHref})`,
                   `[Absolute item](${absoluteItemHref})`,
                   `[Absolute stable page](${absoluteStableHref})`,
                   `[Other origin](${externalHref})`,
@@ -1278,6 +1283,10 @@ describe("MarkdownView", () => {
     expect(screen.getByRole("link", { name: /Library item/ })).toHaveAttribute("href", itemHref);
     expect(screen.getByRole("link", { name: "Workspaces" })).toHaveAttribute("href", directoryHref);
     expect(screen.getByRole("link", { name: /Knowledge Map/ })).toHaveAttribute("href", graphHref);
+    expect(screen.getByRole("link", { name: /Context reader/ }))
+      .toHaveAttribute("href", readerHref.replace("#overview", "#user-content-overview"));
+    expect(screen.getByRole("link", { name: /Context editor/ }))
+      .toHaveAttribute("href", editorHref.replace("#details", "#user-content-details"));
     // Unsupported app paths remain visible as unavailable references.
     expect(screen.queryByRole("link", { name: "Spoofed target" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Unknown route" })).not.toBeInTheDocument();

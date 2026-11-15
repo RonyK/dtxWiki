@@ -688,6 +688,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         : wikilink && classification.lookup === "" && href.startsWith("#") && href !== "#" ? href
         : options.publicReader ? null
         : classification.kind === "workspace_navigation" && !options.allowWorkspaceNavigation ? null
+        : options.allowWorkspaceNavigation && classification.navigationHref ? classification.navigationHref
         : classification.stableUrl ?? (wikilink && legacyPageId && href !== "#" ? href : null);
       if (options.publicReader && !resolvedHref) return unavailable();
       if (resolvedHref) {

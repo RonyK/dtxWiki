@@ -27,7 +27,18 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
     source = source_response.json()["data"]
     ref = f"dtxwiki://index/context/{source['id']}"
     citation_href = f"/p/{workspace_id}/{source['id']}#missing-section"
-    buffer = f"[Draft]({ref})  \nUnsaved\n@cite{{{citation_href}}}\n"
+    # Budget exception: one additional DB URL input verifies a registered edit
+    # route reaches the authorized target and retains its action after preview.
+    # Pure classifier checks cannot detect a reader returning unavailable or
+    # silently projecting this readable editing version as a read destination.
+    edit_href = (
+        f"/workspaces/{workspace_id}/context/pages/{source['id']}"
+        "/%65dit/?view=source#section"
+    )
+    buffer = (
+        f"[Draft]({ref})  \nUnsaved\n@cite{{{citation_href}}}\n"
+        f"[Edit]({edit_href})\n"
+    )
     request = {
         "body_md": buffer,
         "source_page_id": source["id"],
@@ -68,6 +79,10 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
         ],
         "link_targets": [
             {"locator": ref, "href": f"/p/{workspace_id}/{source['id']}",
+             "state": "ok", "target_page_id": source["id"]},
+            {"locator": edit_href,
+             "href": f"/workspaces/{workspace_id}/context/pages/{source['id']}"
+                     "/edit?view=source#section",
              "state": "ok", "target_page_id": source["id"]},
         ],
     }
