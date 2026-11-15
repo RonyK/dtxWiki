@@ -23,6 +23,7 @@ release migration.
 import os
 import shutil
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -40,12 +41,10 @@ from backend.app.bootstrap import (
     resolve_alembic_ini,
     resolve_migrations_dir,
 )
-from backend.app.db import make_session_factory
 from backend.app.settings import Settings
 from backend.models import Base
 from backend.services.ops.alembic_migration_graph import initialization_script_directory
 from backend.services.ops.input_maintenance import audit_inputs
-from backend.services.page_service import PageService
 from backend.tests.integration.test_release_schema_migration import (
     _assert_each_table_rebuilt_at_most_once,
     _batch_rebuild_counts,
@@ -54,12 +53,14 @@ from backend.tests.integration.test_release_schema_migration import (
     _schema_snapshot,
 )
 from backend.tests.utils.migration_paths import configure_test_repositories
+from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 from backend.utils.content_hash import content_hash
 
 # Published 0.1.4. The 0.2.1 package used a development-only parent instead.
 PARENT = "eb86fdacb1bb"
 REVISION = "5b7e5c149279"
 RELEASE_023_REVISION = "00ba02774c4a"
+REVERSIBLE_CONTEXT_REVISION = "872d9c3e104b"
 
 
 def _migration_engine(tmp_path, dialect, filename):
@@ -275,11 +276,10 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         _assert_release_upgrade(engine, release_data, now, first=True)
         _assert_labs_policy_upgrade(engine, config, workspace_id)
         _assert_archived_inbox_indexes(engine)
-        # Current runtime uses the current model. Advance to head before its
-        # real publication, then traverse the historical downgrade as before.
-        # Later revisions may reshape parity tables, so the current model is
-        # compared with the head schema it describes.
-        command.upgrade(config, "head")
+        # Seed both historical locator projections at the last reversible
+        # schema. The shared-draft cutover is intentionally one-way; the release
+        # downgrade assertions below still execute their exact owning revisions.
+        command.upgrade(config, REVERSIBLE_CONTEXT_REVISION)
         _assert_model_parity(engine)
         _seed_runtime_links(engine, release_data)
         command.downgrade(config, REVISION)
@@ -314,7 +314,9 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         with _captured_statements() as statements:
             ensure_app_version_synced(Settings(database_url=database_url))
         if dialect == "sqlite":
-            _assert_each_table_rebuilt_at_most_once(statements)
+            counts = _batch_rebuild_counts(statements)
+            assert counts.pop("context_page_version") == 2
+            assert all(count == 1 for count in counts.values()), counts
         assert _stamp(engine) == current_alembic_head()
         _assert_release_upgrade(engine, release_data, now, first=False)
         _assert_labs_policy_upgrade(
@@ -326,20 +328,7 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
     finally:
         try:
             if upgraded:
-                # The dedicated DB starts empty. The 0.1.4 downgrade refuses
-                # retained login and deletion evidence, so remove it first.
-                with engine.begin() as connection:
-                    connection.execute(sa.text("DELETE FROM auth_login_transactions"))
-                    connection.execute(sa.text("DELETE FROM user_identities"))
-                    connection.execute(
-                        sa.text(
-                            "DELETE FROM users WHERE password_hash IS NULL "
-                            "OR email IS NULL OR status = 'deletion_pending'"
-                        )
-                    )
-                command.downgrade(config, "base")
-                with engine.begin() as connection:
-                    connection.execute(sa.text("DROP TABLE IF EXISTS alembic_version"))
+                _reset_database(engine)
         finally:
             engine.dispose()
 
@@ -704,10 +693,15 @@ def _assert_release_upgrade(engine, data, now, *, first):
             .one()
         )
         assert legacy["locator_key"] == "wikilink:release-target"
-        assert (
-            legacy["occurrence_count"] == 2
-            and legacy["first_snippet"] == "Original snippet"
+        # The historical release retains the stored projection exactly;
+        # current startup regenerates its derived fields from source bytes.
+        expected_projection = (
+            (2, "Original snippet") if first else (1, "# Source [[release-target]]")
         )
+        assert (
+            legacy["occurrence_count"],
+            legacy["first_snippet"],
+        ) == expected_projection
         assert legacy["target_page_id"] == data["target"]
         versions = _table(connection, "context_page_version")
         assert connection.scalar(
@@ -911,46 +905,62 @@ def _assert_atomic_release_failures(config, engine, tmp_path, *, direction):
 
 
 def _seed_runtime_links(engine, data):
-    # A real publication writes URL and wikilink projections together. Downgrade
-    # must use the surviving wikilink, rather than keep a mixed URL edge weight.
-    factory = make_session_factory(engine)
-    from backend.scripts.seed_dev import seed_default_workspace
-
-    with factory.begin() as session:
-        seed_default_workspace(session, slug="retained-workspace")
-    service = PageService(factory)
-
-    def write(slug, body):
-        return service.write_page(
-            workspace_slug="retained-workspace",
-            slug=slug,
-            title=slug,
-            body_md=body,
-            actor_kind="human",
-            actor_id="release-runtime-links",
-            actor_provenance="browser_session",
+    # A publication stores both URL and wikilink projections. These persisted
+    # inputs belong to the historical link-syntax downgrade; current runtime
+    # publication is covered separately against the current model and schema.
+    page_id, version_id, wiki_id = uuid4(), uuid4(), uuid4()
+    with engine.begin() as connection:
+        _insert(
+            connection,
+            "context_page",
+            id=page_id,
+            workspace_id=data["workspace_id"],
+            slug="runtime-mixed",
+            title="Mixed",
         )
-
-    target = write("runtime-target", "# Target")
-    source = write(
-        "runtime-mixed",
-        f"# Mixed\n\n[[{target.slug}]] twice [[{target.slug}]]\n\n"
-        f"[Target](/context?target={target.id})",
-    )
-    with engine.connect() as connection:
-        links = _table(connection, "page_links")
-        rows = (
-            connection.execute(
-                sa.select(links).where(links.c.source_page_id == source.id)
+        _insert(
+            connection,
+            "context_page_version",
+            id=version_id,
+            workspace_id=data["workspace_id"],
+            page_id=page_id,
+            body_md="# Mixed\n\n[[release-target]] twice [[release-target]]",
+            content_hash="historical-link-projection",
+            actor_type="human",
+            version_status="draft",
+            created_by_actor_kind="human",
+            created_by_actor_id="release-runtime-links",
+        )
+        for syntax, count in (("wikilink", 2), ("context_url", 1)):
+            _insert(
+                connection,
+                "page_links",
+                id=wiki_id if syntax == "wikilink" else uuid4(),
+                workspace_id=data["workspace_id"],
+                source_page_id=page_id,
+                source_version_id=version_id,
+                link_syntax=syntax,
+                locator_key=(
+                    "wikilink:release-target"
+                    if syntax == "wikilink"
+                    else f"page_id:{data['target']}"
+                ),
+                target_slug="release-target",
+                target_page_id=data["target"],
+                occurrence_count=count,
+                first_snippet="Historical publication projection",
             )
-            .mappings()
-            .all()
-        )
-        assert len(rows) == 2
-        wiki = next(row for row in rows if row["link_syntax"] == "wikilink")
-        assert wiki["occurrence_count"] == 2
-        data["runtime_link"] = wiki["id"]
-        data["runtime_target"] = target.id
+    data["runtime_link"] = wiki_id
+    data["runtime_target"] = data["target"]
+
+
+def _reset_database(engine):
+    """Reset the disposable test DB without reversing a one-way conversion."""
+    if engine.dialect.name == "postgresql":
+        drop_reflected_postgres_metadata(engine)
+    else:
+        engine.dispose()
+        Path(engine.url.database).unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize(
@@ -970,7 +980,9 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
     database_url, engine = _migration_engine(tmp_path, dialect, "older-releases.db")
     config = _config(database_url)
     settings = Settings(database_url=database_url)
-    native, workspace, source, target, version, link = (uuid4() for _ in range(6))
+    native, workspace, source, target, version, link, audit = (
+        uuid4() for _ in range(7)
+    )
     publication_time = datetime.now(UTC) - timedelta(days=5)
     retained_fields = {
         "users": "id, email, password_hash, display_name, default_workspace_id",
@@ -1015,118 +1027,134 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
             for statement in stamp_writes[1:]
         )
         assert current_alembic_head() in stamp_writes[-1]
-        # The frozen baseline avoids historical rebuilds. The appended Git
-        # body revision must rebuild only this table to make body_md nullable.
+        # Only appended Git/body and shared-draft schema changes rebuild
+        # tables; historical release migrations are still skipped on install.
         assert _batch_rebuild_counts(statements) == (
-            {"context_page_version": 1} if dialect == "sqlite" else {}
+            {"context_page_version": 2, "content_chunk": 1}
+            if dialect == "sqlite"
+            else {}
         )
         initialized_schema = _schema_snapshot(engine)
-        command.downgrade(config, "efcbcf724889")
-        with engine.begin() as connection:
-            _insert(
-                connection,
-                "users",
-                id=native,
-                email="older@example.com",
-                password_hash="retained-older-hash",
-                display_name="Older User",
-                member_search_key="older user older@example.com",
-            )
-            _insert(
-                connection,
-                "workspace",
-                id=workspace,
-                slug="older-workspace",
-                title="Older workspace",
-                name="Older workspace",
-                directory_title_key="older workspace",
-                owner_user_id=native,
-            )
-            users = _table(connection, "users")
-            connection.execute(
-                users.update()
-                .where(users.c.id == native)
-                .values(
-                    default_workspace_id=workspace,
-                    personal_workspace_id=workspace.hex
-                    if dialect == "sqlite"
-                    else workspace,
+        _reset_database(engine)
+
+        def seed_older_release():
+            command.upgrade(config, "efcbcf724889")
+            with engine.begin() as connection:
+                _insert(
+                    connection,
+                    "users",
+                    id=native,
+                    email="older@example.com",
+                    password_hash="retained-older-hash",
+                    display_name="Older User",
+                    member_search_key="older user older@example.com",
                 )
-            )
-            _insert(
-                connection,
-                "context_page",
-                id=source,
-                workspace_id=workspace,
-                slug="older-source",
-                title="Older source",
-            )
-            _insert(
-                connection,
-                "context_page",
-                id=target,
-                workspace_id=workspace,
-                slug="older-target",
-                title="Older target",
-            )
-            _insert(
-                connection,
-                "context_page_version",
-                id=version,
-                workspace_id=workspace,
-                page_id=source,
-                body_md="# Older content\n\n[[older-target]]",
-                content_hash=content_hash("# Older content\n\n[[older-target]]"),
-                actor_type="human",
-                version_status="published_snapshot",
-                created_by_actor_kind="human",
-                created_by_actor_id=str(native),
-            )
-            pages = _table(connection, "context_page")
-            connection.execute(
-                pages.update()
-                .where(pages.c.id == source)
-                .values(
-                    current_version_id=version,
-                    current_published_version_id=version,
-                    lifecycle_status="published",
+                _insert(
+                    connection,
+                    "workspace",
+                    id=workspace,
+                    slug="older-workspace",
+                    title="Older workspace",
+                    name="Older workspace",
+                    directory_title_key="older workspace",
+                    owner_user_id=native,
                 )
-            )
-            _insert(
-                connection,
-                "page_links",
-                id=link,
-                workspace_id=workspace,
-                source_page_id=source,
-                source_version_id=version,
-                target_slug="older-target",
-                target_page_id=target,
-                occurrence_count=2,
-                first_snippet="Retained older snippet",
-            )
-            _insert(
-                connection,
-                "audit_event",
-                id=uuid4(),
-                workspace_id=workspace,
-                actor_kind="human",
-                actor_id=str(native),
-                action="context_page.draft.publish",
-                target_kind="context_page",
-                target_id=source,
-                payload={
-                    "version_id": str(version),
-                    "previous_published_version_id": None,
-                },
-                created_at=publication_time,
-            )
+                users = _table(connection, "users")
+                connection.execute(
+                    users.update()
+                    .where(users.c.id == native)
+                    .values(
+                        default_workspace_id=workspace,
+                        personal_workspace_id=workspace.hex
+                        if dialect == "sqlite"
+                        else workspace,
+                    )
+                )
+                _insert(
+                    connection,
+                    "context_page",
+                    id=source,
+                    workspace_id=workspace,
+                    slug="older-source",
+                    title="Older source",
+                )
+                _insert(
+                    connection,
+                    "context_page",
+                    id=target,
+                    workspace_id=workspace,
+                    slug="older-target",
+                    title="Older target",
+                )
+                _insert(
+                    connection,
+                    "context_page_version",
+                    id=version,
+                    workspace_id=workspace,
+                    page_id=source,
+                    body_md="# Older content\n\n[[older-target]]",
+                    content_hash=content_hash("# Older content\n\n[[older-target]]"),
+                    actor_type="human",
+                    version_status="published_snapshot",
+                    created_by_actor_kind="human",
+                    created_by_actor_id=str(native),
+                )
+                pages = _table(connection, "context_page")
+                connection.execute(
+                    pages.update()
+                    .where(pages.c.id == source)
+                    .values(
+                        current_version_id=version,
+                        current_published_version_id=version,
+                        lifecycle_status="published",
+                    )
+                )
+                _insert(
+                    connection,
+                    "page_links",
+                    id=link,
+                    workspace_id=workspace,
+                    source_page_id=source,
+                    source_version_id=version,
+                    target_slug="older-target",
+                    target_page_id=target,
+                    occurrence_count=2,
+                    first_snippet="Retained older snippet",
+                )
+                _insert(
+                    connection,
+                    "audit_event",
+                    id=audit,
+                    workspace_id=workspace,
+                    actor_kind="human",
+                    actor_id=str(native),
+                    action="context_page.draft.publish",
+                    target_kind="context_page",
+                    target_id=source,
+                    payload={
+                        "version_id": str(version),
+                        "previous_published_version_id": None,
+                    },
+                    created_at=publication_time,
+                )
+
+        seed_older_release()
         retained = retained_state()
+        # Startup deliberately rebuilds local projections from their source.
+        # Preserve the row identity and endpoint binding while requiring the
+        # stale legacy occurrence/snippet values to match the authored body.
+        retained["page_links"] = [
+            (*row[:-2], 1, "# Older content [[older-target]]")
+            for row in retained["page_links"]
+        ]
         for old_version, revision in (
             ("0.1.2", "efcbcf724889"),
             ("0.1.3", "19db79d3e622"),
         ):
             if old_version == "0.1.3":
-                command.downgrade(config, revision)
+                _reset_database(engine)
+                seed_older_release()
+                command.upgrade(config, revision)
             with engine.begin() as connection:
                 assert (
                     connection.scalar(
@@ -1185,8 +1213,6 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
     finally:
         try:
             if migrated:
-                command.downgrade(config, "base")
-                with engine.begin() as connection:
-                    connection.execute(sa.text("DROP TABLE IF EXISTS alembic_version"))
+                _reset_database(engine)
         finally:
             engine.dispose()

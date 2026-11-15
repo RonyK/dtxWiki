@@ -1,3 +1,4 @@
+import { ContextMergeResultPreview } from "../pages/ContextMergeResultPreview";
 import {
   Copy,
   ArrowRight,
@@ -66,6 +67,7 @@ import {
   discardAlternativeDraft,
   diffPageVersions,
   restorePageVersion,
+  type ContextMergePreview,
 } from "../../shared/api/pages";
 import {
   listContextChanges,
@@ -90,6 +92,7 @@ import {
 } from "../../shared/api/operations";
 import type {
   ActivityItem,
+  ContextMergeBinding,
   GraphNeighborEntry,
   GraphNeighborsPayload,
 } from "../../shared/api/operations";
@@ -197,6 +200,7 @@ import { useVersionPairDiff } from "../../shared/hooks/useVersionPairDiff";
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
 import { isEditorRole } from "../../shared/workspace/permissions";
+import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 
@@ -1759,6 +1763,29 @@ function PendingDraftReview({
   ) => Promise<void> | void;
 }) {
   const { t } = useTranslation("context");
+  const actorId = useOptionalAuth()?.user?.user_id ?? "preview";
+  const pendingKey = `${reviewDraftKey(actorId, workspaceId, review.review_item_id)}.pending`;
+  const pendingApprovalRef = useRef<{ key: string; decisionId: string; mergeBinding: ContextMergeBinding | null } | null>(null);
+  const [mergePrompt, setMergePrompt] = useState<{ preview: ContextMergePreview; resolve: (accepted: boolean) => void } | null>(null);
+  const mergeResolveRef = useRef<((accepted: boolean) => void) | null>(null);
+  useEffect(() => {
+    setMergePrompt(null);
+    return () => { mergeResolveRef.current?.(false); mergeResolveRef.current = null; };
+  }, [pendingKey]);
+  function settleMerge(accepted: boolean) {
+    mergePrompt?.resolve(accepted);
+    mergeResolveRef.current = null;
+    setMergePrompt(null);
+  }
+  function readPendingApproval() {
+    if (pendingApprovalRef.current?.key === pendingKey) return pendingApprovalRef.current;
+    try {
+      const value = JSON.parse(readReviewDraft(pendingKey) || "null");
+      if (value?.decision === "approve" && value.workspaceId === workspaceId && value.reviewId === review.review_item_id
+        && typeof value.decisionId === "string") return value as { decisionId: string; mergeBinding: ContextMergeBinding | null };
+    } catch { /* The review remains available when storage is unavailable. */ }
+    return null;
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -1842,14 +1869,37 @@ function PendingDraftReview({
     setBusy(true);
     setError(null);
     try {
+      const pending = type === "approve" ? readPendingApproval() : null;
+      const decisionId = pending?.decisionId ?? crypto.randomUUID();
       const result = await decideReview(
         workspaceId,
         review.review_item_id,
         type,
         type === "request_changes" ? reason : undefined,
+        {
+          decision_id: decisionId,
+          ...(pending ? { merge_binding: pending.mergeBinding } : {}),
+          onMergePreview: (preview) => new Promise<boolean>((resolve) => {
+            mergeResolveRef.current = resolve;
+            setMergePrompt({ preview, resolve });
+          }),
+          onDecisionPrepared(binding) {
+            if (type !== "approve") return;
+            pendingApprovalRef.current = { key: pendingKey, decisionId, mergeBinding: binding };
+            writeReviewDraft(pendingKey, JSON.stringify({ decisionId, workspaceId, reviewId: review.review_item_id,
+              decision: "approve", reason: null, mergeBinding: binding }));
+          },
+        },
       );
+      pendingApprovalRef.current = null;
+      writeReviewDraft(pendingKey, "");
       await onDecided(result);
-    } catch {
+    } catch (exc) {
+      if (exc instanceof DOMException && exc.name === "AbortError") return;
+      if (exc instanceof ApiError && exc.status >= 400 && exc.status < 500) {
+        pendingApprovalRef.current = null;
+        writeReviewDraft(pendingKey, "");
+      }
       setError(
         type === "approve"
           ? t("pendingReview.approveError", {
@@ -1987,6 +2037,19 @@ function PendingDraftReview({
                 "Could not load what approval will settle. Open the review to decide safely.",
             })}
           </p>
+        ) : null}
+        {mergePrompt?.preview.result ? (
+          <Dialog labelledBy="context-merge-approval-title" title={t("pages:editor.mergePreviewTitle")}
+            onClose={() => settleMerge(false)}>
+            <section className="dialog-form">
+              <p>{t("review:workflow.mergePreviewDescription")}</p>
+              <ContextMergeResultPreview candidate={mergePrompt.preview.result} workspaceId={workspaceId} />
+              <div className="dialog-actions">
+                <button type="button" className="icon-button text-button" onClick={() => settleMerge(false)}>{t("review:workflow.mergePreviewCancel")}</button>
+                <button type="button" className="icon-button primary" onClick={() => settleMerge(true)}>{t("review:workflow.mergePreviewApprove")}</button>
+              </div>
+            </section>
+          </Dialog>
         ) : null}
         {error ? <p className="pending-review-error">{error}</p> : null}
       </div>
@@ -2950,7 +3013,7 @@ function ContextReader({
           {canEdit ? (
             <Link
               className="context-reader-header-action context-reader-edit-action icon-button text-button"
-              to={contextEditHref(workspaceId ?? detail.workspace_id, detail.id)}
+              to={`${contextEditHref(workspaceId ?? detail.workspace_id, detail.id)}${detail.version_info?.version_status === "draft" ? `?version_id=${encodeURIComponent(detail.version_info.version_id)}` : ""}`}
             >
               <Edit size={16} aria-hidden="true" />
               <span>{t("actions.edit", { defaultValue: "Edit" })}</span>

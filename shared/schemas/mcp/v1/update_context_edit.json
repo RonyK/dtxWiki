@@ -138,7 +138,7 @@
         "x-normalized-maxLength": 256
       },
       "version_id": {
-        "description": "Your open edit's version_id, from your last create/begin/update/patch response (or read_structure_map with version='my_edit'). The save applies only to that edit: if it was discarded or submitted, or another edit is open now, the call is a conflict and nothing is saved.",
+        "description": "The shared draft version_id, from your last create/begin/update/patch response (or read_structure_map with that version_id). The save applies only to that edit: if it was closed or the editing revision has changed, the call is a conflict and nothing is saved.",
         "format": "uuid",
         "title": "Version Id",
         "type": "string"
@@ -659,7 +659,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",

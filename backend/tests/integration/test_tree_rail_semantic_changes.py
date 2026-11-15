@@ -84,7 +84,18 @@ def _publish_context_change(
     assert _context_content_time(session_factory, original.id) == INITIAL_TIME
 
     clock["now"] = CHANGED_TIME
+    editing = page_service.begin_context_edit(
+        page_id=original.id,
+        workspace_id=original.workspace_id,
+        actor_kind="human",
+        actor_id=ACTOR_ID,
+        actor_provenance="browser_session",
+        from_version_id=original.version_id,
+        idempotency_key="fixture-begin:test_tree_rail_semantic_changes.py:87",
+    )
     staged = page_service.autosave_page(
+        version_id=editing.version_id,
+        expected_editing_revision=editing.editing_revision,
         page_id=original.id,
         workspace_id=original.workspace_id,
         title=original.title,
@@ -92,9 +103,9 @@ def _publish_context_change(
         actor_kind="human",
         actor_id=ACTOR_ID,
         actor_provenance="browser_session",
-        base_version_id=original.version_id,
-        base_content_hash=original.content_hash,
-        session_version_id=original.version_id,
+        base_version_id=editing.version_id,
+        base_content_hash=editing.content_hash,
+        session_version_id=editing.version_id,
         idempotency_key="semantic-content-autosave",
     )
     assert _context_content_time(session_factory, original.id) == INITIAL_TIME

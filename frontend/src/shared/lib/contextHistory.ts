@@ -2,6 +2,7 @@ import type { VersionEntry } from "../api/context";
 import type { HistoryGraphNode, PriorRelation } from "./historyGraph";
 
 export const CONTEXT_HISTORY_STATUSES = [
+  "closed",
   "state_inconsistent",
   "current_editing",
   "current_draft",
@@ -36,6 +37,11 @@ export const CONTEXT_HISTORY_PRESENTATION: Record<
   ContextHistoryStatus,
   ContextHistoryPresentation
 > = {
+  closed: {
+    labelKey: "history.states.closed.label",
+    descriptionKey: "history.states.closed.description",
+    tone: "neutral",
+  },
   state_inconsistent: {
     labelKey: "history.states.state_inconsistent.label",
     descriptionKey: "history.states.state_inconsistent.description",

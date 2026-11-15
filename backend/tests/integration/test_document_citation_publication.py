@@ -85,7 +85,7 @@ def test_publication_audit_failure_rolls_back_citations_and_head(
         assert session.get(ContextPage, source.id).current_published_version_id is None
         assert (
             session.get(ContextPageVersion, source.version_id).version_status
-            == "editing"
+            == "draft"
         )
         assert not session.scalars(
             select(ContextPublishedCitation).where(

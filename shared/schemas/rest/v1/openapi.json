@@ -4084,7 +4084,7 @@
       },
       "BeginContextEditRequest": {
         "additionalProperties": false,
-        "description": "P8.3: resume-or-open the caller's own editing session.\n\nBoth fields optional: omit both to start from whatever the current head\nhappens to be (an idempotent resume of an already-open session ignores\nthem entirely). Pass both together to assert the base explicitly and get\na 409 instead of silently building on a head that moved.",
+        "description": "Join a named draft, or start a new draft from selected commits.",
         "properties": {
           "base_content_hash": {
             "anyOf": [
@@ -4109,6 +4109,25 @@
             ],
             "title": "Base Version Id"
           },
+          "from": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
           "idempotency_key": {
             "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
             "maxLength": 160,
@@ -4116,6 +4135,21 @@
             "pattern": "^[A-Za-z0-9._:-]+$",
             "title": "Idempotency Key",
             "type": "string"
+          },
+          "on_conflict": {
+            "anyOf": [
+              {
+                "enum": [
+                  "keep_both",
+                  "latest"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Conflict"
           },
           "retry_only": {
             "default": false,
@@ -4193,6 +4227,63 @@
           "editing_version_id"
         ],
         "title": "Body_upload_page_media_api_v1_workspaces__workspace_id__context_pages__page_id__media_post",
+        "type": "object"
+      },
+      "BringInContextVersionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "commit_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Version Id"
+          },
+          "expected_editing_revision": {
+            "minimum": 1.0,
+            "title": "Expected Editing Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "on_conflict": {
+            "anyOf": [
+              {
+                "enum": [
+                  "keep_both",
+                  "latest"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Conflict"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "expected_editing_revision",
+          "idempotency_key"
+        ],
+        "title": "BringInContextVersionRequest",
         "type": "object"
       },
       "BuildBundleRequest": {
@@ -4543,11 +4634,8 @@
             "type": "string"
           },
           "publication_state": {
-            "default": "editing",
-            "enum": [
-              "editing",
-              "draft"
-            ],
+            "const": "draft",
+            "default": "draft",
             "title": "Publication State",
             "type": "string"
           },
@@ -4683,6 +4771,14 @@
             "title": "Last Saved At",
             "type": "string"
           },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
           "review": {
             "anyOf": [
               {
@@ -4770,6 +4866,14 @@
             "title": "Last Saved At",
             "type": "string"
           },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
           "review": {
             "anyOf": [
               {
@@ -4794,10 +4898,7 @@
             "type": "string"
           },
           "version_status": {
-            "enum": [
-              "editing",
-              "draft"
-            ],
+            "const": "draft",
             "title": "Version Status",
             "type": "string"
           }
@@ -6024,9 +6125,63 @@
         "title": "ContextMediaUploadResponse",
         "type": "object"
       },
+      "ContextMergePreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "body_md": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Md"
+          },
+          "on_conflict": {
+            "anyOf": [
+              {
+                "enum": [
+                  "keep_both",
+                  "latest"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Conflict"
+          },
+          "page_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Metadata"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id"
+        ],
+        "title": "ContextMergePreviewRequest",
+        "type": "object"
+      },
       "ContextPageCreateRequest": {
         "additionalProperties": false,
-        "description": "REST creation can explicitly save a shared draft in a browser session.",
+        "description": "Create a page with its first shared mutable draft.",
         "properties": {
           "aliases": {
             "anyOf": [
@@ -6089,12 +6244,6 @@
             ],
             "title": "Placement Parent Node Id"
           },
-          "share_draft": {
-            "default": false,
-            "description": "Browser-session creation: save a shared, unpublished draft.",
-            "title": "Share Draft",
-            "type": "boolean"
-          },
           "tags": {
             "anyOf": [
               {
@@ -6154,6 +6303,11 @@
             ],
             "title": "Alternative Draft Id"
           },
+          "autosave_merged": {
+            "default": false,
+            "title": "Autosave Merged",
+            "type": "boolean"
+          },
           "backlink_count": {
             "anyOf": [
               {
@@ -6178,7 +6332,7 @@
           },
           "can_submit_for_review": {
             "default": false,
-            "description": "Whether the caller may submit this exact version for review now: its own edit or unreviewed shared browser draft.",
+            "description": "Whether the caller may submit this exact version for review now: an editable shared draft without an existing open review request.",
             "title": "Can Submit For Review",
             "type": "boolean"
           },
@@ -6282,6 +6436,7 @@
             "anyOf": [
               {
                 "enum": [
+                  "closed",
                   "state_inconsistent",
                   "current_editing",
                   "current_draft",
@@ -6381,6 +6536,11 @@
           "open_drafts": {
             "$ref": "#/components/schemas/OpenDrafts"
           },
+          "page_metadata": {
+            "additionalProperties": true,
+            "title": "Page Metadata",
+            "type": "object"
+          },
           "page_type": {
             "default": "overview",
             "enum": [
@@ -6421,6 +6581,14 @@
               }
             ],
             "title": "Parent Version Id"
+          },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
           },
           "pending_draft_version_id": {
             "anyOf": [
@@ -6877,6 +7045,11 @@
             ],
             "title": "Alternative Draft Id"
           },
+          "autosave_merged": {
+            "default": false,
+            "title": "Autosave Merged",
+            "type": "boolean"
+          },
           "backlink_count": {
             "anyOf": [
               {
@@ -6901,7 +7074,7 @@
           },
           "can_submit_for_review": {
             "default": false,
-            "description": "Whether the caller may submit this exact version for review now: its own edit or unreviewed shared browser draft.",
+            "description": "Whether the caller may submit this exact version for review now: an editable shared draft without an existing open review request.",
             "title": "Can Submit For Review",
             "type": "boolean"
           },
@@ -6995,6 +7168,7 @@
             "anyOf": [
               {
                 "enum": [
+                  "closed",
                   "state_inconsistent",
                   "current_editing",
                   "current_draft",
@@ -7091,6 +7265,11 @@
             ],
             "title": "Next Reconciliation Version Id"
           },
+          "page_metadata": {
+            "additionalProperties": true,
+            "title": "Page Metadata",
+            "type": "object"
+          },
           "page_type": {
             "default": "overview",
             "enum": [
@@ -7131,6 +7310,14 @@
               }
             ],
             "title": "Parent Version Id"
+          },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
           },
           "pending_draft_version_id": {
             "anyOf": [
@@ -7346,887 +7533,6 @@
           "data"
         ],
         "title": "ContextPageWriteResponse",
-        "type": "object"
-      },
-      "ContextReconciliationBlock": {
-        "additionalProperties": false,
-        "properties": {
-          "block_id": {
-            "title": "Block Id",
-            "type": "string"
-          },
-          "granularity": {
-            "enum": [
-              "block",
-              "table_row"
-            ],
-            "title": "Granularity",
-            "type": "string"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "parent_block_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Block Id"
-          },
-          "row_index": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Row Index"
-          },
-          "state": {
-            "enum": [
-              "same",
-              "head_only",
-              "branch_only",
-              "conflict"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "block_id",
-          "kind",
-          "granularity",
-          "state",
-          "label"
-        ],
-        "title": "ContextReconciliationBlock",
-        "type": "object"
-      },
-      "ContextReconciliationBranch": {
-        "additionalProperties": false,
-        "properties": {
-          "actor_display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor Display Name"
-          },
-          "actor_kind": {
-            "title": "Actor Kind",
-            "type": "string"
-          },
-          "base_version_id": {
-            "format": "uuid",
-            "title": "Base Version Id",
-            "type": "string"
-          },
-          "content_hash": {
-            "title": "Content Hash",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "version_id": {
-            "format": "uuid",
-            "title": "Version Id",
-            "type": "string"
-          },
-          "version_no": {
-            "title": "Version No",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "version_id",
-          "version_no",
-          "content_hash",
-          "created_at",
-          "actor_kind",
-          "base_version_id"
-        ],
-        "title": "ContextReconciliationBranch",
-        "type": "object"
-      },
-      "ContextReconciliationBulkDiscardRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          },
-          "review_item_ids": {
-            "items": {
-              "format": "uuid",
-              "type": "string"
-            },
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Review Item Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "review_item_ids",
-          "reason"
-        ],
-        "title": "ContextReconciliationBulkDiscardRequest",
-        "type": "object"
-      },
-      "ContextReconciliationBulkDiscardResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ContextReconciliationBulkDiscardResult"
-          },
-          "envelope": {
-            "$ref": "#/components/schemas/RESTResultEnvelope"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "ContextReconciliationBulkDiscardResponse",
-        "type": "object"
-      },
-      "ContextReconciliationBulkDiscardResult": {
-        "additionalProperties": false,
-        "properties": {
-          "discarded_review_item_ids": {
-            "items": {
-              "format": "uuid",
-              "type": "string"
-            },
-            "title": "Discarded Review Item Ids",
-            "type": "array"
-          },
-          "skipped": {
-            "items": {
-              "$ref": "#/components/schemas/ContextReconciliationBulkDiscardSkipped"
-            },
-            "title": "Skipped",
-            "type": "array"
-          }
-        },
-        "required": [
-          "discarded_review_item_ids",
-          "skipped"
-        ],
-        "title": "ContextReconciliationBulkDiscardResult",
-        "type": "object"
-      },
-      "ContextReconciliationBulkDiscardSkipped": {
-        "additionalProperties": false,
-        "properties": {
-          "error_code": {
-            "title": "Error Code",
-            "type": "string"
-          },
-          "review_item_id": {
-            "format": "uuid",
-            "title": "Review Item Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "review_item_id",
-          "error_code"
-        ],
-        "title": "ContextReconciliationBulkDiscardSkipped",
-        "type": "object"
-      },
-      "ContextReconciliationCleanChange": {
-        "additionalProperties": false,
-        "properties": {
-          "block_id": {
-            "title": "Block Id",
-            "type": "string"
-          },
-          "head": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ContextReconciliationSide"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "resolution_target_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution Target Id"
-          },
-          "state": {
-            "enum": [
-              "head_only",
-              "branch_only"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "yours": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ContextReconciliationSide"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "block_id",
-          "kind",
-          "state"
-        ],
-        "title": "ContextReconciliationCleanChange",
-        "type": "object"
-      },
-      "ContextReconciliationCommit": {
-        "additionalProperties": false,
-        "properties": {
-          "branch_status": {
-            "const": "superseded",
-            "title": "Branch Status",
-            "type": "string"
-          },
-          "draft_version_id": {
-            "format": "uuid",
-            "title": "Draft Version Id",
-            "type": "string"
-          },
-          "head_version_id": {
-            "format": "uuid",
-            "title": "Head Version Id",
-            "type": "string"
-          },
-          "review_item_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Item Id"
-          }
-        },
-        "required": [
-          "draft_version_id",
-          "head_version_id",
-          "branch_status",
-          "review_item_id"
-        ],
-        "title": "ContextReconciliationCommit",
-        "type": "object"
-      },
-      "ContextReconciliationCommitResult": {
-        "additionalProperties": false,
-        "properties": {
-          "commit": {
-            "$ref": "#/components/schemas/ContextReconciliationCommit"
-          },
-          "dry_run": {
-            "const": false,
-            "title": "Dry Run",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "dry_run",
-          "commit"
-        ],
-        "title": "ContextReconciliationCommitResult",
-        "type": "object"
-      },
-      "ContextReconciliationConflict": {
-        "additionalProperties": false,
-        "properties": {
-          "base": {
-            "$ref": "#/components/schemas/ContextReconciliationSide"
-          },
-          "block_id": {
-            "title": "Block Id",
-            "type": "string"
-          },
-          "granularity": {
-            "enum": [
-              "block",
-              "table_row"
-            ],
-            "title": "Granularity",
-            "type": "string"
-          },
-          "head": {
-            "$ref": "#/components/schemas/ContextReconciliationSide"
-          },
-          "head_effects": {
-            "items": {
-              "$ref": "#/components/schemas/ContextReconciliationOperationEffect"
-            },
-            "title": "Head Effects",
-            "type": "array"
-          },
-          "identity_retired": {
-            "title": "Identity Retired",
-            "type": "boolean"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "line_span": {
-            "anyOf": [
-              {
-                "maxItems": 2,
-                "minItems": 2,
-                "prefixItems": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "integer"
-                  }
-                ],
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Line Span"
-          },
-          "parent_block_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Block Id"
-          },
-          "resolution_target_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution Target Id"
-          },
-          "restore_yours_available": {
-            "title": "Restore Yours Available",
-            "type": "boolean"
-          },
-          "row_index": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Row Index"
-          },
-          "yours": {
-            "$ref": "#/components/schemas/ContextReconciliationSide"
-          },
-          "yours_effects": {
-            "items": {
-              "$ref": "#/components/schemas/ContextReconciliationOperationEffect"
-            },
-            "title": "Yours Effects",
-            "type": "array"
-          }
-        },
-        "required": [
-          "block_id",
-          "kind",
-          "granularity",
-          "base",
-          "head",
-          "yours",
-          "identity_retired",
-          "restore_yours_available"
-        ],
-        "title": "ContextReconciliationConflict",
-        "type": "object"
-      },
-      "ContextReconciliationDetail": {
-        "additionalProperties": false,
-        "properties": {
-          "base": {
-            "$ref": "#/components/schemas/ContextReconciliationVersion"
-          },
-          "blocks": {
-            "items": {
-              "$ref": "#/components/schemas/ContextReconciliationBlock"
-            },
-            "title": "Blocks",
-            "type": "array"
-          },
-          "branch": {
-            "$ref": "#/components/schemas/ContextReconciliationBranch"
-          },
-          "clean_changes": {
-            "items": {
-              "$ref": "#/components/schemas/ContextReconciliationCleanChange"
-            },
-            "title": "Clean Changes",
-            "type": "array"
-          },
-          "conflicts": {
-            "items": {
-              "$ref": "#/components/schemas/ContextReconciliationConflict"
-            },
-            "title": "Conflicts",
-            "type": "array"
-          },
-          "head": {
-            "$ref": "#/components/schemas/ContextReconciliationVersion"
-          },
-          "head_advance_count": {
-            "minimum": 0.0,
-            "title": "Head Advance Count",
-            "type": "integer"
-          },
-          "original_head": {
-            "$ref": "#/components/schemas/ContextReconciliationVersion"
-          },
-          "page": {
-            "$ref": "#/components/schemas/ContextReconciliationPage"
-          }
-        },
-        "required": [
-          "page",
-          "branch",
-          "base",
-          "original_head",
-          "head",
-          "head_advance_count",
-          "blocks",
-          "conflicts",
-          "clean_changes"
-        ],
-        "title": "ContextReconciliationDetail",
-        "type": "object"
-      },
-      "ContextReconciliationDetailResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ContextReconciliationDetail"
-          },
-          "envelope": {
-            "$ref": "#/components/schemas/RESTResultEnvelope"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "ContextReconciliationDetailResponse",
-        "type": "object"
-      },
-      "ContextReconciliationDiscardRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reason"
-        ],
-        "title": "ContextReconciliationDiscardRequest",
-        "type": "object"
-      },
-      "ContextReconciliationDryRunResult": {
-        "additionalProperties": false,
-        "properties": {
-          "dry_run": {
-            "const": true,
-            "title": "Dry Run",
-            "type": "boolean"
-          },
-          "preview": {
-            "$ref": "#/components/schemas/ContextReconciliationPreview"
-          }
-        },
-        "required": [
-          "dry_run",
-          "preview"
-        ],
-        "title": "ContextReconciliationDryRunResult",
-        "type": "object"
-      },
-      "ContextReconciliationOperationEffect": {
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "op": {
-            "const": "insert_after",
-            "title": "Op",
-            "type": "string"
-          }
-        },
-        "required": [
-          "op",
-          "content"
-        ],
-        "title": "ContextReconciliationOperationEffect",
-        "type": "object"
-      },
-      "ContextReconciliationPage": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "slug",
-          "title"
-        ],
-        "title": "ContextReconciliationPage",
-        "type": "object"
-      },
-      "ContextReconciliationPreview": {
-        "additionalProperties": false,
-        "properties": {
-          "head_version_id": {
-            "format": "uuid",
-            "title": "Head Version Id",
-            "type": "string"
-          },
-          "merged_body_markdown": {
-            "title": "Merged Body Markdown",
-            "type": "string"
-          },
-          "predicted_block_map": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Predicted Block Map",
-            "type": "array"
-          },
-          "unresolved_count": {
-            "const": 0,
-            "title": "Unresolved Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "head_version_id",
-          "merged_body_markdown",
-          "predicted_block_map",
-          "unresolved_count"
-        ],
-        "title": "ContextReconciliationPreview",
-        "type": "object"
-      },
-      "ContextReconciliationRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "dry_run": {
-            "default": false,
-            "title": "Dry Run",
-            "type": "boolean"
-          },
-          "excluded_clean_change_ids": {
-            "items": {
-              "maxLength": 160,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 20,
-            "title": "Excluded Clean Change Ids",
-            "type": "array"
-          },
-          "expected_head_version_id": {
-            "format": "uuid",
-            "title": "Expected Head Version Id",
-            "type": "string"
-          },
-          "idempotency_key": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[A-Za-z0-9._:-]+$",
-            "title": "Idempotency Key",
-            "type": "string"
-          },
-          "reason": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          },
-          "reconciles": {
-            "items": {
-              "format": "uuid",
-              "type": "string"
-            },
-            "maxItems": 1,
-            "minItems": 1,
-            "title": "Reconciles",
-            "type": "array"
-          },
-          "resolutions": {
-            "items": {
-              "$ref": "#/components/schemas/ContextReconciliationResolution"
-            },
-            "maxItems": 20,
-            "title": "Resolutions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "expected_head_version_id",
-          "reconciles",
-          "resolutions",
-          "reason",
-          "idempotency_key"
-        ],
-        "title": "ContextReconciliationRequest",
-        "type": "object"
-      },
-      "ContextReconciliationResolution": {
-        "additionalProperties": false,
-        "properties": {
-          "block_id": {
-            "maxLength": 160,
-            "minLength": 1,
-            "title": "Block Id",
-            "type": "string"
-          },
-          "choice": {
-            "enum": [
-              "keep_head",
-              "restore_yours",
-              "custom"
-            ],
-            "title": "Choice",
-            "type": "string"
-          },
-          "content": {
-            "anyOf": [
-              {
-                "maxLength": 1000000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content"
-          },
-          "expected_hash": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expected Hash"
-          }
-        },
-        "required": [
-          "block_id",
-          "choice"
-        ],
-        "title": "ContextReconciliationResolution",
-        "type": "object"
-      },
-      "ContextReconciliationResultResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ContextReconciliationDryRunResult"
-              },
-              {
-                "$ref": "#/components/schemas/ContextReconciliationCommitResult"
-              }
-            ],
-            "title": "Data"
-          },
-          "envelope": {
-            "$ref": "#/components/schemas/RESTResultEnvelope"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "ContextReconciliationResultResponse",
-        "type": "object"
-      },
-      "ContextReconciliationSide": {
-        "additionalProperties": false,
-        "properties": {
-          "actor_display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor Display Name"
-          },
-          "actor_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor Kind"
-          },
-          "at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "At"
-          },
-          "hash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hash"
-          },
-          "text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Text"
-          },
-          "version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version Id"
-          }
-        },
-        "title": "ContextReconciliationSide",
-        "type": "object"
-      },
-      "ContextReconciliationVersion": {
-        "additionalProperties": false,
-        "properties": {
-          "content_hash": {
-            "title": "Content Hash",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "version_id": {
-            "format": "uuid",
-            "title": "Version Id",
-            "type": "string"
-          },
-          "version_no": {
-            "title": "Version No",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "version_id",
-          "version_no",
-          "content_hash",
-          "created_at"
-        ],
-        "title": "ContextReconciliationVersion",
         "type": "object"
       },
       "CopyMcpUrlArtifact": {
@@ -8982,6 +8288,26 @@
         "title": "DocumentReferenceRemoveInput",
         "type": "object"
       },
+      "DraftBaseSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "body_md": {
+            "maxLength": 1000000,
+            "title": "Body Md",
+            "type": "string"
+          },
+          "page_metadata": {
+            "additionalProperties": true,
+            "title": "Page Metadata",
+            "type": "object"
+          }
+        },
+        "required": [
+          "body_md"
+        ],
+        "title": "DraftBaseSnapshot",
+        "type": "object"
+      },
       "DraftReviewReason": {
         "additionalProperties": false,
         "description": "One reason a write did not simply publish.\n\nLives here rather than beside either write surface because both use it: the\nMCP result names why a draft went to review, and the REST page payload names\nwhy a save was held from publication.",
@@ -9253,7 +8579,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",
@@ -17787,7 +17112,7 @@
       },
       "PageAutosaveRequest": {
         "additionalProperties": false,
-        "description": "Save an actor's edit with revision CAS, including metadata changes.\n\nBrowser saves explicitly stage a shared draft with ``share_draft``;\nprivate editing clients retain their existing default behavior.",
+        "description": "Save the named shared draft using its revision and browser baseline.",
         "properties": {
           "aliases": {
             "anyOf": [
@@ -17808,14 +17133,38 @@
             "x-normalized-item-minLength": 1
           },
           "base_content_hash": {
-            "pattern": "^[a-f0-9]{64}$",
-            "title": "Base Content Hash",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Content Hash"
+          },
+          "base_snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DraftBaseSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "base_version_id": {
-            "format": "uuid",
-            "title": "Base Version Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Version Id"
           },
           "body_md": {
             "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
@@ -17849,6 +17198,21 @@
             "pattern": "^[A-Za-z0-9._:-]+$",
             "title": "Idempotency Key",
             "type": "string"
+          },
+          "on_conflict": {
+            "anyOf": [
+              {
+                "enum": [
+                  "keep_both",
+                  "latest"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Conflict"
           },
           "on_stale": {
             "default": "conflict",
@@ -17899,12 +17263,6 @@
             ],
             "title": "Session Version Id"
           },
-          "share_draft": {
-            "default": false,
-            "description": "Browser-session save: stage a shared, unpublished draft.",
-            "title": "Share Draft",
-            "type": "boolean"
-          },
           "tags": {
             "anyOf": [
               {
@@ -17936,13 +17294,17 @@
             "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
             "title": "Title",
             "x-normalized-maxLength": 256
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
           }
         },
         "required": [
           "body_md",
-          "base_version_id",
-          "base_content_hash",
           "expected_editing_revision",
+          "version_id",
           "idempotency_key"
         ],
         "title": "PageAutosaveRequest",
@@ -18605,6 +17967,7 @@
           },
           "history_status": {
             "enum": [
+              "closed",
               "state_inconsistent",
               "current_editing",
               "current_draft",
@@ -18764,22 +18127,6 @@
           "data"
         ],
         "title": "PageVersionListResponse",
-        "type": "object"
-      },
-      "PageVersionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/PageVersionEntry"
-          },
-          "envelope": {
-            "$ref": "#/components/schemas/RESTResultEnvelope"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "PageVersionResponse",
         "type": "object"
       },
       "PasswordChangeRequest": {
@@ -19417,6 +18764,23 @@
             "title": "Expected Content Hash",
             "type": "string"
           },
+          "expected_editing_revision": {
+            "minimum": 1.0,
+            "title": "Expected Editing Revision",
+            "type": "integer"
+          },
+          "expected_published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Published Version Id"
+          },
           "expected_references_hash": {
             "anyOf": [
               {
@@ -19430,6 +18794,29 @@
             "description": "Required when a browser publishes an editing or draft version.",
             "title": "Expected References Hash"
           },
+          "idempotency_key": {
+            "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "on_conflict": {
+            "anyOf": [
+              {
+                "enum": [
+                  "keep_both",
+                  "latest"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Conflict"
+          },
           "publish_despite_findings": {
             "default": false,
             "title": "Publish Despite Findings",
@@ -19440,9 +18827,42 @@
             "minLength": 1,
             "title": "Reason",
             "type": "string"
+          },
+          "result_body_md": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Body Md"
+          },
+          "result_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Result Hash",
+            "type": "string"
+          },
+          "result_page_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Page Metadata"
           }
         },
         "required": [
+          "expected_editing_revision",
+          "expected_published_version_id",
+          "result_hash",
+          "idempotency_key",
           "reason",
           "expected_content_hash"
         ],
@@ -21412,6 +20832,18 @@
             "title": "Decision Type",
             "type": "string"
           },
+          "expected_editing_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Editing Revision"
+          },
           "expected_impact_fingerprint": {
             "anyOf": [
               {
@@ -21423,6 +20855,69 @@
               }
             ],
             "title": "Expected Impact Fingerprint"
+          },
+          "expected_published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Published Version Id"
+          },
+          "on_conflict": {
+            "anyOf": [
+              {
+                "enum": [
+                  "keep_both",
+                  "latest"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Conflict"
+          },
+          "result_body_md": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Body Md"
+          },
+          "result_hash": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Hash"
+          },
+          "result_page_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Page Metadata"
           }
         },
         "required": [
@@ -22368,6 +21863,18 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "merge_preview": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merge Preview"
           },
           "reason": {
             "anyOf": [
@@ -23631,6 +23138,19 @@
             "title": "Expected Editing Revision",
             "type": "integer"
           },
+          "feedback_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The feedback item this request addresses. It is linked to the request and marked draft_created.",
+            "title": "Feedback Id"
+          },
           "idempotency_key": {
             "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
             "maxLength": 160,
@@ -24816,6 +24336,7 @@
             "anyOf": [
               {
                 "enum": [
+                  "closed",
                   "state_inconsistent",
                   "current_editing",
                   "current_draft",
@@ -24918,6 +24439,14 @@
               }
             ],
             "title": "Parent Version Id"
+          },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
           },
           "prior_relation": {
             "default": "root",
@@ -25045,6 +24574,7 @@
             "anyOf": [
               {
                 "enum": [
+                  "closed",
                   "state_inconsistent",
                   "current_editing",
                   "current_draft",
@@ -25098,6 +24628,14 @@
               }
             ],
             "title": "Parent Version Id"
+          },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
           },
           "review_disposition": {
             "default": "none",
@@ -38502,6 +38040,117 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/bring-in": {
+      "post": {
+        "operationId": "bring_in_context_version_api_v1_workspaces__workspace_id__context_pages__page_id__bring_in_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BringInContextVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextPageWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTConflictErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Bring In Context Version",
+        "tags": [
+          "context-pages"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/comments": {
       "get": {
         "operationId": "list_page_inline_comments_api_v1_workspaces__workspace_id__context_pages__page_id__comments_get",
@@ -39460,6 +39109,115 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/merge-preview": {
+      "post": {
+        "operationId": "preview_context_merge_api_v1_workspaces__workspace_id__context_pages__page_id__merge_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextMergePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTConflictErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Context Merge",
+        "tags": [
+          "context-pages"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/neighbors": {
       "get": {
         "operationId": "get_context_page_neighbors_api_v1_workspaces__workspace_id__context_pages__page_id__neighbors_get",
@@ -40142,236 +39900,6 @@
         ]
       }
     },
-    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/versions/{branch_id}/reconciliation": {
-      "get": {
-        "operationId": "get_page_reconciliation_api_v1_workspaces__workspace_id__context_pages__page_id__versions__branch_id__reconciliation_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "page_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Page Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "branch_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Branch Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContextReconciliationDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTConflictErrorBody"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          },
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Page Reconciliation",
-        "tags": [
-          "context-pages"
-        ]
-      },
-      "post": {
-        "operationId": "reconcile_page_branch_api_v1_workspaces__workspace_id__context_pages__page_id__versions__branch_id__reconciliation_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "page_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Page Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "branch_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Branch Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ContextReconciliationRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContextReconciliationResultResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTConflictErrorBody"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          },
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Reconcile Page Branch",
-        "tags": [
-          "context-pages"
-        ]
-      }
-    },
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/versions/{page_version_id}/media/{asset_id}/content": {
       "get": {
         "operationId": "read_context_media_version_content",
@@ -40484,127 +40012,6 @@
         "summary": "Read Version Media",
         "tags": [
           "context-media"
-        ]
-      }
-    },
-    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/versions/{version_id}/discard": {
-      "post": {
-        "operationId": "discard_alternative_draft_api_v1_workspaces__workspace_id__context_pages__page_id__versions__version_id__discard_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "page_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Page Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Version Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ContextReconciliationDiscardRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PageVersionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTConflictErrorBody"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          },
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Discard Alternative Draft",
-        "tags": [
-          "context-pages"
         ]
       }
     },
@@ -47748,107 +47155,6 @@
           }
         ],
         "summary": "List Recent Review Decisions",
-        "tags": [
-          "read"
-        ]
-      }
-    },
-    "/api/v1/workspaces/{workspace_id}/reviews/reconciliations/discard-bulk": {
-      "post": {
-        "operationId": "discard_reconciliations_bulk_api_v1_workspaces__workspace_id__reviews_reconciliations_discard_bulk_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ContextReconciliationBulkDiscardRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContextReconciliationBulkDiscardResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          },
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Discard Reconciliations Bulk",
         "tags": [
           "read"
         ]

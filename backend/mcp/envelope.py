@@ -63,22 +63,13 @@ ERROR_CODE_GUIDANCE = {
     # and a blind resend overwrites exactly that work.
     "stale_base_version": (
         "What you based this on changed since you read it, so nothing was "
-        "saved. Re-read before retrying: your own open edit with "
-        "read_structure_map or read_context_outline (version='my_edit'; "
+        "saved. Re-read before retrying: the named shared draft with "
+        "read_structure_map or read_context_outline (version_id=<draft version_id>; "
         "error_details name its current version_id and editing_revision), "
         "otherwise the page or the latest_version_id this failure names. "
         "Rebuild your change on what you read and send it with the values "
         "from that read; do not resend the same content with only the "
         "revision or base swapped in."
-    ),
-    "base_not_found": (
-        "Call read_structure_map to get the page's current content_hash/version_id "
-        "and use that as base, then send a new request."
-    ),
-    "reconcile_target_invalid": (
-        "reconciles must name the alternative_draft_id from an earlier diverged "
-        "response on this page, and every operation must be "
-        "block-addressed; fix the request and resend."
     ),
     "text_occurrence_mismatch": (
         "old_text matched a different number of times than expected_occurrences. "
@@ -93,7 +84,7 @@ ERROR_CODE_GUIDANCE = {
         "old_text is not in the addressed text, even ignoring whitespace and "
         "Unicode differences. error_details lists the nearest lines and blocks "
         "(not applied). Read the text with read_context_outline "
-        "(version='my_edit', its section selected), copy old_text from it, "
+        "(version_id=<draft version_id>, its section selected), copy old_text from it, "
         "and address its block with at={by:'block', block, expected} (id and "
         "hash from read_structure_map); a small copy slip is then forgiven."
     ),
@@ -107,13 +98,13 @@ ERROR_CODE_GUIDANCE = {
         "The closest text differs in a way that is never guessed (a number, an "
         "identifier, code, a URL, a line or hard break, or too many "
         "characters); the message says which. Copy old_text exactly from the "
-        "text in error_details (read_context_outline with version='my_edit' "
+        "text in error_details (read_context_outline with the same version_id "
         "returns it), then send a new request."
     ),
     "section_not_found": (
         "The section address did not resolve. A heading_path lists every "
         "heading from the top of the page, the # title included. Call "
-        "read_context_outline (version='my_edit' for your open edit) for "
+        "read_context_outline (version_id=<draft version_id> for your open draft) for "
         "current section ids and heading paths, then send a new request."
     ),
     "section_hash_mismatch": (
@@ -215,14 +206,10 @@ ERROR_CODE_GUIDANCE = {
         "Send conversation_token: the token returned by an earlier successful "
         'call in this conversation, or the literal "new" to start one.'
     ),
-    "revision_submission_required": (
-        "Call submit_revision_for_review with review_item_id to revise the "
-        "active change request."
-    ),
     "embedded_image_requires_upload": (
         "Call upload_image first and store data.markdown or data.logical_ref. "
         "For a new page, create it (page-first) before uploading -- "
-        "upload_image always requires an existing page_id and your own open "
+        "upload_image always requires an existing page_id and an open draft "
         "version_id, never a page-less upload. Never persist "
         "data.content_url or another /api/v1 transport URL, and never fall "
         "back to a data: URI."
@@ -255,9 +242,8 @@ ERROR_CODE_GUIDANCE = {
         "quota before uploading again. Do not retry unchanged."
     ),
     "media_editing_not_open": (
-        "The named version_id is no longer open (already submitted, "
-        "published, or discarded). Open or resume your own editing session on "
-        "this page, then upload_image against its current version_id "
+        "The named version_id is no longer an open draft. Open a draft on "
+        "this page, then upload_image against its version_id "
         "with a new marker_uuid. Do not retry unchanged."
     ),
     "media_staging_bytes_exceeded": (
@@ -316,7 +302,6 @@ RETRYABLE_BY_CODE = {
     # False despite being recoverable: an identical request still has no token.
     # Recovery adds an earlier envelope token or the "new" sentinel.
     "conversation_token_required": False,
-    "revision_submission_required": False,
     "embedded_image_requires_upload": False,
     "media_content_mismatch": False,
     "media_install_in_progress": True,
@@ -338,8 +323,6 @@ RETRYABLE_BY_CODE = {
     # thing that is stale, so resending it loops forever. The guidance above
     # carries the recovery, which is a different request, not a retry.
     "stale_base_version": False,
-    "base_not_found": False,
-    "reconcile_target_invalid": False,
     "text_occurrence_mismatch": False,
     "text_match_not_found": False,
     "text_match_ambiguous": False,
@@ -444,9 +427,7 @@ def error_envelope(
         # repair instruction. Other failures keep their complete cause, which
         # can include the version, hash and revision needed to recover.
         if root == "validation_failed" and message:
-            error_message = _clamp(
-                message, MAX_ERROR_MESSAGE_CHARS - len(guidance) - 1
-            )
+            error_message = _clamp(message, MAX_ERROR_MESSAGE_CHARS - len(guidance) - 1)
         error_message = f"{error_message} {guidance}" if error_message else guidance
     return MCPResultEnvelope(
         result_status=result_status or result_status_for_error(error_code),

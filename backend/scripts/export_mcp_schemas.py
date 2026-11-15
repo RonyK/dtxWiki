@@ -79,8 +79,6 @@ from backend.schemas.mcp.read_tools import (
 from backend.schemas.mcp.review_tools import (
     ListRequestedChangesInput,
     ListRequestedChangesOutput,
-    SubmitRevisionForReviewInput,
-    SubmitRevisionForReviewOutput,
 )
 from backend.schemas.mcp.upload_tools import UploadImageInput, UploadImageToolOutput
 
@@ -184,10 +182,6 @@ def build_mcp_schemas() -> dict[str, dict]:
         "list_requested_changes": {
             "input": ListRequestedChangesInput.model_json_schema(),
             "output": ListRequestedChangesOutput.model_json_schema(),
-        },
-        "submit_revision_for_review": {
-            "input": SubmitRevisionForReviewInput.model_json_schema(),
-            "output": SubmitRevisionForReviewOutput.model_json_schema(),
         },
         "wiki_maintenance": {
             "input": WikiMaintenanceInput.model_json_schema(),

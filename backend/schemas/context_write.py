@@ -232,11 +232,6 @@ class UpdateDraftRequest(InputRequest):
         return self
 
 
-# Consumed by the MCP receipt adapter, which wraps page-authored text
-# (resolved_heading_path, anchor_preview) as untrusted before it reaches the
-# response. Deliberately plain str/dict rather than the MCP layer's
-# UntrustedPageText/ResolvedLineRange: the MCP schema module already imports
-# FROM here, so the reverse import would cycle.
 class PatchOperationResolution(BaseModel):
     """What the server actually resolved for one ``patch_draft`` operation.
 
@@ -437,6 +432,12 @@ class UpdateDraftResult(BaseModel):
 
 
 class PublishContextPageRequest(InputRequest):
+    result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
+    result_page_metadata: dict[str, Any] | None = None
+    expected_editing_revision: int | None = Field(default=None, ge=1)
+    expected_published_version_id: UUID | None = None
+    result_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
+    on_conflict: Literal["keep_both", "latest"] | None = None
     # Deliberately carries no floor override. This model is bound by the
     # workspace publish route, which any `draft-write` bearer token reaches, so
     # a field here is a field every non-interactive caller can send. Overriding
@@ -518,7 +519,7 @@ class CiteResult(BaseModel):
     version_id: UUID
     editing_revision: int
     references_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
-    publication_state: Literal["editing", "draft"] = "editing"
+    publication_state: Literal["draft"] = "draft"
     added: list[DocumentReferenceInput] = Field(default_factory=list)
     removed: list[DocumentReferenceRemoveInput] = Field(default_factory=list)
     unchanged: list[DocumentReferenceInput | DocumentReferenceRemoveInput] = Field(
@@ -594,6 +595,12 @@ class FeedbackListResponse(RESTResponseBase):
 
 
 class ReviewDecisionRequest(InputRequest):
+    result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
+    result_page_metadata: dict[str, Any] | None = None
+    expected_editing_revision: int | None = Field(default=None, ge=1)
+    expected_published_version_id: UUID | None = None
+    result_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
+    on_conflict: Literal["keep_both", "latest"] | None = None
     # Reuse this ID when retrying an uncertain send. It becomes the durable
     # decision ledger ID, so a retry cannot add another request_changes round.
     decision_id: UUID | None = None
@@ -1056,6 +1063,7 @@ class ReviewSelectionItem(BaseModel):
     reason: str | None = None
     target_title: str | None = None
     target_version_no: int | None = None
+    merge_preview: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="forbid")
 

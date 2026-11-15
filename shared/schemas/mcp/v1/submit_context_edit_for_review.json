@@ -22,6 +22,20 @@
         "title": "Expected Editing Revision",
         "type": "integer"
       },
+      "feedback_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "The feedback item this request addresses. It is linked to the request and marked draft_created.",
+        "title": "Feedback Id"
+      },
       "idempotency_key": {
         "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
         "maxLength": 160,
@@ -565,7 +579,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",

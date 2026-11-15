@@ -35,6 +35,13 @@ from backend.services.read_errors import RejectedByPolicyError
 
 # (HTTP method, FastAPI route path template) → required scopes (any-of).
 REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/merge-preview",
+    ): ("draft-write",),
+    ("POST", "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/bring-in"): (
+        "draft-write",
+    ),
     # /api/v1/workspaces/{workspace_id}/context/pages (P9.1 canonical Context
     # route family -- replaces the old /api/v1/pages* (PageService, P8) and
     # the intermediate context-pages* (DomainReadService/ContextWriteService)
@@ -75,11 +82,6 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     (
         "GET",
         "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/versions",
-    ): CONTEXT_PAGE_BODY_SCOPES,
-    (
-        "GET",
-        "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}"
-        "/versions/{branch_id}/reconciliation",
     ): CONTEXT_PAGE_BODY_SCOPES,
     (
         "GET",
@@ -156,16 +158,6 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
     (
         "POST",
         "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}"
-        "/versions/{version_id}/discard",
-    ): ("draft-write",),
-    (
-        "POST",
-        "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}"
-        "/versions/{branch_id}/reconciliation",
-    ): ("draft-write",),
-    (
-        "POST",
-        "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}"
         "/versions/{version_id}/publish",
     ): ("draft-write",),
     (
@@ -226,10 +218,6 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "PUT",
         "/api/v1/workspaces/{workspace_id}/favorites/{target_kind}/{target_id}",
     ): ("read",),
-    (
-        "POST",
-        "/api/v1/workspaces/{workspace_id}/reviews/reconciliations/discard-bulk",
-    ): ("draft-write",),
     ("GET", "/api/v1/workspaces/{workspace_id}/tree/nodes/{node_id}"): ("read",),
     (
         "GET",

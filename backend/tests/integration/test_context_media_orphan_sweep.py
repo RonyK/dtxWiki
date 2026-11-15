@@ -69,7 +69,7 @@ def _seed_page(
         content_hash="0" * 64,
         actor_type="human",
         actor_id=None,
-        version_status="editing",
+        version_status="draft",
         created_by_actor_kind=actor.kind,
         created_by_actor_id=actor.id,
     )
@@ -241,7 +241,7 @@ def test_page_bound_asset_with_no_surviving_usage_is_reclaimed(
             _candidate(workspace_id, page.id, version.id, blob, inspection_id, actor),
             now=NOW,
         )
-        version.version_status = "draft"
+        version.version_status = "closed"
         page.latest_draft_version_id = version.id
         session.flush()
         SyncVersionUsage().execute(
@@ -327,7 +327,7 @@ def test_page_bound_orphan_with_a_blank_page_title_resolves_page_title_to_none(
             _candidate(workspace_id, page.id, version.id, blob, inspection_id, actor),
             now=NOW,
         )
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         asset_id = asset.asset_id
         page_id = page.id
@@ -367,7 +367,7 @@ def test_page_bound_asset_referenced_by_a_superseded_version_is_not_reclaimed(
             _candidate(workspace_id, page.id, version.id, blob, inspection_id, actor),
             now=NOW,
         )
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         SyncVersionUsage().execute(
             repository,
@@ -482,7 +482,7 @@ def test_open_editing_upload_is_protected_without_age_limit(session_factory) -> 
             == "active"
         )
         # Once submitted, ordinary asset-age retention applies immediately.
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         orphans = list_orphans(
             session,
@@ -554,7 +554,7 @@ def test_autosave_via_service_keeps_editing_status_and_protects_unattached_uploa
         idempotency_key="orphan-sweep-autosave-1",
         expected_editing_revision=created.editing_revision,
     )
-    assert first.version_status == "editing"
+    assert first.version_status == "draft"
     assert first.version_id == created.version_id
 
     second = page_service.autosave_page(
@@ -570,7 +570,7 @@ def test_autosave_via_service_keeps_editing_status_and_protects_unattached_uploa
         idempotency_key="orphan-sweep-autosave-2",
         expected_editing_revision=first.editing_revision,
     )
-    assert second.version_status == "editing"
+    assert second.version_status == "draft"
     assert second.version_id == created.version_id
 
     with session_factory.begin() as session:
@@ -602,7 +602,7 @@ def test_submitted_uninserted_upload_is_reclaimed_exactly_once(session_factory) 
             now=NOW,
         )
         _pin_created_at(session, workspace_id, asset.asset_id, NOW)
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         orphans = list_orphans(
             session,
@@ -644,7 +644,7 @@ def test_zero_retention_disables_reclamation_but_not_visibility(
             _candidate(workspace_id, page.id, version.id, blob, inspection_id, actor),
             now=NOW,
         )
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         asset_id = asset.asset_id
 
@@ -680,7 +680,7 @@ def test_retention_boundary_is_inclusive(session_factory) -> None:
             _candidate(workspace_id, page.id, version.id, blob, inspection_id, actor),
             now=NOW,
         )
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         asset_id = asset.asset_id
         _pin_created_at(session, workspace_id, asset_id, NOW)
@@ -726,7 +726,7 @@ def test_drain_removes_an_upload_request_marker_too(session_factory) -> None:
             _candidate(workspace_id, page.id, version.id, blob, inspection_id, actor),
             now=NOW,
         )
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         asset_id = asset.asset_id
         _pin_created_at(session, workspace_id, asset_id, NOW)
@@ -779,7 +779,7 @@ def test_drain_processes_a_candidate_queued_by_the_manual_delete_action(
             _candidate(workspace_id, page.id, version.id, blob, inspection_id, actor),
             now=NOW,
         )
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         asset_id = asset.asset_id
         usage = repository.get_page_asset_usage(workspace_id, page.id, asset_id)
@@ -844,7 +844,7 @@ def test_reupload_with_the_same_marker_is_not_bricked_by_a_drained_asset(
             ),
             now=NOW,
         )
-        version.version_status = "draft"
+        version.version_status = "closed"
         session.flush()
         _pin_created_at(session, workspace_id, marker_uuid, NOW)
 
@@ -882,7 +882,7 @@ def test_reupload_with_the_same_marker_is_not_bricked_by_a_drained_asset(
             actor_type="human",
             created_by_actor_kind=actor.kind,
             created_by_actor_id=actor.id,
-            version_status="editing",
+            version_status="draft",
         )
         session.add(editing)
         session.flush()

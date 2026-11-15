@@ -12,10 +12,12 @@ from backend.tests.conftest import authenticate_test_client_in_workspace
 
 
 def test_link_preview_checks_source_before_projection_and_never_saves(page_service):
-    client = TestClient(create_app(
-        settings=Settings(database_url="sqlite+pysqlite:///:memory:"),
-        page_service=page_service,
-    ))
+    client = TestClient(
+        create_app(
+            settings=Settings(database_url="sqlite+pysqlite:///:memory:"),
+            page_service=page_service,
+        )
+    )
     workspace_id = authenticate_test_client_in_workspace(
         client, page_service.session_factory
     )
@@ -126,28 +128,47 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
     private_locator = "[[private-mapping]]"
     with page_service.session_factory.begin() as session:
         private_version = ContextPageVersion(
-            workspace_id=UUID(workspace_id), page_id=UUID(source["id"]),
-            version_no=2, body_md=private_locator, content_hash="a" * 64,
-            actor_type="human", created_by_actor_kind="human",
-            created_by_actor_id="another-author", version_status="editing",
+            workspace_id=UUID(workspace_id),
+            page_id=UUID(source["id"]),
+            version_no=2,
+            body_md=private_locator,
+            content_hash="a" * 64,
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="another-author",
+            version_status="draft",
         )
         session.add(private_version)
         session.get(ContextPage, UUID(source["id"])).title = "Foreign private title"
         session.flush()
-        session.add(PageLink(
-            workspace_id=UUID(workspace_id), source_page_id=UUID(source["id"]),
-            source_version_id=private_version.id,
-            target_page_id=UUID(source["id"]), target_slug="private-mapping",
-            locator_key="wikilink:private-mapping", link_syntax="wikilink",
-        ))
-    private_pin_probe = client.post(url, json={
-        **request, "body_md": private_locator, "request_id": "private-pin-probe",
-    })
+        session.add(
+            PageLink(
+                workspace_id=UUID(workspace_id),
+                source_page_id=UUID(source["id"]),
+                source_version_id=private_version.id,
+                target_page_id=UUID(source["id"]),
+                target_slug="private-mapping",
+                locator_key="wikilink:private-mapping",
+                link_syntax="wikilink",
+            )
+        )
+    private_pin_probe = client.post(
+        url,
+        json={
+            **request,
+            "body_md": private_locator,
+            "request_id": "private-pin-probe",
+        },
+    )
     assert private_pin_probe.status_code == 200, private_pin_probe.text
-    assert private_pin_probe.json()["data"]["link_targets"] == [{
-        "locator": private_locator, "href": None,
-        "state": "unavailable", "target_page_id": None,
-    }]
+    assert private_pin_probe.json()["data"]["link_targets"] == [
+        {
+            "locator": private_locator,
+            "href": None,
+            "state": "unavailable",
+            "target_page_id": None,
+        }
+    ]
 
     # Once a second author's version exists, page metadata cannot prove the
     # selected root's title. A legacy mutable title must not leak through the

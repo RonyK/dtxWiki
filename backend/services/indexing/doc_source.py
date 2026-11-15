@@ -12,6 +12,7 @@ from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.context import ContextClaim, ContextPage, ContextPageVersion
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
+from backend.repositories.workspace_scoped import select_projection_in_workspace
 from backend.services.entity_ref import library_stable_url
 from backend.services.library_canonical import (
     get_canonical_library_version,
@@ -52,8 +53,8 @@ def compose_context_doc_source(
         target_id=page.id,
     )
     header = _header(
-        title=page.title,
-        aliases=page.aliases or [],
+        title=(version.page_metadata or {}).get("title", page.title),
+        aliases=(version.page_metadata or {}).get("aliases", page.aliases or []),
         breadcrumb=breadcrumb,
         nav_description=(
             version.nav_description
@@ -267,37 +268,23 @@ def compose_agent_page_doc_sources(
 def _context_live_versions(
     session: Session, page: ContextPage
 ) -> list[tuple[UUID, str]]:
-    """Which (version_id, "published"/"draft") pairs feed FTS5 doc sources.
-
-    Same fix as `PageService._name_index_live_versions`: a page-first
-    creation can have `current_version_id` name a private "editing" row
-    directly, with `latest_draft_version_id` staying `None`,
-    so the old id-comparison-only classification (still just an id
-    comparison here, with no `version_status` check) would tag that row
-    "draft" and feed its full body/claim text into the FTS index under that
-    scope. `retrieval/keyword.py`'s `_hydrate_context_pages` currently
-    cross-checks every FTS hit's `version_id` against the live, per-actor
-    `visible_search_version_ids` (context_visibility.py) before surfacing
-    it, so a misclassified row here has not been shown reachable as an
-    actual search disclosure -- but that is a property of today's one
-    consumer, not of this function, so it is fixed the same way rather than
-    left to depend on that consumer never changing.
-    """
-
-    versions: list[tuple[UUID, str]] = []
+    versions = []
     if page.current_published_version_id is not None:
         versions.append((page.current_published_version_id, "published"))
-    draft_id = page.latest_draft_version_id
-    if (
-        draft_id is None
-        and page.current_version_id is not None
-        and page.current_version_id != page.current_published_version_id
-    ):
-        draft_id = page.current_version_id
-    if draft_id is not None and draft_id != page.current_published_version_id:
-        draft = session.get(ContextPageVersion, draft_id)
-        if draft is not None and draft.version_status == "draft":
-            versions.append((draft.id, "draft"))
+    versions.extend(
+        (version_id, "draft")
+        for version_id in session.scalars(
+            select_projection_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                columns=(ContextPageVersion.id,),
+                predicates=(
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.version_status == "draft",
+                ),
+            ).order_by(ContextPageVersion.last_saved_at.desc(), ContextPageVersion.id)
+        )
+    )
     return versions
 
 

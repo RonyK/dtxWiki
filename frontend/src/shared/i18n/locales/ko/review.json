@@ -452,7 +452,12 @@
       "superseded_by_rejected_candidate": "같은 버전 거절로 정리",
       "superseded_by_newer_draft": "새 초안으로 정리",
       "superseded_by_decision_undo": "결정 취소로 정리"
-    }
+    },
+    "mergeConflict": "변경 내용이 충돌합니다. 현재 초안을 다시 확인한 뒤 승인하세요.",
+    "mergePreviewTitle": "합쳐진 페이지 확인",
+    "mergePreviewDescription": "게시본이 변경되었습니다. 합쳐진 결과를 확인한 뒤 승인하세요.",
+    "mergePreviewApprove": "합쳐진 페이지 승인",
+    "mergePreviewCancel": "취소"
   },
   "document": {
     "targets": "검토 대상",

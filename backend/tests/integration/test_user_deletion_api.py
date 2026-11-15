@@ -12,6 +12,7 @@ from backend.models import (
     AccountInboxEntry,
     ApiToken,
     AppMetadata,
+    AuditEvent,
     ChangeSet,
     ContextMediaUsage,
     ContextPage,
@@ -197,11 +198,42 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             created_by_actor_kind="human",
             created_by_actor_id=str(target.user_id),
             content_hash="private-content-hash",
-            version_status="editing",
+            version_status="draft",
         )
         session.add(private_version)
         session.flush()
         private_version_id = private_version.id
+        # A later save by the creator does not erase another editor's
+        # earlier contribution. The durable version-scoped audit proves it.
+        collaborative = ContextPageVersion(
+            workspace_id=shared_id,
+            page_id=page_id,
+            version_no=3,
+            body_md="Retained collaborative draft",
+            content_hash="collaborative-hash",
+            actor_type="human",
+            actor_id=target.user_id,
+            created_by_actor_kind="human",
+            created_by_actor_id=str(target.user_id),
+            version_status="draft",
+            page_metadata={"title": "Shared collaborative title"},
+        )
+        session.add(collaborative)
+        session.flush()
+        collaborative_id = collaborative.id
+        session.add(
+            AuditEvent(
+                workspace_id=shared_id,
+                actor_kind="human",
+                actor_id=str(admin.user_id),
+                actor_type="human",
+                action="context_page.draft.save",
+                target_kind="context_page",
+                target_type="context_page",
+                target_id=page_id,
+                payload={"version_id": str(collaborative_id)},
+            )
+        )
         for owner, note in (
             (private_version_id, "Unsubmitted private reference note"),
             (version_id, "Retained shared reference note"),
@@ -258,7 +290,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             created_by_actor_kind="human",
             created_by_actor_id=str(target.user_id),
             content_hash="private-document-hash",
-            version_status="editing",
+            version_status="draft",
         )
         session.add(private_page_version)
         session.flush()
@@ -799,15 +831,23 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         foreign = session.get(ContextPageVersion, foreign_version_id)
         assert foreign.body_md == "Contributed before leaving"
         assert foreign.actor_display_name is None
-        # Unsubmitted private edits nobody else could open are deleted.
+        # Sole-author unsubmitted bytes are removed; evidence of another
+        # contributor and already-submitted work keeps shared drafts intact.
+        collaborative = session.get(ContextPageVersion, collaborative_id)
+        assert collaborative.body_md == "Retained collaborative draft"
+        assert collaborative.page_metadata["title"] == "Shared collaborative title"
         private_version = session.get(ContextPageVersion, private_version_id)
         assert private_version.version_status == "discarded"
         assert private_version.body_md == ""
-        assert not session.scalars(
-            select(ContextDocumentReference).where(
-                ContextDocumentReference.owner_version_id == private_version_id
-            )
-        ).all()
+        assert private_version.page_metadata == {}
+        assert (
+            session.scalars(
+                select(ContextDocumentReference).where(
+                    ContextDocumentReference.owner_version_id == private_version_id
+                )
+            ).all()
+            == []
+        )
         assert (
             session.scalar(
                 select(ContextDocumentReference.note).where(
@@ -822,7 +862,9 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
                 LibraryItemTombstone, deleted_reference_id
             ).citations
         ] == ["Shared deleted reference note"]
-        assert session.get(ContextPage, page_id).current_version_id == version_id
+        assert (
+            session.get(ContextPage, page_id).current_published_version_id == version_id
+        )
         assert (
             session.get(
                 ContextMediaUsage,
@@ -833,8 +875,12 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         private_page = session.get(ContextPage, private_page_id)
         assert private_page.lifecycle_status == "archived"
         private_node = session.get(WorkspaceTreeNode, private_node_id)
-        assert private_node.title == private_page.title != "Private title"
-        assert private_node.slug == private_page.slug != "private-title"
+        assert private_node.title == private_page.title == "Deleted draft"
+        assert (
+            private_node.slug
+            == private_page.slug
+            == f"deleted-draft-{private_page.id.hex}"
+        )
         assert session.get(Workspace, shared_id) is not None
         shared_chat = session.get(McpChatSession, shared_chat_id)
         assert shared_chat.owner_user_id is None

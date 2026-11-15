@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import LargeBinary, and_, cast, exists, func, or_, select
+from sqlalchemy import LargeBinary, and_, cast, exists, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
@@ -23,7 +23,11 @@ from backend.repositories.context_visibility import (
     visible_context_version_expression,
 )
 from backend.repositories.page_links import active_page_link_condition
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    join_in_workspace,
+    select_in_workspace,
+)
 from backend.utils.actor_display import resolve_actor_display_name
 from backend.utils.block_identity import (
     BlockOperationProvenance,
@@ -149,43 +153,6 @@ def list_pages_with_current_versions(
     return list(session.execute(statement).tuples())
 
 
-def list_editing_versions_for_actor(
-    session: Session,
-    workspace_id: UUID,
-    actor_kind: str,
-    actor_id: str,
-    limit: int,
-    offset: int = 0,
-) -> list[tuple[ContextPageVersion, ContextPage]]:
-    """This actor's own open "editing" rows in ``workspace_id`` (P8.3/P8.6).
-
-    Filters on ``created_by_actor_kind``/``created_by_actor_id`` in the WHERE
-    clause itself (not a post-fetch filter) -- the dominant bug class this
-    session has found is a query that fetches broadly and trusts a caller to
-    filter afterward. Ordered by most-recently-saved first, with ``id`` as a
-    stable tiebreaker since two autosaves can land the same ``last_saved_at``
-    at second/microsecond storage granularity.
-    """
-
-    statement = (
-        select(ContextPageVersion, ContextPage)
-        .join(ContextPage, ContextPage.id == ContextPageVersion.page_id)
-        .where(
-            ContextPageVersion.workspace_id == workspace_id,
-            ContextPageVersion.version_status == "editing",
-            ContextPageVersion.created_by_actor_kind == actor_kind,
-            ContextPageVersion.created_by_actor_id == actor_id,
-        )
-        .order_by(
-            ContextPageVersion.last_saved_at.desc(),
-            ContextPageVersion.id.asc(),
-        )
-        .offset(offset)
-        .limit(limit)
-    )
-    return list(session.execute(statement).tuples())
-
-
 def iter_version_block_maps(session: Session, *, batch_size: int = 200):
     """Yield (version_status, body_md, block_map) for every version row.
 
@@ -199,32 +166,6 @@ def iter_version_block_maps(session: Session, *, batch_size: int = 200):
         ContextPageVersion.block_map,
     ).execution_options(yield_per=batch_size)
     yield from session.execute(statement)
-
-
-def get_open_edit_for_actor(
-    session: Session,
-    *,
-    workspace_id: UUID,
-    page_id: UUID,
-    actor_kind: str,
-    actor_id: str,
-) -> ContextPageVersion | None:
-    """This actor's own open "editing" row on one page, or None.
-
-    At most one exists (``uq_cpv_current_editing_per_author``). The actor
-    filter is in the WHERE clause, so another author's private row is never
-    fetched at all.
-    """
-
-    return session.scalar(
-        select(ContextPageVersion).where(
-            ContextPageVersion.workspace_id == workspace_id,
-            ContextPageVersion.page_id == page_id,
-            ContextPageVersion.version_status == "editing",
-            ContextPageVersion.created_by_actor_kind == actor_kind,
-            ContextPageVersion.created_by_actor_id == actor_id,
-        )
-    )
 
 
 def get_page_by_id(session: Session, page_id: UUID) -> ContextPage | None:
@@ -333,30 +274,19 @@ def live_page_link_version_ids(
 ) -> set[UUID]:
     """Return versions whose authored-link projections remain live."""
 
-    pointer_ids = {
-        version_id
-        for version_id in (
-            page.current_published_version_id,
-            page.latest_draft_version_id,
-            page.current_version_id,
-        )
-        if version_id is not None
-    }
-    live_predicates = [ContextPageVersion.version_status == "editing"]
-    if pointer_ids:
-        live_predicates.append(
-            and_(
-                ContextPageVersion.id.in_(pointer_ids),
-                ContextPageVersion.version_status != "discarded",
-            )
-        )
     return set(
         session.scalars(
-            select(ContextPageVersion.id).where(
-                ContextPageVersion.workspace_id == page.workspace_id,
-                ContextPageVersion.page_id == page.id,
-                or_(*live_predicates),
-            )
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    ContextPageVersion.page_id == page.id,
+                    or_(
+                        ContextPageVersion.version_status == "draft",
+                        ContextPageVersion.id == page.current_published_version_id,
+                    ),
+                ),
+            ).with_only_columns(ContextPageVersion.id)
         )
     )
 
@@ -370,37 +300,36 @@ def context_link_advisory_row(
 ) -> ContextLinkAdvisoryRow:
     """Load the workspace-scoped authored-link advisory facts in one query."""
 
-    source_page = aliased(ContextPage, name="advisory_source_page")
-    source_version = aliased(ContextPageVersion, name="advisory_source_version")
+    source_page = ContextPage
+    source_version = ContextPageVersion
     candidate_page = aliased(ContextPage, name="advisory_candidate_page")
     candidate_head = aliased(ContextPageVersion, name="advisory_candidate_head")
     linked_page = aliased(ContextPage, name="advisory_linked_page")
     linked_head = aliased(ContextPageVersion, name="advisory_linked_head")
 
-    source_is_advisory_eligible = exists(
-        select(1)
-        .select_from(source_page)
-        .join(
-            source_version,
-            and_(
-                source_version.id == version_id,
-                source_version.page_id == source_page.id,
-                source_version.workspace_id == source_page.workspace_id,
-            ),
-        )
-        .where(
+    source_query = select_in_workspace(
+        source_page,
+        workspace_id=workspace_id,
+        conditions=(
             source_page.id == page_id,
-            source_page.workspace_id == workspace_id,
             source_page.lifecycle_status != "archived",
             source_version.version_status != "discarded",
             or_(
-                source_version.version_status == "editing",
-                source_page.current_version_id == version_id,
+                source_version.version_status == "draft",
                 source_page.current_published_version_id == version_id,
-                source_page.latest_draft_version_id == version_id,
             ),
-        )
+        ),
     )
+    source_query = join_in_workspace(
+        source_query,
+        source_page,
+        source_version,
+        workspace_id=workspace_id,
+        on=and_(
+            source_version.id == version_id, source_version.page_id == source_page.id
+        ),
+    )
+    source_is_advisory_eligible = exists(source_query.with_only_columns(literal(1)))
 
     has_other_graph_visible_context = exists(
         select(1)
@@ -692,6 +621,7 @@ def insert_version_copy(
         identity_seed=identity_seed,
         explicit_block_replacements=explicit_block_replacements,
         prepared_block_map=prepared_block_map,
+        validate_authored_body=False,
     )
     if source_version is not None:
         from backend.repositories.document_reference import copy_document_references
@@ -717,6 +647,7 @@ def _insert_version_raw(
     identity_seed: str | None = None,
     explicit_block_replacements: dict[str, str] | None = None,
     prepared_block_map: list[dict] | None = None,
+    validate_authored_body: bool = True,
 ) -> ContextPageVersion:
     """Single constructor for ContextPageVersion rows.
 
@@ -736,7 +667,8 @@ def _insert_version_raw(
     # The lexical half of the media contract must run before row locks, version
     # allocation, or any PageVersion/Usage DML. SyncVersionUsage repeats the
     # pure validation while atomically authorizing and replacing occurrences.
-    validate_page_markdown_input(body_md)
+    if validate_authored_body:
+        validate_page_markdown_input(body_md)
     validate_markdown_media_policy(body_md)
     # Every Context-media writer uses one lock order: Workspace media intent,
     # then Page, then association/Usage.  Looking up the immutable Workspace id

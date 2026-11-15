@@ -1035,7 +1035,7 @@ means server-confirmed links, not permission to activate arbitrary authored
 references. An omitted or empty value confirms no additional references. This
 MCP revision does not add that metadata to read responses.
 
-- **MCP Streamable HTTP**: 31 tools are registered; the tools available to a
+- **MCP Streamable HTTP**: 30 tools are registered; the tools available to a
   particular client are determined by its permissions and returned by `tools/list`.
 
 <!-- mcp-tool-catalog:start -->
@@ -1046,16 +1046,17 @@ MCP revision does not add that metadata to read responses.
 | Edit Context | `create_context_page`, `begin_context_edit`, `update_context_edit`, `submit_context_edit_for_review`, `discard_context_edit`, `patch_context_edit`, `list_my_context_edits`, `upload_image`, `cite`, `submit_feedback` |
 | Recover writes | `get_operation_status` |
 | Agent workflows | `list_agent_categories`, `read_agent_page`, `write_agent_page_draft`, `build_agent_input_bundle` |
-| Review and maintenance | `list_requested_changes`, `submit_revision_for_review`, `wiki_maintenance` |
+| Review and maintenance | `list_requested_changes`, `wiki_maintenance` |
 
 <!-- mcp-tool-catalog:end -->
 
 For partial edits, read the structure with `read_structure_map`, open an edit
 with `begin_context_edit`, and apply `patch_context_edit`. Use
 `update_context_edit` for a full body replacement or page metadata changes.
-Keep one edit per task and submit it once. In the same MCP chat,
-`begin_context_edit` after a submit reopens that submission while its review is
-pending, instead of creating a new version.
+Keep one draft version for the task and submit it once. `begin_context_edit`
+accepts `from`: an open draft joins that shared row, a commit starts a new draft,
+and omission starts from the published version. A submitted draft remains
+editable at the same `version_id`; it does not need to be reopened.
 MCP editing commands use `page_id`, `version_id`, `expected_editing_revision`,
 and `idempotency_key` to detect conflicting updates. Partial reads require a
 top-level `page_id` (UUID or stable URL); optional
@@ -1066,7 +1067,7 @@ MCP image upload also uses `version_id`; edit responses use `page_id`, and
 structure maps expose the document's hash as `content_hash`.
 
 MCP keyed writes require `idempotency_key` before their first send, including page
-creation, review resubmission, and AgentPage drafts. After a lost response, call
+creation, review requests, and AgentPage drafts. After a lost response, call
 `get_operation_status` with that key and follow its `next_action`; the former
 MCP `retry_only` input is removed. REST editing requests retain `retry_only`:
 they replay an existing unexpired receipt or return `operation_outcome_unknown`
@@ -1098,40 +1099,31 @@ registering Graph edges. Historical `@cite{source-key}` display tokens remain
 unchanged and receive an unresolved-link warning; replace them with permanent
 document addresses to register citations.
 
-Browser create and autosave requests set `share_draft: true` to save a shared,
-unpublished draft. Only browser-session authentication accepts this option;
-MCP creation and editing keep their separate author-owned editing rows. Before changing reference
-metadata, the editor stages an owned draft even when the body is unchanged.
-Reviewed versions are forked first. The browser can explicitly submit its
-shared draft through `submit-for-review`; saving alone does not request review.
-Browser publication of a mutable version requires both content and reference
-hashes. Browser image uploads also accept the owner's current unreviewed draft.
-All saved editing rows are readable by Editors and Owners; `share_draft` selects
-the browser write workflow rather than a privacy setting. Browser and MCP
-authentication resolve to the same human actor, so a browser save continues the
-shared draft line and lands on the caller's own `editing` row only when
-the request names it as its base or session version. Reading another author's
-editing row does not grant write ownership of that session.
+Context drafts are shared mutable rows. Browser and MCP saves address the exact
+`version_id` and its `expected_editing_revision`. Browser autosave also sends
+`base_snapshot`; a clean three-way merge returns the saved server result and
+`autosave_merged`. MCP stale revisions return a conflict and require rereading
+that same draft. Saving does not request review.
 
-Saving an author-owned `editing` row moves `current_version_id` and
-`latest_draft_version_id` only on a never-published page whose pointers name no
-submitted draft, browser-shared draft or published snapshot. Otherwise the
-pointers keep naming the shared head; authors reach their edit through their own
-editing row (`version: "my_edit"` in MCP reads). Submitting an edit while another
-shared draft holds `latest_draft_version_id` is refused as a conflict. A save by
-another actor keeps the existing write-target selection and does not adopt
-someone else's editing row as its writable session.
+Review requests remain attached to an editable draft. Publication and approval
+bind the preview's draft revision, published version and result hash, then
+recheck them under the page lock. The editor asks for confirmation of an
+automatically merged result before publishing it. Conflict choice controls are
+provided separately from this minimum editor integration.
 
-Ordinary Context reads prefer the published version. Without a published version,
-they select the most recently saved `editing` or `draft` row. Editors and Owners
-receive `open_drafts` and unpublished bodies carry `draft` metadata. Open drafts
-include all editing rows, every unreviewed draft (including rows outside the
-latest-draft pointer), and drafts with a pending or changes-requested review.
-Resolved reviews remain readable history, including the default body of a
-never-published page when no draft remains open. `list_context_drafts` and the
-REST page's `/drafts` endpoint paginate summaries without loading their bodies.
-Search keeps its published-plus-latest-draft selection. Discarded editing rows
-remain outside default reads and draft lists.
+Drafts remain in the database. Publication, rejection, withdrawal and restore
+close a draft into a Git commit with its existing ID and commit parents. The
+current published version retains its database body copy; closed and superseded
+versions read their bodies from Git. Old draft-pointer and reconciliation
+columns remain until their cleanup migration.
+
+Ordinary Context reads prefer the published version. Without one, they select
+the most recently saved open draft. Editors and Owners receive `open_drafts`
+and unpublished bodies carry `draft` metadata, including commit parents and
+review state. `list_context_drafts` and the REST `/drafts` endpoint paginate
+summaries without loading bodies. Index collection includes every open draft;
+search continues returning one result per document until version-aware result
+presentation is introduced. Discarded historical editing rows remain hidden.
 
 REST detail and write responses carry `can_submit_for_review` for the calling
 actor; the editor enables **Request review** only when it is true. MCP tool
@@ -1157,9 +1149,9 @@ unchanged. This ORM rule requires no database migration.
 `write_draft`, `update_draft`, and `patch_draft` have been removed without
 compatibility aliases. Use the Context tools above and reconnect through `/mcp`.
 The old `/api/v1/pages*` REST routes have also been replaced by workspace-scoped
-Context routes. `submit_revision_for_review` remains available for responding
-to requested changes. The internal Python draft methods remain in use; their
-removal from the MCP catalog does not remove the internal workflows.
+Context routes. `submit_revision_for_review` is also removed: save requested
+changes to the same shared draft with the Context editing tools. Some inactive
+internal helpers remain until the legacy-code cleanup.
 
 <!-- legacy-tool-migration:end -->
 

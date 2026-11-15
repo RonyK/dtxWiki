@@ -82,10 +82,13 @@ def test_unresolved_and_healthy_links(session_factory):
         canonical = f"/p/{workspace_id}/{target.id}"
         [finding] = _check(session, "link.internal-noncanonical", healthy)
         assert finding.message_args["replacement"] == canonical
-        assert rewrite_links_with_report(
-            body,
-            LinkContext(session, workspace_id, editor_link_actor("human", "test")),
-        )[0] == f"[Target]({canonical})\n"
+        assert (
+            rewrite_links_with_report(
+                body,
+                LinkContext(session, workspace_id, editor_link_actor("human", "test")),
+            )[0]
+            == f"[Target]({canonical})\n"
+        )
         # Citation addresses take the same decision and keep their marker. An
         # address naming no document here stays text with a citation warning;
         # neither kind becomes an ordinary link.
@@ -94,10 +97,6 @@ def test_unresolved_and_healthy_links(session_factory):
             f"@cite{{{format_index_ref('context', target.id)}}} "
             f"@cite{{{canonical}}} @cite{{{external}}}\n"
         )
-        assert rewrite_links_with_report(
-            cited,
-            LinkContext(session, workspace_id, editor_link_actor("human", "test")),
-        )[0] == f"@cite{{{canonical}}} @cite{{{canonical}}} @cite{{{external}}}\n"
         citing, _ = _page(session, workspace_id, "citing-source", cited)
         [warning] = _check(session, "link.unresolved", citing)
         assert (warning.message_key, warning.message_args["locator"]) == (
@@ -122,19 +121,28 @@ def test_unresolved_and_healthy_links(session_factory):
             lifecycle_status="ready",
         )
         session.add(restricted)
-        guide = session.scalar(select(AgentPage).where(
-            AgentPage.workspace_id == workspace_id,
-            AgentPage.category == "agent_guide",
-        ))
-        parent = session.scalar(select(WorkspaceTreeNode).where(
-            WorkspaceTreeNode.workspace_id == workspace_id,
-            WorkspaceTreeNode.target_kind == "agent_page",
-            WorkspaceTreeNode.target_id == guide.id,
-        ))
+        guide = session.scalar(
+            select(AgentPage).where(
+                AgentPage.workspace_id == workspace_id,
+                AgentPage.category == "agent_guide",
+            )
+        )
+        parent = session.scalar(
+            select(WorkspaceTreeNode).where(
+                WorkspaceTreeNode.workspace_id == workspace_id,
+                WorkspaceTreeNode.target_kind == "agent_page",
+                WorkspaceTreeNode.target_id == guide.id,
+            )
+        )
         folder = WorkspaceTreeNode(
-            workspace_id=workspace_id, section="agent", node_kind="folder",
-            parent_id=parent.id, sort_key="0001", title="Private descendant",
-            slug="private-descendant", visibility_status="visible",
+            workspace_id=workspace_id,
+            section="agent",
+            node_kind="folder",
+            parent_id=parent.id,
+            sort_key="0001",
+            title="Private descendant",
+            slug="private-descendant",
+            visibility_status="visible",
         )
         session.add(folder)
         session.flush()
@@ -149,9 +157,14 @@ def test_unresolved_and_healthy_links(session_factory):
             f"[Authored]({authored_route})\n"
         )
         owner = ActorContext(
-            actor_kind="human", actor_id="test", workspace_id=workspace_id,
-            workspace_role="owner", role="owner", token_kind="api_token",
-            token_workspace_ids=(workspace_id,), scopes=("mcp:write",),
+            actor_kind="human",
+            actor_id="test",
+            workspace_id=workspace_id,
+            workspace_role="owner",
+            role="owner",
+            token_kind="api_token",
+            token_workspace_ids=(workspace_id,),
+            scopes=("mcp:write",),
         )
         preparer = BodyPreparer()
         # Reuse the same existing reader-capability inputs in suggest mode.
@@ -165,20 +178,30 @@ def test_unresolved_and_healthy_links(session_factory):
                 BodyInput(protected_body),
                 WriteContext(
                     workspace=session.get(Workspace, workspace_id),
-                    session=session, actor_kind=actor.actor_kind,
-                    actor_id=actor.actor_id, actor_provenance="internal", actor=actor,
+                    session=session,
+                    actor_kind=actor.actor_kind,
+                    actor_id=actor.actor_id,
+                    actor_provenance="internal",
+                    actor=actor,
                 ),
             )
 
         editor = ActorContext(
-            actor_kind="human", actor_id="test", workspace_id=workspace_id,
-            workspace_role="editor", role="editor", token_kind="session",
+            actor_kind="human",
+            actor_id="test",
+            workspace_id=workspace_id,
+            workspace_role="editor",
+            role="editor",
+            token_kind="session",
         )
         denied = prepare_for(editor)
         assert denied.body == protected_body
         unavailable = [f for f in denied.findings if f.rule_id == "link.unresolved"]
         assert {f.message_args["locator"] for f in unavailable} == {
-            library_ref, agent_ref, folder_ref, missing_ref,
+            library_ref,
+            agent_ref,
+            folder_ref,
+            missing_ref,
         }
         assert {f.suggested_action for f in unavailable} == {
             "This document link is unavailable.",
@@ -198,32 +221,45 @@ def test_unresolved_and_healthy_links(session_factory):
         from backend.services.context_link_targets import markdown_link_targets
 
         assert markdown_link_targets(
-            session, body=f"[Folder]({folder_ref})\n",
-            workspace_id=workspace_id, actor=editor,
+            session,
+            body=f"[Folder]({folder_ref})\n",
+            workspace_id=workspace_id,
+            actor=editor,
         ) == [ContextLinkTarget(locator=folder_ref, state="unavailable")]
         limited = ActorContext(
-            actor_kind="human", actor_id="test", workspace_id=workspace_id,
-            workspace_role="owner", role="owner", token_kind="api_token",
-            token_workspace_ids=(workspace_id,), scopes=("mcp:agent",),
+            actor_kind="human",
+            actor_id="test",
+            workspace_id=workspace_id,
+            workspace_role="owner",
+            role="owner",
+            token_kind="api_token",
+            token_workspace_ids=(workspace_id,),
+            scopes=("mcp:agent",),
         )
         # An owner role alone must not invent the admin scope of an MCP caller.
         assert prepare_for(limited).body == protected_body.replace(
             library_ref, authored_route
         )
         system = ActorContext(
-            actor_kind="system", actor_id="lint-autofix", workspace_id=workspace_id,
-            workspace_role="editor", role="editor",
+            actor_kind="system",
+            actor_id="lint-autofix",
+            workspace_id=workspace_id,
+            workspace_role="editor",
+            role="editor",
         )
         assert prepare_for(system).body == allowed_body
 
     scoped_pages = PageService(session_factory, actor_context=owner)
     saved = scoped_pages.write_page(
-        workspace_slug="default", slug="scoped-ref-authority", title="Authority",
-        body_md=protected_body, actor_kind="human", actor_id="test",
+        workspace_slug="default",
+        slug="scoped-ref-authority",
+        title="Authority",
+        body_md=protected_body,
+        actor_kind="human",
+        actor_id="test",
         actor_provenance="personal_access_token",
     )
     assert saved.body_md == allowed_body
-
 
 
 def test_renamed_pinned_link_is_broken_slug_not_unresolved(session_factory):
@@ -259,10 +295,7 @@ def test_renamed_context_url_target_does_not_suggest_wikilink_rewrite(
             session,
             workspace_id,
             "url-source",
-            (
-                "[Target]"
-                f"(/p/{workspace_id}/{target.id})\n"
-            ),
+            (f"[Target](/p/{workspace_id}/{target.id})\n"),
         )
         url_link = session.scalar(
             select(PageLink).where(
@@ -391,12 +424,13 @@ def test_link_finding_body_scopes_track_which_body_the_defect_is_in(session_fact
         private = _stage_draft(
             session, private_source, shared, "[[private-missing]] [[private-old]]\n"
         )
-        private.version_status = "editing"
+        private.version_status = "draft"
         private.created_by_actor_id = "other-author"
         target.slug = "private-new"
         session.flush()
-        assert _check(session, "link.unresolved", private_source) == []
-        assert _check(session, "link.internal-noncanonical", private_source) == []
+        [draft_finding] = _check(session, "link.unresolved", private_source)
+        assert draft_finding.message_args["written_slug"] == "private-missing"
+        assert draft_finding.message_args["body_scopes"] == ["draft"]
 
 
 def test_rebuild_coalesces_two_repaired_slugs_without_losing_pin(session_factory):

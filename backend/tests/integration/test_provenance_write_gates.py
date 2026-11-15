@@ -16,6 +16,7 @@ from backend.tests.integration._cross_transport_helpers import (
     issue_personal_api_token,
     make_client,
 )
+from backend.tests.utils.context_git import merge_preview_binding
 
 
 def _workspace_id(client) -> UUID:
@@ -47,11 +48,7 @@ def _pages_url(workspace_id: UUID) -> str:
 
 
 def _create_context_page(client, workspace_id: UUID, slug: str) -> dict:
-    """P9.1: page-first creation always lands in "editing"; publish it
-    immediately with a follow-up PATCH, mirroring the retired
-    ``write_page(as_draft=False)`` single-shot create-and-publish every
-    caller here relies on (a real published body to autosave/agent-write on
-    top of)."""
+    """Create and publish a base commit before provenance-specific writes."""
 
     pages_url = _pages_url(workspace_id)
     created = client.post(pages_url, json={"title": f"Title {slug}", "body_md": ""})
@@ -68,6 +65,50 @@ def _create_context_page(client, workspace_id: UUID, slug: str) -> dict:
     )
     assert published.status_code == 200, published.text
     return published.json()["data"]
+
+
+def _save_context_draft(client, url, *, json, headers=None):
+    """Begin from a commit explicitly before saving a shared mutable draft."""
+    headers = headers or {}
+    begun = client.post(
+        url.removesuffix("/autosave") + "/begin-edit",
+        headers=headers,
+        json={
+            "from": json.get("version_id", json["base_version_id"]),
+            "idempotency_key": json["idempotency_key"] + "-begin",
+        },
+    )
+    assert begun.status_code == 200, begun.text
+    edit = begun.json()["data"]
+    return client.post(
+        url,
+        headers=headers,
+        json={
+            **json,
+            "version_id": edit["version_id"],
+            "base_version_id": edit["version_id"],
+            "base_content_hash": edit["content_hash"],
+            "expected_editing_revision": edit["editing_revision"],
+            "session_version_id": edit["version_id"],
+        },
+    )
+
+
+def _save_and_submit_context_review(client, url, *, json, headers):
+    saved = _save_context_draft(client, url, json=json, headers=headers)
+    assert saved.status_code == 200, saved.text
+    draft = saved.json()["data"]
+    submitted = client.post(
+        url.removesuffix("/autosave") + "/submit-for-review",
+        headers=headers,
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "idempotency_key": json["idempotency_key"] + "-submit",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    return saved
 
 
 def _review_for_context_version(session, version_id: UUID) -> ReviewItem:
@@ -113,10 +154,13 @@ def test_bearer_autosave_with_session_version_stages_reviewed_draft(
             version.created_by_actor_id = "different-author"
 
     headers = _bearer_headers(client, workspace_id, token_kind)
-    response = client.post(
+    response = _save_and_submit_context_review(
+        client,
         f"{_pages_url(workspace_id)}/{created['id']}/autosave",
         headers=headers,
-        json={"idempotency_key": "t-51",
+        json={
+            "version_id": created["version_id"],
+            "idempotency_key": "t-51",
             "title": f"AI staged {token_kind}",
             "body_md": f"# AI staged {token_kind}\n\nUnreviewed body.",
             "base_version_id": created["version_id"],
@@ -137,7 +181,7 @@ def test_bearer_autosave_with_session_version_stages_reviewed_draft(
         assert page is not None
         assert draft is not None
         assert page.current_published_version_id == published_version_id
-        assert page.latest_draft_version_id == draft_version_id
+        assert draft.parent_version_id == published_version_id
         assert draft.version_status == "draft"
         assert review.risk_signals["ai_authored"] is True
         assert review.status == "pending"
@@ -170,9 +214,12 @@ def test_browser_session_autosave_with_session_version_stages_draft(
             version.created_by_actor_kind = "human"
             version.created_by_actor_id = "different-author"
 
-    response = client.post(
+    response = _save_context_draft(
+        client,
         f"{_pages_url(workspace_id)}/{created['id']}/autosave",
-        json={"idempotency_key": "t-52",
+        json={
+            "version_id": created["version_id"],
+            "idempotency_key": "t-52",
             "title": "Browser staged",
             "body_md": "# Browser staged\n\nHuman body.",
             "base_version_id": created["version_id"],
@@ -189,8 +236,7 @@ def test_browser_session_autosave_with_session_version_stages_draft(
         assert page is not None
         assert version is not None
         assert page.current_published_version_id == original_version_id
-        assert page.current_version_id == version.id
-        assert page.latest_draft_version_id == version.id
+        assert version.parent_version_id == original_version_id
         assert version.version_status == "draft"
 
 
@@ -206,10 +252,13 @@ def test_aged_ai_context_review_is_released_by_workspace_automation(page_service
     workspace_id = _workspace_id(client)
     created = _create_context_page(client, workspace_id, "aged-ai-review")
     headers = _bearer_headers(client, workspace_id, "pat")
-    response = client.post(
+    response = _save_and_submit_context_review(
+        client,
         f"{_pages_url(workspace_id)}/{created['id']}/autosave",
         headers=headers,
-        json={"idempotency_key": "t-53",
+        json={
+            "version_id": created["version_id"],
+            "idempotency_key": "t-53",
             "title": "Aged AI draft",
             "body_md": "# Aged AI draft\n\nPolicy may release this one.",
             "base_version_id": created["version_id"],
@@ -243,6 +292,36 @@ def test_aged_ai_context_review_is_released_by_workspace_automation(page_service
         json={"email": "test@example.com", "password": "correct-password"},
     )
     assert login.status_code == 200, login.text
+    # A pending request follows the shared draft's current bytes. A later
+    # browser save must refresh the risk snapshot before the expiry sweep.
+    current = response.json()["data"]
+    page_url = f"{_pages_url(workspace_id)}/{created['id']}"
+
+    def save_pending(value, body, key):
+        saved = client.post(
+            f"{page_url}/autosave",
+            json={
+                "version_id": value["version_id"],
+                "base_version_id": value["version_id"],
+                "base_content_hash": value["content_hash"],
+                "expected_editing_revision": value["editing_revision"],
+                "idempotency_key": key,
+                "body_md": body,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        return saved.json()["data"]
+
+    broken = save_pending(
+        current, "# Aged AI draft\n\n```python\nprint('unclosed')\n", "aged-risk-broken"
+    )
+    blocked_counts = client.get(f"/api/v1/workspaces/{workspace_id}/reviews/counts")
+    assert blocked_counts.json()["data"]["auto_approve_candidate_count"] == 0
+    blocked_sweep = client.post(
+        f"/api/v1/workspaces/{workspace_id}/reviews/sweep-auto-approvals"
+    )
+    assert blocked_sweep.json()["data"]["approved"] == []
+    save_pending(broken, current["body_md"], "aged-risk-repaired")
     counts = client.get(f"/api/v1/workspaces/{workspace_id}/reviews/counts")
     assert counts.status_code == 200, counts.text
     assert counts.json()["data"]["auto_approve_candidate_count"] == 1
@@ -267,10 +346,13 @@ def test_aged_ai_context_review_needing_a_person_is_never_auto_approved(page_ser
     workspace_id = _workspace_id(client)
     created = _create_context_page(client, workspace_id, "aged-ai-review-needs-human")
     headers = _bearer_headers(client, workspace_id, "pat")
-    response = client.post(
+    response = _save_and_submit_context_review(
+        client,
         f"{_pages_url(workspace_id)}/{created['id']}/autosave",
         headers=headers,
-        json={"idempotency_key": "t-54",
+        json={
+            "version_id": created["version_id"],
+            "idempotency_key": "t-54",
             "title": "Aged AI draft",
             # An unclosed fence is the objective lint floor, and a lint error
             # is a veto no automation policy may override.
@@ -319,10 +401,7 @@ def test_aged_ai_context_review_needing_a_person_is_never_auto_approved(page_ser
 
 
 def test_workspace_can_stop_requiring_a_person_for_ai_writes(page_service):
-    """`always_for_ai_authored=false` is the workspace saying it trusts its
-    agents. Their writes then land the way a person's do -- published, with an
-    approved ReviewItem carrying the policy snapshot that allowed it, so the
-    decision is on the record rather than silent."""
+    """Trusted AI review keeps its policy snapshot through explicit publication."""
     client = make_client(page_service)
     workspace_id = _workspace_id(client)
     with page_service.session_factory.begin() as session:
@@ -348,6 +427,35 @@ def test_workspace_can_stop_requiring_a_person_for_ai_writes(page_service):
         },
     )
     assert response.status_code == 200, response.text
+    staged = response.json()["data"]
+    submitted = client.post(
+        f"{_pages_url(workspace_id)}/{created['id']}/submit-for-review",
+        headers=headers,
+        json={
+            "version_id": staged["version_id"],
+            "expected_editing_revision": staged["editing_revision"],
+            "idempotency_key": "trusted-agent-submit",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    with page_service.session_factory() as session:
+        requested = _review_for_context_version(session, UUID(staged["version_id"]))
+        assert requested.risk_signals["human_review_required"] is False
+    publish_url = (
+        f"{_pages_url(workspace_id)}/{created['id']}/versions/"
+        f"{staged['version_id']}/publish"
+    )
+    published = client.post(
+        publish_url,
+        headers=headers,
+        json={
+            **merge_preview_binding(client, publish_url, headers=headers),
+            "reason": "Publish an authorized trusted agent write",
+            "expected_content_hash": staged["content_hash"],
+        },
+    )
+    assert published.status_code == 200, published.text
+    response = published
     version_id = UUID(response.json()["data"]["version_id"])
 
     with page_service.session_factory() as session:
@@ -368,9 +476,7 @@ def test_workspace_can_stop_requiring_a_person_for_ai_writes(page_service):
         assert review.status == "approved"
         assert review.risk_signals["ai_authored"] is True
         assert review.risk_signals["human_review_required"] is False
-        assert review.decision_summary == (
-            "agent-authored page write approved by policy"
-        )
+        assert review.id == UUID(submitted.json()["data"]["review_item_id"])
 
 
 @pytest.mark.parametrize("path", ["create", "update", "autosave"])
@@ -429,7 +535,7 @@ def test_trusted_agent_write_still_stages_when_the_body_fails_lint(
             page = session.get(ContextPage, page_id)
             version = session.get(ContextPageVersion, version_id)
             assert page is not None and version is not None
-            assert version.version_status == "editing"
+            assert version.version_status == "draft"
             assert page.current_published_version_id is None
         return
     else:
@@ -445,7 +551,8 @@ def test_trusted_agent_write_still_stages_when_the_body_fails_lint(
             body["expected_editing_revision"] = created["editing_revision"]
             body["session_version_id"] = created["version_id"]
             body["idempotency_key"] = f"autosave-{page_id}"
-            response = client.post(
+            response = _save_and_submit_context_review(
+                client,
                 f"{_pages_url(workspace_id)}/{page_id}/autosave",
                 headers=headers,
                 json=body,
@@ -455,6 +562,19 @@ def test_trusted_agent_write_still_stages_when_the_body_fails_lint(
                 f"{_pages_url(workspace_id)}/{page_id}", headers=headers, json=body
             )
         assert response.status_code == 200, response.text
+
+    if path == "update":
+        draft = response.json()["data"]
+        submitted = client.post(
+            f"{_pages_url(workspace_id)}/{page_id}/submit-for-review",
+            headers=headers,
+            json={
+                "version_id": draft["version_id"],
+                "expected_editing_revision": draft["editing_revision"],
+                "idempotency_key": "submit-broken-update",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
 
     version_id = UUID(response.json()["data"]["version_id"])
     with page_service.session_factory() as session:

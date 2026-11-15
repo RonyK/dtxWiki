@@ -6,8 +6,8 @@ from collections.abc import Collection
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, tuple_
-from sqlalchemy.orm import Session, aliased, selectinload
+from sqlalchemy import and_, case, func, select, tuple_
+from sqlalchemy.orm import Session, aliased
 
 from backend.library_media.ports import LibraryBlobRepositoryFactory
 from backend.models.agent import AgentPage, AgentPageVersion
@@ -39,6 +39,7 @@ from backend.repositories.workspace_scoped import (
     get_in_workspace,
     join_in_workspace,
     select_in_workspace,
+    where_in_workspace,
 )
 from backend.schemas.read import (
     AgentCategoryEntry,
@@ -90,7 +91,6 @@ from backend.services.context_review_disposition import (
     context_version_review_metadata,
 )
 from backend.services.context_visibility import (
-    discarded_row_hidden_from_actor,
     visible_context_version_expression,
     visible_context_version_id,
 )
@@ -264,28 +264,6 @@ class DomainReadService:
         # callers that build this service without blob access keep working
         # (every LibraryItemVersionPayload then reports availability False).
         self._library_blob_repository_factory = library_blob_repository_factory
-
-    def list_alternative_drafts(
-        self,
-        session: Session,
-        page_id: UUID,
-        *,
-        actor: ActorContext | None,
-        limit: int = 20,
-    ) -> list[ContextPageVersion]:
-        if not actor_can_read_drafts(actor):
-            return []
-        return list(
-            session.scalars(
-                select(ContextPageVersion)
-                .where(
-                    ContextPageVersion.page_id == page_id,
-                    ContextPageVersion.graph_status == "branched",
-                )
-                .order_by(ContextPageVersion.version_no.desc())
-                .limit(limit)
-            )
-        )
 
     def list_library_items(
         self,
@@ -771,67 +749,90 @@ class DomainReadService:
                 "filtering Context pages by draft state requires draft-read capability"
             )
         visible_version = visible_context_version_expression(actor)
-        published_version = aliased(ContextPageVersion)
-        draft_version = aliased(ContextPageVersion)
+        selected_version = aliased(ContextPageVersion)
         modified_at = func.coalesce(
-            published_version.created_at,
-            draft_version.created_at,
+            case(
+                (
+                    ContextPage.current_published_version_id.is_not(None),
+                    selected_version.created_at,
+                ),
+                else_=selected_version.last_saved_at,
+            ),
             ContextPage.updated_at,
         )
-        base = (
-            select(ContextPage, modified_at.label("modified_at"))
-            .outerjoin(
-                published_version,
-                published_version.id == ContextPage.current_published_version_id,
-            )
-            .outerjoin(
-                draft_version,
-                draft_version.id == ContextPage.latest_draft_version_id,
-            )
-            .where(
-                ContextPage.workspace_id == workspace_id,
-                visible_version.is_not(None),
-            )
-        )
+        base = join_in_workspace(
+            select_in_workspace(
+                ContextPage,
+                workspace_id=workspace_id,
+                conditions=(visible_version.is_not(None),),
+            ),
+            ContextPage,
+            selected_version,
+            workspace_id=workspace_id,
+            on=and_(
+                selected_version.id == visible_version,
+                selected_version.page_id == ContextPage.id,
+            ),
+            isouter=True,
+        ).add_columns(modified_at.label("modified_at"))
         if page_type is not None:
-            base = base.where(ContextPage.page_type == page_type)
+            base = where_in_workspace(
+                base,
+                ContextPage,
+                workspace_id=workspace_id,
+                conditions=(ContextPage.page_type == page_type,),
+            )
         if status is not None:
-            base = base.where(ContextPage.lifecycle_status == status)
+            base = where_in_workspace(
+                base,
+                ContextPage,
+                workspace_id=workspace_id,
+                conditions=(ContextPage.lifecycle_status == status,),
+            )
         else:
             # The overview is a navigation list of current pages, not an
             # activity log. Archived pages have no live tree destination and
             # must follow the default-hidden lifecycle policy used by Library.
-            base = base.where(ContextPage.lifecycle_status != "archived")
+            base = where_in_workspace(
+                base,
+                ContextPage,
+                workspace_id=workspace_id,
+                conditions=(ContextPage.lifecycle_status != "archived",),
+            )
         if has_draft is not None:
-            has_unpublished_head = or_(
-                ContextPage.latest_draft_version_id.is_not(None),
-                ContextPage.current_version_id.is_not(None)
-                & (
-                    ContextPage.current_published_version_id.is_(None)
-                    | (
-                        ContextPage.current_version_id
-                        != ContextPage.current_published_version_id
-                    )
+            has_unpublished_head = (
+                select_in_workspace(
+                    ContextPageVersion,
+                    workspace_id=workspace_id,
+                    conditions=(
+                        ContextPageVersion.page_id == ContextPage.id,
+                        ContextPageVersion.version_status == "draft",
+                    ),
+                )
+                .with_only_columns(ContextPageVersion.id)
+                .correlate(ContextPage)
+                .exists()
+            )
+            base = where_in_workspace(
+                base,
+                ContextPage,
+                workspace_id=workspace_id,
+                conditions=(
+                    has_unpublished_head if has_draft else ~has_unpublished_head,
                 ),
             )
-            base = base.where(
-                has_unpublished_head if has_draft else ~has_unpublished_head
-            )
-        pointer_columns = (
-            ContextPageVersion.version_status,
-            ContextPageVersion.created_by_actor_kind,
-            ContextPageVersion.created_by_actor_id,
-        )
-        base = base.add_columns(visible_version.label("visible_version_id")).options(
-            selectinload(ContextPage.current_version).load_only(*pointer_columns),
-            selectinload(ContextPage.latest_draft_version).load_only(*pointer_columns),
-        )
+        base = base.add_columns(visible_version.label("visible_version_id"))
         total = session.scalar(select(func.count()).select_from(base.subquery())) or 0
         stmt = base.order_by(modified_at.desc(), ContextPage.id.desc())
         decoded = _decode_keyset_cursor(cursor)
         if decoded is not None:
             cur_ts, cur_id = decoded
-            stmt = stmt.where(tuple_(modified_at, ContextPage.id) < (cur_ts, cur_id))
+            stmt = where_in_workspace(
+                stmt,
+                ContextPage,
+                workspace_id=workspace_id,
+                conditions=(tuple_(modified_at, ContextPage.id) < (cur_ts, cur_id),),
+            )
         rows = session.execute(stmt.limit(limit + 1)).all()
         page_rows, has_more = rows[:limit], len(rows) > limit
         next_cursor = (
@@ -909,7 +910,16 @@ class DomainReadService:
         )
         return ContextPageDetail(
             **self._context_page_summary(
-                page, actor=actor, visible_version_id=visible_head_id
+                page,
+                actor=actor,
+                visible_version_id=visible_head_id,
+                modified_at=(
+                    page.current_published_version.created_at
+                    if page.current_published_version is not None
+                    else version.last_saved_at
+                    if version is not None
+                    else page.updated_at
+                ),
             ).model_dump(),
             body_markdown=version.body_md if version is not None else None,
             version_info=(
@@ -981,65 +991,10 @@ class DomainReadService:
         # M1: lint the EXACT version being displayed (version-aware), so warnings
         # match the body in the response. Skipped on internal existence-check
         # reads (e.g. citation validation) via include_warnings=False.
-        warnings: list[str] = []
         pending_review: PendingReviewInfo | None = None
         pending_draft_version_id: UUID | None = None
         reconciliation_versions: list[ContextPageVersion] = []
         reconciliation_pending_count_truncated = False
-        if actor_can_read_drafts(actor):
-            from backend.services.context_reconciliation import (
-                verified_reconciliation_branch_is_available,
-            )
-
-            reconciliation_candidates = session.scalars(
-                select(ContextPageVersion)
-                .where(
-                    ContextPageVersion.workspace_id == workspace_id,
-                    ContextPageVersion.page_id == page.id,
-                    ContextPageVersion.graph_status == "branched",
-                    ContextPageVersion.version_status == "draft",
-                    ContextPageVersion.reconcile_manifest.is_not(None),
-                )
-                .order_by(
-                    ContextPageVersion.created_at.desc(),
-                    ContextPageVersion.id.desc(),
-                )
-                .limit(_RECONCILIATION_SUMMARY_SCAN_LIMIT + 1)
-            ).all()
-            reconciliation_pending_count_truncated = (
-                len(reconciliation_candidates) > _RECONCILIATION_SUMMARY_SCAN_LIMIT
-            )
-            reconciliation_versions = [
-                candidate
-                for candidate in reconciliation_candidates[
-                    :_RECONCILIATION_SUMMARY_SCAN_LIMIT
-                ]
-                if verified_reconciliation_branch_is_available(
-                    session,
-                    page=page,
-                    version=candidate,
-                    actor_kind=actor.actor_kind if actor is not None else None,
-                    actor_id=actor.actor_id if actor is not None else None,
-                )
-            ]
-        if include_warnings:
-            workspace = session.get(Workspace, workspace_id)
-            lint_policy = (
-                workspace.lint_policy
-                if workspace is not None and workspace.lint_policy
-                else None
-            )
-            warnings = page_format_warnings_for_body(
-                session,
-                workspace_id,
-                page,
-                version.body_md if version is not None else None,
-                registry=self.lint_registry,
-                policy=lint_policy,
-                actor=actor,
-                version=version,
-                self_origins=self.context_link_origins,
-            )
         if include_pending_review:
             # Review state comes from stored metadata, independently of body lint.
             # F1: surface the open review for this page's CURRENT pending draft so
@@ -1050,9 +1005,10 @@ class DomainReadService:
             review_item = None
             if (
                 actor_can_read_drafts(actor)
-                and page.latest_draft_version_id is not None
+                and version is not None
+                and version.version_status == "draft"
             ):
-                draft_ref = f"context_page_version:{page.latest_draft_version_id}"
+                draft_ref = f"context_page_version:{version.id}"
                 review_query = select_in_workspace(
                     ReviewItem,
                     workspace_id=workspace_id,
@@ -1092,7 +1048,7 @@ class DomainReadService:
                     status=review_item.status,
                     risk_level=review_item.risk_level,
                 )
-                pending_draft_version_id = page.latest_draft_version_id
+                pending_draft_version_id = version.id
         reference_fields = {}
         if include_references:
             from backend.services.document_references import (
@@ -1151,9 +1107,7 @@ class DomainReadService:
                 if version is not None
                 else []
             ),
-            "warnings": warnings,
             "pending_draft_version_id": pending_draft_version_id,
-            "pending_draft_warnings": [],
             "pending_review": pending_review,
             "reconciliation_pending_count": len(reconciliation_versions),
             "reconciliation_pending_count_truncated": (
@@ -2305,15 +2259,6 @@ class DomainReadService:
             if visible_version_id is not None
             else visible_context_version_id(page, actor)[0]
         )
-        can_read_drafts = actor_can_read_drafts(actor)
-        # Editing rows are readable by other editors. Only discarded work
-        # needs author-based redaction on the two independent page pointers.
-        latest_is_hidden_discarded = discarded_row_hidden_from_actor(
-            page.latest_draft_version, actor
-        )
-        current_is_hidden_discarded = discarded_row_hidden_from_actor(
-            page.current_version, actor
-        )
         return ContextPageSummary(
             id=page.id,
             slug=page.slug,
@@ -2322,31 +2267,11 @@ class DomainReadService:
             lifecycle_status=page.lifecycle_status,
             aliases=list(page.aliases or []),
             visible_version_id=visible_id,
-            # Redacting only latest_draft_version_id would still answer the
-            # question: current_version_id follows the draft, so it differs from
-            # the published pointer exactly when one is open.
-            current_version_id=(
-                page.current_version_id
-                if can_read_drafts and not current_is_hidden_discarded
-                else page.current_published_version_id
-            ),
+            current_version_id=visible_id,
             current_published_version_id=page.current_published_version_id,
-            latest_draft_version_id=(
-                page.latest_draft_version_id
-                if can_read_drafts and not latest_is_hidden_discarded
-                else None
-            ),
+            latest_draft_version_id=None,
             is_public=page.is_public,
-            updated_at=modified_at
-            or (
-                page.current_published_version.created_at
-                if page.current_published_version is not None
-                else (
-                    page.latest_draft_version.created_at
-                    if page.latest_draft_version is not None
-                    else page.updated_at
-                )
-            ),
+            updated_at=modified_at or page.updated_at,
         )
 
     @staticmethod
@@ -2386,6 +2311,9 @@ class DomainReadService:
             history_status=projection.history_status,
             graph_status=projection.graph_status,
             parent_version_id=visible_parent_id,
+            parent_version_ids=DomainReadService._visible_parent_ids(
+                session, version, actor
+            ),
             content_hash=version.content_hash,
             created_at=version.created_at,
             is_visible_head=projection.is_visible_head,
@@ -2450,6 +2378,29 @@ class DomainReadService:
             )
             return
         raise ReadNotFoundError("target not found")
+
+    @staticmethod
+    def _visible_parent_ids(session, version, actor):
+        from backend.services.context_version_storage import ordered_parent_version_ids
+
+        ids = ordered_parent_version_ids(session, version)
+        if actor_can_read_drafts(actor):
+            return list(ids)
+        return list(
+            session.scalars(
+                select_in_workspace(
+                    ContextPageVersion,
+                    workspace_id=version.workspace_id,
+                    conditions=(
+                        ContextPageVersion.page_id == version.page_id,
+                        ContextPageVersion.id.in_(ids),
+                        ContextPageVersion.version_status.in_(
+                            tuple(PUBLISHED_CONTEXT_VERSION_STATUSES)
+                        ),
+                    ),
+                ).with_only_columns(ContextPageVersion.id)
+            )
+        )
 
     def _version_entries(
         self,
@@ -2520,9 +2471,6 @@ class DomainReadService:
             actor_names = resolve_actor_display_names(session, missing_actor_keys)
             visible_head_id = visible_context_version_id(page, actor)[0]
             expose_draft_state = actor_can_read_drafts(actor)
-            from backend.services.context_reconciliation import (
-                verified_reconciliation_branch_is_available,
-            )
 
             entries: list[VersionEntry] = []
             for version in versions:
@@ -2550,21 +2498,17 @@ class DomainReadService:
                         or actor_names[(version.actor_type, version.actor_id)],
                         created_at=version.created_at,
                         parent_version_id=visible_parent_id,
+                        parent_version_ids=self._visible_parent_ids(
+                            session, version, actor
+                        ),
                         prior_version_id=visible_parent_id,
                         prior_relation=prior_relation,
                         actor_id=version.actor_id,
-                        is_current=(
-                            version.id == page.current_version_id
-                            if expose_draft_state
-                            else projection.is_visible_head
-                        ),
+                        is_current=(projection.is_visible_head),
                         is_current_published=(
                             version.id == page.current_published_version_id
                         ),
-                        is_latest_draft=(
-                            expose_draft_state
-                            and version.id == page.latest_draft_version_id
-                        ),
+                        is_latest_draft=(False),
                         is_visible_head=projection.is_visible_head,
                         is_published_head=projection.is_published_head,
                         is_draft_head=projection.is_draft_head,
@@ -2572,23 +2516,8 @@ class DomainReadService:
                         review_item_id=review_metadata[version.id].review_item_id,
                         is_alternative=projection.is_alternative,
                         is_discarded=projection.is_discarded,
-                        merged_into_version_id=(
-                            version.merged_into_version_id
-                            if expose_draft_state
-                            else None
-                        ),
-                        reconciliation_available=(
-                            expose_draft_state
-                            and verified_reconciliation_branch_is_available(
-                                session,
-                                page=page,
-                                version=version,
-                                actor_kind=(
-                                    actor.actor_kind if actor is not None else None
-                                ),
-                                actor_id=actor.actor_id if actor is not None else None,
-                            )
-                        ),
+                        merged_into_version_id=None,
+                        reconciliation_available=False,
                     )
                 )
             return entries

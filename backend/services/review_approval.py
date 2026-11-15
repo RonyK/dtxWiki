@@ -37,3 +37,4 @@ class ReviewApprovalPreflight:
     target_title: str | None = None
     target_version_no: int | None = None
     fingerprint_parts: dict[str, Any] = field(default_factory=dict)
+    merge_preview: dict[str, Any] | None = None

@@ -1,5 +1,4 @@
 import { apiRequest } from "./client";
-import type { components } from "./types.gen";
 
 export type ContextReconciliationBlockState =
   | "same"
@@ -120,8 +119,10 @@ export type ContextReconciliationCommit = {
   review_item_id: string | null;
 };
 
+// Retired workbench types remain local until its UI is removed.
 export type ContextReconciliationResult =
-  components["schemas"]["ContextReconciliationResultResponse"]["data"];
+  | { dry_run: true; preview: ContextReconciliationPreview }
+  | { dry_run: false; commit: ContextReconciliationCommit };
 
 export async function getContextReconciliation(
   workspaceId: string,

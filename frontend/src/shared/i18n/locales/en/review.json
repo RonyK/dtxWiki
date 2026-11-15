@@ -452,7 +452,12 @@
       "superseded_by_rejected_candidate": "Settled when the same version was rejected",
       "superseded_by_newer_draft": "Replaced by a newer draft",
       "superseded_by_decision_undo": "Closed by an undone decision"
-    }
+    },
+    "mergeConflict": "These changes conflict. Read the current draft before approving.",
+    "mergePreviewTitle": "Review merged page",
+    "mergePreviewDescription": "The published page changed. Review the combined result before approving.",
+    "mergePreviewApprove": "Approve merged page",
+    "mergePreviewCancel": "Cancel"
   },
   "document": {
     "targets": "Review targets",

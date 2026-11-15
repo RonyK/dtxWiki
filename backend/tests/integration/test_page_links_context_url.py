@@ -357,9 +357,7 @@ def test_wikilink_projection_matches_custom_token_visibility(page_service):
     # still decides whether content is an inline text token, but a tag seen in
     # an earlier token does not maintain a second HTML5 visibility state here.
     assert links[0].occurrence_count == 6
-    assert "Visible [[visible-wikilink-target]]" in (
-        links[0].first_snippet or ""
-    )
+    assert "Visible [[visible-wikilink-target]]" in (links[0].first_snippet or "")
 
 
 @pytest.mark.parametrize(
@@ -521,18 +519,9 @@ def test_context_url_projection_ignores_bare_gfm_autolinks(page_service):
                 f"https://\u200bwiki/context?target={target.id}",
                 f"https://\u200cwiki/context?target={target.id}",
                 f"https://\u200dwiki/context?target={target.id}",
-                (
-                    "https://bad_host|"
-                    f"http://testserver/context?target={target.id}"
-                ),
-                (
-                    "https://bad_host,"
-                    f"http://testserver/context?target={target.id}"
-                ),
-                (
-                    "www.bad_host|"
-                    f"www.wiki.example/context?target={target.id}"
-                ),
+                (f"https://bad_host|http://testserver/context?target={target.id}"),
+                (f"https://bad_host,http://testserver/context?target={target.id}"),
+                (f"www.bad_host|www.wiki.example/context?target={target.id}"),
                 f"www.-wiki/context?target={target.id}",
                 f"www.€wiki/context?target={target.id}",
             )
@@ -578,10 +567,7 @@ def test_math_does_not_project_relationships(page_service):
     source = _write_page(
         page_service,
         slug="hidden-math-source",
-        body_md=(
-            f"$[hidden](/context?target={target.id})$ "
-            "$[[hidden-math-target]]$"
-        ),
+        body_md=(f"$[hidden](/context?target={target.id})$ $[[hidden-math-target]]$"),
     )
 
     assert _links_for_source(page_service, source.id) == []
@@ -616,11 +602,7 @@ def test_context_url_first_snippet_stays_bounded_in_long_paragraph(page_service)
     source = _write_page(
         page_service,
         slug="long-snippet-source",
-        body_md=(
-            f"`{destination}` "
-            f"{'prefix ' * 1500}"
-            f"[target]({destination})"
-        ),
+        body_md=(f"`{destination}` {'prefix ' * 1500}[target]({destination})"),
     )
 
     links = _links_for_source(page_service, source.id)
@@ -638,9 +620,7 @@ def test_explicit_context_url_first_snippet_caps_a_long_destination(page_service
         slug="long-url-target",
         body_md="# Long URL target",
     )
-    destination = (
-        f"/p/{_workspace_id(page_service)}/{target.id}#" + "x" * 10_000
-    )
+    destination = f"/p/{_workspace_id(page_service)}/{target.id}#" + "x" * 10_000
     source = _write_page(
         page_service,
         slug="long-url-source",
@@ -752,10 +732,7 @@ def test_live_context_link_shapes_and_contract_variants_are_projected(page_servi
                     "- [Reference 18]"
                     f"(http://testserver/context?target={targets[17].id})"
                 ),
-                (
-                    f"- [Reference 19](/context?target={targets[18].id}"
-                    "&view=history)"
-                ),
+                (f"- [Reference 19](/context?target={targets[18].id}&view=history)"),
                 "- [Placeholder A](/context?target=<page-id>)",
                 "- [Placeholder B](/context?target=<id>)",
                 "- [Placeholder C](/context?target=<B id>)",
@@ -773,9 +750,7 @@ def test_live_context_link_shapes_and_contract_variants_are_projected(page_servi
         )
         for index, body in enumerate(page_bodies)
     ]
-    links_by_source = [
-        _links_for_source(page_service, source.id) for source in sources
-    ]
+    links_by_source = [_links_for_source(page_service, source.id) for source in sources]
 
     assert [len(links) for links in links_by_source] == [1, 1, 1, 2, 2, 2, 1, 7, 2]
     all_links = [link for links in links_by_source for link in links]
@@ -871,8 +846,7 @@ def test_private_edit_link_rows_follow_create_begin_and_discard(page_service):
     assert len(edges) == 1
     assert edges[0]["weight"] == 1.0
     assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == edge_version_before_edits
+        _workspace_edge_version(page_service, workspace_id) == edge_version_before_edits
     )
 
     saved_first_edit = page_service.autosave_page(
@@ -896,14 +870,16 @@ def test_private_edit_link_rows_follow_create_begin_and_discard(page_service):
         first_edit.version_id,
         second_edit.version_id,
     }
-    assert next(
-        link
-        for link in links_after_autosave
-        if link.source_version_id == first_edit.version_id
-    ).occurrence_count == 2
     assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == edge_version_before_edits
+        next(
+            link
+            for link in links_after_autosave
+            if link.source_version_id == first_edit.version_id
+        ).occurrence_count
+        == 2
+    )
+    assert (
+        _workspace_edge_version(page_service, workspace_id) == edge_version_before_edits
     )
 
     page_service.discard_context_edit(
@@ -921,8 +897,7 @@ def test_private_edit_link_rows_follow_create_begin_and_discard(page_service):
         second_edit.version_id,
     }
     assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == edge_version_before_edits
+        _workspace_edge_version(page_service, workspace_id) == edge_version_before_edits
     )
 
 
@@ -979,9 +954,7 @@ def test_editing_link_sync_reconciles_rows_in_place(page_service):
         page_service,
         slug="sync-source",
         body_md=(
-            "# Source\n\n"
-            "Original lead [[sync-alpha]]\n\n"
-            "Remove later [[sync-beta]]"
+            "# Source\n\nOriginal lead [[sync-alpha]]\n\nRemove later [[sync-beta]]"
         ),
     )
     workspace_id = _workspace_id(page_service)
@@ -1032,10 +1005,7 @@ def test_editing_link_sync_reconciles_rows_in_place(page_service):
     assert "Changed lead" in (after[alpha.id].first_snippet or "")
     assert before[beta.id].id not in {link.id for link in after.values()}
     assert after[gamma.id].id not in {link.id for link in before.values()}
-    assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == revision_before
-    )
+    assert _workspace_edge_version(page_service, workspace_id) == revision_before
 
 
 def test_published_title_and_metadata_saves_preserve_semantic_graph(
@@ -1114,14 +1084,14 @@ def test_published_title_and_metadata_saves_preserve_semantic_graph(
     )
 
     assert title_only.title == "Published Metadata Source Renamed"
-    assert title_only.version_id == source.version_id
-    assert title_only.current_published_version_id == source.version_id
-    assert link_snapshot() == before_links
+    assert title_only.version_id != source.version_id
+    assert title_only.current_published_version_id == title_only.version_id
+    assert {
+        (link.link_syntax, link.target_page_id, link.target_slug)
+        for link in _links_for_version(page_service, source.id, title_only.version_id)
+    } == before_link_targets
     assert edge_snapshot() == before_edges
-    assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == revision_before
-    )
+    assert _workspace_edge_version(page_service, workspace_id) == revision_before
 
     metadata_only = page_service.write_page(
         workspace_slug="default",
@@ -1148,10 +1118,7 @@ def test_published_title_and_metadata_saves_preserve_semantic_graph(
         for link in metadata_links
     } == before_link_targets
     assert edge_snapshot() == before_edges
-    assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == revision_before
-    )
+    assert _workspace_edge_version(page_service, workspace_id) == revision_before
 
 
 def test_editing_link_sync_creates_relation_when_url_target_changes(page_service):
@@ -1184,9 +1151,7 @@ def test_editing_link_sync_creates_relation_when_url_target_changes(page_service
     original_node_id = _tree_node_id_for_page(page_service, original.id)
     with page_service.session_factory.begin() as session:
         session.get(ContextPage, original.id).slug = "sync-renamed-original"
-        session.get(WorkspaceTreeNode, original_node_id).slug = (
-            "sync-renamed-original"
-        )
+        session.get(WorkspaceTreeNode, original_node_id).slug = "sync-renamed-original"
     replacement = _write_page(
         page_service,
         slug="sync-reused-target",
@@ -1217,10 +1182,7 @@ def test_editing_link_sync_creates_relation_when_url_target_changes(page_service
     assert after.target_page_id == replacement.id
     assert after.id != before.id
     assert after.created_at != before.created_at
-    assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == revision_before
-    )
+    assert _workspace_edge_version(page_service, workspace_id) == revision_before
 
 
 def test_context_url_target_slug_rename_preserves_row_identity(page_service):
@@ -1274,10 +1236,7 @@ def test_context_url_target_slug_rename_preserves_row_identity(page_service):
     assert after.created_at == before.created_at
     assert after.target_page_id == target.id
     assert after.target_slug is None
-    assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == revision_before
-    )
+    assert _workspace_edge_version(page_service, workspace_id) == revision_before
 
 
 def test_context_url_target_slug_swap_preserves_both_row_identities(page_service):
@@ -1360,10 +1319,7 @@ def test_context_url_target_slug_swap_preserves_both_row_identities(page_service
         assert after[target_id].created_at == before[target_id].created_at
     assert after[first_target.id].target_slug is None
     assert after[second_target.id].target_slug is None
-    assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == revision_before
-    )
+    assert _workspace_edge_version(page_service, workspace_id) == revision_before
 
 
 def test_context_url_tree_node_retarget_replaces_row_identity(page_service):
@@ -1444,10 +1400,7 @@ def test_context_url_tree_node_retarget_replaces_row_identity(page_service):
     assert after.target_slug is None
     assert after.id != before.id
     assert after.created_at != before.created_at
-    assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == revision_before
-    )
+    assert _workspace_edge_version(page_service, workspace_id) == revision_before
 
 
 def test_context_url_stale_legacy_locator_rows_are_removed(page_service):
@@ -1515,7 +1468,4 @@ def test_context_url_stale_legacy_locator_rows_are_removed(page_service):
     assert after.target_page_id == target.id
     assert after.target_slug is None
     assert after.link_syntax == "context_url"
-    assert (
-        _workspace_edge_version(page_service, workspace_id)
-        == revision_before
-    )
+    assert _workspace_edge_version(page_service, workspace_id) == revision_before

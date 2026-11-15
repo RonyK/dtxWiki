@@ -164,7 +164,8 @@ def _seed_proposal(connection, *, workspace_id, turn_id, source_kind, item_ids):
 def test_backfills_legacy_relation_arrays_and_downgrade_restores_them(
     tmp_path, sqlite_templates
 ):
-    # One 0001 -> head -> 0001 traversal seeds all four legacy JSON shapes the
+    # One 0001 -> reversible Context boundary -> 0001 traversal seeds all
+    # four legacy JSON shapes the
     # released core revision (efcbcf724889) normalizes, each in its own
     # workspace: ask_turn citation arrays, proposal source arrays (including
     # the ask_turn misuse), context_page provenance arrays and sync-run
@@ -270,7 +271,7 @@ def test_backfills_legacy_relation_arrays_and_downgrade_restores_them(
             },
         )
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "872d9c3e104b")
 
     with engine.connect() as connection:
         citations = connection.execute(
@@ -399,4 +400,4 @@ def test_raises_on_broken_pairing(tmp_path, sqlite_templates):
         )
 
     with pytest.raises(Exception, match="does not"):
-        command.upgrade(config, "head")
+        command.upgrade(config, "872d9c3e104b")

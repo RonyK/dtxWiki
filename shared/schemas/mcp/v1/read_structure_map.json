@@ -53,18 +53,6 @@
         "title": "Page Id",
         "type": "string"
       },
-      "version": {
-        "default": "visible",
-        "description": "Which version to read: 'visible' (default; published, or latest saved draft when never published), 'draft', 'published', or 'my_edit' -- your own open editing row, the exact body patch_context_edit edits (no_open_edit when this page is visible but you have none; it never opens one). An explicit version_id overrides this.",
-        "enum": [
-          "visible",
-          "draft",
-          "published",
-          "my_edit"
-        ],
-        "title": "Version",
-        "type": "string"
-      },
       "version_id": {
         "anyOf": [
           {
@@ -76,7 +64,7 @@
           }
         ],
         "default": null,
-        "description": "Read this exact version of page_id, overriding version. A version belonging to a different page returns not_found.",
+        "description": "Read this exact version of page_id. A version belonging to a different page returns not_found.",
         "title": "Version Id"
       },
       "workspace_id": {
@@ -154,6 +142,14 @@
             "title": "Last Saved At",
             "type": "string"
           },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
           "review": {
             "anyOf": [
               {
@@ -227,6 +223,14 @@
             "title": "Last Saved At",
             "type": "string"
           },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
           "review": {
             "anyOf": [
               {
@@ -252,10 +256,7 @@
             "type": "string"
           },
           "version_status": {
-            "enum": [
-              "editing",
-              "draft"
-            ],
+            "const": "draft",
             "title": "Version Status",
             "type": "string"
           }
@@ -293,7 +294,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",
@@ -813,7 +813,7 @@
               }
             ],
             "default": null,
-            "description": "For an 'editing' row: the revision to send as patch_context_edit.expected_editing_revision. null otherwise.",
+            "description": "For a shared draft: the revision to send as patch_context_edit.expected_editing_revision. null otherwise.",
             "title": "Editing Revision"
           },
           "map_repaired": {
@@ -841,12 +841,9 @@
           },
           "resolved_version_source": {
             "default": "visible",
-            "description": "How version_id was chosen: the requested `version` mode, or exact_version when version_id was given.",
+            "description": "How version_id was chosen: the visible version by default, or exact_version when version_id was given.",
             "enum": [
               "visible",
-              "draft",
-              "published",
-              "my_edit",
               "exact_version"
             ],
             "title": "Resolved Version Source",

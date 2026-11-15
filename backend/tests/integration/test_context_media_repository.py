@@ -73,7 +73,7 @@ def _seed_page(session, workspace_id: UUID, actor: ActorIdentity | None = None):
         content_hash="0" * 64,
         actor_type="human",
         actor_id=None,
-        version_status="editing",
+        version_status="draft",
         created_by_actor_kind=actor.kind,
         created_by_actor_id=actor.id,
     )
@@ -635,7 +635,7 @@ def test_sqlite_tombstone_fences_later_version_usage(session_factory) -> None:
 
 
 @pytest.mark.parametrize(
-    "closed_status", ["draft", "published_snapshot", "superseded_snapshot"]
+    "closed_status", ["closed", "published_snapshot", "superseded_snapshot"]
 )
 def test_sqlite_closed_editing_version_fences_late_asset_association(
     session_factory, closed_status,
@@ -833,9 +833,9 @@ def test_asset_add_and_tombstone_follow_workspace_quota_page_lock_order(
 
 
 @pytest.mark.parametrize(
-    "mismatch", ["missing", "actor_id", "actor_kind", "page", "workspace"]
+    "mismatch", ["missing", "page", "workspace"]
 )
-@pytest.mark.parametrize("version_status", ["editing", "draft"])
+@pytest.mark.parametrize("version_status", ["draft"])
 def test_registration_hides_foreign_or_missing_editing_version(
     session_factory, mismatch, version_status,
 ) -> None:
@@ -893,7 +893,7 @@ def test_version_content_usage_grant_and_author_only_uninserted_fallback(
             workspace_id=workspace_id, page_id=page.id, version_no=2,
             body_md="", content_hash="1" * 64, actor_type="human",
             created_by_actor_kind=stranger.kind, created_by_actor_id=stranger.id,
-            version_status="editing",
+            version_status="draft",
         )
         session.add(other_version)
         session.flush()
@@ -905,7 +905,7 @@ def test_version_content_usage_grant_and_author_only_uninserted_fallback(
             now=NOW,
         )
         if submitted:
-            version.version_status = "draft"
+            version.version_status = "closed"
             session.flush()
         for target_workspace, target_version, actor, readable in (
             (workspace_id, version.id, owner, True),
@@ -973,7 +973,7 @@ def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
         retained = repository.get_asset(workspace_id, asset.asset_id)
         assert retained.association_state is AssociationState.ACTIVE
         if close_version:
-            version.version_status = "draft"
+            version.version_status = "closed"
             session.flush()
         unprotected = repository.get_page_asset_usage(
             workspace_id, page.id, asset.asset_id
@@ -1036,7 +1036,7 @@ def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
             content_hash="1" * 64,
             actor_type="human",
             actor_id=None,
-            version_status="editing",
+            version_status="draft",
             created_by_actor_kind=other_author.kind,
             created_by_actor_id=other_author.id,
         )

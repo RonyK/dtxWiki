@@ -40,7 +40,8 @@ def make_client(page_service) -> TestClient:
     )
     with page_service.session_factory.begin() as session:
         session.get(Workspace, UUID(workspace_id)).labs_policy = {
-            "ask_enabled": True, "agent_enabled": True,
+            "ask_enabled": True,
+            "agent_enabled": True,
         }
     return client
 
@@ -358,9 +359,7 @@ def test_activity_kind_classifies_jobs_and_lint_as_system(page_service):
         "items"
     ]
     assert any(item["body"] == "context_page.update" for item in workspace_items)
-    assert not any(
-        item["target"]["target_kind"] == "job" for item in workspace_items
-    )
+    assert not any(item["target"]["target_kind"] == "job" for item in workspace_items)
     assert not any(
         item["body"].startswith(("auth.", "lint.")) for item in workspace_items
     )
@@ -370,9 +369,7 @@ def test_activity_kind_classifies_jobs_and_lint_as_system(page_service):
     assert any(item["target"]["target_kind"] == "job" for item in system_items)
     assert any(item["body"].startswith("lint.") for item in system_items)
     assert any(item["body"].startswith("auth.") for item in system_items)
-    assert not any(
-        item["body"] == "context_page.update" for item in system_items
-    )
+    assert not any(item["body"] == "context_page.update" for item in system_items)
 
 
 def test_settings_change_appears_under_system_settings_activity(page_service):
@@ -396,9 +393,7 @@ def test_settings_change_appears_under_system_settings_activity(page_service):
         item["body"] == "settings.workspace.title.updated" for item in system_items
     )
     workspace_items = client.get(f"{base}&kind=workspace").json()["data"]["items"]
-    assert not any(
-        item["body"].startswith("settings.") for item in workspace_items
-    )
+    assert not any(item["body"].startswith("settings.") for item in workspace_items)
 
 
 def test_activity_kind_filter_applies_before_the_audit_limit(page_service):
@@ -579,13 +574,9 @@ def test_activity_lane_pagination_cursor_tolerance_and_kind_validation(page_serv
     assert len(bad_cursor_page["items"]) == 2
     assert bad_cursor_page["next_cursor"] is not None
 
-    huge_cursor = base64.urlsafe_b64encode(
-        b"activity-offset:100000000"
-    ).decode()
+    huge_cursor = base64.urlsafe_b64encode(b"activity-offset:100000000").decode()
     assert _decode_activity_cursor(huge_cursor) == 10_000
-    huge_cursor_page = client.get(f"{base_url}&cursor={huge_cursor}").json()[
-        "data"
-    ]
+    huge_cursor_page = client.get(f"{base_url}&cursor={huge_cursor}").json()["data"]
     assert huge_cursor_page["items"] == []
     assert huge_cursor_page["next_cursor"] is None
 
@@ -724,18 +715,19 @@ def test_settings_policy_patch_updates_workspace_and_literal_values(page_service
         },
     )
     assert review_policy.status_code == 200
-    assert review_policy.json()["data"]["review"]["policy"]["automation"][
-        "auto_approve_after_hours"
-    ] == 72
+    assert (
+        review_policy.json()["data"]["review"]["policy"]["automation"][
+            "auto_approve_after_hours"
+        ]
+        == 72
+    )
 
     review_preset = client.patch(
         f"/api/v1/workspaces/{workspace_id}/settings/policies",
         json={"group": "review", "key": "preset", "value": " fast_moving "},
     )
     assert review_preset.status_code == 200
-    assert review_preset.json()["data"]["review"]["policy"]["preset"] == (
-        "fast_moving"
-    )
+    assert review_preset.json()["data"]["review"]["policy"]["preset"] == ("fast_moving")
 
     rejected = client.patch(
         f"/api/v1/workspaces/{workspace_id}/settings/policies",
@@ -802,9 +794,7 @@ def test_settings_policy_rejects_bundle_ttl_above_one_year(page_service):
     )
     assert accepted.status_code == 200
     assert (
-        accepted.json()["data"]["agent_injection"]["policy"][
-            "bundle_ttl_max_seconds"
-        ]
+        accepted.json()["data"]["agent_injection"]["policy"]["bundle_ttl_max_seconds"]
         == 8760 * 3600
     )
 
@@ -889,9 +879,9 @@ def test_settings_family_limit_may_exceed_workspace_default(page_service):
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
-    initial = client.get(
-        f"/api/v1/workspaces/{workspace_id}/settings/policies"
-    ).json()["data"]["library"]
+    initial = client.get(f"/api/v1/workspaces/{workspace_id}/settings/policies").json()[
+        "data"
+    ]["library"]
 
     updated = client.patch(
         f"/api/v1/workspaces/{workspace_id}/settings/policies/batch",
@@ -963,6 +953,7 @@ def test_settings_mcp_client_status_update(page_service):
     assert next(item for item in clients if item["id"] == external_id)["status"] == (
         "active"
     )
+
 
 def test_ask_session_turn_uses_context_first_search(page_service):
     client = make_client(page_service)

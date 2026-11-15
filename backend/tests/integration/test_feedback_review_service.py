@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
-from backend.models.context import ContextPage
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.feedback import FeedbackItem
 from backend.models.job import Job
 from backend.models.review import ReviewDecision, ReviewItem
@@ -16,7 +16,6 @@ from backend.policy.auth import ActorContext
 from backend.schemas.context_write import (
     ReviewDecisionRequest,
     SubmitFeedbackRequest,
-    UpdateDraftRequest,
     WriteDraftRequest,
 )
 from backend.services.context_write_service import ContextWriteService
@@ -498,7 +497,6 @@ def test_review_context_target_metadata_fails_closed_without_actor(session_facto
     # all) that motivated the "scoped headless preview" branch, since that
     # branch ALSO depends on the actor -- so the None case below is a real
     # fail-closed default, not just "nobody could see this anyway".
-    from backend.models.context import ContextPageVersion
     from backend.services.review_service import _review_context_target_metadata
 
     with session_factory.begin() as session:
@@ -657,8 +655,12 @@ def test_review_reject_retry_redacts_sensitive_agent_page_target_for_non_owner(
 
     with session_factory.begin() as session:
         released = review_service.release_review(
-            session=session, workspace_id=workspace_id, review_item_id=review_id,
-            actor_kind="human", actor_id=str(owner_id), actor=owner,
+            session=session,
+            workspace_id=workspace_id,
+            review_item_id=review_id,
+            actor_kind="human",
+            actor_id=str(owner_id),
+            actor=owner,
             actor_role="owner",
         )
     assert released.evidence.operations[0].target_title == "Sensitive Recall Notes"
@@ -758,22 +760,31 @@ def test_review_library_artifact_and_version_resolve_to_visible_owning_document(
         session.add(artifact)
         draft = _context_draft(session, workspace.id)
         for target_type, target_id in [
-            ("library_item_version", version.id), ("library_artifact", artifact.id),
+            ("library_item_version", version.id),
+            ("library_artifact", artifact.id),
         ]:
-            session.add(ChangeOperation(
-                workspace_id=workspace.id,
-                change_set_id=draft.change_set_id,
-                target_type=target_type,
-                target_id=target_id,
-                operation="review_source",
-            ))
+            session.add(
+                ChangeOperation(
+                    workspace_id=workspace.id,
+                    change_set_id=draft.change_set_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    operation="review_source",
+                )
+            )
         session.flush()
         detail = service.get_review(
-            session, workspace.id, draft.review_item_id,
-            actor_role="owner", actor=_audit_actor(),
+            session,
+            workspace.id,
+            draft.review_item_id,
+            actor_role="owner",
+            actor=_audit_actor(),
         )
-        sources = [operation for operation in detail.evidence.operations
-                   if operation.target_type.startswith("library_")]
+        sources = [
+            operation
+            for operation in detail.evidence.operations
+            if operation.target_type.startswith("library_")
+        ]
         assert len(sources) == 2
         for operation in sources:
             assert operation.document.document_id == item.id
@@ -798,8 +809,11 @@ def test_review_library_artifact_and_version_resolve_to_visible_owning_document(
             role="editor",
         )
         redacted = service.get_review(
-            session, workspace.id, draft.review_item_id,
-            actor_role="editor", actor=editor,
+            session,
+            workspace.id,
+            draft.review_item_id,
+            actor_role="editor",
+            actor=editor,
         )
         for operation in redacted.evidence.operations:
             if operation.target_type.startswith("library_"):
@@ -1048,44 +1062,3 @@ def test_review_counts_group_statuses_and_respect_risk_filter(session_factory):
     assert high.changes_requested == 1
     assert high.resolved == 1
     assert high.risk_counts.model_dump() == {"high": 3, "medium": 0, "low": 0}
-
-
-def test_context_update_links_feedback_to_draft_change(session_factory):
-    feedback_service = FeedbackService()
-    write_service = ContextWriteService()
-
-    with session_factory.begin() as session:
-        workspace = _workspace(session)
-        draft = _context_draft(session, workspace.id)
-        feedback = feedback_service.submit_feedback(
-            session=session,
-            workspace_id=workspace.id,
-            request=SubmitFeedbackRequest(
-                target_type="context_page",
-                target_id=draft.page_id,
-                body="Add detail.",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-        )
-        page = session.get(FeedbackItem, feedback.feedback_id)
-        context_page = session.get(ContextPage, draft.page_id)
-        base_version = context_page.latest_draft_version
-        update = write_service.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=draft.page_id,
-                base_version_id=base_version.id,
-                base_content_hash=base_version.content_hash,
-                update_mode="append_section",
-                body_markdown="## Detail\n\nAdded detail.",
-                reason="address feedback",
-                feedback_id=feedback.feedback_id,
-            ),
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-        )
-
-    assert page.status == "draft_created"
-    assert page.resolved_by_change_set_id == update.change_set_id

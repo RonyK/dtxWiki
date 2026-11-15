@@ -28,7 +28,6 @@ from backend.context_media.domain import (
 )
 from backend.context_media.ports import ContextLogicalQuotaExceededError
 from backend.media.domain import BlobEpoch, BlobReference, BlobState
-from backend.models.change import ChangeOperation
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.context_media import (
     ContextMediaAsset,
@@ -44,9 +43,9 @@ from backend.models.media import (
     StoredBlobInspectionRow,
     WorkspaceMediaWriteIntent,
 )
-from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
+from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories.context_media_orphans import (
     context_media_orphan_clause,
 )
@@ -61,7 +60,6 @@ from backend.repositories.media_blob_reference import (
 )
 from backend.repositories.workspace_scoped import (
     select_in_workspace,
-    select_projection_in_workspace,
 )
 from backend.services.actor_visible_read import context_version_is_visible
 from backend.services.db_write_intent import acquire_write_intent
@@ -247,63 +245,18 @@ class SqlAlchemyContextMediaRepository:
             or page.lifecycle_status == "archived"
         ):
             raise ContextMediaNotFoundError("Context Page was not found")
-        # P3.2: every upload must name the uploader's OWN currently-open
-        # "editing" row -- not merely an existing version of the right page.
-        # Locked (not just read) because two concurrent uploads racing the
-        # same version's status must not both observe "editing".
-        #
-        # Same opacity rule P2 established for editing rows generally: a
-        # different author's version -- editing or not -- is indistinguishable from a
-        # nonexistent one, because even a distinguishable "belongs to
-        # another actor" response would itself confirm this exact version
-        # id currently exists in someone's private editing session to a
-        # caller who merely names it. The version's OWN author gets a clear,
-        # non-opaque signal instead when it simply isn't "editing" any more
-        # (already submitted/published/discarded) -- that's ordinary
-        # same-author feedback, not a disclosure to someone else.
+        # Uploads attach to a workspace-authorized mutable draft.
+        # Lock the row so publication cannot race asset registration.
         editing_version = _lock_context_page_version(
             self._session,
             workspace_id=asset.workspace_id,
             page_id=asset.page_id,
             version_id=asset.created_for_version_id,
         )
-        if editing_version is None or (
-            editing_version.created_by_actor_kind != asset.created_by.kind
-            or editing_version.created_by_actor_id != asset.created_by.id
-        ):
-            raise ContextMediaNotFoundError("Context Page version was not found")
-        shared_draft = (
-            allow_shared_draft
-            and editing_version.version_status == "draft"
-            and editing_version.graph_status == "linear"
-            and page.latest_draft_version_id == editing_version.id
-            and self._session.scalar(
-                select_projection_in_workspace(
-                    ReviewItem,
-                    workspace_id=asset.workspace_id,
-                    columns=(ReviewItem.id,),
-                    predicates=(
-                        ReviewItem.review_type == "context_update",
-                        ReviewItem.change_set_id.in_(
-                            select_projection_in_workspace(
-                                ChangeOperation,
-                                workspace_id=asset.workspace_id,
-                                columns=(ChangeOperation.change_set_id,),
-                                predicates=(
-                                    ChangeOperation.target_type == "context_page",
-                                    ChangeOperation.target_id == page.id,
-                                    ChangeOperation.diff_ref
-                                    == f"context_page_version:{editing_version.id}",
-                                ),
-                            )
-                        ),
-                    ),
-                ).limit(1)
-            )
-            is None
-        )
-        if editing_version.version_status != "editing" and not shared_draft:
-            raise ContextMediaEditingNotOpenError("editing version is not open")
+        if editing_version is None:
+            raise ContextMediaNotFoundError("editing version not found")
+        if editing_version.version_status != "draft":
+            raise ContextMediaEditingNotOpenError("draft is not open")
         self._logical_quota.reserve(
             asset.workspace_id,
             asset_id=asset.asset_id,
@@ -620,7 +573,9 @@ class SqlAlchemyContextMediaRepository:
         )
         conditions = [
             ContextPage.workspace_id == workspace_id,
-            visible_context_page_expression(actor),
+            (ContextPage.lifecycle_status != "archived")
+            if actor_can_read_drafts(actor)
+            else visible_context_page_expression(actor),
             ContextMediaAsset.workspace_id == workspace_id,
             ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
             # Match the visibility of the creating version or a readable use.
@@ -1213,16 +1168,25 @@ def _usage_snapshot(
     latest_count = 0
     published_count = 0
     historical_count = 0
-    active_ids = {
-        version_id
-        for version_id in (
-            page.latest_draft_version_id,
-            page.current_published_version_id,
+    draft_ids = set(
+        session.scalars(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.version_status == "draft",
+                ),
+            ).with_only_columns(ContextPageVersion.id)
         )
-        if version_id is not None
-    }
+    )
+    active_ids = draft_ids | (
+        {page.current_published_version_id}
+        if page.current_published_version_id
+        else set()
+    )
     for usage in usages:
-        if usage.page_version_id == page.latest_draft_version_id:
+        if usage.page_version_id in draft_ids:
             latest_count += usage.reference_count
         if usage.page_version_id == page.current_published_version_id:
             published_count += usage.reference_count
@@ -1259,7 +1223,7 @@ def _usage_snapshot(
             for usage in usages:
                 if usage.page_version_id in foreign_discarded_ids:
                     continue
-                if usage.page_version_id == page.latest_draft_version_id:
+                if usage.page_version_id in draft_ids:
                     viewer_latest_count += usage.reference_count
                 if usage.page_version_id == page.current_published_version_id:
                     viewer_published_count += usage.reference_count
@@ -1281,7 +1245,7 @@ def _usage_snapshot(
         historical_reference_count=historical_count,
         created_for_version_is_editing=(
             created_for_version is not None
-            and created_for_version.version_status == "editing"
+            and created_for_version.version_status == "draft"
         ),
         viewer_visible_latest_draft_reference_count=viewer_latest_count,
         viewer_visible_current_published_reference_count=viewer_published_count,

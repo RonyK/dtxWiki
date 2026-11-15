@@ -42,6 +42,26 @@
         "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
         "title": "Conversation Token"
       },
+      "from": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "From"
+      },
       "idempotency_key": {
         "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
         "maxLength": 160,
@@ -49,6 +69,22 @@
         "pattern": "^[A-Za-z0-9._:-]+$",
         "title": "Idempotency Key",
         "type": "string"
+      },
+      "on_conflict": {
+        "anyOf": [
+          {
+            "enum": [
+              "keep_both",
+              "latest"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "On Conflict"
       },
       "page_id": {
         "description": "Context page UUID or stable_url: /p/<workspace_id>/<page_id> or /p/<page_id> in this workspace.",
@@ -85,18 +121,10 @@
             "title": "Aliases",
             "type": "array"
           },
-          "alternative_draft_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Alternative Draft Id"
+          "autosave_merged": {
+            "default": false,
+            "title": "Autosave Merged",
+            "type": "boolean"
           },
           "block_map_stale": {
             "default": false,
@@ -191,6 +219,7 @@
             "anyOf": [
               {
                 "enum": [
+                  "closed",
                   "state_inconsistent",
                   "current_editing",
                   "current_draft",
@@ -257,6 +286,11 @@
             "title": "Page Id",
             "type": "string"
           },
+          "page_metadata": {
+            "additionalProperties": true,
+            "title": "Page Metadata",
+            "type": "object"
+          },
           "page_type": {
             "default": "overview",
             "enum": [
@@ -287,10 +321,13 @@
             "default": null,
             "title": "Parent Version Id"
           },
-          "preserved_as_alternative": {
-            "default": false,
-            "title": "Preserved As Alternative",
-            "type": "boolean"
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
           },
           "publish_blocked_reasons": {
             "items": {
@@ -345,11 +382,6 @@
           "slug": {
             "title": "Slug",
             "type": "string"
-          },
-          "superseded_review_count": {
-            "default": 0,
-            "title": "Superseded Review Count",
-            "type": "integer"
           },
           "tags": {
             "items": {
@@ -458,7 +490,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",

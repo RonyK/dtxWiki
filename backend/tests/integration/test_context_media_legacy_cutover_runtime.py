@@ -61,7 +61,18 @@ def test_publish_conflict_is_409_and_rolls_back_every_publication_pointer(
     page_service,
 ):
     published = _published(page_service, slug="cutover-publish")
+    editing = page_service.begin_context_edit(
+        page_id=published.id,
+        workspace_id=published.workspace_id,
+        actor_kind="human",
+        actor_id=ACTOR_ID,
+        actor_provenance="browser_session",
+        from_version_id=published.version_id,
+        idempotency_key="fixture-begin:test_context_media_legacy_cutover_runtime.py:64",
+    )
     draft = page_service.autosave_page(
+        version_id=editing.version_id,
+        expected_editing_revision=editing.editing_revision,
         page_id=published.id,
         workspace_id=published.workspace_id,
         title=published.title,
@@ -69,9 +80,9 @@ def test_publish_conflict_is_409_and_rolls_back_every_publication_pointer(
         actor_kind="human",
         actor_id=ACTOR_ID,
         actor_provenance="browser_session",
-        base_version_id=published.version_id,
-        base_content_hash=published.content_hash,
-        session_version_id=published.version_id,
+        base_version_id=editing.version_id,
+        base_content_hash=editing.content_hash,
+        session_version_id=editing.version_id,
         idempotency_key="cutover-publish-draft",
     )
     with page_service.session_factory.begin() as session:
@@ -80,7 +91,7 @@ def test_publish_conflict_is_409_and_rolls_back_every_publication_pointer(
         assert version is not None
         version.body_md = f"# Cutover publish\n\n![legacy]({_legacy_url(workspace.id)})"
 
-    with pytest.raises(PageContextMediaError) as excinfo:
+    with pytest.raises(LegacyMediaCutoverConflictError) as excinfo:
         page_service.publish_draft(
             page_id=published.id,
             version_id=draft.version_id,
@@ -93,16 +104,15 @@ def test_publish_conflict_is_409_and_rolls_back_every_publication_pointer(
         )
 
     assert excinfo.value.error_code == "legacy_media_cutover_conflict"
-    assert excinfo.value.page_id == published.id
-    assert status_code_for_error(excinfo.value) == 409
+    assert status_code_for_read_error(excinfo.value) == 409
     with page_service.session_factory() as session:
         page = session.get(ContextPage, published.id)
         old = session.get(ContextPageVersion, published.version_id)
         rejected = session.get(ContextPageVersion, draft.version_id)
         assert page is not None and old is not None and rejected is not None
         assert page.current_published_version_id == old.id
-        assert page.current_version_id == rejected.id
-        assert page.latest_draft_version_id == rejected.id
+        assert page.current_version_id == old.id
+        assert page.latest_draft_version_id is None
         assert old.version_status == "published_snapshot"
         assert rejected.version_status == "draft"
 
@@ -121,13 +131,15 @@ def test_review_approval_keeps_the_cutover_conflict(page_service):
     review_id = UUID(_seed_pending_review(page_service, str(workspace_id)))
     with page_service.session_factory.begin() as session:
         change_set_id = session.get(ReviewItem, review_id).change_set_id
-        operation = session.scalar(select(ChangeOperation).where(
-            ChangeOperation.change_set_id == change_set_id
-        ))
-        version_id = UUID(operation.diff_ref.split(":")[1])
-        session.get(ContextPageVersion, version_id).body_md = (
-            f"# Cutover approval\n\n![legacy]({_legacy_url(workspace_id)})"
+        operation = session.scalar(
+            select(ChangeOperation).where(
+                ChangeOperation.change_set_id == change_set_id
+            )
         )
+        version_id = UUID(operation.diff_ref.split(":")[1])
+        session.get(
+            ContextPageVersion, version_id
+        ).body_md = f"# Cutover approval\n\n![legacy]({_legacy_url(workspace_id)})"
 
     with pytest.raises(LegacyMediaCutoverConflictError) as excinfo:
         with page_service.session_factory.begin() as session:
@@ -261,7 +273,6 @@ def test_public_exposure_refuses_legacy_snapshot_before_mutating_grant(page_serv
         )
 
     assert excinfo.value.error_code == "legacy_media_cutover_conflict"
-    assert excinfo.value.page_id == published.id
     assert status_code_for_error(excinfo.value) == 409
     with page_service.session_factory() as session:
         page = session.get(ContextPage, published.id)

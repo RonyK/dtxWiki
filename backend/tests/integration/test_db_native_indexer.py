@@ -19,6 +19,7 @@ from backend.models.library import (
 from backend.models.workspace import Workspace
 from backend.schemas.read import SearchFilters
 from backend.services.indexing import DbNativeIndexer
+from backend.services.indexing.doc_source import compose_context_page_doc_sources
 from backend.services.retrieval.semantic import SemanticRetriever
 from backend.services.vector_store import BruteForceVectorStore
 
@@ -155,6 +156,10 @@ def _library_version(session, item, *, version_no, body):
 
 
 def test_index_context_page_published_and_draft_scopes(session_factory):
+    # Test-budget exception: a second draft in this existing DB traversal is
+    # needed to detect source-version uniqueness and all-draft collection.
+    # A one-draft fixture or pure test cannot catch overwriting one draft's
+    # persisted chunks with another, or terminal-draft cleanup on reindex.
     indexer = _indexer()
     with session_factory.begin() as session:
         wsid = _ws(session)
@@ -169,26 +174,53 @@ def test_index_context_page_published_and_draft_scopes(session_factory):
         draft = _version(
             session, page.id, "# Doc\n\nDraft beta content here.", "draft", version_no=2
         )
+        other_draft = _version(
+            session,
+            page.id,
+            "# Another Draft\n\nIndependent gamma content.",
+            "draft",
+            version_no=3,
+        )
         page.current_published_version_id = published.id
+        # The old pointer names only one draft. Both must still be collected.
         page.latest_draft_version_id = draft.id
         session.flush()
 
+        indexer.index(session=session, source_kind="context_page", source_id=page.id)
         indexer.index(session=session, source_kind="context_page", source_id=page.id)
 
         chunks = session.scalars(select(ContentChunk)).all()
         scopes = {chunk.content_scope for chunk in chunks}
         embeddings = session.scalars(select(ChunkEmbedding)).all()
-    assert scopes == {"published", "draft"}
-    assert len(embeddings) == len(chunks)
-    assert all(chunk.heading_path for chunk in chunks)
+        expected_ids = {published.id, draft.id, other_draft.id}
+        assert {chunk.source_version_id for chunk in chunks} == expected_ids
+        assert {
+            source.version_id
+            for source in compose_context_page_doc_sources(session, page)
+            if source.source_kind == "context_page"
+        } == expected_ids
+        assert scopes == {"published", "draft"}
+        assert len(embeddings) == len(chunks)
+        assert all(chunk.heading_path for chunk in chunks)
+
+        other_draft.version_status = "closed"
+        session.flush()
+        indexer.index(session=session, source_kind="context_page", source_id=page.id)
+        assert set(session.scalars(select(ContentChunk.source_version_id))) == {
+            published.id,
+            draft.id,
+        }
+        assert {
+            source.version_id
+            for source in compose_context_page_doc_sources(session, page)
+            if source.source_kind == "context_page"
+        } == {published.id, draft.id}
 
 
-def test_index_context_page_excludes_private_editing_row_from_draft_scope(
+def test_index_context_page_excludes_discarded_rows_from_draft_scope(
     session_factory,
 ):
-    """Legacy generic current/latest pointers may name a private edit
-    alongside a published snapshot. The indexer must exclude that private
-    body rather than treating every unpublished row as a shared draft."""
+    """A stale legacy pointer must not index a terminated draft's body."""
 
     indexer = _indexer()
     with session_factory.begin() as session:
@@ -205,10 +237,10 @@ def test_index_context_page_excludes_private_editing_row_from_draft_scope(
             session,
             page.id,
             "# Editing Doc\n\nUnsubmitted private body.",
-            "editing",
+            "discarded",
             version_no=2,
         )
-        # Simulate legacy generic pointers to a private row while retaining
+        # Simulate legacy generic pointers to a terminated row while retaining
         # the published snapshot. Current private autosaves on a published
         # page leave its readable base and published-version pointer intact.
         page.current_published_version_id = published.id

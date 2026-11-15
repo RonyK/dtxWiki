@@ -241,6 +241,7 @@ test("publishes real GIF and animated WebP uploads through the trusted Context r
       data: {
         title,
         body_md: body,
+        version_id: created.version_id,
         base_version_id: created.version_id,
         base_content_hash: created.content_hash,
         expected_editing_revision: created.editing_revision,
@@ -266,10 +267,10 @@ test("publishes real GIF and animated WebP uploads through the trusted Context r
   };
   const decisionResponse = await page.request.post(
     `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/reviews/${submitted.review_item_id}/decision`,
-    { data: { decision_type: "approve" } },
+    { data: { decision_type: "approve", ...await mergeBinding(page.request, workspace.id, created.id, submitted.version_id) } },
   );
   expect(decisionResponse.ok(), await decisionResponse.text()).toBeTruthy();
-  const published = await publishVersion(page.request, workspace.id, created.id, submitted);
+  const published = await readPage(page.request, workspace.id, created.id);
   expect(published.current_published_version_id).toBe(submitted.version_id);
 
   const contentPaths = uploads.map(
@@ -763,6 +764,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
     });
 
     let created!: PagePayload;
+    let previewDraft!: PagePayload;
     let canonicalBody = "";
     let assetIds: string[] = [];
     await test.step("save and publish only canonical logical references", async () => {
@@ -771,7 +773,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       // in PageEditor.tsx) so every upload above had a real page/editing
       // version to target from its first attempt. By the time "Save draft" is
       // clicked here, `page` state is already populated, so this click is an
-      // ordinary autosave of the caller's own open "editing" row, not a create
+      // ordinary autosave of the selected shared draft, not a create
       // -- and there is no `media_session_id` concept to assert on any more.
       const autosaveRequest = page.waitForRequest(
         (request) =>
@@ -809,7 +811,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       assertCanonicalBody(stored.body_md, RETAINED_UPLOAD_NAMES);
       canonicalBody = stored.body_md;
       await expect(page).toHaveURL(
-        new RegExp(`/workspaces/${workspace.id}/context/pages/${created.id}/edit$`),
+        new RegExp(`/workspaces/${workspace.id}/context/pages/${created.id}/edit\\?version_id=${created.version_id}$`),
       );
 
       const publishResponse = page.waitForResponse(
@@ -876,14 +878,25 @@ test("preserves a five-image batch through retry, publication, revocation, and r
         200,
       );
 
+      const beginPreview = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/begin-edit`
+          && response.request().method() === "POST",
+      );
       await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}/edit`));
+      const previewResponse = await beginPreview;
+      expect(previewResponse.ok(), await previewResponse.text()).toBeTruthy();
+      previewDraft = (await previewResponse.json()).data as PagePayload;
+      expect(previewDraft.version_id).not.toBe(created.version_id);
+      const previewMediaUrls = assetIds.map((assetId) =>
+        `/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/versions/${previewDraft.version_id}/media/${assetId}/content`,
+      );
       await expect(page.getByLabel("Title")).toHaveValue(title);
       await page.getByRole("tab", { name: "Reading" }).click();
       const privateGeometry = await expectMediaGeometry(
         page,
         page.locator(".preview-pane .markdown-body"),
         RETAINED_UPLOAD_NAMES,
-        exactVersionUrls,
+        previewMediaUrls,
       );
 
       const versionPage = await page.context().newPage();
@@ -935,15 +948,23 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       );
 
       const nextBody = `# ${title}\n\nThe current published version no longer references media.`;
+      const beginResponse = await page.request.post(
+        `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/begin-edit`,
+        { data: { from: previewDraft.version_id, idempotency_key: randomUUID() } },
+      );
+      expect(beginResponse.ok(), await beginResponse.text()).toBeTruthy();
+      const opened = (await beginResponse.json()).data as PagePayload;
+      expect(opened.version_id).toBe(previewDraft.version_id);
       const updateResponse = await page.request.post(
         `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/autosave`,
         {
           data: {
             title,
             body_md: nextBody,
-            base_version_id: created.version_id,
-            base_content_hash: created.content_hash,
-            expected_editing_revision: created.editing_revision,
+            version_id: opened.version_id,
+            base_version_id: opened.version_id,
+            base_content_hash: opened.content_hash,
+            expected_editing_revision: opened.editing_revision,
             idempotency_key: randomUUID(),
           },
         },
@@ -1239,6 +1260,23 @@ async function setPagePublic(
   return (await response.json()).data as PagePayload;
 }
 
+async function mergeBinding(
+  request: APIRequestContext, workspaceId: string, pageId: string, versionId: string,
+) {
+  const response = await request.post(
+    `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/context/pages/${pageId}/merge-preview`,
+    { data: { version_id: versionId } },
+  );
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const preview = (await response.json()).data;
+  expect(preview.result).not.toBeNull();
+  return {
+    expected_editing_revision: preview.editing_revision,
+    expected_published_version_id: preview.published_version_id,
+    result_hash: preview.result.result_hash,
+  };
+}
+
 async function publishVersion(
   request: APIRequestContext,
   workspaceId: string,
@@ -1251,6 +1289,8 @@ async function publishVersion(
       data: {
         reason: "E2E retained Context media history",
         publish_despite_findings: false,
+        idempotency_key: randomUUID(),
+        ...await mergeBinding(request, workspaceId, pageId, version.version_id),
         expected_content_hash: version.content_hash,
         expected_references_hash: version.references_hash,
       },

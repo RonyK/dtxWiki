@@ -10,10 +10,6 @@ from sqlalchemy.orm import Session
 
 from backend.models.context import ContextPage, ContextPageVersion, PageNameIndex
 from backend.policy.auth import ActorContext
-from backend.services.context_visibility import (
-    editable_context_version_id,
-    searchable_context_version_id,
-)
 from backend.services.read_errors import PageNameOccupiedError, ReadServiceError
 
 NAME_KIND_PRIORITY = {"slug": 0, "title": 1, "alias": 2}
@@ -128,11 +124,13 @@ def visible_page_name_matches(
 
     matches: list[VisiblePageNameMatch] = []
     for index, page, version in session.execute(statement):
-        if include_unpublished:
-            version_id = editable_context_version_id(page)
-        else:
-            version_id, _is_draft = searchable_context_version_id(page, actor)
-        if version_id == index.source_version_id == version.id:
+        from backend.policy.trust_boundaries import actor_can_read_drafts
+
+        visible = version.id == page.current_published_version_id or (
+            version.version_status == "draft"
+            and (include_unpublished or actor_can_read_drafts(actor))
+        )
+        if visible and index.source_version_id == version.id:
             matches.append(
                 VisiblePageNameMatch(index=index, page=page, version=version)
             )

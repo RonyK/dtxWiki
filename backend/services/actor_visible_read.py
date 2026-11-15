@@ -452,7 +452,6 @@ def resolve_visible_context_version(
     # this module, so hoisting these to module scope raises ImportError on a
     # partially initialized `policy.auth` at startup.
     from backend.models.context import ContextPage, ContextPageVersion
-    from backend.repositories.context_page_repo import get_open_edit_for_actor
     from backend.services.context_visibility import visible_context_version_id
 
     page = None
@@ -490,36 +489,7 @@ def resolve_visible_context_version(
             return None, None
         return page, explicit_version
 
-    if version_preference == "my_edit":
-        # The caller's OWN open editing row -- the body its next
-        # patch_context_edit applies to -- is always readable, whoever holds
-        # the page head. Without one, page visibility decides between
-        # no-open-edit and an opaque miss. A read never opens an edit (that is
-        # begin_context_edit's job).
-        if actor is None:
-            return None, None
-        own_edit = get_open_edit_for_actor(
-            session,
-            workspace_id=workspace_id,
-            page_id=page.id,
-            actor_kind=actor.actor_kind,
-            actor_id=actor.actor_id,
-        )
-        if own_edit is not None and context_version_is_visible(own_edit, actor):
-            return page, own_edit
-        if own_edit is None and context_page_visible(
-            page, actor, workspace_id=workspace_id
-        ):
-            return page, None
-        return None, None
-    if version_preference == "visible":
-        resolved_version_id = visible_context_version_id(page, actor)[0]
-    elif version_preference == "published":
-        resolved_version_id = page.current_published_version_id
-    else:
-        if not actor_can_read_drafts(actor):
-            return None, None
-        resolved_version_id = page.latest_draft_version_id
+    resolved_version_id = visible_context_version_id(page, actor)[0]
     version = (
         get_in_workspace(
             session,

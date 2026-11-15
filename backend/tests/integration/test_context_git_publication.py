@@ -240,6 +240,7 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(
         old_map = deepcopy(old.block_map)
         original_saved_at = old.last_saved_at
         approved = _approve(session, workspace_id, draft.review_item_id)
+        current_body = current.body_md
         store = session.info["context_snapshot_store"]
         current_oid = current.commit_oid
         assert old._body_md is None and old._block_map is None
@@ -270,7 +271,8 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(
         assert old._body_md == old_body
         assert old._block_map == old_map
         assert old.last_saved_at == original_saved_at
-        assert current._body_md == current_body and current.commit_oid is None
+        assert current._body_md is None and current.body_md == current_body
+        assert current.commit_oid == current_oid and current.version_status == "closed"
         assert store.list_heads(workspace_id)[page_id] == old.commit_oid
 
     with session_factory.begin() as session:
@@ -310,6 +312,10 @@ def test_git_bodies_follow_publication_undo_and_storage_failure(
         restored_version = session.get(ContextPageVersion, restored.version_id)
         assert restored_version.body_md == old_body
         assert restored_version.block_map == old_map
+        assert restored_version.version_status == "published_snapshot"
+        current_id = restored_version.id
+        current_oid = restored_version.commit_oid
+        current_body = restored_version.body_md
 
     with session_factory() as session:
         historical = session.get(ContextPageVersion, old_id)

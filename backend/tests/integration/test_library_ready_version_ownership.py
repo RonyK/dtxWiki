@@ -120,7 +120,9 @@ def sqlite_templates(tmp_path_factory):
 def test_core_schema_migration_installs_and_removes_ready_version_ownership(
     tmp_path: Path, sqlite_templates
 ):
-    database_url = sqlite_templates.clone("head", tmp_path / "migration-ready-owner.db")
+    database_url = sqlite_templates.clone(
+        "rev_872d9c3e104b", tmp_path / "migration-ready-owner.db"
+    )
     config = Config(str(resolve_alembic_ini()))
     config.set_main_option("script_location", str(resolve_migrations_dir()))
     config.set_main_option("sqlalchemy.url", database_url)

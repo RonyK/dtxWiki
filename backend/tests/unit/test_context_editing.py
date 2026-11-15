@@ -11,12 +11,11 @@ from backend.schemas.context_edit import (
     EditOperation,
     InsertSectionOperation,
     InsertTextOperation,
-    PatchDraftRequest,
     ReplaceDocumentOperation,
     ReplaceSectionOperation,
     ReplaceTextOperation,
 )
-from backend.schemas.context_write import UpdateDraftRequest
+from backend.schemas.mcp.context_tools import PatchContextEditInput
 from backend.services import context_editing
 from backend.services.anchor_resolver import AnchorStatus, ResolvedAnchor
 from backend.services.context_editing import (
@@ -433,89 +432,32 @@ def test_last_operation_failure_keeps_twenty_operation_batch_atomic(monkeypatch)
     assert "changed-1" not in body
 
 
-def test_replace_text_containing_old_text_does_not_require_an_explicit_key():
-    """A self-containing replace no longer needs the caller to supply a key:
-    the MCP layer (backend/mcp/context_tools.py) derives one from the
-    conversation and this request's own content whenever the field is
-    omitted, so a retry is always replayed from the ledger regardless of
-    operation shape -- see PatchDraftRequest.idempotency_key's description."""
-    operation = {
-        "op": "replace_text",
-        "old_text": "old",
-        "new_text": "old-new",
+def test_patch_request_has_bounded_operations_and_no_unknown_fields():
+    base = {
+        "workspace_id": uuid4(),
+        "page_id": str(uuid4()),
+        "version_id": uuid4(),
+        "expected_editing_revision": 1,
+        "idempotency_key": "bounded-batch",
     }
-
-    request = PatchDraftRequest(
-        page_id=uuid4(),
-        operations=[operation],
-        reason="self-containing replacement",
+    PatchContextEditInput(
+        **base, operations=[{"op": "append_document", "content": "valid"}]
     )
-    assert request.idempotency_key is None
-
-    keyed = PatchDraftRequest(
-        page_id=uuid4(),
-        operations=[operation],
-        reason="self-containing replacement",
-        idempotency_key="replace-old-once",
-    )
-    assert keyed.idempotency_key == "replace-old-once"
-
-
-def test_patch_request_is_a_strict_sibling_with_bounded_operations():
-    assert not issubclass(PatchDraftRequest, UpdateDraftRequest)
-
     with pytest.raises(ValidationError):
-        PatchDraftRequest(page_id=uuid4(), operations=[], reason="empty batch")
+        PatchContextEditInput(**base, operations=[])
     with pytest.raises(ValidationError):
-        PatchDraftRequest(
-            page_id=uuid4(),
+        PatchContextEditInput(
+            **base,
             operations=[
                 {"op": "append_document", "content": f"item-{index}"}
                 for index in range(21)
             ],
-            reason="oversized batch",
         )
     with pytest.raises(ValidationError):
-        PatchDraftRequest(
-            page_id=uuid4(),
+        PatchContextEditInput(
+            **base,
             operations=[{"op": "append_document", "content": "valid"}],
-            reason="reject unknown fields",
             unknown_field=True,
-        )
-
-
-def test_patch_request_accepts_explicit_identity_retirement_resolution():
-    branch_id = uuid4()
-    request = PatchDraftRequest(
-        page_id=uuid4(),
-        operations=[
-            {
-                "op": "resolve_conflict",
-                "block": "b_retired",
-                "resolution": "keep_head",
-            }
-        ],
-        reason="accept current head for retired identity",
-        reconciles=[branch_id],
-    )
-
-    resolution = request.operations[0]
-    assert resolution.op == "resolve_conflict"
-    assert resolution.block == "b_retired"
-    assert resolution.resolution == "keep_head"
-
-    with pytest.raises(ValidationError):
-        PatchDraftRequest(
-            page_id=uuid4(),
-            operations=[
-                {
-                    "op": "resolve_conflict",
-                    "block": "b_retired",
-                    "resolution": "keep_deleted",
-                }
-            ],
-            reason="reject ambiguous retired resolution",
-            reconciles=[branch_id],
         )
 
 

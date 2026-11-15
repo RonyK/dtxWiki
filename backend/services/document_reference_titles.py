@@ -1,10 +1,7 @@
 """Bounded, version-owned Context titles for reference read projections."""
 
-import json
+from sqlalchemy import func
 
-from sqlalchemy import and_, func, or_
-
-from backend.models.change import ChangeOperation
 from backend.models.context import ContextPageVersion
 from backend.repositories.workspace_scoped import select_in_workspace
 from backend.utils.page_frontmatter import (
@@ -19,70 +16,8 @@ TITLE_BODY_PREFIX_LENGTH = 16_384
 
 
 def _metadata_titles(session, workspace_id, visible_versions):
-    owners = {
-        f"context_page_version:{version_id}": (page_id, version_id)
-        for page_id, version_id in visible_versions.items()
-    }
-    snapshots, patches = {}, {}
-    refs = list(owners)
-    for start in range(0, len(refs), 400):
-        rows = session.execute(
-            select_in_workspace(
-                ChangeOperation,
-                workspace_id=workspace_id,
-                conditions=(
-                    ChangeOperation.diff_ref.in_(refs[start : start + 400]),
-                    or_(
-                        and_(
-                            ChangeOperation.target_type == "context_page_metadata",
-                            ChangeOperation.operation == "metadata_snapshot",
-                        ),
-                        and_(
-                            ChangeOperation.target_type == "context_page",
-                            ChangeOperation.operation == "metadata_patch",
-                        ),
-                    ),
-                ),
-            )
-            .with_only_columns(
-                ChangeOperation.diff_ref,
-                ChangeOperation.target_id,
-                ChangeOperation.operation,
-                ChangeOperation.diff_summary,
-            )
-            .order_by(ChangeOperation.created_at, ChangeOperation.id)
-        )
-        for diff_ref, page_id, operation, summary in rows:
-            owner = owners.get(diff_ref)
-            if owner is None or owner[0] != page_id:
-                continue
-            try:
-                value = json.loads(summary or "")
-            except ValueError:
-                continue
-            title = value.get("title") if isinstance(value, dict) else None
-            if isinstance(title, str) and title.strip():
-                target = snapshots if operation == "metadata_snapshot" else patches
-                target[owner[1]] = title
-    return {**snapshots, **patches}
-
-
-def _sole_editing_titles(session, workspace_id, pages, visible_versions):
-    """Use a page title only when its sole version owns all private metadata.
-
-    First browser creation has no change-set title ledger. Prove that the
-    actor-visible root editing version is the entire page history before
-    using its page metadata. Even a discarded or foreign private sibling
-    invalidates that proof; inherited and published rows never use it.
-    """
-    candidates = {
-        version_id: page_id
-        for page_id, version_id in visible_versions.items()
-        if getattr(pages[page_id], "current_published_version_id", None) is None
-        and getattr(pages[page_id], "current_version_id", None) == version_id
-    }
-    roots = {}
-    version_ids = list(candidates)
+    result = {}
+    version_ids = list(visible_versions.values())
     for start in range(0, len(version_ids), 400):
         rows = session.execute(
             select_in_workspace(
@@ -90,35 +25,20 @@ def _sole_editing_titles(session, workspace_id, pages, visible_versions):
                 workspace_id=workspace_id,
                 conditions=(
                     ContextPageVersion.id.in_(version_ids[start : start + 400]),
-                    ContextPageVersion.version_status == "editing",
-                    ContextPageVersion.parent_version_id.is_(None),
                 ),
-            ).with_only_columns(ContextPageVersion.id, ContextPageVersion.page_id)
+            ).with_only_columns(
+                ContextPageVersion.id,
+                ContextPageVersion.page_id,
+                ContextPageVersion.page_metadata,
+            )
         )
-        for version_id, page_id in rows:
-            if candidates.get(version_id) == page_id:
-                roots[version_id] = page_id
-    page_ids = list(roots.values())
-    counts = {}
-    for start in range(0, len(page_ids), 400):
-        counts.update(
-            session.execute(
-                select_in_workspace(
-                    ContextPageVersion,
-                    workspace_id=workspace_id,
-                    conditions=(
-                        ContextPageVersion.page_id.in_(page_ids[start : start + 400]),
-                    ),
-                )
-                .with_only_columns(ContextPageVersion.page_id, func.count())
-                .group_by(ContextPageVersion.page_id)
-            ).all()
-        )
-    return {
-        version_id: pages[page_id].title
-        for version_id, page_id in roots.items()
-        if counts.get(page_id) == 1
-    }
+        for version_id, page_id, metadata in rows:
+            if visible_versions.get(page_id) != version_id:
+                continue
+            title = (metadata or {}).get("title")
+            if isinstance(title, str) and title.strip():
+                result[version_id] = title
+    return result
 
 
 def context_reference_titles(
@@ -133,18 +53,6 @@ def context_reference_titles(
     titles = {}
     if not public:
         titles = _metadata_titles(session, workspace_id, visible_versions)
-        titles.update(
-            _sole_editing_titles(
-                session,
-                workspace_id,
-                pages,
-                {
-                    page_id: version_id
-                    for page_id, version_id in visible_versions.items()
-                    if version_id not in titles
-                },
-            )
-        )
     missing = [value for value in visible_versions.values() if value not in titles]
     verified = set()
     for start in range(0, len(missing), 400):

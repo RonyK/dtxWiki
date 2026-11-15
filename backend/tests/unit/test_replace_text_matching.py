@@ -526,42 +526,6 @@ def test_the_receipt_says_a_match_was_forgiven():
     assert receipts[0].line_range == (5, 5)
 
 
-def test_the_legacy_field_list_matches_the_operations_that_keep_accept_fuzzy():
-    from backend.schemas import context_edit
-
-    declared = {
-        cls.model_fields["op"].annotation.__args__[0]
-        for cls in vars(context_edit).values()
-        if isinstance(cls, type)
-        and issubclass(cls, context_edit._Operation)
-        and "accept_fuzzy" in cls.model_fields
-        and "op" in cls.model_fields
-    }
-    assert declared == context_edit.ANCHOR_SCOPED_OPERATION_KINDS
-
-    # A corrupted value is left for validation to reject.
-    corrupt = context_edit.without_legacy_operation_fields(
-        [{"op": "replace_block", "accept_fuzzy": {"corrupt": True}}]
-    )
-    assert corrupt[0]["accept_fuzzy"] == {"corrupt": True}
-
-    stored = [
-        {
-            "op": "replace_block",
-            "block": "b",
-            "expected": "0" * 64,
-            "content": "x",
-            "accept_fuzzy": False,
-        },
-        {"op": "replace_text", "old_text": "a", "new_text": "b", "accept_fuzzy": True},
-    ]
-    cleaned = context_edit.without_legacy_operation_fields(stored)
-    assert "accept_fuzzy" not in cleaned[0]
-    assert cleaned[1]["accept_fuzzy"] is True
-    for operation in cleaned:
-        _OPERATION.validate_python(operation)
-
-
 # A Markdown hard break: two trailing spaces before a non-blank line.
 _CARD = "# Card\n\nAddress line one on this street  \nAddress line two\n"
 _POEM = (

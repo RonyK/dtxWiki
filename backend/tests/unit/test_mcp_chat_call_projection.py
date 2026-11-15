@@ -243,11 +243,9 @@ def test_input_version_number_hides_draft_versions_from_viewers(
 ):
     with session_factory.begin() as session:
         workspace, client, owner = _setup(session)
-        page, _ = _published_page(
-            session, workspace.id, "draft-version-input", "Guide"
-        )
+        page, _ = _published_page(session, workspace.id, "draft-version-input", "Guide")
         editing = _version(
-            session, page, status="editing", author=str(uuid4()), number=37
+            session, page, status="draft", author=str(uuid4()), number=37
         )
         chat = _Chat(session, workspace, client, owner)
         call = chat.call(
@@ -723,7 +721,7 @@ def test_previews_follow_the_visibility_of_the_edited_version(session_factory):
         editing = _version(
             session,
             page,
-            status="editing",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
@@ -798,7 +796,7 @@ def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
         editing = _version(
             session,
             page,
-            status="editing",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
@@ -1068,7 +1066,7 @@ def test_detail_and_export_project_every_call_identically(session_factory):
         editing = _version(
             session,
             page,
-            status="editing",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
@@ -1131,7 +1129,7 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
         editing = _version(
             session,
             page,
-            status="editing",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
@@ -1151,7 +1149,7 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
             session, workspace.id, "diff-new", "Diff New", lifecycle_status="draft"
         )
         new_editing = _version(
-            session, new_page, status="editing", author=owner.id, number=1
+            session, new_page, status="draft", author=owner.id, number=1
         )
         new_page.current_version_id = new_editing.id
         session.flush()

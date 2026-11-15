@@ -85,7 +85,7 @@ _READ_DEFAULTS = {
 }
 _VERSION_STATUSES = frozenset(
     {
-        "editing",
+        "closed",
         "draft",
         "published_snapshot",
         "superseded_snapshot",
@@ -186,7 +186,7 @@ def record_served_read(
         "version_status": status,
         "content_identity": content_identity,
         "editing_revision": getattr(version, "editing_revision", None)
-        if status == "editing"
+        if status == "draft"
         else None,
     }
     if snapshot not in snapshots:
@@ -230,7 +230,7 @@ def validate_read_projection(value: Any) -> dict[str, Any] | None:
         ):
             return None
     revision = value.get("editing_revision")
-    if value["version_status"] == "editing" and (
+    if value["version_status"] == "draft" and (
         type(revision) is not int or revision < 1
     ):
         return None
@@ -242,7 +242,7 @@ def validate_read_projection(value: Any) -> dict[str, Any] | None:
         "version_status": value["version_status"],
         "content_identity": value["content_identity"],
         "scope_identity": value["scope_identity"],
-        "editing_revision": revision if value["version_status"] == "editing" else None,
+        "editing_revision": revision if value["version_status"] == "draft" else None,
     }
 
 

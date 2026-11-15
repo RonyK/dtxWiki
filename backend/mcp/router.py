@@ -78,7 +78,6 @@ TOOL_HANDLERS = {
     "write_agent_page_draft": agent_tools.write_agent_page_draft,
     "build_agent_input_bundle": agent_tools.build_agent_input_bundle,
     "list_requested_changes": review_tools.list_requested_changes,
-    "submit_revision_for_review": review_tools.submit_revision_for_review,
     "wiki_maintenance": maintenance_tools.wiki_maintenance,
     "read_context_outline": read_tools.read_context_outline,
     "read_structure_map": read_tools.read_structure_map,

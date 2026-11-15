@@ -283,7 +283,7 @@ def test_worker_end_to_end_reclaims_a_real_orphan():
             actor_type="human",
             created_by_actor_kind=actor.kind,
             created_by_actor_id=actor.id,
-            version_status="editing",
+            version_status="draft",
         )
         session.add(version)
         session.flush()
@@ -305,7 +305,7 @@ def test_worker_end_to_end_reclaims_a_real_orphan():
             now=scheduled_for - timedelta(days=2),
         )
         asset_id = asset.asset_id
-        version.version_status = "draft"
+        version.version_status = "closed"
         row = session.get(ContextMediaAsset, (workspace_id, asset_id))
         row.created_at = scheduled_for - timedelta(days=2)
         session.flush()

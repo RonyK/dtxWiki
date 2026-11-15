@@ -26,6 +26,7 @@ class ContextDraftReview(BaseModel):
 
 class ContextDraftInfo(BaseModel):
     author: ContextDraftAuthor
+    parent_version_ids: list[UUID] = Field(default_factory=list)
     last_saved_at: datetime
     is_editing: bool
     review: ContextDraftReview | None = None
@@ -43,7 +44,7 @@ class ContextDraftInfo(BaseModel):
 
 class ContextDraftSummary(ContextDraftInfo):
     version_id: UUID
-    version_status: Literal["editing", "draft"]
+    version_status: Literal["draft"]
     is_mine: bool
     state: Literal["writing", "reviewing"]
 

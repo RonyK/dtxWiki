@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Shared Context drafts
+
+- Save shared drafts in place using their version ID and editing revision.
+  Browser saves can merge a supplied baseline; stale MCP saves return a conflict.
+- Bind publication and review approval to a merge preview. Confirm automatic
+  merge results in the editor before publication, and retain closed drafts as
+  Git commits with their commit parents and version-owned metadata.
+- Collect all open drafts for indexing while preserving the existing
+  single-result search presentation. Existing draft-pointer and reconciliation
+  columns remain for the later cleanup.
+- MCP contract revision 34 adapts existing editing tools and removes
+  `submit_revision_for_review`. Refresh cached tool catalogs and schemas.
+- Upgrade the draft schema after the document-identity migration. This data
+  conversion cannot be downgraded; recovery uses the pre-upgrade backup.
+
+
 ### Context body links
 
 - Expand short `/p/<page_id>` Markdown destinations to workspace-qualified

@@ -1103,6 +1103,29 @@ class ReviewService:
             )
         )
 
+    def has_context_update_reviews(self, session, workspace_id, review_item_ids):
+        """Whether external approval needs a Context merge-preview binding."""
+        return any(
+            review.review_type == "context_update"
+            and not self._ancestry_inspection(review)
+            for review in session.scalars(
+                select_in_workspace_by_ids(
+                    ReviewItem,
+                    workspace_id=workspace_id,
+                    resource_ids=review_item_ids,
+                )
+            )
+        )
+
+    @staticmethod
+    def _ancestry_inspection(review):
+        """A migrated ancestry notice acknowledges history, not publication."""
+        return bool(
+            (review.risk_signals or {})
+            .get("migration_parent_repaired", {})
+            .get("inspection_only")
+        )
+
     def get_review(
         self,
         session: Session,
@@ -1302,43 +1325,38 @@ class ReviewService:
         review: ReviewItem,
         change_set: ChangeSet,
     ) -> tuple[ContextPage, ContextPageVersion, list[ReviewItem]] | None:
-        """Resolve the version an approval publishes and the reviews it settles.
-
-        Approval publishes the review's exact version: the latest draft or an
-        earlier linear draft of the same chain (the changes up to it). Open
-        reviews of that version and of its own draft ancestors are settled
-        with it. Newer drafts and versions off this lineage (branched
-        alternatives, other forks) keep their reviews, as does a review that
-        also covers one of them.
-        """
-        from backend.services.context_lifecycle import (
-            is_publishable_draft,
-            live_draft_chain,
-        )
-
         if (
-            review.status not in {"pending", CHANGES_REQUESTED_STATUS}
-            or review.review_type != "context_update"
+            review.review_type != "context_update"
+            or ReviewService._ancestry_inspection(review)
+            or review.status
+            not in {
+                "pending",
+                CHANGES_REQUESTED_STATUS,
+            }
         ):
             return None
-        target = session.execute(
-            select(ChangeOperation, ContextPage)
-            .join(ContextPage, ContextPage.id == ChangeOperation.target_id)
-            .where(
-                ChangeOperation.change_set_id == change_set.id,
-                ChangeOperation.target_type == "context_page",
+        operation = session.scalar(
+            select_in_workspace(
+                ChangeOperation,
+                workspace_id=change_set.workspace_id,
+                conditions=(
+                    ChangeOperation.change_set_id == change_set.id,
+                    ChangeOperation.target_type == "context_page",
+                    ChangeOperation.diff_ref.startswith("context_page_version:"),
+                ),
             )
             .order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
-        ).first()
-        if target is None:
-            return None
-        operation, page = target
-        prefix = "context_page_version:"
-        version_id = (
-            parse_uuid_or_none(operation.diff_ref[len(prefix) :])
-            if operation.diff_ref and operation.diff_ref.startswith(prefix)
-            else None
+            .limit(1)
         )
+        if operation is None:
+            return None
+        page = get_in_workspace(
+            session,
+            ContextPage,
+            workspace_id=change_set.workspace_id,
+            resource_id=operation.target_id,
+        )
+        version_id = parse_uuid_or_none(operation.diff_ref.split(":", 1)[1])
         version = (
             get_in_workspace(
                 session,
@@ -1349,92 +1367,23 @@ class ReviewService:
             if version_id
             else None
         )
-        if version is None or not is_publishable_draft(session, page, version):
+        if (
+            page is None
+            or version is None
+            or version.page_id != page.id
+            or version.version_status
+            not in {"draft", "closed", "superseded_snapshot", "published_snapshot"}
+        ):
             return None
-        chain_ids = [draft.id for draft in live_draft_chain(session, page)]
-        settled_refs = [
-            f"{prefix}{settled_id}"
-            for settled_id in (
-                chain_ids[chain_ids.index(version.id) :]
-                if version.id in chain_ids
-                else [version.id]
-            )
+        from backend.services.context_write_service import ContextWriteService
+
+        siblings = [
+            item
+            for item in ContextWriteService._reviews_for_version(session, version)
+            if item.id != review.id
+            and item.status in {"pending", CHANGES_REQUESTED_STATUS}
         ]
-        change_set_ids = set(
-            session.scalars(
-                select_in_workspace(
-                    ChangeOperation,
-                    workspace_id=page.workspace_id,
-                    criteria=[
-                        ChangeOperation.target_type == "context_page",
-                        ChangeOperation.target_id == page.id,
-                        ChangeOperation.diff_ref.in_(settled_refs),
-                    ],
-                ).with_only_columns(ChangeOperation.change_set_id)
-            ).all()
-        )
-        outside = (
-            session.execute(
-                select_in_workspace(
-                    ChangeOperation,
-                    workspace_id=page.workspace_id,
-                    criteria=[
-                        ChangeOperation.change_set_id.in_(change_set_ids),
-                        ChangeOperation.diff_ref.startswith(prefix),
-                        ChangeOperation.diff_ref.not_in(settled_refs),
-                    ],
-                ).with_only_columns(
-                    ChangeOperation.change_set_id, ChangeOperation.diff_ref
-                )
-            ).all()
-            if change_set_ids
-            else []
-        )
-        if outside:
-            # A review that also covers a version outside this version's own
-            # history (a newer draft, a fork) is not settled by approving it.
-            parents = dict(
-                session.execute(
-                    select_in_workspace(
-                        ContextPageVersion,
-                        workspace_id=page.workspace_id,
-                        criteria=[ContextPageVersion.page_id == page.id],
-                    ).with_only_columns(
-                        ContextPageVersion.id, ContextPageVersion.parent_version_id
-                    )
-                ).all()
-            )
-            history: set[UUID] = set()
-            cursor = page.current_published_version_id
-            while cursor is not None and cursor not in history:
-                history.add(cursor)
-                cursor = parents.get(cursor)
-            change_set_ids -= {
-                change_set_id
-                for change_set_id, diff_ref in outside
-                if parse_uuid_or_none(diff_ref[len(prefix) :]) not in history
-            }
-        pending_reviews = (
-            list(
-                session.scalars(
-                    select_in_workspace(
-                        ReviewItem,
-                        workspace_id=page.workspace_id,
-                        criteria=[
-                            ReviewItem.change_set_id.in_(change_set_ids),
-                            ReviewItem.status.in_(
-                                ("pending", CHANGES_REQUESTED_STATUS)
-                            ),
-                            ReviewItem.review_type == "context_update",
-                            ReviewItem.id != review.id,
-                        ],
-                    )
-                ).all()
-            )
-            if change_set_ids
-            else []
-        )
-        return page, version, pending_reviews
+        return page, version, siblings
 
     def _rejection_impact(
         self,
@@ -1444,192 +1393,25 @@ class ReviewService:
         *,
         lock: bool = True,
     ) -> "_RejectionImpact | None":
-        """What rejecting a Context review does, for its preview and decision.
-
-        The decision recomputes this under the page lock, so the fingerprint
-        the preview showed proves the actor confirmed exactly this impact.
-        """
-
-        if review.review_type != "context_update":
+        context = self._approval_supersession_context(session, review, change_set)
+        if context is None:
             return None
-        prefix = "context_page_version:"
-        target = session.scalar(
-            select_in_workspace(
-                ChangeOperation,
-                workspace_id=change_set.workspace_id,
-                criteria=[
-                    ChangeOperation.change_set_id == change_set.id,
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.diff_ref.startswith(prefix),
-                ],
-            )
-            .order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
-            .limit(1)
-        )
-        version_id = (
-            parse_uuid_or_none(target.diff_ref[len(prefix) :])
-            if target is not None
-            else None
-        )
-        if version_id is None:
-            return None
+        page, version, siblings = context
+        from backend.services.mcp_write_idempotency import request_fingerprint
 
-        from backend.repositories.context_page_repo import get_page_by_id_for_update
-        from backend.services.context_lifecycle import (
-            live_draft_chain,
-            plan_context_rejection,
-        )
-
-        page = (
-            get_page_by_id_for_update(session, target.target_id)
-            if lock
-            else get_in_workspace(
-                session,
-                ContextPage,
-                workspace_id=review.workspace_id,
-                resource_id=target.target_id,
-            )
-        )
-        if page is not None and lock:
-            # ``with_for_update`` can return an already-loaded identity.  The
-            # review evidence path commonly loaded this page earlier in the
-            # transaction, so refresh after the lock rather than deciding from
-            # a stale lifecycle/head snapshot.
-            session.refresh(page)
-        version = get_in_workspace(
-            session,
-            ContextPageVersion,
-            workspace_id=change_set.workspace_id,
-            resource_id=version_id,
-        )
-        if (
-            page is None
-            or page.workspace_id != change_set.workspace_id
-            or version is None
-            or version.page_id != page.id
-        ):
-            return None
-        plan = plan_context_rejection(session, page, version)
-        if plan is not None:
-            # A review covering several drafts of the chain rejects from the
-            # earliest of them, as approving it publishes the newest: its
-            # later drafts were written on that one.
-            refs = set(
-                session.scalars(
-                    select_in_workspace(
-                        ChangeOperation,
-                        workspace_id=change_set.workspace_id,
-                        criteria=[
-                            ChangeOperation.change_set_id == change_set.id,
-                            ChangeOperation.target_type == "context_page",
-                            ChangeOperation.target_id == page.id,
-                            ChangeOperation.diff_ref.startswith(prefix),
-                        ],
-                    ).with_only_columns(ChangeOperation.diff_ref)
-                ).all()
-            )
-            earliest = next(
-                (
-                    member
-                    for member in reversed(live_draft_chain(session, page))
-                    if f"{prefix}{member.id}" in refs
-                ),
-                version,
-            )
-            if earliest.id != version.id:
-                version = earliest
-                plan = plan_context_rejection(session, page, version)
-        open_statuses = ("pending", CHANGES_REQUESTED_STATUS)
-        if plan is None:
-            # The version is off the live chain, so the rejection retires
-            # nothing: it closes only the redundant reviews of that exact
-            # version and leaves a claimed one to the reviewer already working
-            # it. (Content replacement in update_draft supersedes page-wide.)
-            siblings = self._open_reviews_within(
-                session,
-                page,
-                {f"{prefix}{version.id}"},
-                statuses=("pending",),
-                exclude_id=review.id,
-                unclaimed_only=True,
-            )
-            cascaded: list[ReviewItem] = []
-        else:
-            # The rejected draft and the later drafts written on it retire, so
-            # every open review within them closes, claimed or not; one that
-            # reviews only the rejected draft is its sibling. A review that
-            # also covers a surviving version stays open.
-            siblings = self._open_reviews_within(
-                session,
-                page,
-                {f"{prefix}{version.id}"},
-                statuses=open_statuses,
-                exclude_id=review.id,
-            )
-            sibling_ids = {item.id for item in siblings}
-            cascaded = [
-                item
-                for item in self._open_reviews_within(
-                    session,
-                    page,
-                    {f"{prefix}{member.id}" for member in plan.retired},
-                    statuses=open_statuses,
-                    exclude_id=review.id,
-                )
-                if item.id not in sibling_ids
-            ]
-        destination = plan.destination if plan is not None else None
-        restores_review = destination is not None and not session.scalar(
-            select_in_workspace(
-                ReviewItem,
-                workspace_id=page.workspace_id,
-                criteria=[
-                    ReviewItem.change_set_id.in_(
-                        select_in_workspace(
-                            ChangeOperation,
-                            workspace_id=page.workspace_id,
-                            criteria=[
-                                ChangeOperation.target_type == "context_page",
-                                ChangeOperation.target_id == page.id,
-                                ChangeOperation.diff_ref == f"{prefix}{destination.id}",
-                            ],
-                        ).with_only_columns(ChangeOperation.change_set_id)
-                    ),
-                    ReviewItem.review_type == "context_update",
-                    ReviewItem.status.in_(open_statuses),
-                    # The review being decided closes; it cannot keep it open.
-                    ReviewItem.id != review.id,
-                ],
-            )
-            .with_only_columns(ReviewItem.id)
-            .limit(1)
-        )
-        fingerprint = sha256(
-            json.dumps(
-                {
-                    "version": str(version.id),
-                    "effect": plan.effect if plan is not None else "no_head_change",
-                    "retired": [
-                        str(member.id) for member in (plan.retired if plan else ())
-                    ],
-                    "destination": str(destination.id) if destination else None,
-                    "siblings": sorted(str(item.id) for item in siblings),
-                    "cascaded": sorted(str(item.id) for item in cascaded),
-                    "restores_review": restores_review,
-                    "metadata_kept": bool(plan and plan.metadata_kept),
-                    "blocked": bool(plan and plan.blocked),
-                },
-                sort_keys=True,
-            ).encode("utf-8")
-        ).hexdigest()[:32]
         return _RejectionImpact(
-            page=page,
-            version=version,
-            plan=plan,
-            siblings=siblings,
-            cascaded=cascaded,
-            restores_review=restores_review,
-            fingerprint=fingerprint,
+            page,
+            version,
+            None,
+            siblings,
+            [],
+            False,
+            request_fingerprint(
+                {
+                    "version_id": str(version.id),
+                    "editing_revision": version.editing_revision,
+                }
+            ),
         )
 
     def _open_restored_draft_review(
@@ -1915,6 +1697,8 @@ class ReviewService:
             return "human_approval_required"
         if change_set is None or change_set.workspace_id != review.workspace_id:
             return "change_set_unavailable"
+        if self._ancestry_inspection(review):
+            return None
         if review.review_type == "context_update":
             context = self._approval_supersession_context(session, review, change_set)
             if context is None:
@@ -1979,20 +1763,6 @@ class ReviewService:
                         ):
                             return "publication_blocked"
             except (ReadServiceError, ContextMediaError):
-                return "publication_blocked"
-            # All pending exact-version siblings will be superseded by approval.
-            # A rejected review of these bytes is not part of that effect and
-            # continues to block publication, as ContextWriteService requires.
-            from backend.services.context_write_service import ContextWriteService
-
-            settled_ids = {review.id, *(sibling.id for sibling in siblings)}
-            if any(
-                candidate.id not in settled_ids
-                and candidate.status not in {"approved", "superseded"}
-                for candidate in ContextWriteService._reviews_for_version(
-                    session, version
-                )
-            ):
                 return "publication_blocked"
         elif review.review_type == "agent_page_activation":
             operation = session.scalar(
@@ -2325,6 +2095,35 @@ class ReviewService:
         else:
             page_state = version_state = None
         context_metadata = None
+        merge_preview = None
+        if (
+            reason is None
+            and isinstance(page, ContextPage)
+            and isinstance(version, ContextPageVersion)
+        ):
+            from backend.services.context_draft_workflow import preview_merge
+            from backend.services.page_service import PageService
+
+            preparer = PageService(
+                lambda: None,
+                body_preparer=self.body_preparer,
+                actor_context=actor,
+                context_media_repository_factory=self.context_media_repository_factory,
+            )
+            merge_preview = preview_merge(
+                session,
+                page,
+                version,
+                prepare=lambda candidate: preparer._prepare_merge_candidate(
+                    session,
+                    page,
+                    version,
+                    candidate,
+                    actor.actor_kind,
+                    actor.actor_id,
+                    actor.provenance,
+                ),
+            ).payload()
         if isinstance(page, ContextPage):
             context_metadata = self._context_approval_metadata_fingerprint(
                 session,
@@ -2361,6 +2160,7 @@ class ReviewService:
             "page_state": page_state,
             "version_state": version_state,
             "context_metadata": context_metadata,
+            "merge_preview": merge_preview,
             "sibling_state": sorted(
                 [
                     [
@@ -2388,6 +2188,7 @@ class ReviewService:
             target_title=metadata["target_title"],
             target_version_no=metadata["target_version_no"],
             fingerprint_parts=fingerprint,
+            merge_preview=merge_preview if reason is None else None,
         )
 
     @staticmethod
@@ -2403,73 +2204,27 @@ class ReviewService:
         patch bound to this version, so a preview must cover that same ledger,
         not just the selected review's own operations.
         """
-        metadata: dict[str, object] = {
-            "canonical": {
-                "title": page.title,
-                "slug": page.slug,
-                "page_type": page.page_type,
-                "tags": list(page.tags or []),
-                "aliases": list(page.aliases or []),
-                "placement_parent_node_id": (
-                    str(page.placement_parent_node_id)
-                    if page.placement_parent_node_id is not None
-                    else None
-                ),
-                "placement_reason": page.placement_reason,
-                "placement_confidence": page.placement_confidence,
-                "updated_at": str(page.updated_at),
-            },
-        }
         if version is None:
-            return metadata
-        from backend.services.page_service import (
-            effective_metadata_for_payload,
-            pending_page_metadata_patch,
+            return {}
+        from backend.services.context_draft_workflow import (
+            metadata_dict,
+            metadata_for,
+            preview_merge,
         )
 
-        # Use the publication writer's canonical merge rather than inventing
-        # another JSON-patch ordering or ignoring patches from sibling changes.
-        metadata["pending_patch"] = pending_page_metadata_patch(
-            session,
-            page=page,
-            version_id=version.id,
-        )
-        title, page_type, tags, aliases = effective_metadata_for_payload(
-            session,
-            page,
-            version,
-        )
-        metadata["effective_candidate"] = {
-            "title": title,
-            "page_type": page_type,
-            "tags": tags,
-            "aliases": aliases,
+        preview = preview_merge(session, page, version)
+        return {
+            "version_metadata": metadata_dict(metadata_for(page, version)),
+            "parent_version_ids": [str(key) for key in preview.parent_version_ids],
+            "editing_revision": version.editing_revision,
+            "published_version_id": str(page.current_published_version_id)
+            if page.current_published_version_id
+            else None,
+            "merge_kind": preview.kind,
+            "clean_hash": preview.clean.result_hash if preview.clean else None,
+            "keep_both_hash": preview.keep_both.result_hash,
+            "latest_hash": preview.latest.result_hash,
         }
-        patches = session.scalars(
-            select_in_workspace(
-                ChangeOperation,
-                workspace_id=page.workspace_id,
-                criteria=[
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.operation == "metadata_patch",
-                    ChangeOperation.diff_ref == f"context_page_version:{version.id}",
-                ],
-            )
-            .order_by(ChangeOperation.created_at.asc(), ChangeOperation.id.asc())
-            .execution_options(populate_existing=True)
-        ).all()
-        metadata["staged_operations"] = [
-            [
-                str(patch.id),
-                str(patch.change_set_id),
-                str(patch.created_at),
-                patch.diff_ref,
-                patch.diff_summary,
-            ]
-            for patch in patches
-        ]
-        return metadata
 
     def apply_decision(
         self,
@@ -2483,6 +2238,7 @@ class ReviewService:
         actor_user_id: UUID | None = None,
         actor_role: str | None = None,
         actor: ActorContext | None = None,
+        publish_despite_findings: bool = False,
     ) -> ReviewItemDetail:
         with record_decision_effect(session) as recorder:
             return self._decide(
@@ -2497,6 +2253,7 @@ class ReviewService:
                 actor_role=actor_role,
                 actor=actor,
                 recorder=recorder,
+                publish_despite_findings=publish_despite_findings,
             )
 
     def _decide(
@@ -2513,6 +2270,7 @@ class ReviewService:
         actor_role: str | None,
         actor: ActorContext | None,
         recorder: DecisionEffectRecorder,
+        publish_despite_findings: bool = False,
     ) -> ReviewItemDetail:
         validate_request_inputs(request)
         workspace = session.get(Workspace, workspace_id)
@@ -2678,6 +2436,7 @@ class ReviewService:
         if (
             request.decision_type == "approve"
             and review.review_type == "context_update"
+            and not self._ancestry_inspection(review)
         ):
             approval_context = self._approval_supersession_context(
                 session,
@@ -2753,6 +2512,29 @@ class ReviewService:
             page = rejection_impact.page
             version = rejection_impact.version
             plan = rejection_impact.plan
+            if version.version_status == "draft":
+                from backend.services.context_lifecycle import record_context_decision
+
+                record_context_decision(
+                    session,
+                    action="close",
+                    page=page,
+                    version=version,
+                    context_version_writer=self.context_version_writer,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    reason="Context review rejected",
+                    audit_service=self.audit_service,
+                    review_decision_id=decision.id,
+                )
+                from backend.services.page_service import sync_page_projections
+
+                sync_page_projections(
+                    session,
+                    page=page,
+                    version=version,
+                    self_origins=self.body_preparer.self_origins,
+                )
             if plan is not None:
                 from backend.services.context_lifecycle import (
                     apply_context_rejection,
@@ -2862,7 +2644,7 @@ class ReviewService:
             rejection_impact.version.id if rejection_impact is not None else None
         )
         superseded_review_count = 0
-        if approval_context is not None and actor_kind == "human":
+        if approval_context is not None:
             page, version, pending_reviews = approval_context
             for pending_review in pending_reviews:
                 supersede_review_with_lineage(
@@ -2907,11 +2689,18 @@ class ReviewService:
                 request=PublishContextPageRequest(
                     version_id=version.id,
                     reason="approved through Context review",
+                    expected_editing_revision=request.expected_editing_revision,
+                    expected_published_version_id=request.expected_published_version_id,
+                    result_hash=request.result_hash,
+                    on_conflict=request.on_conflict,
+                    result_body_md=request.result_body_md,
+                    result_page_metadata=request.result_page_metadata,
                 ),
                 actor_kind=actor_kind,
                 actor_id=actor_id,
                 publish_chain_ancestor=True,
                 review_decision_id=decision.id,
+                publish_despite_findings=publish_despite_findings,
             )
             published_version_id = published.published_version_id
             restore_version_id = published.previous_published_version_id
@@ -2970,6 +2759,19 @@ class ReviewService:
                 "decision_id": str(decision.id),
                 "decision_type": request.decision_type,
                 "change_set_id": str(change_set.id),
+                **(
+                    {
+                        "initiating_actor": {
+                            "kind": actor.actor_kind,
+                            "id": actor.actor_id,
+                            "provenance": actor.provenance,
+                        }
+                    }
+                    if actor is not None
+                    and actor_kind == "system"
+                    and actor.actor_id != actor_id
+                    else {}
+                ),
                 **(
                     {"reject_effect": reject_effect, **rejection_record}
                     if request.decision_type == "reject"
@@ -3067,7 +2869,24 @@ class ReviewService:
         if not candidate.available:
             raise ReviewDecisionUndoUnavailableError("later_changes")
         decision, effect = candidate.decision, candidate.effect
-        restored = restore_effect(session, workspace_id, effect)
+        if isinstance(page, ContextPage):
+            from backend.services.context_lifecycle import record_context_decision
+
+            recorded = record_context_decision(
+                session,
+                action="undo",
+                page=page,
+                effect=effect,
+                context_version_writer=self.context_version_writer,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                reason="review decision undone",
+                audit_service=self.audit_service,
+                review_decision_id=decision.id,
+            )
+            restored = recorded.restored or {}
+        else:
+            restored = restore_effect(session, workspace_id, effect)
         for created_id in effect["created"].get("review_item", []):
             created = get_in_workspace(
                 session,
@@ -3166,10 +2985,6 @@ class ReviewService:
         from backend.services.change_propagation import (
             process_page_publish_maintenance,
         )
-        from backend.services.context_version_storage import (
-            ContextStorageServiceError,
-            align_publication,
-        )
         from backend.services.page_service import sync_page_projections
         from backend.services.tree_service import ensure_primary_tree_placement
 
@@ -3207,23 +3022,6 @@ class ReviewService:
             is not None
         ]
         published_id = page.current_published_version_id
-        if "current_published_version_id" in columns:
-            published = next(
-                (version for version in live if version.id == published_id), None
-            )
-            if published_id is not None and (
-                published is None
-                or published.page_id != page.id
-                or not published.commit_oid
-            ):
-                raise ContextStorageServiceError("context_snapshot_invalid")
-            # Restore SQL FULL before rebuilding projections of the live head.
-            align_publication(
-                session,
-                page,
-                published.commit_oid if published is not None else None,
-                self.context_version_writer,
-            )
         for version in live or [None]:
             sync_page_projections(
                 session,
@@ -3241,32 +3039,6 @@ class ReviewService:
         )
         if "current_published_version_id" not in columns:
             return
-        # The timeline names what is published from now on, so reads "as of"
-        # a later instant resolve to the restored version (or to nothing).
-        revert = ChangeSet(
-            workspace_id=page.workspace_id,
-            reason="review decision undone",
-            trigger_type="context_page_publish_revert",
-            actor_type=actor_kind,
-            actor_id=parse_uuid_or_none(actor_id),
-            status="applied",
-        )
-        session.add(revert)
-        session.flush()
-        session.add(
-            ChangeOperation(
-                workspace_id=page.workspace_id,
-                change_set_id=revert.id,
-                target_type="context_page",
-                target_id=page.id,
-                operation="publish_revert",
-                diff_ref=(
-                    f"context_page_version:{published_id}"
-                    if published_id is not None
-                    else None
-                ),
-            )
-        )
         if published_id is not None:
             # Dependents learn the published content changed again. The page's
             # own stale warning was restored with the effect; keep it.
@@ -3274,7 +3046,7 @@ class ReviewService:
                 session,
                 page=page,
                 published_version_id=published_id,
-                reason=revert.reason,
+                reason="review decision undone",
                 resolve_republished=False,
             )
 
@@ -3704,179 +3476,6 @@ class ReviewService:
             latest_decision_at=(
                 latest_rc.created_at if latest_rc is not None else None
             ),
-        )
-
-    def submit_revision_for_review(
-        self,
-        session: Session,
-        workspace_id: UUID,
-        review_item_id: UUID,
-        principal: UUID | None,
-        actor_kind: str,
-        actor_id: str,
-        principal_role: str | None = None,
-        *,
-        context_write_service,
-        actor_provenance: str = "internal",
-        update: UpdateDraftRequest | None = None,
-        create: WriteDraftRequest | None = None,
-        note: str | None = None,
-        origin_chat_session_id: UUID | None = None,
-    ) -> SubmitRevisionForReviewResult:
-        """Submit a revised draft for an open request (state machine T6).
-
-        Acquires the soft-claim, creates a new draft via the existing write
-        path, and returns the ORIGINAL review item to ``pending`` for a human to
-        approve (the AI never approves — Risk 6). Idempotent on
-        (review_item_id, principal, revision-hash): a duplicate submit by the
-        SAME principal returns the prior result instead of creating a second
-        draft. The idempotency key is the per-conversation principal P, never
-        the shared MCP client actor_id — two principals sharing one client must
-        not collide, and a dedup hit is never returned to a principal who did
-        not author it.
-        """
-        if note is not None:
-            validate_text(note, field="note", max_length=2000)
-        self._lock_context_page_for_review_update(
-            session,
-            workspace_id=workspace_id,
-            review_item_id=review_item_id,
-        )
-        review = self._require_review_for_update(session, workspace_id, review_item_id)
-        if principal is None:
-            # No effective principal (owner-less caller) → no audience.
-            raise ReadNotFoundError("review item not found")
-        # The principal-keyed prior result (proof THIS principal already
-        # submitted this exact revision for this item). Computed up front but
-        # applied AFTER the audience gate so it can never leak existence to an
-        # out-of-audience caller (HIGH #1).
-        content_hash = _revision_content_hash(update, create)
-        prior = self._prior_revision_result(
-            session, review_item_id, principal, content_hash
-        )
-        # Audience gate FIRST (no existence leak outside the caller's audience).
-        # An active changes_requested item must pass the current-audience
-        # predicate. Once the item has been resolved back to pending, the only
-        # legitimate caller is a retry by the principal who authored the prior
-        # revision — its own prior result is the proof of past membership.
-        if review.status == CHANGES_REQUESTED_STATUS:
-            if not self._principal_in_current_audience(
-                session, review, principal, principal_role
-            ):
-                raise ReadNotFoundError("review item not found")
-            if prior is not None:
-                return prior
-        else:
-            # Not changes_requested: the only valid caller is a same-principal
-            # idempotent retry (its prior result proves past audience
-            # membership). Anyone else — including an out-of-audience caller on
-            # the same MCP client — gets not_found, never a status leak that the
-            # item exists (HIGH #1: no existence leak outside audience).
-            if prior is not None:
-                return prior
-            if self._withdrawn_request_reached(
-                session, review, principal, principal_role
-            ):
-                raise ReadNotFoundError(
-                    "the change request on this review was withdrawn; it no "
-                    "longer accepts revisions"
-                )
-            raise ReadNotFoundError("review item not found")
-
-        # Bind the revision to the original review's target (P1). The revised
-        # draft MUST update the SAME context page this change-request is about.
-        # A mismatched update.page_id — or a `create`, which always writes a
-        # different/new page — would otherwise persist an unrelated draft AND
-        # supersede this review below, silently dropping the requested change and
-        # smuggling an unrelated draft into pending. Checked AFTER the audience
-        # gate so an out-of-audience caller still gets a uniform not_found (no
-        # target/existence leak), and before any claim/write/supersede.
-        bound_page_id = self._revision_target_page_id(session, review)
-        if bound_page_id is None:
-            # No supported context-page target (e.g. an agent-page review): not
-            # revisable here, and must not be superseded by a context write.
-            raise ReadValidationError("this review has no revisable context page")
-        if update is None or update.page_id != bound_page_id:
-            raise ReadValidationError(
-                "a revision must update the page this review is about"
-            )
-
-        # Soft-claim (T4): block a competing live claim by another principal.
-        if self._claim_is_live(review) and review.claimed_by != principal:
-            raise ReviewAlreadyClaimedError(
-                "this review is already being worked by another collaborator"
-            )
-        review.claimed_by = principal
-        review.claimed_at = utc_now()
-        session.flush()
-
-        # Create the new draft via the EXISTING update path (its own ChangeSet +
-        # ReviewItem at pending, with origin_chat_session_id for this AI's chat).
-        # Only `update` reaches here — the binding gate above rejects `create`
-        # (it would target a different page than the review is bound to).
-        draft = context_write_service.update_draft(
-            session=session,
-            workspace_id=workspace_id,
-            request=update,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            actor_provenance=actor_provenance,
-            origin_chat_session_id=origin_chat_session_id,
-            # A revision answering a change request must never auto-approve — it
-            # goes back to a human ("the AI never approves" — Risk 6). (re-review
-            # r2 #1/#2: an Auto-fix format-only resubmit was being force-approved.)
-            auto_approve_format_only=False,
-            allow_changes_requested_revision=True,
-        )
-        if draft.change_set_id is None or draft.review_item_id is None:
-            # A no-op revision (the resubmitted body is identical to the current
-            # draft — the Auto-fix no-op short-circuit produced no change_set).
-            # Do NOT supersede the original request; the author must actually
-            # address the requested changes. (re-review r2: no fail-open / crash.)
-            # Release the soft-claim we took above so the item is not left
-            # claimed after a rejected no-op (re-review r3 :1104).
-            review.claimed_by = None
-            review.claimed_at = None
-            session.flush()
-            raise ReadValidationError(
-                "the submitted revision is identical to the current draft; "
-                "please address the requested changes"
-            )
-
-        # Resolve T6 (#7 one-pending-item invariant): the AI's revision is a NEW
-        # draft created above with its OWN ChangeSet + pending ReviewItem (status
-        # 'draft_created'). Reusing the original and keeping its stale
-        # change_set_id would leave TWO competing pending items for one page — a
-        # human could approve the STALE original and silently drop the AI's fix.
-        # So CLOSE the original instead: mark it and its now-stale ChangeSet
-        # 'superseded'. The new draft's ReviewItem is then the single live
-        # pending item, pointing at the revised content. The original→new lineage
-        # is recorded as the audit event below (O3, not a ledger decision); the
-        # idempotency key is still the original review_item_id + principal.
-        supersede_review_with_lineage(
-            session=session,
-            audit_service=self.audit_service,
-            workspace_id=workspace_id,
-            review=review,
-            new_change_set_id=draft.change_set_id,
-            new_review_item_id=draft.review_item_id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            payload={
-                # principal (per-conversation owner P) is the idempotency key —
-                # NOT actor_id (the shared MCP client). actor_id is still
-                # recorded by AuditService for the actor trail.
-                "principal": str(principal),
-                "content_hash": content_hash,
-                "note": note,
-            },
-        )
-        return SubmitRevisionForReviewResult(
-            original_review_item_id=review.id,
-            new_change_set_id=draft.change_set_id,
-            new_review_item_id=draft.review_item_id,
-            new_review_status="pending",
-            deduplicated=False,
         )
 
     def _withdrawn_request_reached(
@@ -4514,95 +4113,6 @@ class ReviewService:
         settlement = (
             self._settlement(session, review) if review.status == "superseded" else None
         )
-        reconciliation_page_id: UUID | None = None
-        reconciliation_version_id: UUID | None = None
-        reconciliation_base_version_no: int | None = None
-        reconciliation_head_advance_count: int | None = None
-        reconciliation_conflict_count: int | None = None
-        reconciliation_branch_actor_kind: str | None = None
-        reconciliation_branch_actor_display_name: str | None = None
-        reconciliation_chat_session_id: UUID | None = None
-        reconciliation_available = False
-        if review.review_type == "context_reconciliation" and actor_can_read_drafts(
-            actor
-        ):
-            reconciliation_operation = session.scalar(
-                select(ChangeOperation).where(
-                    ChangeOperation.workspace_id == review.workspace_id,
-                    ChangeOperation.change_set_id == review.change_set_id,
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.operation == "patch_draft_diverged_manifest",
-                )
-            )
-            candidate_version_id = _context_version_id_from_diff_ref(
-                reconciliation_operation.diff_ref
-                if reconciliation_operation is not None
-                else None
-            )
-            candidate_page = (
-                session.scalar(
-                    select(ContextPage).where(
-                        ContextPage.workspace_id == review.workspace_id,
-                        ContextPage.id == reconciliation_operation.target_id,
-                    )
-                )
-                if reconciliation_operation is not None
-                else None
-            )
-            candidate_version = (
-                session.scalar(
-                    select(ContextPageVersion).where(
-                        ContextPageVersion.workspace_id == review.workspace_id,
-                        ContextPageVersion.page_id
-                        == reconciliation_operation.target_id,
-                        ContextPageVersion.id == candidate_version_id,
-                    )
-                )
-                if reconciliation_operation is not None
-                and candidate_version_id is not None
-                else None
-            )
-            if (
-                candidate_page is not None
-                and candidate_version is not None
-                and candidate_page.workspace_id == review.workspace_id
-                and candidate_version.workspace_id == review.workspace_id
-                and candidate_version.page_id == candidate_page.id
-            ):
-                from backend.services.context_reconciliation import (
-                    available_reconciliation_snapshot,
-                )
-
-                snapshot = available_reconciliation_snapshot(
-                    session,
-                    page=candidate_page,
-                    version=candidate_version,
-                    actor_kind=actor.actor_kind if actor else None,
-                    actor_id=actor.actor_id if actor else None,
-                )
-                if snapshot is not None:
-                    reconciliation_available = True
-                    reconciliation_page_id = candidate_page.id
-                    reconciliation_version_id = candidate_version.id
-                    reconciliation_base_version_no = snapshot.base.version_no
-                    reconciliation_head_advance_count = snapshot.head_advance_count
-                    reconciliation_conflict_count = len(snapshot.conflict_ids)
-                    reconciliation_branch_actor_kind = snapshot.branch.actor_type
-                    reconciliation_branch_actor_display_name = (
-                        snapshot.branch.actor_display_name
-                    )
-                    if (
-                        change_set is not None
-                        and change_set.origin_chat_session_id is not None
-                    ):
-                        chat = session.scalar(
-                            select(McpChatSession).where(
-                                McpChatSession.workspace_id == review.workspace_id,
-                                McpChatSession.id == change_set.origin_chat_session_id,
-                            )
-                        )
-                        if chat is not None:
-                            reconciliation_chat_session_id = chat.id
         return ReviewItemDetail(
             id=review.id,
             workspace_id=review.workspace_id,
@@ -4649,21 +4159,6 @@ class ReviewService:
                 )
                 if include_undo
                 else None
-            ),
-            reconciliation_available=reconciliation_available,
-            reconciliation_page_id=reconciliation_page_id,
-            reconciliation_version_id=reconciliation_version_id,
-            reconciliation_base_version_no=reconciliation_base_version_no,
-            reconciliation_head_advance_count=reconciliation_head_advance_count,
-            reconciliation_conflict_count=reconciliation_conflict_count,
-            reconciliation_branch_actor_kind=reconciliation_branch_actor_kind,
-            reconciliation_branch_actor_display_name=(
-                reconciliation_branch_actor_display_name
-            ),
-            reconciliation_chat_session_id=reconciliation_chat_session_id,
-            can_discard_reconciliation=(
-                reconciliation_available
-                and role_allows(actor_role or "viewer", "editor")
             ),
         )
 

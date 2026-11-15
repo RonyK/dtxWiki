@@ -35,3 +35,12 @@ def bind_context_storage(registry, factory) -> None:
                 "context_version_writer": writer,
             }
         )
+
+
+def build_context_merger():
+    """Compose the merge engine without leaking concrete adapters to services."""
+    from backend.context_versions.adapters.block_ids import MarkdownBlockIds
+    from backend.context_versions.adapters.git_merge import Libgit2TextMerge
+    from backend.context_versions.application import ContextMergeService
+
+    return ContextMergeService(Libgit2TextMerge(), MarkdownBlockIds())

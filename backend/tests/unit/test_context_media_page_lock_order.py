@@ -11,7 +11,6 @@ from backend.repositories import context_page_repo
 from backend.schemas.context_ingress import ContextIngressAcceptRequest
 from backend.schemas.context_write import (
     PublishContextPageRequest,
-    UpdateDraftRequest,
     WriteDraftRequest,
 )
 from backend.scripts.seed_dev import DEFAULT_WORKSPACE_SLUG, seed_default_workspace
@@ -166,7 +165,7 @@ def test_page_service_locks_media_before_context_page(
         engine.dispose()
 
 
-@pytest.mark.parametrize("operation", ["write_draft", "update_draft", "publish_draft"])
+@pytest.mark.parametrize("operation", ["write_draft", "publish_draft"])
 def test_context_write_service_locks_media_before_context_page(
     operation: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -210,21 +209,6 @@ def test_context_write_service_locks_media_before_context_page(
                     actor_kind="mcp_client",
                     actor_id=actor_id,
                     actor_role="editor",
-                )
-            elif operation == "update_draft":
-                service.update_draft(
-                    session=session,
-                    workspace_id=workspace_id,
-                    request=UpdateDraftRequest(
-                        page_id=page_id,
-                        base_version_id=uuid4(),
-                        base_content_hash="0" * 64,
-                        update_mode="full_rewrite",
-                        body_markdown="# Updated draft\n",
-                        reason="test lock order",
-                    ),
-                    actor_kind="mcp_client",
-                    actor_id=actor_id,
                 )
             else:
                 service.publish_draft(

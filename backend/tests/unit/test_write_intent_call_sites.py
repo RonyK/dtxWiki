@@ -36,7 +36,6 @@ from backend.schemas.agent import AgentPageDraftRequest
 from backend.schemas.ask import AskTurnCreate
 from backend.schemas.context_write import (
     PublishContextPageRequest,
-    UpdateDraftRequest,
     WriteDraftRequest,
 )
 from backend.scripts.seed_dev import DEFAULT_WORKSPACE_SLUG, seed_default_workspace
@@ -116,7 +115,14 @@ def _assert_locked_at_guarded_read(call):
 # --- page_service: the five transactions that own a context page write --------
 
 
-def test_publish_draft_holds_write_intent(db, probe):
+def test_publish_draft_holds_write_intent(db, probe, monkeypatch):
+    # The command first resolves immutable routing for its idempotency scope.
+    # Probe the guarded mutable read after that lookup, without seeding a body.
+    monkeypatch.setattr(
+        context_page_repo,
+        "get_page_by_id",
+        lambda *_args: SimpleNamespace(id=ANY_ID, workspace_id=db.workspace_id),
+    )
     probe(context_page_repo, "get_page_by_id_for_update")
     _assert_locked_at_guarded_read(
         lambda: PageService(db.factory).publish_draft(
@@ -219,27 +225,6 @@ def test_context_write_write_draft_holds_write_intent(db, probe):
         )
 
 
-def test_context_write_update_draft_holds_write_intent(db, probe):
-    probe(context_write_service, "get_page_by_id_for_update")
-    with db.factory.begin() as session:
-        _assert_locked_at_guarded_read(
-            lambda: ContextWriteService().update_draft(
-                session=session,
-                workspace_id=db.workspace_id,
-                request=UpdateDraftRequest(
-                    page_id=ANY_ID,
-                    base_version_id=ANY_ID,
-                    base_content_hash="0" * 64,
-                    update_mode="full_rewrite",
-                    body_markdown="# Write intent\n\nbody\n",
-                    reason="update",
-                ),
-                actor_kind="mcp_client",
-                actor_id=str(uuid4()),
-            )
-        )
-
-
 def test_context_write_publish_draft_holds_write_intent(db, probe):
     probe(context_write_service, "get_page_by_id_for_update")
     with db.factory.begin() as session:
@@ -319,11 +304,15 @@ def test_create_turn_holds_write_intent(db, probe, monkeypatch):
     """
 
     with db.factory.begin() as session:
-        tree_node_id = session.scalars(
-            select(WorkspaceTreeNode).where(
-                WorkspaceTreeNode.workspace_id == db.workspace_id
+        tree_node_id = (
+            session.scalars(
+                select(WorkspaceTreeNode).where(
+                    WorkspaceTreeNode.workspace_id == db.workspace_id
+                )
             )
-        ).first().id
+            .first()
+            .id
+        )
         ask_session = AskSession(
             workspace_id=db.workspace_id,
             title="Write intent",

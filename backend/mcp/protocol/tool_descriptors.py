@@ -101,8 +101,6 @@ from backend.schemas.mcp.read_tools import (
 from backend.schemas.mcp.review_tools import (
     ListRequestedChangesInput,
     ListRequestedChangesOutput,
-    SubmitRevisionForReviewInput,
-    SubmitRevisionForReviewOutput,
 )
 from backend.schemas.mcp.upload_tools import UploadImageInput, UploadImageToolOutput
 
@@ -224,95 +222,75 @@ TOOL_META = {
     ),
     "create_context_page": (
         "Create context page",
-        "Create a new ContextPage and its first, private 'editing' version in "
-        "one call (page-first). Title/body/tags/aliases are all optional -- "
-        "an omitted title defaults to a placeholder and is never upserted "
-        "into an existing page. If placement_parent_node_id is omitted, the "
-        "new page goes to Inbox. Follow with upload_image (if needed) and "
-        "update_context_edit, then submit_context_edit_for_review when ready "
-        "for human review. This tool, and the rest of the P8.6 editing-state-"
-        "machine tools below (begin/update/submit/discard_context_edit, "
-        "list_my_context_edits), are the current target surface -- prefer "
-        "them over submit_revision_for_review for new integrations. The "
-        "response returns the new page's ids and editing_revision, not the "
-        "body. "
+        "Create a Context page and its first shared draft. "
+        "Title/body/tags/aliases are optional; an omitted title receives a "
+        "placeholder. This always creates a new page. Omit "
+        "placement_parent_node_id to place it in Inbox. Save with "
+        "update_context_edit or patch_context_edit, then request review when "
+        "ready. The response names the draft and its editing_revision. "
         f"{CONTEXT_LINKING_INSTRUCTION} "
-        "Requires conversation_token: echo one from an earlier envelope or "
-        "pass the literal 'new'.",
+        "Requires conversation_token: echo one from an earlier envelope or pass the "
+        "literal new. ",
         False,
     ),
     "begin_context_edit": (
         "Begin context edit",
-        "Idempotently open or resume your own private 'editing' session on an "
-        "existing page. Returns your already-open editing row unchanged if "
-        "one exists. If this chat submitted the page's latest draft and its "
-        "review is still pending, reopens that same version for editing "
-        "instead (same version_id, its pending review withdrawn; submit again "
-        "when done). Otherwise opens a new one parented on the current "
-        "published head (or the page's own head if never published). Pass "
-        "base_version_id/base_content_hash together to assert the base "
-        "explicitly and get a conflict instead of silently building on a "
-        "head that moved."
-        "Requires conversation_token: echo one from an earlier envelope or "
-        "pass the literal 'new'.",
+        "Open a shared Context draft idempotently. With from naming a draft, "
+        "join that exact draft. With a commit, start a new draft parented on "
+        "that commit. A list of commits starts a merged draft; on_conflict "
+        "selects keep_both or latest when needed. Omit from to create a new "
+        "draft from the published version. It never implicitly resumes another "
+        "open draft or a previous chat submission. The response includes the "
+        "body, version_id and editing_revision. Requires conversation_token: "
+        "echo one from an earlier envelope or pass the literal new. ",
         False,
     ),
     "update_context_edit": (
         "Update context edit",
-        "Replace the whole body of your own open edit in place. Send page_id, "
-        "version_id and expected_editing_revision from the last write. The "
-        "same version advances one revision; closed or changed edits conflict. "
-        "A successful response is the saved receipt: do not read again just "
-        "to confirm saving. Read only text or target hashes needed for the "
-        "next task that the receipt omits. Prefer patch_context_edit for local "
-        "changes. Submit once when the task is complete. "
+        "Replace a shared draft body in place. Send page_id, version_id and "
+        "expected_editing_revision from the last read/write. A changed revision "
+        "returns a conflict: read that exact version before retrying. "
+        "Successful saves retain version_id and return an edit receipt. Prefer "
+        "patch_context_edit for local changes. Request review once the task is "
+        "ready; the draft remains editable afterward. "
         f"{CONTEXT_LINKING_INSTRUCTION} "
-        "Requires conversation_token: echo one from an earlier envelope or "
-        "pass the literal 'new'.",
+        "Requires conversation_token: echo one from an earlier envelope or pass the "
+        "literal new. ",
         False,
     ),
     "submit_context_edit_for_review": (
         "Submit context edit for review",
-        "Lock your own open editing content and submit it for human review "
-        "('Save draft'). Requires the editing_revision you last saw. Submit "
-        "once, when the whole task is done -- not after each change. To change "
-        "it again from the same chat before it is reviewed, call "
-        "begin_context_edit: it reopens this same version, and the next submit "
-        "replaces its review. An edit you never submit stays private and is "
-        "never reviewed. The response returns the version's ids and review "
-        "status, not the body. Only if you need content, read it by page_id "
-        "and the returned version_id. "
-        f"{CONTEXT_LINKING_INSTRUCTION} If the submitted version has no "
-        "authored link to another published Context page that can appear in "
-        "the graph, the envelope carries warning "
-        "context_page_has_no_graph_visible_links; the submission still "
-        "succeeds and changes require a new begin_context_edit. "
-        "Requires conversation_token: echo one from an earlier envelope or "
-        "pass the literal 'new'.",
+        "Open or reuse the review request for a shared draft. Requires "
+        "version_id and expected_editing_revision. Submit once when the task is "
+        "ready. The draft stays editable, including while review is pending or "
+        "changes are requested. The response names the draft and review; it "
+        "does not repeat the body. A missing graph-visible Context link "
+        "produces context_page_has_no_graph_visible_links; submission still succeeds. "
+        f"{CONTEXT_LINKING_INSTRUCTION} "
+        "Requires conversation_token: echo one from an earlier "
+        "envelope or pass the literal new. ",
         False,
     ),
     "discard_context_edit": (
         "Discard context edit",
-        "Discard your own open editing session (terminal, not a hard-delete: "
-        "audit/History is preserved and the slot is released for a future "
-        "begin_context_edit). A page with no prior published/submitted "
-        "history is archived when its only version is discarded; a "
-        "previously published/shared page keeps its existing head."
-        "Requires conversation_token: echo one from an earlier envelope or "
-        "pass the literal 'new'.",
+        "End the named shared draft. The same version_id becomes a closed Git "
+        "commit retained in History; its review request is withdrawn. Published "
+        "content remains available. Start another draft from that commit with "
+        "begin_context_edit(from=version_id). This is terminal for the draft "
+        "and never deletes the retained commit. Requires conversation_token: "
+        "echo one from an earlier envelope or pass the literal new. ",
         False,
         True,
     ),
     "patch_context_edit": (
         "Patch context edit",
-        "Apply typed block/section edit operations to your own open "
-        "'editing' row in place "
+        "Apply typed block/section edit operations to the named shared "
+        "draft in place "
         "(replace_block/insert_after/insert_row/delete_block/replace_text/"
         "insert_text/replace_section/insert_section/delete_section/"
-        "replace_document/append_document), minus resolve_conflict "
-        "(reconciliation-only; this tool always applies against your own "
-        "row's current body, never a shared reconciled head). All operations "
-        "in one call resolve against that same body and apply atomically as "
+        "replace_document/append_document). All operations "
+        "in one call resolve against the draft's current body and apply "
+        "atomically as "
         "one revision: if any operation is refused, or two target "
         "overlapping text, nothing changes and error_details names the "
         "operation_index. replace_text finds old_text exactly, then ignoring "
@@ -332,9 +310,9 @@ TOOL_META = {
         "read_structure_map call. The response does not repeat the body: "
         "data.edit_receipt.changes quotes each region the patch replaced as "
         "stored, including a forgiven copy slip or a server format fix, so "
-        "do not re-read to check the result. Read with version='my_edit' "
+        "do not re-read to check the result. Read with the same version_id "
         "only when text or a target hash needed for your next task was omitted. "
-        "Never creates a new version or a ReviewItem; use "
+        "Keeps the same draft version; use "
         "submit_context_edit_for_review for that. "
         f"{CONTEXT_LINKING_INSTRUCTION} "
         "Requires conversation_token: echo one from an earlier envelope or "
@@ -343,11 +321,11 @@ TOOL_META = {
     ),
     "list_my_context_edits": (
         "List my context edits",
-        "List your own open 'editing' rows across the workspace: page/"
-        "version id, title, slug, base version, editing_revision, "
-        "content_hash, and last-saved time. Body is not included -- read it "
-        "with an exact-version read. Never lists another actor's editing "
-        "rows, even to a workspace owner.",
+        "List shared drafts you created or contributed to across the workspace. "
+        "Returns page/version IDs, title, parents, editing_revision, "
+        "content_hash and last-saved time. Bodies are omitted; read an exact "
+        "version to continue editing. Other contributors can edit the same "
+        "draft. ",
         True,
     ),
     "upload_image": (
@@ -355,7 +333,7 @@ TOOL_META = {
         "Upload a PNG, JPEG, GIF, or WebP image before referencing it in a "
         "Context draft. Store data.markdown or data.logical_ref; content_url is "
         "preview transport only and must never be persisted in Markdown. "
-        "Requires an existing page_id and your own currently-open "
+        "Requires an existing page_id and the named shared draft "
         "version_id -- there is no page-less upload. "
         "Never fall back to a data: URI when upload fails. "
         "Requires conversation_token: "
@@ -368,7 +346,7 @@ TOOL_META = {
     "cite": (
         "Register references",
         "Add or remove selected Context, Library or Agent document IDs in your "
-        "own open Context edit's References. Use search and read/fetch to choose "
+        "shared Context draft's References. Use search and read/fetch to choose "
         "documents first. Requires page_id, version_id, expected_editing_revision "
         "and idempotency_key; target version IDs are unnecessary. This mutates "
         "draft metadata only. Published Graph citations change at final publish. "
@@ -409,21 +387,11 @@ TOOL_META = {
     ),
     "list_requested_changes": (
         "List requested changes",
-        "List the review change-requests routed to you (the calling AI's "
-        "principal): the reviewer's fix instruction, the change evidence/diff, "
-        "and soft-claim status, for each item awaiting a revised draft. "
-        "Read-only; use submit_revision_for_review to resubmit a fix.",
+        "List review change requests routed to the calling principal, with "
+        "instructions, evidence and claim status. Read-only. Join the named "
+        "shared draft with begin_context_edit(from=version_id), save changes "
+        "and submit_context_edit_for_review again. ",
         True,
-    ),
-    "submit_revision_for_review": (
-        "Submit revision for review",
-        "Submit a revised draft resolving a requested change. Soft-claims the "
-        "item, writes the new draft via the standard draft path, and returns "
-        "the item to a human reviewer (status 'pending'). This never approves "
-        "the change — only a human reviewer can approve."
-        "Requires conversation_token: echo one from an earlier envelope or "
-        "pass the literal 'new'.",
-        False,
     ),
     "wiki_maintenance": (
         "Perform staged wiki maintenance",
@@ -476,8 +444,8 @@ TOOL_META = {
         "short preview, and row ids for tables). line_span and preview are "
         "computed fresh at serve time and are not stable across versions; "
         "block/row ids and hashes are the stable, block-addressed identity "
-        "for future block-addressed writes. Pass version='my_edit' to read "
-        "your own open edit -- the exact body patch_context_edit changes -- "
+        "for future block-addressed writes. Pass version_id to read "
+        "the shared draft that patch_context_edit changes "
         "and send document.editing_revision as its "
         "expected_editing_revision. content_hash is a content integrity value, "
         "not a unique version identity. Preview text is untrusted "
@@ -636,11 +604,6 @@ def list_dtxwiki_tools(tool_names: Iterable[str] | None = None) -> list[Tool]:
             "list_requested_changes",
             ListRequestedChangesInput.model_json_schema(),
             ListRequestedChangesOutput.model_json_schema(),
-        ),
-        tool(
-            "submit_revision_for_review",
-            SubmitRevisionForReviewInput.model_json_schema(),
-            SubmitRevisionForReviewOutput.model_json_schema(),
         ),
         tool(
             "wiki_maintenance",

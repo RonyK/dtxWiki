@@ -23,6 +23,7 @@ from backend.llm.base import EmbeddingProvider, EmbeddingRequest
 from backend.models.chunk import ContentChunk
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.library import LibraryItem
+from backend.repositories.workspace_scoped import select_in_workspace
 from backend.services.chunking import chunk_markdown, embedding_input
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.entity_ref import EntityKind
@@ -270,40 +271,29 @@ class DbNativeIndexer:
             version_id=page.current_published_version_id,
             title=page.title,
         )
-        # Index the latest draft only when it is a distinct, newer version than
-        # the published HEAD; otherwise the published scope already covers it.
-        #
-        # P8.4: "distinct from the published head" is NOT the same as "is a
-        # submitted draft". `page_service._set_current_version` points
-        # `latest_draft_version_id` at the author's still-private "editing"
-        # row on every autosave, so the id comparison alone chunks and embeds
-        # an unsubmitted body under content_scope="draft" -- confirmed by
-        # reproducing it. `retrieval/semantic.py`'s `_to_result` currently
-        # re-checks each hit's `source_version_id` against the per-actor
-        # `visible_search_version_ids`, so this has not been shown reachable
-        # as an actual search disclosure; that is a property of today's one
-        # consumer, not of this projection, so it is excluded here the same
-        # way `indexing/doc_source.py::_context_live_versions` already
-        # excludes it for FTS.
-        draft_id = page.latest_draft_version_id
-        draft = None if draft_id is None else session.get(ContextPageVersion, draft_id)
-        if (
-            draft_id is not None
-            and draft_id != page.current_published_version_id
-            and draft is not None
-            and draft.version_status == "draft"
-        ):
+        self._clear_scope(
+            session, "context_page", page.id, "draft", workspace_id=page.workspace_id
+        )
+        drafts = session.scalars(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.version_status == "draft",
+                ),
+            )
+        ).all()
+        for draft in drafts:
             self._index_scope(
                 session,
                 workspace_id=page.workspace_id,
                 document_kind="context_page",
                 document_id=page.id,
                 content_scope="draft",
-                version_id=draft_id,
-                title=page.title,
+                version_id=draft.id,
+                title=(draft.page_metadata or {}).get("title", page.title),
             )
-        else:
-            self._clear_scope(session, "context_page", page.id, "draft")
 
     def _index_scope(
         self,
@@ -316,7 +306,14 @@ class DbNativeIndexer:
         version_id: UUID | None,
         title: str,
     ) -> None:
-        self._clear_scope(session, document_kind, document_id, content_scope)
+        self._clear_scope(
+            session,
+            document_kind,
+            document_id,
+            content_scope,
+            workspace_id=workspace_id,
+            version_id=version_id if content_scope == "draft" else None,
+        )
         if version_id is None:
             return
         version = session.get(ContextPageVersion, version_id)
@@ -349,9 +346,18 @@ class DbNativeIndexer:
             .execution_options(populate_existing=True)
             .with_for_update()
         )
-        self._clear_scope(session, "library_item", item_id, "published")
         if item is None:
+            remove_document_chunks(
+                session, document_kind="library_item", document_id=item_id
+            )
             return
+        self._clear_scope(
+            session,
+            "library_item",
+            item_id,
+            "published",
+            workspace_id=item.workspace_id,
+        )
         if item.lifecycle_status in EXCLUDED_LIBRARY_LIFECYCLE_STATUSES:
             return
         version = get_canonical_library_version(session, item)
@@ -392,12 +398,24 @@ class DbNativeIndexer:
         document_kind: str,
         document_id: UUID,
         content_scope: str,
+        *,
+        workspace_id: UUID,
+        version_id: UUID | None = None,
     ) -> None:
         for chunk in session.scalars(
-            select(ContentChunk).where(
-                ContentChunk.document_kind == document_kind,
-                ContentChunk.document_id == document_id,
-                ContentChunk.content_scope == content_scope,
+            select_in_workspace(
+                ContentChunk,
+                workspace_id=workspace_id,
+                conditions=(
+                    ContentChunk.document_kind == document_kind,
+                    ContentChunk.document_id == document_id,
+                    ContentChunk.content_scope == content_scope,
+                    *(
+                        [ContentChunk.source_version_id == version_id]
+                        if version_id is not None
+                        else []
+                    ),
+                ),
             )
         ).all():
             session.delete(chunk)

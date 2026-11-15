@@ -14,11 +14,12 @@ from backend.migrations.revision_modules.v0_1.content_event_backfill_v1 import (
 )
 from backend.models.agent import AgentPage, AgentPageVersion
 from backend.models.audit import AuditEvent
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPage
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.integration.test_release_schema_migration import _config
 from backend.tests.utils.context_git import (
     configure_test_context_storage,
+    historical_context_version_model,
     seed_published_snapshot,
 )
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
@@ -31,7 +32,8 @@ SECOND_EVENT = FIRST_EVENT + timedelta(days=12)
 def test_upgrade_from_previous_head_backfills_only_proven_content_events(
     tmp_path, tmp_path_factory
 ):
-    # One head -> efcbcf724889 -> head traversal seeds every legacy shape the
+    # One reversible boundary -> efcbcf724889 -> boundary traversal seeds
+    # every legacy shape the
     # content-event backfill tells apart, for Context and Agent pages alike:
     # a latest version that only renames (its body keeps a soft line break),
     # so content time stays at the first event; one whose body turns that
@@ -40,9 +42,10 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
     # are independent rows read by the same backfill, so one upgrade checks
     # all of them together with the bounded, indexed history reads.
     database = tmp_path / "tree-metadata.sqlite"
-    url = shared_templates(tmp_path_factory).clone("head", database)
+    url = shared_templates(tmp_path_factory).clone("rev_872d9c3e104b", database)
     engine = create_engine(url)
     config = _config(url)
+    ContextPageVersion = historical_context_version_model(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     configure_test_context_storage(
         session_factory, config.attributes["context_repositories_root"]
@@ -274,7 +277,7 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
         private_id not in str(version_read_parameters)
         for private_id in private_version_ids
     ), version_read_parameters
-    command.upgrade(config, "head")
+    command.upgrade(config, "872d9c3e104b")
     engine = create_engine(url)
     try:
         with Session(engine) as session:

@@ -277,6 +277,7 @@ def _repairable_database(tmp_path: Path):
             status="published_snapshot",
             graph_status="linear",
             parent_version_id=head.id,
+            parent_commit_oid=head.commit_oid,
         )
         session.add(rogue)
         session.flush()
@@ -492,6 +493,7 @@ def _version(
     status: str,
     graph_status: str,
     parent_version_id: UUID | None = None,
+    parent_commit_oid: str | None = None,
 ) -> ContextPageVersion:
     version_id = uuid4()
     created_at = utc_now()
@@ -499,7 +501,8 @@ def _version(
     oid = None
     if status in {"published_snapshot", "superseded_snapshot"}:
         # These fixtures model corruption after the Git migration. Provision
-        # actual snapshot objects rather than bypassing required Git storage.
+        # actual snapshot objects and their recorded parent edges rather than
+        # bypassing the immutable Git graph required by storage validation.
         store = GitSnapshotStore(data_dir() / "repositories")
         oid = store.commit(
             workspace_id=workspace_id,
@@ -507,7 +510,7 @@ def _version(
             version_id=version_id,
             created_at=created_at,
             payload=MarkdownCodec().encode(body),
-            parents=[],
+            parents=[parent_commit_oid] if parent_commit_oid else [],
         )
         if status == "published_snapshot":
             store.set_head(workspace_id, page_id, oid)
@@ -760,6 +763,7 @@ def _coexist_draft_database(
             status="published_snapshot",
             graph_status="linear",
             parent_version_id=old.id,
+            parent_commit_oid=old.commit_oid,
         )
         session.add(head)
         session.flush()
@@ -996,6 +1000,7 @@ def _overlap_database(
             status="published_snapshot",
             graph_status="linear",
             parent_version_id=old.id,
+            parent_commit_oid=old.commit_oid,
         )
         session.add(head)
         session.flush()

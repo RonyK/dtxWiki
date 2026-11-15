@@ -181,22 +181,22 @@ export class PageEditingUnavailableError extends Error {
   }
 }
 
-// Reading defaults to the published snapshot. The actor-projected current
-// pointer still identifies the existing editable head, so resuming an editor
-// must select it explicitly without opening or modifying a session.
-export async function readEditablePage(workspaceId: string, id: string) {
-  const visible = await readPage(workspaceId, id);
-  const editableId = visible.current_version_id;
-  if (editableId == null) throw new PageEditingUnavailableError();
-  return editableId === visible.version_id
-    ? visible
-    : readPage(workspaceId, id, editableId);
+// The URL's explicit version chooses a shared draft or a historical commit.
+// An ordinary editor entry starts a fresh draft from the published head.
+export async function readEditablePage(workspaceId: string, id: string, versionId?: string) {
+  const selected = await readPage(workspaceId, id, versionId);
+  const fromVersionId = versionId ?? (
+    !selected.current_published_version_id && selected.version_status === "draft"
+      ? selected.version_id
+      : undefined
+  );
+  return beginPageEdit(workspaceId, selected, fromVersionId);
 }
 
-export async function beginPageEdit(workspaceId: string, page: PagePayload) {
+export async function beginPageEdit(workspaceId: string, page: PagePayload, fromVersionId?: string) {
   const response = await apiRequest<PageResponse>(pagesPath(workspaceId, `/${page.id}/begin-edit`), {
     method: "POST",
-    body: JSON.stringify({ idempotency_key: newIdempotencyKey(), base_version_id: page.version_id, base_content_hash: page.content_hash }),
+    body: JSON.stringify({ idempotency_key: newIdempotencyKey(), ...(fromVersionId ? { from: fromVersionId } : {}) }),
   });
   return response.data;
 }
@@ -276,8 +276,12 @@ export async function createPageComment(
   return response.data;
 }
 
+export type PreparedPagePublication = { versionId: string; request: PublishPageVersionInput };
 export type PageWriteOptions = {
   signal?: AbortSignal;
+  onMergePreview?: (preview: ContextMergePreview) => Promise<boolean>;
+  preparedPublication?: PreparedPagePublication;
+  onPublicationPrepared?: (command: PreparedPagePublication) => void;
 };
 
 export async function createPage(
@@ -287,7 +291,7 @@ export async function createPage(
 ) {
   const response = await apiRequest<PageResponse>(pagesPath(workspaceId), {
     method: "POST",
-    body: JSON.stringify({ ...payload, share_draft: true }),
+    body: JSON.stringify(payload),
     signal: options.signal,
   });
   return response.data;
@@ -320,10 +324,36 @@ export async function autosavePage(
     pagesPath(workspaceId, `/${id}/autosave`),
     {
       method: "POST",
-      body: JSON.stringify({ ...payload, share_draft: true }),
+      body: JSON.stringify(payload),
       signal: options.signal,
     },
   );
+  return response.data;
+}
+
+export type ContextMergeCandidate = {
+  body_md: string;
+  page_metadata: Record<string, unknown>;
+  block_map: Record<string, unknown>[];
+  result_hash: string;
+};
+
+export type ContextMergePreview = {
+  version_id: string;
+  editing_revision: number;
+  published_version_id: string | null;
+  parent_version_ids: string[];
+  kind: "fast_forward" | "automatic_merge" | "conflict";
+  result: ContextMergeCandidate | null;
+  keep_both: ContextMergeCandidate;
+  latest: ContextMergeCandidate;
+};
+
+export async function previewPageMerge(workspaceId: string, id: string, versionId: string,
+  options: PageWriteOptions = {}) {
+  const response = await apiRequest<{ data: ContextMergePreview }>(pagesPath(workspaceId, `/${id}/merge-preview`), {
+    method: "POST", body: JSON.stringify({ version_id: versionId }), signal: options.signal,
+  });
   return response.data;
 }
 
@@ -331,21 +361,35 @@ export async function publishPageVersion(
   workspaceId: string,
   id: string,
   versionId: string,
-  payload: PublishPageVersionInput,
+  payload: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash">,
   options: PageWriteOptions = {},
 ) {
+  let command = options.preparedPublication;
+  if (!command) {
+    const preview = await previewPageMerge(workspaceId, id, versionId, options);
+    if (!preview.result) {
+      throw new ApiError(409, { error_code: "context_merge_conflict", message: "These changes conflict. Read the current draft before publishing.", request_id: "", warnings: [] });
+    }
+    if (preview.kind === "automatic_merge" && options.onMergePreview &&
+        !await options.onMergePreview(preview)) {
+      throw new DOMException("Publication cancelled", "AbortError");
+    }
+    command = { versionId, request: { ...payload,
+      expected_editing_revision: preview.editing_revision,
+      expected_published_version_id: preview.published_version_id,
+      result_hash: preview.result.result_hash, idempotency_key: newIdempotencyKey() } };
+    options.onPublicationPrepared?.(command);
+  }
+  return executePreparedPagePublication(workspaceId, id, command, options);
+}
+
+export async function executePreparedPagePublication(workspaceId: string, id: string,
+  command: PreparedPagePublication, options: PageWriteOptions = {}) {
   const response = await apiRequest<PageResponse>(
-    pagesPath(workspaceId, `/${id}/versions/${versionId}/publish`),
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-      signal: options.signal,
-    },
+    pagesPath(workspaceId, `/${id}/versions/${command.versionId}/publish`),
+    { method: "POST", body: JSON.stringify(command.request), signal: options.signal },
   );
-  return {
-    page: response.data,
-    warnings: response.envelope?.warnings ?? [],
-  };
+  return { page: response.data, warnings: response.envelope?.warnings ?? [] };
 }
 
 // Conservative cap for sendBeacon / keepalive fetch bodies. Chromium enforces
@@ -370,7 +414,7 @@ export function sendPageAutosave(
   id: string,
   payload: PageAutosaveInput,
 ) {
-  const body = JSON.stringify({ ...payload, share_draft: true });
+  const body = JSON.stringify(payload);
   const apiToken = getApiToken();
   const url = `${getApiBaseUrl()}${pagesPath(workspaceId, `/${id}/autosave`)}`;
   const bodyBytes = utf8ByteLength(body);

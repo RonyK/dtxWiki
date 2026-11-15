@@ -44,6 +44,8 @@ CONTEXT_HISTORY_STATUSES = (
     "superseded_draft",
 )
 
+UNARCHIVE_REASON = "page restored from archive"
+
 _PUBLISHED_STATUSES = frozenset({"published_snapshot", "superseded_snapshot"})
 _GRAPH_STATUSES = frozenset({"linear", "branched", "superseded", "discarded"})
 
@@ -123,108 +125,42 @@ class ContextHistoryRepairFailedError(RuntimeError):
         self.report = report
 
 
-def project_context_version(
-    page: ContextPage,
-    version: ContextPageVersion,
-    *,
-    visible_version_id: UUID | None,
-    expose_draft_state: bool,
-) -> ContextVersionProjection:
-    """Project a raw row without disclosing a hidden draft to viewers.
-
-    ``history_status`` uses the normative precedence encoded below.  A viewer
-    never receives a draft row, and hidden draft pointers are deliberately not
-    considered while projecting its published row; otherwise an
-    ``state_inconsistent`` or head flag could reveal that private work exists.
-    """
-
-    is_published_head = version.id == page.current_published_version_id
-    actual_draft_head = version.id == page.latest_draft_version_id
-    is_draft_head = expose_draft_state and actual_draft_head
-    is_alternative = (
-        version.version_status == "draft" and version.graph_status == "branched"
-    )
-    is_discarded = (
-        version.version_status == "draft" and version.graph_status == "discarded"
-    )
-    # P2.2: an "editing" row reaching this function has already been through
-    # the actor-ownership visibility check upstream (the same trust boundary
-    # this function already relies on for `is_draft_head`/`is_published_head`
-    # -- it does not independently re-derive who may see `version`), so any
-    # "editing" row seen here is either the caller's own or something a
-    # caller that skipped that check is responsible for, not something this
-    # projection can or should re-verify.
-    is_editing = version.version_status == "editing"
-
-    # P8.1: every in-place save of an open "editing" row points
-    # latest_draft_version_id at it (PageService._set_current_version), so an
-    # editing draft head is the normal state of an edit in progress, not a
-    # contradiction. Reporting it as one put `state_inconsistent` on every
-    # successful update/patch response.
-    reasons: list[str] = []
-    if version.page_id != page.id:
-        reasons.append("version_on_another_page")
-    if version.version_status not in {
-        "editing",
-        "draft",
-        "published_snapshot",
-        "superseded_snapshot",
-    }:
-        reasons.append("unknown_version_status")
-    if version.graph_status not in _GRAPH_STATUSES:
-        reasons.append("unknown_graph_status")
-    if (
-        version.version_status in _PUBLISHED_STATUSES
-        and version.graph_status != "linear"
-    ):
-        reasons.append("published_row_not_linear")
-    if is_editing and version.graph_status != "linear":
-        reasons.append("editing_row_not_linear")
-    if is_published_head and version.version_status != "published_snapshot":
-        reasons.append("published_head_not_a_snapshot")
-    if (
-        expose_draft_state
-        and actual_draft_head
-        and (
-            version.version_status not in {"draft", "editing"}
-            or version.graph_status != "linear"
-        )
-    ):
-        reasons.append("draft_head_not_a_linear_draft")
-    if expose_draft_state and is_published_head and actual_draft_head:
-        reasons.append("published_head_is_also_draft_head")
-    inconsistent = bool(reasons)
-
-    # Exact precedence: state inconsistent; current editing; current draft;
-    # published snapshot; alternative; discarded; superseded snapshot;
-    # superseded draft.
-    if inconsistent:
-        history_status = "state_inconsistent"
-    elif is_editing:
-        history_status = "current_editing"
-    elif is_draft_head:
-        history_status = "current_draft"
-    elif is_published_head:
-        history_status = "published_snapshot"
-    elif is_alternative:
-        history_status = "alternative_draft"
-    elif is_discarded:
-        history_status = "discarded_draft"
-    elif version.version_status in _PUBLISHED_STATUSES:
-        history_status = "superseded_snapshot"
-    else:
-        history_status = "superseded_draft"
-
+def project_context_version(page, version, *, visible_version_id, expose_draft_state):
+    published = version.id == page.current_published_version_id
+    draft = expose_draft_state and version.version_status == "draft"
     return ContextVersionProjection(
-        history_status=history_status,
-        graph_status=version.graph_status,
+        history_status=(
+            "current_draft"
+            if draft
+            else "published_snapshot"
+            if published
+            else "closed"
+            if version.version_status == "closed"
+            else "discarded_draft"
+            if version.version_status == "discarded"
+            else "superseded_snapshot"
+        ),
+        graph_status="linear",
         is_visible_head=version.id == visible_version_id,
-        is_published_head=is_published_head,
-        is_draft_head=is_draft_head,
-        is_alternative=is_alternative,
-        is_discarded=is_discarded,
-        inconsistency_reasons=tuple(reasons),
+        is_published_head=published,
+        is_draft_head=draft,
+        is_alternative=False,
+        is_discarded=version.version_status == "discarded",
     )
+
+
+# Context writes apply page metadata directly until the page is first
+# published, so each draft written before then also records the full values
+# it was written with. Publishing or restoring an earlier draft uses them.
+METADATA_SNAPSHOT_OPERATION = "metadata_snapshot"
+METADATA_SNAPSHOT_TARGET = "context_page_metadata"
+METADATA_SNAPSHOT_FIELDS = (
+    "title",
+    "page_type",
+    "tags",
+    "aliases",
+    "placement_parent_node_id",
+)
 
 
 def live_draft_chain(session: Session, page: ContextPage) -> list[ContextPageVersion]:
@@ -254,20 +190,6 @@ def live_draft_chain(session: Session, page: ContextPage) -> list[ContextPageVer
         chain.append(version)
         version_id = version.parent_version_id
     return chain if version_id == page.current_published_version_id else []
-
-
-# Context writes apply page metadata directly until the page is first
-# published, so each draft written before then also records the full values
-# it was written with. Publishing or restoring an earlier draft uses them.
-METADATA_SNAPSHOT_OPERATION = "metadata_snapshot"
-METADATA_SNAPSHOT_TARGET = "context_page_metadata"
-METADATA_SNAPSHOT_FIELDS = (
-    "title",
-    "page_type",
-    "tags",
-    "aliases",
-    "placement_parent_node_id",
-)
 
 
 def page_metadata_snapshot(page: ContextPage) -> dict[str, object]:
@@ -408,41 +330,8 @@ def record_metadata_snapshot(
     page: ContextPage,
     version: ContextPageVersion,
 ) -> None:
-    """Record the full metadata a draft of a never-published page carries.
-
-    That is the page's values plus anything staged on this draft. Its own
-    target type keeps it out of every query that pairs a review with the
-    Context page operation it reviews.
-    """
-
-    if page.current_published_version_id is not None:
-        return
-    from backend.services.page_service import pending_page_metadata_patch
-
-    snapshot = page_metadata_snapshot(page)
-    for field, value in pending_page_metadata_patch(
-        session, page=page, version_id=version.id
-    ).items():
-        if field in METADATA_SNAPSHOT_FIELDS:
-            snapshot[field] = (
-                str(value)
-                if field == "placement_parent_node_id" and value is not None
-                else value
-            )
-    session.add(
-        ChangeOperation(
-            workspace_id=page.workspace_id,
-            change_set_id=change_set_id,
-            target_type=METADATA_SNAPSHOT_TARGET,
-            target_id=page.id,
-            operation=METADATA_SNAPSHOT_OPERATION,
-            diff_summary=json.dumps(snapshot, ensure_ascii=False, sort_keys=True),
-            diff_ref=f"context_page_version:{version.id}",
-        )
-    )
-
-
-UNARCHIVE_REASON = "page restored from archive"
+    if not version.page_metadata:
+        version.page_metadata = page_metadata_snapshot(page)
 
 
 def record_unarchive(
@@ -483,32 +372,12 @@ def record_unarchive(
     )
 
 
-def is_publishable_draft(
-    session: Session, page: ContextPage, version: ContextPageVersion
-) -> bool:
-    """Whether approving ``version`` would publish exactly this draft.
-
-    The latest draft always can. An earlier linear draft can when it lies on
-    the chain between the latest draft and the published head. Before a first
-    publication it also needs its own recorded metadata, and so does every
-    newer draft, whose values would otherwise be overwritten.
-    """
-
-    if (
-        version.page_id != page.id
-        or version.version_status != "draft"
-        or version.graph_status != "linear"
-    ):
-        return False
-    if page.latest_draft_version_id == version.id:
-        return True
-    chain_ids = [member.id for member in live_draft_chain(session, page)]
-    if version.id not in chain_ids:
-        return False
-    if page.current_published_version_id is not None:
-        return True
-    covered = chain_ids[: chain_ids.index(version.id) + 1]
-    return len(metadata_snapshots(session, page, covered)) == len(covered)
+def is_publishable_draft(session, page, version):
+    return version.page_id == page.id and version.version_status in {
+        "draft",
+        "closed",
+        "superseded_snapshot",
+    }
 
 
 @dataclass(frozen=True)
@@ -799,91 +668,23 @@ def _rejected_version_ids(
 
 
 def assert_context_publish_candidate(
-    session: Session,
-    *,
-    page: ContextPage,
-    version: ContextPageVersion,
-    require_latest_draft: bool,
-    allow_chain_ancestor: bool = False,
-) -> None:
-    """Reject a stale, branched, discarded, or non-linear publication.
-
-    A current draft may have one or more earlier linear draft ancestors (MCP
-    revisions create that shape).  The chain must end at the current published
-    head, or at ``None`` for a never-published page.  A historical snapshot,
-    cross-page parent, cycle, or alternative anywhere in the chain is stale.
-    ``allow_chain_ancestor`` (review approval only) also accepts one of those
-    earlier linear drafts once the page has been published: it publishes the
-    changes up to that draft and the newer drafts stay on top of it.
-    """
-
-    if version.page_id != page.id or version.graph_status != "linear":
+    session, *, page, version, require_latest_draft, allow_chain_ancestor=False
+):
+    if (
+        version.page_id != page.id
+        or version.workspace_id != page.workspace_id
+        or version.version_status
+        not in {"draft", "closed", "published_snapshot", "superseded_snapshot"}
+    ):
         raise StaleContextDraftError()
-    if require_latest_draft:
-        if version.version_status != "draft" or (
-            page.latest_draft_version_id != version.id
-            and not (
-                allow_chain_ancestor and is_publishable_draft(session, page, version)
-            )
-        ):
-            raise StaleContextDraftError()
-    elif version.version_status not in {"draft", "published_snapshot"}:
-        raise StaleContextDraftError()
+    from backend.services.context_draft_workflow import parents_for
 
-    # Re-applying the already published head is a topology no-op.  Higher-level
-    # callers still require their publish operation and audit evidence before
-    # treating such a replay as successful.
-    if version.id == page.current_published_version_id:
-        return
-
-    if not require_latest_draft:
-        expected_parent_ids = {
-            value
-            for value in (page.latest_draft_version_id, page.current_version_id)
-            if value is not None
-        }
-        if expected_parent_ids:
-            if version.parent_version_id not in expected_parent_ids:
-                raise StaleContextDraftError()
-        elif version.parent_version_id is not None:
-            raise StaleContextDraftError()
-
-    published_head_id = page.current_published_version_id
-    parent_id = version.parent_version_id
-    seen = {version.id}
-    while parent_id != published_head_id:
-        if parent_id is None or parent_id in seen:
-            raise StaleContextDraftError()
-        seen.add(parent_id)
-        parent = session.get(ContextPageVersion, parent_id)
-        if (
-            parent is None
-            or parent.page_id != page.id
-            # P9.1: `update_page` (`require_latest_draft=False`) targets the
-            # page's own shared head via `page.current_version_id`, which a
-            # never-submitted page-first page legitimately still names its
-            # original "editing" row (see `_set_current_version`'s own
-            # "editing"/"draft" note) -- that row is exactly as live and
-            # non-stale a predecessor as a submitted "draft" one, just not
-            # yet locked for review. `submit_context_edit_for_review` never
-            # inserts a new row on top of one (it flips the same row's status
-            # in place), so an "editing" ancestor can only appear as the
-            # immediate parent here, never partway through a longer chain.
-            or parent.version_status not in ("draft", "editing")
-            or parent.graph_status != "linear"
-        ):
-            raise StaleContextDraftError()
-        parent_id = parent.parent_version_id
-
-    if published_head_id is not None:
-        published = session.get(ContextPageVersion, published_head_id)
-        if (
-            published is None
-            or published.page_id != page.id
-            or published.version_status not in _PUBLISHED_STATUSES
-            or published.graph_status != "linear"
-        ):
-            raise StaleContextDraftError()
+    for key in parents_for(session, version):
+        parent = get_in_workspace(
+            session, ContextPageVersion, workspace_id=page.workspace_id, resource_id=key
+        )
+        if parent is None or parent.page_id != page.id or not parent.commit_oid:
+            raise StaleContextDraftError("Context parents must be immutable commits")
 
 
 def audit_context_history(
@@ -1523,139 +1324,245 @@ def _require_repair_candidate_allowed(
     )
 
 
-def apply_context_publication(
+@dataclass(frozen=True)
+class ContextDecisionRecord:
+    version: ContextPageVersion | None
+    previous_published_version_id: UUID | None
+    change_set: ChangeSet | None
+    audit_event: object | None
+    restored: dict[str, set[str]] | None = None
+
+
+def record_context_decision(
     session: Session,
     *,
-    context_version_writer=None,
+    action: str,
     page: ContextPage,
-    version: ContextPageVersion,
-    require_latest_draft: bool,
-    allow_chain_ancestor: bool = False,
+    version: ContextPageVersion | None = None,
+    context_version_writer=None,
+    actor_kind: str = "system",
+    actor_id: str = "internal",
     actor=None,
-    self_origins: frozenset[str] | None = None,
-) -> UUID | None:
-    """Atomically normalize snapshots and advance every published pointer.
+    reason: str,
+    risk_level: str = "low",
+    audit_service=None,
+    self_origins=None,
+    effect: dict | None = None,
+    review_decision_id: UUID | None = None,
+    existing_change_set: ChangeSet | None = None,
+    existing_audit_event=None,
+    event_action: str | None = None,
+) -> ContextDecisionRecord:
+    """Commit a Context transition and its durable operation/audit together.
 
-    The caller owns the surrounding transaction/savepoint.  Selecting prior
-    rows for update gives PostgreSQL the same serialization boundary as the
-    already locked page row; SQLite keeps the operation in its single write
-    transaction.  Every former ``published_snapshot`` is normalized, not only
-    the row named by the pointer, so legacy multi-published pages self-heal on
-    their next successful publication.
+    Review permissions and ReviewDecision rows remain with ReviewService. This
+    entry owns every Context close, published-ref movement and undo; the Git
+    preparation/alignment functions below it are storage primitives.
     """
+    from backend.services.audit_service import AuditService
+    from backend.services.context_version_storage import (
+        ContextStorageServiceError,
+        align_publication,
+        freeze_context_version,
+    )
 
+    with session.begin_nested():
+        previous_id = page.current_published_version_id
+        restored = None
+        if action == "publish":
+            if version is None:
+                raise ValueError("publication requires a version")
+            _apply_context_publication(
+                session,
+                context_version_writer=context_version_writer,
+                page=page,
+                version=version,
+                require_latest_draft=False,
+                actor=actor,
+                self_origins=self_origins,
+            )
+            operation, trigger = "publish", "context_page_publish"
+            audit_action = "context_page.draft.publish"
+        elif action == "close":
+            if version is None:
+                raise ValueError("closing requires a version")
+            freeze_context_version(session, page, version, context_version_writer)
+            operation, trigger = "close", "context_draft_close"
+            audit_action = "context_page.draft.close"
+        elif action == "undo":
+            from backend.services.review_decision_effect import restore_effect
+
+            if effect is None:
+                raise ValueError("undo requires a recorded decision effect")
+            restored = restore_effect(session, page.workspace_id, effect)
+            if "current_published_version_id" not in restored.get(
+                "context_page", set()
+            ):
+                return ContextDecisionRecord(None, previous_id, None, None, restored)
+            version = (
+                get_in_workspace(
+                    session,
+                    ContextPageVersion,
+                    workspace_id=page.workspace_id,
+                    resource_id=page.current_published_version_id,
+                )
+                if page.current_published_version_id
+                else None
+            )
+            if page.current_published_version_id and (
+                version is None or version.page_id != page.id or not version.commit_oid
+            ):
+                raise ContextStorageServiceError("context_snapshot_invalid")
+            align_publication(
+                session,
+                page,
+                version.commit_oid if version else None,
+                context_version_writer,
+            )
+            operation, trigger = "publish_revert", "context_page_publish_revert"
+            audit_action = "context_page.publication.undo"
+        elif action == "replay":
+            if version is None or version.id != page.current_published_version_id:
+                raise ContextStorageServiceError("context_snapshot_invalid")
+            if existing_change_set is None or existing_audit_event is None:
+                raise ValueError("publication replay requires its existing ledger")
+            align_publication(session, page, version.commit_oid, context_version_writer)
+            return ContextDecisionRecord(
+                version, previous_id, existing_change_set, existing_audit_event
+            )
+        else:
+            raise ValueError(f"unknown Context decision: {action}")
+
+        change_set = ChangeSet(
+            workspace_id=page.workspace_id,
+            reason=reason,
+            trigger_type=trigger,
+            actor_type=actor_kind,
+            actor_id=parse_uuid_or_none(actor_id),
+            status="applied",
+            risk_level=risk_level,
+        )
+        session.add(change_set)
+        session.flush()
+        session.add(
+            ChangeOperation(
+                workspace_id=page.workspace_id,
+                change_set_id=change_set.id,
+                target_type="context_page",
+                target_id=page.id,
+                operation=operation,
+                diff_summary=reason,
+                diff_ref=f"context_page_version:{version.id}" if version else None,
+            )
+        )
+        audit = (audit_service or AuditService()).emit(
+            session=session,
+            workspace_id=page.workspace_id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            action=event_action or audit_action,
+            target_kind="context_page",
+            target_id=page.id,
+            payload={
+                "reason": reason,
+                "version_id": str(version.id) if version else None,
+                "previous_published_version_id": str(previous_id)
+                if previous_id
+                else None,
+                "change_set_id": str(change_set.id),
+                **(
+                    {"review_decision_id": str(review_decision_id)}
+                    if review_decision_id
+                    else {}
+                ),
+            },
+        )
+        session.flush()
+        return ContextDecisionRecord(version, previous_id, change_set, audit, restored)
+
+
+def _apply_context_publication(
+    session,
+    *,
+    context_version_writer=None,
+    page,
+    version,
+    require_latest_draft,
+    allow_chain_ancestor=False,
+    actor=None,
+    self_origins=None,
+):
+    """Publish one prepared merge result; unrelated drafts remain untouched."""
     assert_context_publish_candidate(
-        session,
-        page=page,
-        version=version,
-        require_latest_draft=require_latest_draft,
-        allow_chain_ancestor=allow_chain_ancestor,
+        session, page=page, version=version, require_latest_draft=require_latest_draft
     )
     require_no_visible_legacy_media(
-        workspace_id=page.workspace_id,
-        body_markdown=version.body_md,
+        workspace_id=page.workspace_id, body_markdown=version.body_md
     )
-    # Publishing an earlier draft of the chain leaves the drafts above it
-    # pending; they stay the edit head and build on this version.
-    newer_draft_ids: set[UUID] = set()
-    if allow_chain_ancestor and page.latest_draft_version_id not in (
-        None,
-        version.id,
-    ):
-        chain_ids = [draft.id for draft in live_draft_chain(session, page)]
-        newer_draft_ids = set(chain_ids[: chain_ids.index(version.id)])
+    from backend.services.context_draft_workflow import metadata_dict, metadata_for
     from backend.services.document_references import publish_document_references
 
-    # Register the exact stored version once, inside the caller's publication
-    # transaction. Reindex/read paths never manufacture citation metadata.
-    if page.current_published_version_id != version.id:
+    previous_id = page.current_published_version_id
+    if previous_id != version.id:
         publish_document_references(
             session, version=version, actor=actor, self_origins=self_origins
         )
-    previous_published_version_id = page.current_published_version_id
-    previous = (
-        get_in_workspace(
-            session,
-            ContextPageVersion,
-            workspace_id=page.workspace_id,
-            resource_id=previous_published_version_id,
+        previous = (
+            get_in_workspace(
+                session,
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                resource_id=previous_id,
+            )
+            if previous_id
+            else None
         )
-        if previous_published_version_id is not None
-        else None
-    )
-    if previous is None or (
-        normalize_content_recency(parse_page_frontmatter(previous.body_md).body)
-        != normalize_content_recency(parse_page_frontmatter(version.body_md).body)
-        or previous.rendering_profile != version.rendering_profile
-    ):
-        page.content_changed_at = utc_now()
+        if previous is None or (
+            normalize_content_recency(parse_page_frontmatter(previous.body_md).body)
+            != normalize_content_recency(parse_page_frontmatter(version.body_md).body)
+            or previous.rendering_profile != version.rendering_profile
+        ):
+            page.content_changed_at = utc_now()
     _normalize_context_published_rows(
         session,
         page=page,
         version=version,
         context_version_writer=context_version_writer,
     )
-    # A multi-step draft chain (ordinary since staged autosave shipped -- see
-    # commit 60593953 -- not an edge case) leaves every ancestor between the
-    # published tip and the previous published head `draft`/`linear`. This
-    # publish is about to clear `latest_draft_version_id`, so those ancestors
-    # would otherwise become audit-visible orphans that repair could
-    # resurrect as the edit head. `assert_context_publish_candidate` just
-    # walked this exact same path (its own loop above) and proved it reaches
-    # `previous_published_version_id` through nothing but `draft`/`linear`
-    # rows, so retracing it here and demoting everything found is provably
-    # safe: a page has at most one editable chain rooted at its published
-    # head, so this walk can never reach an unrelated draft still reachable
-    # some other way (e.g. a preserved alternative, which is `branched`, not
-    # `linear`, precisely so this walk leaves it alone).
-    #
-    # Replaying the already-published head (``version.id ==
-    # previous_published_version_id``) is the one case where that proof does
-    # NOT hold: `assert_context_publish_candidate` returns early for that
-    # topology no-op (its own docstring calls it out) and never walks the
-    # chain at all, so nothing here guarantees `version.parent_version_id`
-    # even belongs to an active draft chain. Skip the walk entirely then --
-    # there is no new chain being published, so there is nothing to demote.
-    if version.id != previous_published_version_id:
-        parent_id = version.parent_version_id
-        seen = {version.id}
-        while parent_id != previous_published_version_id:
-            if parent_id is None or parent_id in seen:
-                break
-            seen.add(parent_id)
-            ancestor = session.get(ContextPageVersion, parent_id)
-            if (
-                ancestor is None
-                or ancestor.version_status not in ("draft", "editing")
-                or ancestor.graph_status != "linear"
-            ):
-                break
-            if ancestor.version_status == "editing":
-                # P9.1: a page-first page's initial "editing" row can be the
-                # immediate ancestor of its first direct publish (see the
-                # matching relaxation in `assert_context_publish_candidate`).
-                # It is not part of the shared draft chain the way a
-                # submitted "draft" ancestor is, so demote its
-                # `version_status` too, exactly like an explicit
-                # `discard_context_edit` would -- otherwise it keeps
-                # matching `_editable_version_id_for_actor`'s "this actor's
-                # own open editing row" lookup forever, and every later
-                # autosave by that actor resolves back onto this superseded
-                # row instead of the actual published head.
-                ancestor.version_status = "discarded"
-            ancestor.graph_status = "discarded"
-            session.add(ancestor)
-            parent_id = ancestor.parent_version_id
+    apply_page_metadata_snapshot(page, metadata_dict(metadata_for(page, version)))
     page.current_published_version_id = version.id
-    if page.current_version_id not in newer_draft_ids:
-        page.current_version_id = version.id
-    if not newer_draft_ids:
-        page.latest_draft_version_id = None
+    page.current_version_id = version.id
     page.lifecycle_status = "published"
     reconcile_public_exposure_after_publication(
-        page,
-        previous_published_version_id=previous_published_version_id,
-        published_version_id=version.id,
+        page, previous_published_version_id=previous_id, published_version_id=version.id
     )
     session.add_all([page, version])
-    return previous_published_version_id
+    return previous_id
+
+
+def apply_context_publication(
+    session,
+    *,
+    page,
+    version,
+    context_version_writer=None,
+    require_latest_draft=False,
+    allow_chain_ancestor=False,
+    actor=None,
+    self_origins=None,
+):
+    """Internal publication callers share the common decision recorder."""
+    del require_latest_draft, allow_chain_ancestor
+    result = record_context_decision(
+        session,
+        action="publish",
+        page=page,
+        version=version,
+        context_version_writer=context_version_writer,
+        actor=actor,
+        actor_kind=getattr(actor, "actor_kind", "system"),
+        actor_id=getattr(actor, "actor_id", "internal"),
+        reason="Context content published",
+        self_origins=self_origins,
+    )
+    return result.previous_published_version_id

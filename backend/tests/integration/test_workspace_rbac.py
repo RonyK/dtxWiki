@@ -25,6 +25,7 @@ from backend.repositories.workspace_repo import insert_workspace
 from backend.schemas.context_write import WriteDraftRequest
 from backend.services.context_write_service import ContextWriteService
 from backend.tests.conftest import authenticate_test_client
+from backend.tests.utils.context_commands import review_binding
 
 
 def make_client(page_service, email: str) -> TestClient:
@@ -56,9 +57,7 @@ def test_workspace_list_filters_to_actor_memberships(page_service):
 
     workspaces = client.get("/api/v1/workspaces")
     assert workspaces.status_code == 200
-    slugs = [
-        workspace["slug"] for workspace in workspaces.json()["data"]["workspaces"]
-    ]
+    slugs = [workspace["slug"] for workspace in workspaces.json()["data"]["workspaces"]]
     assert len(slugs) == 1
     assert slugs[0].startswith("personal-")
 
@@ -161,26 +160,32 @@ def test_owner_can_create_select_and_delete_empty_workspace(page_service):
     }
     assert "research-workspace" in workspace_slugs
     assert len(workspace_slugs) == 2
-    assert len(
-        [slug for slug in workspace_slugs if slug.startswith("personal-")]
-    ) == 1
+    assert len([slug for slug in workspace_slugs if slug.startswith("personal-")]) == 1
 
     deleted = client.delete(f"/api/v1/workspaces/{payload['id']}")
     assert deleted.status_code == 200
     assert deleted.json()["data"]["deleted_workspace_id"] == payload["id"]
     with page_service.session_factory() as session:
-        assert session.scalar(
-            text(
-                "SELECT count(*) FROM search_doc_fts WHERE workspace_id = :workspace_id"
-            ),
-            {"workspace_id": payload["id"]},
-        ) == 0
-        assert session.scalar(
-            text(
-                "SELECT count(*) FROM page_name_trgm WHERE workspace_id = :workspace_id"
-            ),
-            {"workspace_id": payload["id"]},
-        ) == 0
+        assert (
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM search_doc_fts "
+                    "WHERE workspace_id = :workspace_id"
+                ),
+                {"workspace_id": payload["id"]},
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM page_name_trgm "
+                    "WHERE workspace_id = :workspace_id"
+                ),
+                {"workspace_id": payload["id"]},
+            )
+            == 0
+        )
 
 
 def test_workspace_delete_detaches_audit_history_instead_of_blocking(
@@ -380,8 +385,8 @@ def test_purge_is_refused_before_anything_is_deleted_when_the_store_cannot_purge
         """Deliberately has no `purge_workspace` -- the pre-fix duck type."""
 
     container = client.app.state.container
-    container.get_services().blob_store_provider.store_for = (
-        lambda _workspace_id: _StoreWithoutPurgeSupport()
+    container.get_services().blob_store_provider.store_for = lambda _workspace_id: (
+        _StoreWithoutPurgeSupport()
     )
 
     response = client.delete(f"/api/v1/workspaces/{workspace_id}?purge=true")
@@ -496,7 +501,10 @@ def test_decide_review_rejects_viewer_and_allows_editor(page_service):
     set_role(page_service, "decide-reviewer@example.com", workspace_id, "editor")
     allowed = reviewer.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decision",
-        json={"decision_type": "approve"},
+        json={
+            "decision_type": "approve",
+            **review_binding(reviewer, workspace_id, review_item_id),
+        },
     )
     assert allowed.status_code == 200
     assert allowed.json()["data"]["status"] == "approved"
@@ -511,12 +519,13 @@ def test_bulk_decide_reviews_best_effort_and_editor_gated(page_service):
     approve_id = _seed_review_item(
         page_service, workspace_id, title="Bulk Approve Target"
     )
-    skip_id = _seed_review_item(
-        page_service, workspace_id, title="Bulk Skip Target"
-    )
+    skip_id = _seed_review_item(page_service, workspace_id, title="Bulk Skip Target")
     already_resolved = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/{skip_id}/decision",
-        json={"decision_type": "approve"},
+        json={
+            "decision_type": "approve",
+            **review_binding(owner, workspace_id, skip_id),
+        },
     )
     assert already_resolved.status_code == 200
 
@@ -532,11 +541,15 @@ def test_bulk_decide_reviews_best_effort_and_editor_gated(page_service):
     assert denied.status_code == 403
     assert denied.json()["error_code"] == "workspace_role_insufficient"
 
+    selection = owner.post(
+        f"/api/v1/workspaces/{workspace_id}/reviews/selection",
+        json={"review_item_ids": [approve_id, skip_id]},
+    )
+    assert selection.status_code == 200, selection.text
     allowed = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/decide-bulk",
         json={
-            "review_item_ids": [approve_id, skip_id],
-            "filters": None,
+            "selection_token": selection.json()["data"]["selection_token"],
             "decision_type": "approve",
         },
     )
@@ -545,9 +558,7 @@ def test_bulk_decide_reviews_best_effort_and_editor_gated(page_service):
     assert payload["approved"] == [approve_id]
     assert payload["skipped"][0]["id"] == skip_id
 
-    listed = owner.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews?status=resolved"
-    )
+    listed = owner.get(f"/api/v1/workspaces/{workspace_id}/reviews?status=resolved")
     assert listed.status_code == 200
     statuses = {item["id"]: item["status"] for item in listed.json()["data"]["items"]}
     assert statuses[approve_id] == "approved"
@@ -556,11 +567,15 @@ def test_bulk_decide_reviews_best_effort_and_editor_gated(page_service):
     filter_id = _seed_review_item(
         page_service, workspace_id, title="Bulk Filter Target"
     )
+    selection = owner.post(
+        f"/api/v1/workspaces/{workspace_id}/reviews/selection",
+        json={"filters": {"status": "pending", "risk_level": "high", "scope": "all"}},
+    )
+    assert selection.status_code == 200, selection.text
     filtered = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/decide-bulk",
         json={
-            "review_item_ids": None,
-            "filters": {"status": "pending", "risk_level": "high", "scope": "all"},
+            "selection_token": selection.json()["data"]["selection_token"],
             "decision_type": "approve",
         },
     )
@@ -593,13 +608,9 @@ def test_list_reviews_does_not_sweep_auto_approve_policy(page_service):
         review.risk_level = "medium"
         review.created_at = datetime.now(UTC) - timedelta(days=2)
 
-    pending = owner.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews?status=pending"
-    )
+    pending = owner.get(f"/api/v1/workspaces/{workspace_id}/reviews?status=pending")
     assert pending.status_code == 200
-    assert review_item_id in [
-        item["id"] for item in pending.json()["data"]["items"]
-    ]
+    assert review_item_id in [item["id"] for item in pending.json()["data"]["items"]]
     with page_service.session_factory.begin() as session:
         decision_count = session.scalar(
             select(func.count(ReviewDecision.id)).where(
@@ -666,9 +677,7 @@ def test_request_changes_routes_to_me_scope(page_service):
     workspace_id = owner.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
-    review_item_id = _seed_review_item(
-        page_service, workspace_id, title="Scope Target"
-    )
+    review_item_id = _seed_review_item(page_service, workspace_id, title="Scope Target")
     decided = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decision",
         json={
@@ -680,9 +689,7 @@ def test_request_changes_routes_to_me_scope(page_service):
     assert decided.status_code == 200
     assert decided.json()["data"]["current_audience_kind"] == "workspace_editors"
 
-    to_me = owner.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews?scope=to_me"
-    )
+    to_me = owner.get(f"/api/v1/workspaces/{workspace_id}/reviews?scope=to_me")
     assert to_me.status_code == 200
     assert review_item_id in [item["id"] for item in to_me.json()["data"]["items"]]
 
@@ -714,9 +721,7 @@ def test_claim_and_second_claimer_conflicts(page_service):
     workspace_id = owner.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
-    review_item_id = _seed_review_item(
-        page_service, workspace_id, title="Claim Target"
-    )
+    review_item_id = _seed_review_item(page_service, workspace_id, title="Claim Target")
     # A review must be changes_requested before it can be claimed (status guard).
     requested = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decision",

@@ -109,7 +109,7 @@ def _seed_page_bound_orphan(
             content_hash="0" * 64,
             actor_type="human",
             actor_id=None,
-            version_status="editing",
+            version_status="draft",
             created_by_actor_kind="human",
             created_by_actor_id=created_by_actor_id,
         )
@@ -192,7 +192,7 @@ def _seed_page_bound_orphan(
             now=now,
         )
         if not editing:
-            version.version_status = "draft"
+            version.version_status = "closed"
             page.latest_draft_version_id = version.id
 
 

@@ -19,7 +19,7 @@ from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.user import User
 from backend.policy.rbac import grant_workspace_membership
-from backend.schemas.context_write import UpdateDraftRequest, WriteDraftRequest
+from backend.schemas.context_write import WriteDraftRequest
 from backend.services import review_selection_service
 from backend.services.context_write_service import ContextWriteService
 from backend.services.read_errors import ReadValidationError
@@ -104,14 +104,16 @@ def _seed_same_candidate_reviews(page_service, workspace_id, review_id, count):
             )
             session.add(change_set)
             session.flush()
-            session.add(ChangeOperation(
-                workspace_id=UUID(workspace_id),
-                change_set_id=change_set.id,
-                target_type=operation.target_type,
-                target_id=operation.target_id,
-                operation=operation.operation,
-                diff_ref=operation.diff_ref,
-            ))
+            session.add(
+                ChangeOperation(
+                    workspace_id=UUID(workspace_id),
+                    change_set_id=change_set.id,
+                    target_type=operation.target_type,
+                    target_id=operation.target_id,
+                    operation=operation.operation,
+                    diff_ref=operation.diff_ref,
+                )
+            )
             sibling = ReviewItem(
                 workspace_id=UUID(workspace_id),
                 change_set_id=change_set.id,
@@ -125,12 +127,62 @@ def _seed_same_candidate_reviews(page_service, workspace_id, review_id, count):
         return str(operation.target_id), ids
 
 
+def _save_draft_in_place(page_service, workspace_id, version_id, body):
+    """The browser user saves new bytes into the same shared draft."""
+    with page_service.session_factory() as session:
+        version = session.get(ContextPageVersion, UUID(str(version_id)))
+        user_id = session.scalar(
+            select(User.id).where(User.email == "test@example.com")
+        )
+        page_id, content, revision = (
+            version.page_id,
+            version.content_hash,
+            version.editing_revision,
+        )
+    return page_service.autosave_page(
+        page_id=page_id,
+        workspace_id=UUID(workspace_id),
+        title=None,
+        body_md=body,
+        actor_kind="human",
+        actor_id=str(user_id),
+        base_version_id=UUID(str(version_id)),
+        base_content_hash=content,
+        actor_provenance="browser_session",
+        idempotency_key=str(uuid4()),
+        expected_editing_revision=revision,
+        version_id=UUID(str(version_id)),
+    )
+
+
 def _selection(client, workspace_id, **selector):
     response = client.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/selection", json=selector
     )
     assert response.status_code == 200, response.text
     return response.json()["data"]
+
+
+def _approval_binding(client, workspace_id, review_id):
+    detail = client.get(
+        f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}"
+    ).json()["data"]
+    operation = next(
+        op
+        for op in detail["evidence"]["operations"]
+        if op["content"]["candidate_version_id"]
+    )
+    response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/context/pages/{operation['document']['document_id']}/merge-preview",
+        json={"version_id": operation["content"]["candidate_version_id"]},
+    )
+    assert response.status_code == 200, response.text
+    preview = response.json()["data"]
+    return {
+        "expected_editing_revision": preview["editing_revision"],
+        "expected_published_version_id": preview["published_version_id"],
+        "result_hash": preview["result"]["result_hash"],
+    }
 
 
 def _execute_selection(client, workspace_id, token, *, batch_limit=500):
@@ -149,9 +201,7 @@ def test_get_review_returns_detail(page_service):
     workspace_id = _current_workspace_id(client)
     review_id = _seed_pending_review(page_service, workspace_id)
 
-    response = client.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}"
-    )
+    response = client.get(f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}")
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -174,13 +224,12 @@ def test_get_review_returns_detail(page_service):
     assert content["is_current_candidate"] is True
     assert data["actions"]["approve"]["allowed"] is True
     assert data["actions"]["edit_directly"]["allowed"] is False
-    assert data["reject_effect"]["effect"] == "hide_unpublished"
+    assert data["reject_effect"]["effect"] == "no_head_change"
 
     # The projection identifies an actual readable version, independently of
     # the current-document destination above.
     version = client.get(
-        f"/api/v1/workspaces/{workspace_id}/context/pages/"
-        f"{document['document_id']}",
+        f"/api/v1/workspaces/{workspace_id}/context/pages/{document['document_id']}",
         params={"version_id": content["candidate_version_id"]},
     )
     assert version.status_code == 200, version.text
@@ -193,7 +242,9 @@ def test_get_review_returns_detail(page_service):
     "association", ["valid", "different_page", "hidden", "foreign", "ambiguous"]
 )
 def test_ingress_placement_evidence_requires_visible_same_change_exact_candidate(
-    page_service, association, monkeypatch,
+    page_service,
+    association,
+    monkeypatch,
 ):
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)
@@ -203,63 +254,86 @@ def test_ingress_placement_evidence_requires_visible_same_change_exact_candidate
     )
     with page_service.session_factory.begin() as session:
         review = session.get(ReviewItem, UUID(review_id))
-        operation = session.scalar(select(ChangeOperation).where(
-            ChangeOperation.change_set_id == review.change_set_id
-        ))
+        operation = session.scalar(
+            select(ChangeOperation).where(
+                ChangeOperation.change_set_id == review.change_set_id
+            )
+        )
         operation.operation = "context_ingress_accept"
-        node = session.scalar(select(WorkspaceTreeNode).where(
-            WorkspaceTreeNode.workspace_id == UUID(workspace_id),
-            WorkspaceTreeNode.target_kind == "context_page",
-            WorkspaceTreeNode.target_id == operation.target_id,
-        ))
+        node = session.scalar(
+            select(WorkspaceTreeNode).where(
+                WorkspaceTreeNode.workspace_id == UUID(workspace_id),
+                WorkspaceTreeNode.target_kind == "context_page",
+                WorkspaceTreeNode.target_id == operation.target_id,
+            )
+        )
         assert node is not None
         if association == "different_page":
             unrelated = session.get(ReviewItem, UUID(unrelated_id))
-            other_operation = session.scalar(select(ChangeOperation).where(
-                ChangeOperation.change_set_id == unrelated.change_set_id
-            ))
-            node = session.scalar(select(WorkspaceTreeNode).where(
-                WorkspaceTreeNode.target_id == other_operation.target_id
-            ))
+            other_operation = session.scalar(
+                select(ChangeOperation).where(
+                    ChangeOperation.change_set_id == unrelated.change_set_id
+                )
+            )
+            node = session.scalar(
+                select(WorkspaceTreeNode).where(
+                    WorkspaceTreeNode.target_id == other_operation.target_id
+                )
+            )
         elif association == "hidden":
             session.get(ContextPage, node.target_id).lifecycle_status = "archived"
         elif association == "ambiguous":
-            session.add(ChangeOperation(
-                workspace_id=UUID(workspace_id),
-                change_set_id=review.change_set_id,
-                target_type="context_page", target_id=operation.target_id,
-                operation="context_ingress_accept", diff_ref=operation.diff_ref,
-            ))
+            session.add(
+                ChangeOperation(
+                    workspace_id=UUID(workspace_id),
+                    change_set_id=review.change_set_id,
+                    target_type="context_page",
+                    target_id=operation.target_id,
+                    operation="context_ingress_accept",
+                    diff_ref=operation.diff_ref,
+                )
+            )
         placement_target = node.id
         if association == "foreign":
-            foreign = session.scalar(select(WorkspaceTreeNode).where(
-                WorkspaceTreeNode.workspace_id != UUID(workspace_id)
-            ).limit(1))
+            foreign = session.scalar(
+                select(WorkspaceTreeNode)
+                .where(WorkspaceTreeNode.workspace_id != UUID(workspace_id))
+                .limit(1)
+            )
             assert foreign is not None
             placement_target = foreign.id
-        session.add(ChangeOperation(
-            workspace_id=UUID(workspace_id),
-            change_set_id=review.change_set_id,
-            target_type="workspace_tree_node",
-            target_id=placement_target,
-            operation="tree_place",
-            diff_summary="placed under Inbox",
-        ))
+        session.add(
+            ChangeOperation(
+                workspace_id=UUID(workspace_id),
+                change_set_id=review.change_set_id,
+                target_type="workspace_tree_node",
+                target_id=placement_target,
+                operation="tree_place",
+                diff_summary="placed under Inbox",
+            )
+        )
     with monkeypatch.context() as patch:
         # A placement is decided by its own ancestor chain, never a section load.
         patch.setattr(TreeProjectionService, "load", _no_section_load)
         response = client.get(f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}")
     assert response.status_code == 200, response.text
     evidence = response.json()["data"]["evidence"]
-    placement = next(operation for operation in evidence["operations"]
-                     if operation["target_type"] == "workspace_tree_node")
+    placement = next(
+        operation
+        for operation in evidence["operations"]
+        if operation["target_type"] == "workspace_tree_node"
+    )
     if association == "valid":
-        candidate = next(operation for operation in evidence["operations"]
-                         if operation["target_type"] == "context_page")
+        candidate = next(
+            operation
+            for operation in evidence["operations"]
+            if operation["target_type"] == "context_page"
+        )
         assert placement["document"] == candidate["document"]
         assert placement["content"]["mode"] == "metadata_only"
-        assert placement["content"]["candidate_version_id"] == (
-            candidate["content"]["candidate_version_id"]
+        assert (
+            placement["content"]["candidate_version_id"]
+            == (candidate["content"]["candidate_version_id"])
         )
         assert placement["content"]["can_read"] is False
         assert placement["content"]["can_diff"] is False
@@ -267,7 +341,10 @@ def test_ingress_placement_evidence_requires_visible_same_change_exact_candidate
         assert evidence["reason"] == "seed dry-run review"
         approve = client.post(
             f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}/decision",
-            json={"decision_type": "approve"},
+            json={
+                "decision_type": "approve",
+                **_approval_binding(client, workspace_id, review_id),
+            },
         )
         assert approve.status_code == 200, approve.text
     else:
@@ -301,20 +378,12 @@ def test_dry_run_preview_is_side_effect_free_and_skips_resolved(page_service):
 
     # The preview must be side-effect free: the review is still pending and
     # decidable afterwards (L7 evaluates it in a read-only session).
-    after = client.get(
-        f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}"
-    )
+    after = client.get(f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}")
     assert after.json()["data"]["status"] == "pending"
     assert after.json()["data"]["can_decide"] is True
 
-    approved = client.post(
-        bulk_url,
-        json={
-            "review_item_ids": [review_id],
-            "decision_type": "approve",
-            "dry_run": False,
-        },
-    )
+    selection = _selection(client, workspace_id, review_item_ids=[review_id])
+    approved = _execute_selection(client, workspace_id, selection["selection_token"])
     assert approved.status_code == 200
     assert review_id in approved.json()["data"]["approved"]
 
@@ -390,23 +459,31 @@ def test_group_selection_includes_unloaded_reviews_and_settles_exact_candidate(
     assert queue["next_cursor"] is not None
     assert queue["total"] == 6
 
-    selection = _selection(client, workspace_id, filters={
-        "target_page_id": page_id, "status": "pending", "scope": "all"
-    })
+    selection = _selection(
+        client,
+        workspace_id,
+        filters={"target_page_id": page_id, "status": "pending", "scope": "all"},
+    )
     expected = {review_id, *siblings}
     assert set(selection["review_item_ids"]) == expected
     assert selection["total"] == 6
-    assert selection["eligible_count"] == 1
+    assert selection["eligible_count"] == 1, [
+        (item["reason_code"], item["reason"]) for item in selection["items"]
+    ]
     assert sum(item["will_auto_settle"] for item in selection["items"]) == 5
     representative = next(item for item in selection["items"] if item["eligible"])
     assert set(representative["auto_settled_review_item_ids"]) == (
         expected - {representative["id"]}
     )
-    assert representative["auto_settled_review_item_ids"] == (
-        selection["auto_settled_review_item_ids"]
+    assert (
+        representative["auto_settled_review_item_ids"]
+        == (selection["auto_settled_review_item_ids"])
     )
-    assert all(not item["auto_settled_review_item_ids"]
-               for item in selection["items"] if not item["eligible"])
+    assert all(
+        not item["auto_settled_review_item_ids"]
+        for item in selection["items"]
+        if not item["eligible"]
+    )
 
     # A new queue item on a different page is outside the fixed selection.
     later = _seed_pending_review(page_service, workspace_id, title="Later page")
@@ -430,61 +507,52 @@ def test_group_selection_includes_unloaded_reviews_and_settles_exact_candidate(
         assert page.current_published_version_id is not None
 
 
-def test_selection_approves_newest_selected_draft_and_settles_earlier_one(
+def test_selection_approves_revised_shared_draft_and_settles_duplicate_request(
     page_service,
 ):
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)
     review_id = _seed_pending_review(page_service, workspace_id)
-    with page_service.session_factory.begin() as session:
+    with page_service.session_factory() as session:
         review = session.get(ReviewItem, UUID(review_id))
-        operation = session.scalar(select(ChangeOperation).where(
-            ChangeOperation.change_set_id == review.change_set_id
-        ))
-        page = session.get(ContextPage, operation.target_id)
-        base = session.get(ContextPageVersion, page.latest_draft_version_id)
-        newer = ContextWriteService().update_draft(
-            session=session,
-            workspace_id=UUID(workspace_id),
-            request=UpdateDraftRequest(
-                page_id=page.id,
-                base_version_id=base.id,
-                base_content_hash=base.content_hash,
-                update_mode="full_rewrite",
-                body_markdown="# Dry-run target\n\nNewer body.",
-                reason="newer draft",
-            ),
-            actor_kind="human",
-            actor_id=str(session.scalar(select(User.id).where(
-                User.email == "test@example.com"
-            ))),
+        operation = session.scalar(
+            select(ChangeOperation).where(
+                ChangeOperation.change_set_id == review.change_set_id
+            )
         )
+        draft_id = UUID(operation.diff_ref.split(":")[-1])
+    # The newer save lands in place; the draft keeps its open request.
+    newer = _save_draft_in_place(
+        page_service, workspace_id, draft_id, "# Dry-run target\n\nNewer body."
+    )
+    assert newer.version_id == draft_id
     page_id, [older] = _seed_same_candidate_reviews(
         page_service, workspace_id, review_id, 1
     )
-    newest = str(newer.review_item_id)
+    newest = review_id
     # Approving revives the archived page, an effect undo does not reverse, so
     # the approved row must not offer a per-document undo.
     with page_service.session_factory.begin() as session:
         session.get(ContextPage, UUID(page_id)).lifecycle_status = "archived"
 
-    # Listed oldest first, the newest draft still becomes the approval basis.
+    # Both requests target the same mutable draft and its latest saved content.
     selection = _selection(client, workspace_id, review_item_ids=[older, newest])
-    assert selection["review_item_ids"] == [newest, older]
-    assert selection["eligible_count"] == 1
-    # The earlier draft's review shows its own version, not the newest one.
-    settled = next(item for item in selection["items"] if item["id"] == older)
+    assert selection["review_item_ids"] == [older, newest]
+    assert selection["eligible_count"] == 1, [
+        (item["reason_code"], item["reason"]) for item in selection["items"]
+    ]
+    settled = next(item for item in selection["items"] if item["id"] == newest)
     assert (settled["will_auto_settle"], settled["target_version_no"]) == (True, 1)
     result = _execute_selection(client, workspace_id, selection["selection_token"])
     assert result.status_code == 200, result.text
     data = result.json()["data"]
-    assert data["approved"] == [newest]
-    assert data["auto_settled_review_item_ids"] == [older]
-    approved = next(item for item in data["outcomes"] if item["id"] == newest)
+    assert data["approved"] == [older]
+    assert data["auto_settled_review_item_ids"] == [newest]
+    approved = next(item for item in data["outcomes"] if item["id"] == older)
     assert approved["decision_id"] is None
     with page_service.session_factory() as session:
         page = session.get(ContextPage, UUID(page_id))
-        assert page.current_published_version_id == newer.draft_version_id
+        assert page.current_published_version_id == newer.version_id
 
 
 def test_selection_continuation_keeps_explicit_ids_across_batches(page_service):
@@ -553,33 +621,30 @@ def test_selection_refuses_changed_candidate_or_approval_impact(page_service, ch
     else:
         with page_service.session_factory.begin() as session:
             review = session.get(ReviewItem, UUID(review_id))
-            operation = session.scalar(select(ChangeOperation).where(
-                ChangeOperation.change_set_id == review.change_set_id
-            ))
-            page = session.get(ContextPage, operation.target_id)
-            version = session.get(ContextPageVersion, page.latest_draft_version_id)
+            operation = session.scalar(
+                select(ChangeOperation).where(
+                    ChangeOperation.change_set_id == review.change_set_id
+                )
+            )
+            version = session.get(
+                ContextPageVersion, UUID(operation.diff_ref.split(":")[-1])
+            )
             if change == "metadata":
                 # Same body and candidate UUID; the confirmation still binds
                 # the effective metadata and editing revision.
-                page.title = "Changed title after confirmation"
+                version.page_metadata = {
+                    **version.page_metadata,
+                    "title": "Changed title after confirmation",
+                }
                 version.editing_revision += 1
-            else:
-                ContextWriteService().update_draft(
-                    session=session,
-                    workspace_id=UUID(workspace_id),
-                    request=UpdateDraftRequest(
-                        page_id=page.id,
-                        base_version_id=version.id,
-                        base_content_hash=version.content_hash,
-                        update_mode="full_rewrite",
-                        body_markdown="# Different candidate\n\nChanged body.",
-                        reason="candidate changed after selection",
-                    ),
-                    actor_kind="human",
-                    actor_id=str(session.scalar(select(User.id).where(
-                        User.email == "test@example.com"
-                    ))),
-                )
+            version_id = version.id
+        if change == "candidate":
+            _save_draft_in_place(
+                page_service,
+                workspace_id,
+                version_id,
+                "# Different candidate\n\nChanged body.",
+            )
 
     result = _execute_selection(client, workspace_id, selection["selection_token"])
     assert result.status_code == 409, result.text
@@ -590,7 +655,9 @@ def test_selection_refuses_changed_candidate_or_approval_impact(page_service, ch
 
 @pytest.mark.parametrize("failure", ["domain_refusal", "candidate_changed"])
 def test_selection_partial_results_preserve_commits_and_item_failure_reasons(
-    page_service, monkeypatch, failure,
+    page_service,
+    monkeypatch,
+    failure,
 ):
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)
@@ -610,10 +677,19 @@ def test_selection_partial_results_preserve_commits_and_item_failure_reasons(
             # commit boundary, before the next item starts its transaction.
             session = kwargs["session"]
             second = session.get(ReviewItem, UUID(ids[1]))
-            operation = session.scalar(select(ChangeOperation).where(
-                ChangeOperation.change_set_id == second.change_set_id
-            ))
-            session.get(ContextPage, operation.target_id).title = "Changed in flight"
+            operation = session.scalar(
+                select(ChangeOperation).where(
+                    ChangeOperation.change_set_id == second.change_set_id
+                )
+            )
+            version = session.get(
+                ContextPageVersion, UUID(operation.diff_ref.split(":")[-1])
+            )
+            version.page_metadata = {
+                **version.page_metadata,
+                "title": "Changed in flight",
+            }
+            version.editing_revision += 1
         return result
 
     monkeypatch.setattr(ReviewService, "apply_decision", refuse_one)
@@ -627,19 +703,24 @@ def test_selection_partial_results_preserve_commits_and_item_failure_reasons(
     )
     assert data["skipped"][0]["reason"]
     assert {item["id"]: item["outcome"] for item in data["outcomes"]} == {
-        ids[0]: "approved", ids[1]: "failed", ids[2]: "approved",
+        ids[0]: "approved",
+        ids[1]: "failed",
+        ids[2]: "approved",
     }
     assert data["selection_complete"] is True
     assert data["requires_reconfirmation"] is (failure == "candidate_changed")
     with page_service.session_factory() as session:
         assert [session.get(ReviewItem, UUID(value)).status for value in ids] == [
-            "approved", "pending", "approved",
+            "approved",
+            "pending",
+            "approved",
         ]
         assert session.scalar(select(func.count(ReviewDecision.id))) == 2
 
 
 def test_selection_is_signed_actor_bound_and_expires_without_mutation(
-    page_service, monkeypatch,
+    page_service,
+    monkeypatch,
 ):
     client = _make_client(page_service)
     workspace_id = _current_workspace_id(client)
@@ -648,9 +729,9 @@ def test_selection_is_signed_actor_bound_and_expires_without_mutation(
     token = selection["selection_token"]
     other = _make_client(page_service, email="other-reviewer@example.com")
     with page_service.session_factory.begin() as session:
-        user = session.scalar(select(User).where(
-            User.email == "other-reviewer@example.com"
-        ))
+        user = session.scalar(
+            select(User).where(User.email == "other-reviewer@example.com")
+        )
         grant_workspace_membership(
             session, user_id=user.id, workspace_id=UUID(workspace_id), role="editor"
         )
@@ -659,14 +740,14 @@ def test_selection_is_signed_actor_bound_and_expires_without_mutation(
     assert wrong_actor.json()["error_code"] == "review_selection_invalid"
     payload, signature = token.split(".")
     wrong_signature = ("A" if signature[0] != "A" else "B") + signature[1:]
-    tampered = _execute_selection(
-        client, workspace_id, f"{payload}.{wrong_signature}"
-    )
+    tampered = _execute_selection(client, workspace_id, f"{payload}.{wrong_signature}")
     assert tampered.status_code == 409
     expires = datetime.fromisoformat(selection["expires_at"].replace("Z", "+00:00"))
-    monkeypatch.setattr(review_selection_service, "time", SimpleNamespace(
-        time=lambda: expires.astimezone(UTC).timestamp()
-    ))
+    monkeypatch.setattr(
+        review_selection_service,
+        "time",
+        SimpleNamespace(time=lambda: expires.astimezone(UTC).timestamp()),
+    )
     expired = _execute_selection(client, workspace_id, token)
     assert expired.status_code == 409, expired.text
     assert expired.json()["error_code"] == "review_selection_expired"
@@ -694,17 +775,24 @@ def test_selection_limit_reports_total_instead_of_truncating(page_service, monke
     review_id = _seed_pending_review(page_service, workspace_id)
     with page_service.session_factory.begin() as session:
         source = session.get(ReviewItem, UUID(review_id))
-        operation = session.scalar(select(ChangeOperation).where(
-            ChangeOperation.change_set_id == source.change_set_id
-        ))
+        operation = session.scalar(
+            select(ChangeOperation).where(
+                ChangeOperation.change_set_id == source.change_set_id
+            )
+        )
         page_id = str(operation.target_id)
-        session.add_all([ReviewItem(
-            workspace_id=UUID(workspace_id),
-            change_set_id=source.change_set_id,
-            review_type="context_update",
-            status="pending",
-            risk_level="low",
-        ) for _ in range(4)])
+        session.add_all(
+            [
+                ReviewItem(
+                    workspace_id=UUID(workspace_id),
+                    change_set_id=source.change_set_id,
+                    review_type="context_update",
+                    status="pending",
+                    risk_level="low",
+                )
+                for _ in range(4)
+            ]
+        )
     group = client.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/selection",
         json={"filters": {"target_page_id": page_id, "status": "pending"}},
@@ -727,14 +815,16 @@ def test_single_decision_receipt_retries_once_and_conflicts_on_changed_payload(
         "decision_id": str(uuid4()),
         "decision_type": "approve",
         "decision_reason": "Reason for the original decision.",
+        **_approval_binding(client, workspace_id, review_id),
     }
     first = client.post(url, json=request)
     assert first.status_code == 200, first.text
     retried = client.post(url, json=request)
     assert retried.status_code == 200, retried.text
     assert len(retried.json()["data"]["decisions"]) == 1
-    assert retried.json()["data"]["decisions"][0]["decision_id"] == (
-        request["decision_id"]
+    assert (
+        retried.json()["data"]["decisions"][0]["decision_id"]
+        == (request["decision_id"])
     )
     conflict = client.post(url, json={**request, "decision_reason": "Changed reason"})
     assert conflict.status_code == 409, conflict.text

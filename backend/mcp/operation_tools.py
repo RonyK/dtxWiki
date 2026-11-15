@@ -18,7 +18,6 @@ from backend.schemas.mcp.operation_tools import (
     GetOperationStatusOutput,
     OperationStatusResult,
 )
-from backend.schemas.mcp.review_tools import SubmitRevisionForReviewResult
 from backend.schemas.page import DiscardContextEditResult, PagePayload
 from backend.services.mcp_operation_attempt import lookup_operation_status
 from backend.services.mcp_write_idempotency import restore_ledger_result
@@ -49,16 +48,9 @@ KEYED_TOOLS: dict[str, KeyedTool] = {
     "submit_context_edit_for_review": KeyedTool(
         "submit_context_edit_for_review", PagePayload, _edit_result
     ),
-    "discard_context_edit": KeyedTool(
-        "discard_context_edit", DiscardContextEditResult
-    ),
+    "discard_context_edit": KeyedTool("discard_context_edit", DiscardContextEditResult),
     "cite": KeyedTool("cite", CiteResult, _mcp_cite_result),
-    "write_agent_page_draft": KeyedTool(
-        "write_agent_page_draft", AgentPageDraftResult
-    ),
-    "submit_revision_for_review": KeyedTool(
-        "submit_revision_for_review", SubmitRevisionForReviewResult
-    ),
+    "write_agent_page_draft": KeyedTool("write_agent_page_draft", AgentPageDraftResult),
 }
 KEYED_TOOL_COMMANDS = {name: tool.command for name, tool in KEYED_TOOLS.items()}
 

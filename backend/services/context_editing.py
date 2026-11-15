@@ -843,7 +843,7 @@ def _match_refusal(
         )
         fix = (
             "Copy old_text exactly from that text (read_context_outline with "
-            "version='my_edit' and its section selected returns it), then send "
+            "the same version_id and its section selected returns it), then send "
             "a new request."
         )
     else:
@@ -857,10 +857,10 @@ def _match_refusal(
         # read_structure_map returns only each block's first line as a
         # preview; the text to copy comes from the section read.
         fix = (
-            "Read the text with read_context_outline (version='my_edit', its "
+            "Read the text with read_context_outline (with the same version_id, its "
             "section selected), copy old_text from it, and address its block "
             "with at={by:'block', block, expected} using the id and hash from "
-            "read_structure_map (version='my_edit')."
+            "read_structure_map (with the same version_id)."
         )
         warnings = (EnvelopeWarning(code="text_not_found", message=f"{message} {fix}"),)
     return ContextEditError(
@@ -2217,24 +2217,6 @@ def _share_touching_gaps(
     return tuple(adjusted)
 
 
-def resolve_operations(
-    body: str,
-    outline: Outline | None,
-    operations: list[EditOperation],
-    *,
-    markdown_analysis: MarkdownAnalysis | None = None,
-    block_map: list[dict] | None = None,
-) -> tuple[ResolvedEdit, ...]:
-    resolved, _context = _resolve_operations_with_context(
-        body,
-        outline,
-        operations,
-        markdown_analysis=markdown_analysis,
-        block_map=block_map,
-    )
-    return resolved
-
-
 def _splice_units(edit: ResolvedEdit) -> tuple[tuple[int, int, str], ...]:
     if edit.match_replacements is not None and edit.changed_ranges:
         return tuple(
@@ -2360,3 +2342,21 @@ def block_map_edit_plan(
         for edit in edits
         if edit.block_operation is not None
     )
+
+
+def resolve_operations(
+    body: str,
+    outline: Outline | None,
+    operations: list[EditOperation],
+    *,
+    markdown_analysis: MarkdownAnalysis | None = None,
+    block_map: list[dict] | None = None,
+) -> tuple[ResolvedEdit, ...]:
+    resolved, _context = _resolve_operations_with_context(
+        body,
+        outline,
+        operations,
+        markdown_analysis=markdown_analysis,
+        block_map=block_map,
+    )
+    return resolved

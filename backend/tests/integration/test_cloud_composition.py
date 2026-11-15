@@ -97,6 +97,7 @@ from backend.tenancy_manifest import (
     WORKSPACE_PLANE_TABLES,
 )
 from backend.tests.conftest import authenticate_test_client
+from backend.tests.utils.context_commands import merge_binding
 from backend.worker.runtime import OneShotWorker
 
 PNG_BYTES = bytes.fromhex(
@@ -2338,6 +2339,7 @@ def test_split_provider_public_context_media_serves_from_workspace_plane(tmp_pat
         json={
             "idempotency_key": "t-1",
             "body_md": body_md,
+            "version_id": page["version_id"],
             "base_version_id": page["version_id"],
             "base_content_hash": surface.editing_content_hash,
             # `page` above is hand-built from the fresh, never-saved
@@ -2358,17 +2360,16 @@ def test_split_provider_public_context_media_serves_from_workspace_plane(tmp_pat
     )
     assert submitted.status_code == 200, submitted.text
     saved_data = submitted.json()["data"]
-    if saved_data.get("review_item_id") is not None:
-        decision = surface.client.post(
-            f"/api/v1/workspaces/{surface.workspace_id}/reviews/"
-            f"{saved_data['review_item_id']}/decision",
-            json={"decision_type": "approve"},
-        )
-        assert decision.status_code == 200, decision.text
     published = surface.client.post(
         f"/api/v1/workspaces/{surface.workspace_id}/context/pages/{page['id']}/versions/{saved_data['version_id']}/publish",
         json={
             "reason": "media integration fixture",
+            **merge_binding(
+                surface.client,
+                f"/api/v1/workspaces/{surface.workspace_id}/context/pages",
+                page["id"],
+                saved_data["version_id"],
+            ),
             "publish_despite_findings": False,
             "expected_content_hash": saved_data["content_hash"],
             "expected_references_hash": saved_data["references_hash"],

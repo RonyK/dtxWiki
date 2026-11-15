@@ -267,6 +267,10 @@
       "superseded_draft": {
         "label": "Superseded draft",
         "description": "Replaced by a newer version."
+      },
+      "closed": {
+        "label": "Closed",
+        "description": "This draft ended and is preserved as a commit."
       }
     }
   },

@@ -6,7 +6,7 @@ members while the account is retained, then deleted with it unless an active
 admin is appointed first. A durable blob-purge manifest survives the database
 cleanup so failed physical deletion can be retried before the user identity is
 finally removed. Other workspaces keep their shared content and append-only
-audit history; the account's unsubmitted private edits there are deleted.
+audit history; the account's unsubmitted sole-author drafts there are deleted.
 
 Only the workspaces that hold the user's footprint are locked; the footprint
 comes from the single attribution registry in ``backend.models.user_attribution``.
@@ -55,6 +55,7 @@ from backend.models.library import LibraryItemTombstone
 from backend.models.user_attribution import (
     USER_ATTRIBUTIONS,
     UserAttribution,
+    _private_version_outstanding,
 )
 from backend.repositories.context_visibility import PRIVATE_VERSION_STATUSES
 from backend.repositories.workspace_scoped import (
@@ -224,7 +225,7 @@ def _user_footprint(session: Session, user: User) -> set[UUID]:
 def _private_draft_page_ids(
     session: Session, user_id: UUID, workspace_id: UUID
 ) -> set[UUID]:
-    # The pages whose unsubmitted private edits cleanup deletes.
+    # Lock only pages with sole-author unsubmitted bytes eligible for cleanup.
     return set(
         session.scalars(
             select_in_workspace(
@@ -233,7 +234,7 @@ def _private_draft_page_ids(
                 conditions=(
                     ContextPageVersion.created_by_actor_kind == "human",
                     ContextPageVersion.created_by_actor_id == str(user_id),
-                    ContextPageVersion.version_status.in_(PRIVATE_VERSION_STATUSES),
+                    *_private_version_outstanding(),
                 ),
             ).with_only_columns(ContextPageVersion.page_id)
         )
@@ -1099,7 +1100,7 @@ class UserDeletionService:
         self, session: Session, user_id: UUID, workspace_ids: set[UUID]
     ) -> None:
         # Shared documents, submitted drafts, media and conversation history
-        # stay. Unsubmitted private edits, credentials and preferences go, and
+        # stay. Unsubmitted sole-author drafts, credentials and preferences go, and
         # nullable account links are detached.
         for workspace_id in sorted(workspace_ids, key=lambda value: value.int):
             self._cleanup_workspace_user_resources(
@@ -1210,7 +1211,7 @@ class UserDeletionService:
                 conditions=(
                     ContextPageVersion.created_by_actor_kind == "human",
                     ContextPageVersion.created_by_actor_id == str(user_id),
-                    ContextPageVersion.version_status.in_(PRIVATE_VERSION_STATUSES),
+                    *_private_version_outstanding(),
                 ),
             )
         ).all()
@@ -1240,6 +1241,7 @@ class UserDeletionService:
         for version in private_versions:
             version.version_status = "discarded"
             version.body_md = ""
+            version.page_metadata = {}
             version.content_hash = content_hash("")
             version.nav_description = None
             version.block_map = None
@@ -1357,9 +1359,7 @@ class UserDeletionService:
                 version.version_status not in PRIVATE_VERSION_STATUSES
                 for version in versions
             )
-            if not has_shared_history and not any(
-                version.version_status == "editing" for version in versions
-            ):
+            if not has_shared_history:
                 page.lifecycle_status = "archived"
                 page.current_version_id = None
                 page.title = "Deleted draft"

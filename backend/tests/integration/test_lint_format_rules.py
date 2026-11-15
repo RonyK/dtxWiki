@@ -276,9 +276,9 @@ def test_format_rules_see_both_the_live_body_and_the_staged_draft(session_factor
     assert [finding.rule_id for finding in advisory] == ["md.heading_hierarchy"]
 
 
-def test_format_rules_never_scan_a_private_editing_row(session_factory):
+def test_format_rules_never_scan_discarded_rows(session_factory):
     """P8.1/P8.4 (LEAK-04 class): unlike the "draft" row above, a
-    `version_status == "editing"` row parked behind `latest_draft_version_id`
+    `version_status == "draft"` row parked behind `latest_draft_version_id`
     is private to its own author and has no actor-scoping in this scan at
     all (lint runs workspace-wide, not on behalf of any one actor). Before
     this fix, a heading in such a row would surface as a `body_scopes:
@@ -305,7 +305,7 @@ def test_format_rules_never_scan_a_private_editing_row(session_factory):
             actor_type="human",
             created_by_actor_kind="human",
             created_by_actor_id="other-author",
-            version_status="editing",
+            version_status="discarded",
         )
         session.add(editing)
         session.flush()

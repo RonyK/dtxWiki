@@ -27,6 +27,7 @@ from backend.repositories.workspace_scoped import (
     select_in_workspace,
     select_in_workspace_by_ids,
 )
+from backend.services.context_links import format_stable_url
 from backend.utils.uuid import parse_uuid_or_none
 
 _PUBLISH_OPERATIONS = ("create", "update", "publish")
@@ -104,9 +105,7 @@ def _draft_write_version_ids(
     }
 
 
-def _publish_operation_version_ids(
-    session: Session, page_ids: set[UUID]
-) -> set[UUID]:
+def _publish_operation_version_ids(session: Session, page_ids: set[UUID]) -> set[UUID]:
     if not page_ids:
         return set()
     result: set[UUID] = set()
@@ -351,7 +350,7 @@ def what_changed(
     archive. An undone first publication emits unpublished for actors who
     can still see the draft. Returns (entries, has_more).
     """
-    from backend.services.context_links import format_stable_url
+    from backend.policy.trust_boundaries import actor_can_read_drafts
     from backend.services.context_visibility import visible_context_version_id
 
     naive_since = _naive_utc(since)
@@ -407,7 +406,11 @@ def what_changed(
             change_kind = "updated"
         # Visibility gates every entry: an archived draft-only page must
         # not surface its slug/title/reason to an actor who never saw it.
-        if visible_context_version_id(page, actor)[0] is None:
+        if visible_context_version_id(page, actor)[0] is None and not (
+            change_kind == "unpublished"
+            and actor_can_read_drafts(actor)
+            and page.lifecycle_status != "archived"
+        ):
             continue
         if page.lifecycle_status == "archived" and operation.operation != "archive":
             continue

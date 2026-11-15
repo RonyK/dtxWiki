@@ -18,23 +18,23 @@ from backend.services.lint.base import (
 def lint_visible_versions(
     session: Session, page: ContextPage
 ) -> list[tuple[str, ContextPageVersion]]:
-    """Published head first, then shared draft; private editing rows stay out."""
-    versions: list[tuple[str, ContextPageVersion]] = []
-    seen = set()
-    for scope, version_id in (
-        ("published", page.current_published_version_id),
-        ("draft", page.latest_draft_version_id),
-    ):
-        if version_id is None or version_id in seen:
-            continue
-        seen.add(version_id)
-        version = session.get(ContextPageVersion, version_id)
-        if version is None or (
-            scope == "draft" and version.version_status == "editing"
-        ):
-            continue
-        versions.append((scope, version))
-    return versions
+    """Inspect the published snapshot and every mutable shared draft."""
+    from backend.repositories.workspace_scoped import select_in_workspace
+
+    rows = session.scalars(
+        select_in_workspace(
+            ContextPageVersion,
+            workspace_id=page.workspace_id,
+            conditions=(ContextPageVersion.page_id == page.id,),
+        )
+    ).all()
+    by_id = {row.id: row for row in rows}
+    versions = (
+        [("published", by_id[page.current_published_version_id])]
+        if page.current_published_version_id in by_id
+        else []
+    )
+    return versions + [("draft", row) for row in rows if row.version_status == "draft"]
 
 
 def collapse_by_fingerprint(

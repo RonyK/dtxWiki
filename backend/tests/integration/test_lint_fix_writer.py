@@ -66,14 +66,17 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
     )
     draft_links = (
         "[Draft](/context/lint-draft-target.md)\n"
-        f"[Draft ref]({format_index_ref('context', draft_target.id)})\n"
+        f"[Draft ref](/p/{workspace_id}/{draft_target.id})\n"
     )
     missing_id = uuid4()
 
     def legacy_source(base=None, *, suffix=""):
         with page_service.session_factory.begin() as session:
             workspace = session.get(Workspace, workspace_id)
-            workspace.lint_policy = {"link_fix_mode": "suggest"}
+            workspace.lint_policy = {
+                "link_fix_mode": "suggest",
+                "format_fix_mode": "suggest",
+            }
             workspace.auto_fix_enabled = False
         body_md = (
             f"# Lint Source\n\n[Target](/workspaces/{workspace_id}"
@@ -95,6 +98,15 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
                 as_draft=True,
             )
         else:
+            base = page_service.begin_context_edit(
+                page_id=base.id,
+                workspace_id=workspace_id,
+                actor_kind="human",
+                actor_id="author",
+                actor_provenance="browser_session",
+                from_version_id=base.version_id,
+                idempotency_key=f"lint-fixture-begin:{base.version_id}",
+            )
             page = page_service.autosave_page(
                 page_id=base.id,
                 workspace_id=workspace_id,
@@ -105,6 +117,8 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
                 actor_provenance="browser_session",
                 base_version_id=base.version_id,
                 base_content_hash=base.content_hash,
+                version_id=base.version_id,
+                expected_editing_revision=base.editing_revision,
                 idempotency_key=f"lint-legacy-source:{base.version_id}",
             )
         with page_service.session_factory.begin() as session:
@@ -120,9 +134,12 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
             )
             stored.content_hash = content_hash(stored.body_md)
             refresh_page_links(session, page=stored_page, version=stored)
-            page = page.model_copy(update={
-                "body_md": stored.body_md, "content_hash": stored.content_hash,
-            })
+            page = page.model_copy(
+                update={
+                    "body_md": stored.body_md,
+                    "content_hash": stored.content_hash,
+                }
+            )
             references_hash = document_references_hash(session, stored)
         published = page_service.publish_draft(
             page_id=page.id,
@@ -209,10 +226,14 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         # must preserve it. Writer-only checks cannot detect a READ/fix gate.
         draft_ref = format_index_ref("context", draft_target.id)
         reader_targets = {
-            entry.locator: entry for entry in markdown_link_targets(
-                session, body=f"[Draft]({draft_ref})\n",
-                workspace_id=workspace_id, source_page_id=page.id,
-                source_version_id=fixed.id, source_is_published=True,
+            entry.locator: entry
+            for entry in markdown_link_targets(
+                session,
+                body=f"[Draft]({draft_ref})\n",
+                workspace_id=workspace_id,
+                source_page_id=page.id,
+                source_version_id=fixed.id,
+                source_is_published=True,
                 actor=editor_link_actor("human", "author", workspace_id=workspace_id),
             )
         }
@@ -324,51 +345,6 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
 
     base = page_service.read_page(page_id=source.id)
     busy_base = legacy_source(base)
-    editing = page_service.begin_context_edit(
-        page_id=source.id,
-        workspace_id=workspace_id,
-        actor_kind="human",
-        actor_id="author",
-        actor_provenance="browser_session",
-        idempotency_key="lint-test-open",
-        base_version_id=busy_base.version_id,
-        base_content_hash=busy_base.content_hash,
-    )
-    with page_service.session_factory.begin() as session:
-        before = session.scalar(
-            select(func.count())
-            .select_from(ContextPageVersion)
-            .where(ContextPageVersion.page_id == source.id)
-        )
-        skipped = writer.fix_page(
-            session,
-            workspace_id=workspace_id,
-            run_id=uuid4(),
-            page_id=source.id,
-            base_version_id=busy_base.version_id,
-            base_content_hash=busy_base.content_hash,
-        )
-        assert skipped.state == "skipped"
-        assert (
-            session.get(ContextPageVersion, editing.version_id).editing_revision
-            == editing.editing_revision
-        )
-        assert (
-            session.scalar(
-                select(func.count())
-                .select_from(ContextPageVersion)
-                .where(ContextPageVersion.page_id == source.id)
-            )
-            == before
-        )
-    page_service.discard_context_edit(
-        page_id=source.id,
-        version_id=editing.version_id,
-        workspace_id=workspace_id,
-        actor_kind="human",
-        actor_id="author",
-        idempotency_key="lint-test-discard",
-    )
     changed = legacy_source(busy_base, suffix="\nA later human change.\n")
 
     def transaction_counts(session):
@@ -478,7 +454,11 @@ def test_lint_fix_writer_keeps_edits_cas_retries_and_rollback_atomic(page_servic
         assert reviewed.state == "review"
         page = session.get(ContextPage, source.id)
         assert page.current_published_version_id == changed.version_id
-        assert page.latest_draft_version_id == reviewed.version_id
+        assert page.latest_draft_version_id is None
+        assert (
+            session.get(ContextPageVersion, reviewed.version_id).version_status
+            == "draft"
+        )
         review = session.scalar(
             select(ReviewItem)
             .join(

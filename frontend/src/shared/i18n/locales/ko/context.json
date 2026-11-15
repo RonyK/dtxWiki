@@ -315,6 +315,10 @@
       "superseded_draft": {
         "label": "대체된 초안",
         "description": "더 최신 버전으로 대체됨"
+      },
+      "closed": {
+        "label": "끝남",
+        "description": "종료된 초안이며 커밋으로 보존됩니다."
       }
     }
   },

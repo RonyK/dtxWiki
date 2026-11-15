@@ -72,6 +72,10 @@ class ContextVersionWriter:
             )
             if stored != payload.data:
                 raise ContextVersionStorageError("context_snapshot_invalid")
+            if self.reader.read_parents(
+                workspace_id=workspace_id, page_id=page_id, commit_oid=oid
+            ) != tuple(parents):
+                raise ContextVersionStorageError("context_snapshot_invalid")
             if payload.block_map is not None:
                 stored_map = self.reader.read_block_map(
                     workspace_id=workspace_id,

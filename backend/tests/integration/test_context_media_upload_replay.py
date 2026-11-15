@@ -85,7 +85,7 @@ def _build_service(session_factory, tmp_path):
         version = ContextPageVersion(workspace_id=workspace_id, page_id=page.id,
             version_no=1, body_md="", content_hash="0" * 64, actor_type="human",
             created_by_actor_kind="human", created_by_actor_id=ACTOR_ID,
-            version_status="editing")
+            version_status="draft")
         session.add(version)
         session.flush()
     return services, service, workspace_id, page.id, version.id
@@ -644,7 +644,7 @@ def test_editing_submitted_during_install_rejects_without_association(
             with session_factory.begin() as session:
                 session.get(
                     ContextPageVersion, editing_version_id
-                ).version_status = "draft"
+                ).version_status = "closed"
             return available
 
     race_upload = ContextMediaUploadService(

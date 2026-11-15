@@ -45,6 +45,15 @@ def _create_published(client, *, title: str, body_md: str) -> dict:
     return published.json()["data"]
 
 
+def _begin(client, page, key):
+    response = client.post(
+        f"{_pages_url(client)}/{page['id']}/begin-edit",
+        json={"idempotency_key": key, "from": page["version_id"]},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["data"]
+
+
 @pytest.mark.parametrize(
     (
         "trigger_type",
@@ -317,14 +326,17 @@ def test_reader_modified_time_stays_at_published_head_when_draft_is_staged(
             version.created_at = instant
             page.updated_at = instant
 
+    editing = _begin(client, published, "modified-time-begin")
     autosave_response = client.post(
         f"{pages_url}/{published['id']}/autosave",
-        json={"idempotency_key": "t-49",
+        json={
+            "idempotency_key": "t-49",
+            "version_id": editing["version_id"],
             "title": "Published",
             "body_md": "# Published\n\nUnpublished editor body.\n",
-            "base_version_id": published["version_id"],
-            "base_content_hash": published["content_hash"],
-            "expected_editing_revision": published["editing_revision"],
+            "base_version_id": editing["version_id"],
+            "base_content_hash": editing["content_hash"],
+            "expected_editing_revision": editing["editing_revision"],
             "session_version_id": None,
         },
     )
@@ -357,7 +369,7 @@ def test_reader_modified_time_stays_at_published_head_when_draft_is_staged(
         page for page in page_list.json()["data"] if page["id"] == published["id"]
     )
     assert datetime.fromisoformat(listed["updated_at"]) == published_at
-    assert listed["latest_draft_version_id"] == draft["version_id"]
+    assert listed["latest_draft_version_id"] is None
     page_ids = [page["id"] for page in page_list.json()["data"]]
     assert page_ids.index(newer["id"]) < page_ids.index(published["id"])
 
@@ -379,14 +391,17 @@ def test_viewer_cannot_infer_a_draft_from_the_editable_head(page_service):
     )
     published_version_id = UUID(page["version_id"])
 
+    editing = _begin(client, page, "read-truth-begin")
     staged = client.post(
         f"{_pages_url(client)}/{page['id']}/autosave",
-        json={"idempotency_key": "t-50",
+        json={
+            "idempotency_key": "t-50",
+            "version_id": editing["version_id"],
             "title": "Page",
             "body_md": "# Page\n\nStaged, not published.\n",
-            "base_version_id": page["version_id"],
-            "base_content_hash": page["content_hash"],
-            "expected_editing_revision": page["editing_revision"],
+            "base_version_id": editing["version_id"],
+            "base_content_hash": editing["content_hash"],
+            "expected_editing_revision": editing["editing_revision"],
             "session_version_id": None,
         },
     )
@@ -408,7 +423,13 @@ def test_viewer_cannot_infer_a_draft_from_the_editable_head(page_service):
     )
 
     seen_by_editor = page_service.read_page(page_id=UUID(page["id"]), actor=editor)
-    assert seen_by_editor.current_version_id == draft_version_id
+    assert seen_by_editor.current_version_id == published_version_id
+    assert (
+        page_service.read_page(
+            page_id=UUID(page["id"]), version_id=draft_version_id, actor=editor
+        ).version_id
+        == draft_version_id
+    )
 
     seen_by_viewer = page_service.read_page(page_id=UUID(page["id"]), actor=viewer)
     assert seen_by_viewer.version_id == published_version_id

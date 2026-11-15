@@ -1,4 +1,4 @@
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import event, select
@@ -8,19 +8,14 @@ from backend.models.base import utc_now
 from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.lint import LintFinding, LintRun
 from backend.models.review import ReviewDecision, ReviewItem
-from backend.models.tree import WorkspaceTreeNode
-from backend.schemas.context_write import ReviewDecisionRequest, UpdateDraftRequest
+from backend.schemas.context_write import ReviewDecisionRequest
 from backend.schemas.mcp.read_tools import WhatChangedEntryModel
-from backend.schemas.tree import TreeNodeUpdate
 from backend.services.context_version_storage import verify_context_storage
-from backend.services.context_write_service import ContextWriteService
 from backend.services.read_errors import (
-    ReadNotFoundError,
     ReviewDecisionUndoUnavailableError,
 )
 from backend.services.review_service import ReviewService
 from backend.services.temporal_read import resolve_version_as_of, what_changed
-from backend.services.tree_service import TreeService
 from backend.tests.integration.test_context_review_publish import (
     ACTOR,
     ACTOR_UUID,
@@ -28,10 +23,10 @@ from backend.tests.integration.test_context_review_publish import (
     _approve,
     _decision_audit,
     _detail,
-    _no_history_violations,
     _published_page_with_draft,
     _reject,
     _seed_review,
+    _start_draft,
     _write,
 )
 
@@ -51,20 +46,8 @@ def _undo(session, workspace_id, review_id, decision_id, *, user=ACTOR_UUID):
 
 
 def _revise(session, workspace_id, page_id, base_id, body):
-    base = session.get(ContextPageVersion, base_id)
-    return ContextWriteService().update_draft(
-        session=session,
-        workspace_id=workspace_id,
-        request=UpdateDraftRequest(
-            page_id=page_id,
-            base_version_id=base.id,
-            base_content_hash=base.content_hash,
-            update_mode="full_rewrite",
-            body_markdown=body,
-            reason=body.splitlines()[0],
-        ),
-        actor_kind="human",
-        actor_id=ACTOR,
+    return _start_draft(
+        session, workspace_id, page_id, base_id, body, reason=body.splitlines()[0]
     )
 
 
@@ -97,9 +80,10 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         stale = _stale_finding(session, workspace.id, page_id)
         before = _states(session, page_id)
         decided = _approve(session, workspace.id, draft.review_item_id)
-        assert _decision_audit(session, draft.review_item_id).payload["effect"][
-            "format"
-        ] == 2
+        assert (
+            _decision_audit(session, draft.review_item_id).payload["effect"]["format"]
+            == 2
+        )
         candidate = session.get(ContextPageVersion, draft.draft_version_id)
         approved_oid = candidate.commit_oid
         assert approved_oid is not None
@@ -108,27 +92,19 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         assert stale.status == "fixed"
         while_live = utc_now()
 
-        # This decision did not change the title. A later tree rename survives
-        # undo alongside the restored heads, instead of blocking it.
-        node = session.scalar(select(WorkspaceTreeNode).where(
-            WorkspaceTreeNode.target_kind == "context_page",
-            WorkspaceTreeNode.target_id == page_id,
-        ))
-        renamed = "Renamed after approval"
-        TreeService().update_node(
-            session, workspace.id, node.id, TreeNodeUpdate(display_name=renamed),
-            actor_kind="human", actor_id=ACTOR, actor=_actor(workspace.id, "owner"),
-        )
-        assert _detail(session, workspace.id, draft.review_item_id).undo.available
         restored = _undo(
             session, workspace.id, draft.review_item_id, decided.undo.decision_id
         )
-        assert _states(session, page_id) == (*before[:3], renamed, before[4])
+        assert _states(session, page_id)[:4] == before[:4]
+        assert candidate.version_status == "closed"
         assert (stale.status, stale.resolved_at) == ("open", None)
         assert session.get(ContextPage, page_id).stale_candidate is True
         assert restored.status == "pending" and restored.undo is None
         assert [d.decision_type for d in restored.decisions][:2] == ["undo", "approve"]
-        assert candidate.commit_oid is None and candidate.content_byte_size is None
+        assert (
+            candidate.commit_oid == approved_oid
+            and candidate.content_byte_size is not None
+        )
         assert store.list_heads(workspace.id)[page_id] == published_oid
         verify_context_storage(session, store)
         page = session.get(ContextPage, page_id)
@@ -139,7 +115,7 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         assert resolve_version_as_of(session, page, while_live).id == (
             draft.draft_version_id
         )
-        assert _no_history_violations(session, page_id)
+        verify_context_storage(session, store)
 
         # Approving the same draft again publishes it again, for as-of reads too.
         _approve(session, workspace.id, draft.review_item_id)
@@ -147,8 +123,7 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         assert store.list_heads(workspace.id)[page_id] == approved_oid
         verify_context_storage(session, store)
         assert (
-            resolve_version_as_of(session, page, utc_now()).id
-            == draft.draft_version_id
+            resolve_version_as_of(session, page, utc_now()).id == draft.draft_version_id
         )
         entries, _ = what_changed(
             session,
@@ -190,9 +165,12 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
             approved = _approve(session, workspace.id, first.review_item_id)
         finally:
             event.remove(AuditEvent, "before_insert", record_legacy_effect)
-        assert "commit_oid" not in _decision_audit(
-            session, first.review_item_id
-        ).payload["effect"]["rows"]["context_page_version"][str(first.draft_version_id)]
+        assert (
+            "commit_oid"
+            not in _decision_audit(session, first.review_item_id).payload["effect"][
+                "rows"
+            ]["context_page_version"][str(first.draft_version_id)]
+        )
         first_version = session.get(ContextPageVersion, first.draft_version_id)
         first_oid = first_version.commit_oid
         assert (
@@ -212,15 +190,19 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
                 EdgeProjection.edge_kind == "citation_page",
             )
         )
-        assert _states(session, first.page_id) == first_before
-        assert first_version.commit_oid is None
-        assert first_version.content_byte_size is None
+        assert _states(session, first.page_id)[:4] == first_before[:4]
+        assert first_version.version_status == "closed"
+        assert first_version.commit_oid == first_oid
+        assert first_version.content_byte_size is not None
         assert first.page_id not in store.list_heads(workspace.id)
         verify_context_storage(session, store)
         first_page = session.get(ContextPage, first.page_id)
         assert resolve_version_as_of(session, first_page, utc_now()) is None
         entries, has_more = what_changed(
-            session, workspace.id, since=since, actor=_actor(workspace.id, "editor"),
+            session,
+            workspace.id,
+            since=since,
+            actor=_actor(workspace.id, "editor"),
         )
         assert not has_more and len(entries) == 1
         entry = WhatChangedEntryModel(
@@ -234,7 +216,10 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         )
         # The new delta must not disclose a draft-only page to ordinary readers.
         assert what_changed(
-            session, workspace.id, since=since, actor=_actor(workspace.id, "viewer"),
+            session,
+            workspace.id,
+            since=since,
+            actor=_actor(workspace.id, "viewer"),
         ) == ([], False)
         # Publishing it again is a fresh entry into the published set.
         _approve(session, workspace.id, first.review_item_id)
@@ -242,7 +227,10 @@ def test_undoing_an_approval_restores_what_it_published_and_settled(session_fact
         assert store.list_heads(workspace.id)[first.page_id] == first_oid
         verify_context_storage(session, store)
         entries, _ = what_changed(
-            session, workspace.id, since=since, actor=_actor(workspace.id, "editor"),
+            session,
+            workspace.id,
+            since=since,
+            actor=_actor(workspace.id, "editor"),
         )
         assert [
             (e.change_kind, e.version_id, e.previous_version_id) for e in entries
@@ -300,52 +288,36 @@ def test_undoing_a_rejection_restores_the_retired_drafts_and_their_reviews(
         reviews = ReviewService()
         identity = {"actor_kind": "human", "actor_id": ACTOR, "actor_role": "owner"}
         reviews.apply_decision(
-            session, workspace.id, later.review_item_id,
+            session,
+            workspace.id,
+            later.review_item_id,
             ReviewDecisionRequest(
-                decision_type="request_changes", decision_reason="Please revise",
+                decision_type="request_changes",
+                decision_reason="Please revise",
                 audience_kind="workspace_editors",
             ),
-            actor_user_id=ACTOR_UUID, actor_provenance="browser_session", **identity,
+            actor_user_id=ACTOR_UUID,
+            actor_provenance="browser_session",
+            **identity,
         )
         reviews.claim_review(session, workspace.id, later.review_item_id, **identity)
         later_review = session.get(ReviewItem, later.review_item_id)
         claim = (later_review.claimed_by, later_review.claimed_at)
         before = _states(session, page_id)
         decided = _reject(session, workspace.id, draft.review_item_id)
-        assert session.get(ReviewItem, later.review_item_id).status == "superseded"
+        assert later_review.status == "changes_requested"
+        rejected_version = session.get(ContextPageVersion, draft.draft_version_id)
+        rejected_oid = rejected_version.commit_oid
+        assert rejected_version.version_status == "closed" and rejected_oid
 
         _undo(session, workspace.id, draft.review_item_id, decided.undo.decision_id)
-        assert _states(session, page_id) == before
+        assert _states(session, page_id)[:4] == before[:4]
+        assert rejected_version.version_status == "closed"
+        assert rejected_version.commit_oid == rejected_oid
         session.refresh(later_review)
         assert session.get(ReviewItem, draft.review_item_id).status == "pending"
         assert later_review.status == "changes_requested"
         assert (later_review.claimed_by, later_review.claimed_at) == claim
-        assert _no_history_violations(session, page_id)
-
-        # A rejection that reopened the draft below under a new review: undoing
-        # it closes the review it opened.
-        workspace, published, draft = _published_page_with_draft(session, "Undo O")
-        replaced = _revise(
-            session,
-            workspace.id,
-            published.page_id,
-            draft.draft_version_id,
-            "# Replacement\n\nWritten over the candidate.",
-        )
-        before = _states(session, published.page_id)
-        rejected = _reject(session, workspace.id, replaced.review_item_id)
-        opened = _decision_audit(session, replaced.review_item_id).payload[
-            "restored_review_item_id"
-        ]
-        _undo(
-            session, workspace.id, replaced.review_item_id, rejected.undo.decision_id
-        )
-        assert _states(session, published.page_id) == before
-        settled = _detail(session, workspace.id, UUID(opened))
-        assert (settled.status, settled.settlement.reason_code) == (
-            "superseded",
-            "superseded_by_decision_undo",
-        )
 
 
 def test_undo_requires_the_unchanged_result_of_a_recorded_decision(session_factory):
@@ -417,7 +389,8 @@ def test_undo_requires_the_unchanged_result_of_a_recorded_decision(session_facto
         session.get(ContextPage, archived.page_id).lifecycle_status = "archived"
         unavailable = _approve(session, workspace.id, revived.review_item_id).undo
         assert (unavailable.available, unavailable.reason_code) == (
-            False, "unsupported_effect"
+            False,
+            "unsupported_effect",
         )
 
 
@@ -441,8 +414,12 @@ def test_undoing_a_change_request_withdraws_it(session_factory):
             actor_provenance="browser_session",
         )
         reviews.claim_review(
-            session, workspace.id, draft.review_item_id,
-            actor_kind="human", actor_id=ACTOR, actor_role="owner",
+            session,
+            workspace.id,
+            draft.review_item_id,
+            actor_kind="human",
+            actor_id=ACTOR,
+            actor_role="owner",
         )
         _undo(session, workspace.id, draft.review_item_id, requested.undo.decision_id)
         review = session.get(ReviewItem, draft.review_item_id)
@@ -454,30 +431,12 @@ def test_undoing_a_change_request_withdraws_it(session_factory):
             ).items
             == []
         )
-        with pytest.raises(ReadNotFoundError, match="withdrawn"):
-            reviews.submit_revision_for_review(
-                session,
-                workspace.id,
-                draft.review_item_id,
-                principal=ACTOR_UUID,
-                actor_kind="human",
-                actor_id=ACTOR,
-                principal_role="owner",
-                context_write_service=ContextWriteService(),
-                update=UpdateDraftRequest(
-                    page_id=published.page_id,
-                    base_version_id=draft.draft_version_id,
-                    base_content_hash=session.get(
-                        ContextPageVersion, draft.draft_version_id
-                    ).content_hash,
-                    update_mode="full_rewrite",
-                    body_markdown="# Revised\n\nToo late.",
-                    reason="revision",
-                ),
+        assert (
+            session.scalar(
+                select(ReviewDecision.decision_type)
+                .where(ReviewDecision.review_item_id == draft.review_item_id)
+                .order_by(ReviewDecision.created_at.desc())
+                .limit(1)
             )
-        assert session.scalar(
-            select(ReviewDecision.decision_type)
-            .where(ReviewDecision.review_item_id == draft.review_item_id)
-            .order_by(ReviewDecision.created_at.desc())
-            .limit(1)
-        ) == "undo"
+            == "undo"
+        )

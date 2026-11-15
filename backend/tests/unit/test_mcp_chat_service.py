@@ -908,7 +908,7 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
             actor_type="human",
             created_by_actor_kind="human",
             created_by_actor_id=str(reader_id),
-            version_status="editing",
+            version_status="draft",
         )
         foreign_editing_version = ContextPageVersion(
             workspace_id=visible_page.workspace_id,
@@ -919,7 +919,7 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
             actor_type="human",
             created_by_actor_kind="human",
             created_by_actor_id=str(other_actor_id),
-            version_status="editing",
+            version_status="draft",
         )
         session.add_all([reader_editing_version, foreign_editing_version])
         session.flush()
@@ -2404,20 +2404,6 @@ def _tool_call(
         params_summary={},
         client_self_reported=False,
     )
-
-
-def test_derive_artifact_links_submit_revision_links_edited_page():
-    # Codex #11: the revision must link its edited page to chat provenance.
-    page_id = uuid4()
-    links = derive_artifact_links(
-        session=None,
-        tool_name="submit_revision_for_review",
-        arguments={"update": {"page_id": str(page_id)}},
-        payload={"data": {}},
-    )
-    assert _link_keys(links) == {
-        (McpChatArtifactKind.CONTEXT_PAGE, page_id, McpChatArtifactVerb.EDITED)
-    }
 
 
 def test_ensure_chat_session_creates_row_and_is_idempotent(session_factory):

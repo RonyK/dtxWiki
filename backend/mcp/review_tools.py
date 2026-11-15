@@ -6,7 +6,6 @@ revised draft. There is intentionally NO approve/reject/request_changes tool —
 an AI can never adjudicate (Risk 6, structural).
 """
 
-
 from pydantic import ValidationError
 
 from backend.app.container import ToolCallContext
@@ -19,20 +18,11 @@ from backend.policy.rbac import get_workspace_access
 from backend.schemas.mcp.review_tools import (
     ListRequestedChangesInput,
     ListRequestedChangesOutput,
-    SubmitRevisionForReviewInput,
-    SubmitRevisionForReviewOutput,
-    SubmitRevisionForReviewResult,
 )
 from backend.services.mcp_chat_service import (
-    ensure_chat_session,
     resolve_effective_principal,
 )
-from backend.services.mcp_client_service import resolve_trace_mcp_client
 from backend.services.mcp_context_projection import page_links
-from backend.services.mcp_write_idempotency import (
-    execute_idempotent_write,
-    request_fingerprint,
-)
 from backend.services.read_errors import ReadServiceError
 
 
@@ -111,91 +101,6 @@ def list_requested_changes(
         target.stable_url = links["stable_url"]
         target.link_markdown = links["link_markdown"]
     return ListRequestedChangesOutput(envelope=ok_envelope(actor), data=data)
-
-
-def submit_revision_for_review(
-    payload: dict, ctx: ToolCallContext
-) -> SubmitRevisionForReviewOutput:
-    actor = ctx.actor
-    conversation_token = ctx.conversation_token
-    try:
-        request = SubmitRevisionForReviewInput.model_validate(payload)
-        # Route the shard through the AUTHORIZED workspace (ctx.workspace_id,
-        # bound by router.resolve_target_actor), not the caller-requested
-        # one -- see upload_tools.py for the same pattern and its rationale.
-        session_factory = ctx.session_factory
-        with session_factory() as session:
-            principal = resolve_effective_principal(
-                session,
-                workspace_id=ctx.workspace_id,
-                mcp_session_id=conversation_token,
-                fallback_user_id=actor.user_id,
-            )
-        principal_role = _principal_role(
-            ctx,
-            workspace_id=ctx.workspace_id,
-            principal=principal,
-        )
-        with session_factory.begin() as session:
-            # The revised draft is stamped with THIS AI conversation's chat
-            # session. Create the row up-front (Codex #10) so a first-write
-            # revision still routes chat_owner reviews instead of stamping NULL.
-            origin_chat_session_id = None
-            if conversation_token:
-                client = resolve_trace_mcp_client(
-                    session, workspace_id=ctx.workspace_id, actor=actor
-                )
-                origin_chat_session_id = ensure_chat_session(
-                    session,
-                    workspace_id=ctx.workspace_id,
-                    client_id=client.id,
-                    mcp_session_id=conversation_token,
-                    owner_user_id=actor.user_id,
-                )
-
-            def execute_revision():
-                return ctx.services.review.submit_revision_for_review(
-                    session=session,
-                    workspace_id=ctx.workspace_id,
-                    review_item_id=request.review_item_id,
-                    principal=principal,
-                    actor_kind=actor.actor_kind,
-                    actor_id=actor.actor_id,
-                    actor_provenance=actor.provenance,
-                    principal_role=principal_role,
-                    context_write_service=ctx.services.context_write.with_actor(actor),
-                    update=request.update,
-                    create=request.create,
-                    note=request.note,
-                    origin_chat_session_id=origin_chat_session_id,
-                )
-
-            data = execute_idempotent_write(
-                session,
-                workspace_id=ctx.workspace_id,
-                actor_kind=actor.actor_kind,
-                actor_id=actor.actor_id,
-                tool_name="submit_revision_for_review",
-                idempotency_key=request.idempotency_key,
-                fingerprint=request_fingerprint(
-                    request.model_dump(
-                        mode="json", exclude={"idempotency_key", "conversation_token"}
-                    )
-                ),
-                result_model=SubmitRevisionForReviewResult,
-                execute=execute_revision,
-            )
-    except ValidationError as exc:
-        return SubmitRevisionForReviewOutput(
-            envelope=validation_error_envelope(
-                actor, exc, allowed_fields=SubmitRevisionForReviewInput.model_fields
-            )
-        )
-    except ReadServiceError as exc:
-        return SubmitRevisionForReviewOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
-    return SubmitRevisionForReviewOutput(envelope=ok_envelope(actor), data=data)
 
 
 def _principal_role(ctx: ToolCallContext, *, workspace_id, principal) -> str:

@@ -1784,6 +1784,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/bring-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bring In Context Version */
+        post: operations["bring_in_context_version_api_v1_workspaces__workspace_id__context_pages__page_id__bring_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/comments": {
         parameters: {
             query?: never;
@@ -1885,6 +1902,23 @@ export interface paths {
         put?: never;
         /** Upload Page Media */
         post: operations["upload_page_media_api_v1_workspaces__workspace_id__context_pages__page_id__media_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/merge-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Context Merge */
+        post: operations["preview_context_merge_api_v1_workspaces__workspace_id__context_pages__page_id__merge_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1996,24 +2030,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/versions/{branch_id}/reconciliation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Page Reconciliation */
-        get: operations["get_page_reconciliation_api_v1_workspaces__workspace_id__context_pages__page_id__versions__branch_id__reconciliation_get"];
-        put?: never;
-        /** Reconcile Page Branch */
-        post: operations["reconcile_page_branch_api_v1_workspaces__workspace_id__context_pages__page_id__versions__branch_id__reconciliation_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/versions/{page_version_id}/media/{asset_id}/content": {
         parameters: {
             query?: never;
@@ -2025,23 +2041,6 @@ export interface paths {
         get: operations["read_context_media_version_content"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}/versions/{version_id}/discard": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Discard Alternative Draft */
-        post: operations["discard_alternative_draft_api_v1_workspaces__workspace_id__context_pages__page_id__versions__version_id__discard_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2950,23 +2949,6 @@ export interface paths {
         get: operations["list_recent_review_decisions_api_v1_workspaces__workspace_id__reviews_decisions_recent_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace_id}/reviews/reconciliations/discard-bulk": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Discard Reconciliations Bulk */
-        post: operations["discard_reconciliations_bulk_api_v1_workspaces__workspace_id__reviews_reconciliations_discard_bulk_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4966,23 +4948,22 @@ export interface components {
         };
         /**
          * BeginContextEditRequest
-         * @description P8.3: resume-or-open the caller's own editing session.
-         *
-         *     Both fields optional: omit both to start from whatever the current head
-         *     happens to be (an idempotent resume of an already-open session ignores
-         *     them entirely). Pass both together to assert the base explicitly and get
-         *     a 409 instead of silently building on a head that moved.
+         * @description Join a named draft, or start a new draft from selected commits.
          */
         BeginContextEditRequest: {
             /** Base Content Hash */
             base_content_hash?: string | null;
             /** Base Version Id */
             base_version_id?: string | null;
+            /** From */
+            from?: string | string[] | null;
             /**
              * Idempotency Key
              * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
              */
             idempotency_key: string;
+            /** On Conflict */
+            on_conflict?: ("keep_both" | "latest") | null;
             /**
              * Retry Only
              * @default false
@@ -5015,6 +4996,25 @@ export interface components {
              * Format: uuid
              */
             marker_uuid: string;
+        };
+        /** BringInContextVersionRequest */
+        BringInContextVersionRequest: {
+            /** Commit Version Id */
+            commit_version_id?: string | null;
+            /** Expected Editing Revision */
+            expected_editing_revision: number;
+            /**
+             * Idempotency Key
+             * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
+             */
+            idempotency_key: string;
+            /** On Conflict */
+            on_conflict?: ("keep_both" | "latest") | null;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
         };
         /** BuildBundleRequest */
         BuildBundleRequest: {
@@ -5148,10 +5148,10 @@ export interface components {
             page_id: string;
             /**
              * Publication State
-             * @default editing
-             * @enum {string}
+             * @default draft
+             * @constant
              */
-            publication_state: "editing" | "draft";
+            publication_state: "draft";
             /**
              * Receipt Id
              * Format: uuid
@@ -5204,6 +5204,8 @@ export interface components {
              * Format: date-time
              */
             last_saved_at: string;
+            /** Parent Version Ids */
+            parent_version_ids?: string[];
             review?: components["schemas"]["ContextDraftReview"] | null;
         };
         /** ContextDraftListResponse */
@@ -5238,6 +5240,8 @@ export interface components {
              * Format: date-time
              */
             last_saved_at: string;
+            /** Parent Version Ids */
+            parent_version_ids?: string[];
             review?: components["schemas"]["ContextDraftReview"] | null;
             /**
              * State
@@ -5251,9 +5255,9 @@ export interface components {
             version_id: string;
             /**
              * Version Status
-             * @enum {string}
+             * @constant
              */
-            version_status: "editing" | "draft";
+            version_status: "draft";
         };
         /** @enum {string} */
         ContextImageMediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
@@ -5731,9 +5735,25 @@ export interface components {
             data: components["schemas"]["ContextMediaUploadPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** ContextMergePreviewRequest */
+        ContextMergePreviewRequest: {
+            /** Body Md */
+            body_md?: string | null;
+            /** On Conflict */
+            on_conflict?: ("keep_both" | "latest") | null;
+            /** Page Metadata */
+            page_metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
         /**
          * ContextPageCreateRequest
-         * @description REST creation can explicitly save a shared draft in a browser session.
+         * @description Create a page with its first shared mutable draft.
          */
         ContextPageCreateRequest: {
             /** Aliases */
@@ -5748,12 +5768,6 @@ export interface components {
             page_type?: ("overview" | "source" | "entity" | "concept" | "synthesis" | "comparison" | "decision" | "contradiction" | "query" | "guide") | null;
             /** Placement Parent Node Id */
             placement_parent_node_id?: string | null;
-            /**
-             * Share Draft
-             * @description Browser-session creation: save a shared, unpublished draft.
-             * @default false
-             */
-            share_draft: boolean;
             /** Tags */
             tags?: string[] | null;
             /**
@@ -5772,6 +5786,11 @@ export interface components {
             /** Alternative Draft Id */
             alternative_draft_id?: string | null;
             /**
+             * Autosave Merged
+             * @default false
+             */
+            autosave_merged: boolean;
+            /**
              * Backlink Count
              * @description Visible backlink count; null until requested by the inspector.
              */
@@ -5786,7 +5805,7 @@ export interface components {
             body_md: string;
             /**
              * Can Submit For Review
-             * @description Whether the caller may submit this exact version for review now: its own edit or unreviewed shared browser draft.
+             * @description Whether the caller may submit this exact version for review now: an editable shared draft without an existing open review request.
              * @default false
              */
             can_submit_for_review: boolean;
@@ -5819,7 +5838,7 @@ export interface components {
             /** Graph Status */
             graph_status?: string | null;
             /** History Status */
-            history_status?: ("state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            history_status?: ("closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**
              * Id
              * Format: uuid
@@ -5871,6 +5890,10 @@ export interface components {
             /** Next Reconciliation Version Id */
             next_reconciliation_version_id?: string | null;
             open_drafts?: components["schemas"]["OpenDrafts"];
+            /** Page Metadata */
+            page_metadata?: {
+                [key: string]: unknown;
+            };
             /**
              * Page Type
              * @default overview
@@ -5881,6 +5904,8 @@ export interface components {
             parent_node_id?: string | null;
             /** Parent Version Id */
             parent_version_id?: string | null;
+            /** Parent Version Ids */
+            parent_version_ids?: string[];
             /** Pending Draft Version Id */
             pending_draft_version_id?: string | null;
             /**
@@ -6065,6 +6090,11 @@ export interface components {
             /** Alternative Draft Id */
             alternative_draft_id?: string | null;
             /**
+             * Autosave Merged
+             * @default false
+             */
+            autosave_merged: boolean;
+            /**
              * Backlink Count
              * @description Visible backlink count; null until requested by the inspector.
              */
@@ -6079,7 +6109,7 @@ export interface components {
             body_md: string;
             /**
              * Can Submit For Review
-             * @description Whether the caller may submit this exact version for review now: its own edit or unreviewed shared browser draft.
+             * @description Whether the caller may submit this exact version for review now: an editable shared draft without an existing open review request.
              * @default false
              */
             can_submit_for_review: boolean;
@@ -6111,7 +6141,7 @@ export interface components {
             /** Graph Status */
             graph_status?: string | null;
             /** History Status */
-            history_status?: ("state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            history_status?: ("closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**
              * Id
              * Format: uuid
@@ -6162,6 +6192,10 @@ export interface components {
             };
             /** Next Reconciliation Version Id */
             next_reconciliation_version_id?: string | null;
+            /** Page Metadata */
+            page_metadata?: {
+                [key: string]: unknown;
+            };
             /**
              * Page Type
              * @default overview
@@ -6172,6 +6206,8 @@ export interface components {
             parent_node_id?: string | null;
             /** Parent Version Id */
             parent_version_id?: string | null;
+            /** Parent Version Ids */
+            parent_version_ids?: string[];
             /** Pending Draft Version Id */
             pending_draft_version_id?: string | null;
             /**
@@ -6259,314 +6295,6 @@ export interface components {
         ContextPageWriteResponse: {
             data: components["schemas"]["ContextPageWriteDetail"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
-        };
-        /** ContextReconciliationBlock */
-        ContextReconciliationBlock: {
-            /** Block Id */
-            block_id: string;
-            /**
-             * Granularity
-             * @enum {string}
-             */
-            granularity: "block" | "table_row";
-            /** Kind */
-            kind: string;
-            /** Label */
-            label: string;
-            /** Parent Block Id */
-            parent_block_id?: string | null;
-            /** Row Index */
-            row_index?: number | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "same" | "head_only" | "branch_only" | "conflict";
-        };
-        /** ContextReconciliationBranch */
-        ContextReconciliationBranch: {
-            /** Actor Display Name */
-            actor_display_name?: string | null;
-            /** Actor Kind */
-            actor_kind: string;
-            /**
-             * Base Version Id
-             * Format: uuid
-             */
-            base_version_id: string;
-            /** Content Hash */
-            content_hash: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Version Id
-             * Format: uuid
-             */
-            version_id: string;
-            /** Version No */
-            version_no: number;
-        };
-        /** ContextReconciliationBulkDiscardRequest */
-        ContextReconciliationBulkDiscardRequest: {
-            /** Reason */
-            reason: string;
-            /** Review Item Ids */
-            review_item_ids: string[];
-        };
-        /** ContextReconciliationBulkDiscardResponse */
-        ContextReconciliationBulkDiscardResponse: {
-            data: components["schemas"]["ContextReconciliationBulkDiscardResult"];
-            envelope?: components["schemas"]["RESTResultEnvelope"];
-        };
-        /** ContextReconciliationBulkDiscardResult */
-        ContextReconciliationBulkDiscardResult: {
-            /** Discarded Review Item Ids */
-            discarded_review_item_ids: string[];
-            /** Skipped */
-            skipped: components["schemas"]["ContextReconciliationBulkDiscardSkipped"][];
-        };
-        /** ContextReconciliationBulkDiscardSkipped */
-        ContextReconciliationBulkDiscardSkipped: {
-            /** Error Code */
-            error_code: string;
-            /**
-             * Review Item Id
-             * Format: uuid
-             */
-            review_item_id: string;
-        };
-        /** ContextReconciliationCleanChange */
-        ContextReconciliationCleanChange: {
-            /** Block Id */
-            block_id: string;
-            head?: components["schemas"]["ContextReconciliationSide"] | null;
-            /** Kind */
-            kind: string;
-            /** Resolution Target Id */
-            resolution_target_id?: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "head_only" | "branch_only";
-            yours?: components["schemas"]["ContextReconciliationSide"] | null;
-        };
-        /** ContextReconciliationCommit */
-        ContextReconciliationCommit: {
-            /**
-             * Branch Status
-             * @constant
-             */
-            branch_status: "superseded";
-            /**
-             * Draft Version Id
-             * Format: uuid
-             */
-            draft_version_id: string;
-            /**
-             * Head Version Id
-             * Format: uuid
-             */
-            head_version_id: string;
-            /** Review Item Id */
-            review_item_id: string | null;
-        };
-        /** ContextReconciliationCommitResult */
-        ContextReconciliationCommitResult: {
-            commit: components["schemas"]["ContextReconciliationCommit"];
-            /**
-             * Dry Run
-             * @constant
-             */
-            dry_run: false;
-        };
-        /** ContextReconciliationConflict */
-        ContextReconciliationConflict: {
-            base: components["schemas"]["ContextReconciliationSide"];
-            /** Block Id */
-            block_id: string;
-            /**
-             * Granularity
-             * @enum {string}
-             */
-            granularity: "block" | "table_row";
-            head: components["schemas"]["ContextReconciliationSide"];
-            /** Head Effects */
-            head_effects?: components["schemas"]["ContextReconciliationOperationEffect"][];
-            /** Identity Retired */
-            identity_retired: boolean;
-            /** Kind */
-            kind: string;
-            /** Line Span */
-            line_span?: [
-                number,
-                number
-            ] | null;
-            /** Parent Block Id */
-            parent_block_id?: string | null;
-            /** Resolution Target Id */
-            resolution_target_id?: string | null;
-            /** Restore Yours Available */
-            restore_yours_available: boolean;
-            /** Row Index */
-            row_index?: number | null;
-            yours: components["schemas"]["ContextReconciliationSide"];
-            /** Yours Effects */
-            yours_effects?: components["schemas"]["ContextReconciliationOperationEffect"][];
-        };
-        /** ContextReconciliationDetail */
-        ContextReconciliationDetail: {
-            base: components["schemas"]["ContextReconciliationVersion"];
-            /** Blocks */
-            blocks: components["schemas"]["ContextReconciliationBlock"][];
-            branch: components["schemas"]["ContextReconciliationBranch"];
-            /** Clean Changes */
-            clean_changes: components["schemas"]["ContextReconciliationCleanChange"][];
-            /** Conflicts */
-            conflicts: components["schemas"]["ContextReconciliationConflict"][];
-            head: components["schemas"]["ContextReconciliationVersion"];
-            /** Head Advance Count */
-            head_advance_count: number;
-            original_head: components["schemas"]["ContextReconciliationVersion"];
-            page: components["schemas"]["ContextReconciliationPage"];
-        };
-        /** ContextReconciliationDetailResponse */
-        ContextReconciliationDetailResponse: {
-            data: components["schemas"]["ContextReconciliationDetail"];
-            envelope?: components["schemas"]["RESTResultEnvelope"];
-        };
-        /** ContextReconciliationDiscardRequest */
-        ContextReconciliationDiscardRequest: {
-            /** Reason */
-            reason: string;
-        };
-        /** ContextReconciliationDryRunResult */
-        ContextReconciliationDryRunResult: {
-            /**
-             * Dry Run
-             * @constant
-             */
-            dry_run: true;
-            preview: components["schemas"]["ContextReconciliationPreview"];
-        };
-        /** ContextReconciliationOperationEffect */
-        ContextReconciliationOperationEffect: {
-            /** Content */
-            content: string;
-            /**
-             * Op
-             * @constant
-             */
-            op: "insert_after";
-        };
-        /** ContextReconciliationPage */
-        ContextReconciliationPage: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Slug */
-            slug: string;
-            /** Title */
-            title: string;
-        };
-        /** ContextReconciliationPreview */
-        ContextReconciliationPreview: {
-            /**
-             * Head Version Id
-             * Format: uuid
-             */
-            head_version_id: string;
-            /** Merged Body Markdown */
-            merged_body_markdown: string;
-            /** Predicted Block Map */
-            predicted_block_map: {
-                [key: string]: unknown;
-            }[];
-            /**
-             * Unresolved Count
-             * @constant
-             */
-            unresolved_count: 0;
-        };
-        /** ContextReconciliationRequest */
-        ContextReconciliationRequest: {
-            /**
-             * Dry Run
-             * @default false
-             */
-            dry_run: boolean;
-            /** Excluded Clean Change Ids */
-            excluded_clean_change_ids?: string[];
-            /**
-             * Expected Head Version Id
-             * Format: uuid
-             */
-            expected_head_version_id: string;
-            /** Idempotency Key */
-            idempotency_key: string;
-            /** Reason */
-            reason: string;
-            /** Reconciles */
-            reconciles: string[];
-            /** Resolutions */
-            resolutions: components["schemas"]["ContextReconciliationResolution"][];
-        };
-        /** ContextReconciliationResolution */
-        ContextReconciliationResolution: {
-            /** Block Id */
-            block_id: string;
-            /**
-             * Choice
-             * @enum {string}
-             */
-            choice: "keep_head" | "restore_yours" | "custom";
-            /** Content */
-            content?: string | null;
-            /** Expected Hash */
-            expected_hash?: string | null;
-        };
-        /** ContextReconciliationResultResponse */
-        ContextReconciliationResultResponse: {
-            /** Data */
-            data: components["schemas"]["ContextReconciliationDryRunResult"] | components["schemas"]["ContextReconciliationCommitResult"];
-            envelope?: components["schemas"]["RESTResultEnvelope"];
-        };
-        /** ContextReconciliationSide */
-        ContextReconciliationSide: {
-            /** Actor Display Name */
-            actor_display_name?: string | null;
-            /** Actor Kind */
-            actor_kind?: string | null;
-            /** At */
-            at?: string | null;
-            /** Hash */
-            hash?: string | null;
-            /** Text */
-            text?: string | null;
-            /** Version Id */
-            version_id?: string | null;
-        };
-        /** ContextReconciliationVersion */
-        ContextReconciliationVersion: {
-            /** Content Hash */
-            content_hash: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Version Id
-             * Format: uuid
-             */
-            version_id: string;
-            /** Version No */
-            version_no: number;
         };
         /** CopyMcpUrlArtifact */
         CopyMcpUrlArtifact: {
@@ -6861,6 +6589,15 @@ export interface components {
             /** Target Kind */
             target_kind?: ("context_page" | "library_item" | "agent_page") | null;
         };
+        /** DraftBaseSnapshot */
+        DraftBaseSnapshot: {
+            /** Body Md */
+            body_md: string;
+            /** Page Metadata */
+            page_metadata?: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * DraftReviewReason
          * @description One reason a write did not simply publish.
@@ -6985,7 +6722,7 @@ export interface components {
              * @description Stable warning code; must be drawn from WARNING_CODES.
              * @enum {string}
              */
-            code: "metadata_frontmatter_overridden" | "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "unresolved_diverged_branch" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete" | "context_page_has_no_graph_visible_links";
+            code: "metadata_frontmatter_overridden" | "stale" | "permission_limited" | "citation_missing" | "citation_weak" | "citation_stale" | "token_budget" | "workflow_sequence_incomplete" | "draft_not_injectable" | "expired_context" | "archived" | "unsupported_retrieval_mode_fallback" | "deprecated_tool" | "conversation_token_not_supplied" | "conversation_read_stale" | "lint_publish_blocked" | "published_with_findings" | "draft_unpublished" | "text_occurrence_mismatch" | "text_not_found" | "unsupported_filter_tag" | "unsupported_filter_date" | "semantic_fallback_used" | "keyword_lane_unavailable" | "coverage_gap_recorded" | "evidence_not_citable" | "mrtr_preview_unavailable" | "borrowed_rerank_applied" | "borrowed_query_rewrite_applied" | "llm_provider_unavailable" | "llm_composer_failed" | "job_fanout_incomplete" | "context_page_has_no_graph_visible_links";
             /** Message */
             message: string;
         };
@@ -9933,21 +9670,16 @@ export interface components {
         };
         /**
          * PageAutosaveRequest
-         * @description Save an actor's edit with revision CAS, including metadata changes.
-         *
-         *     Browser saves explicitly stage a shared draft with ``share_draft``;
-         *     private editing clients retain their existing default behavior.
+         * @description Save the named shared draft using its revision and browser baseline.
          */
         PageAutosaveRequest: {
             /** Aliases */
             aliases?: string[] | null;
             /** Base Content Hash */
-            base_content_hash: string;
-            /**
-             * Base Version Id
-             * Format: uuid
-             */
-            base_version_id: string;
+            base_content_hash?: string | null;
+            base_snapshot?: components["schemas"]["DraftBaseSnapshot"] | null;
+            /** Base Version Id */
+            base_version_id?: string | null;
             /**
              * Body Md
              * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
@@ -9962,6 +9694,8 @@ export interface components {
              * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
              */
             idempotency_key: string;
+            /** On Conflict */
+            on_conflict?: ("keep_both" | "latest") | null;
             /**
              * On Stale
              * @default conflict
@@ -9977,12 +9711,6 @@ export interface components {
             retry_only: boolean;
             /** Session Version Id */
             session_version_id?: string | null;
-            /**
-             * Share Draft
-             * @description Browser-session save: stage a shared, unpublished draft.
-             * @default false
-             */
-            share_draft: boolean;
             /** Tags */
             tags?: string[] | null;
             /**
@@ -9990,6 +9718,11 @@ export interface components {
              * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
              */
             title?: string | null;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
         };
         /** PageBacklink */
         PageBacklink: {
@@ -10239,7 +9972,7 @@ export interface components {
              * History Status
              * @enum {string}
              */
-            history_status: "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft";
+            history_status: "closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft";
             /**
              * Is Alternative
              * @default false
@@ -10314,11 +10047,6 @@ export interface components {
             envelope?: components["schemas"]["RESTResultEnvelope"];
             /** Next Cursor */
             next_cursor?: string | null;
-        };
-        /** PageVersionResponse */
-        PageVersionResponse: {
-            data: components["schemas"]["PageVersionEntry"];
-            envelope?: components["schemas"]["RESTResultEnvelope"];
         };
         /** PasswordChangeRequest */
         PasswordChangeRequest: {
@@ -10583,11 +10311,22 @@ export interface components {
         PublishPageVersionRequest: {
             /** Expected Content Hash */
             expected_content_hash: string;
+            /** Expected Editing Revision */
+            expected_editing_revision: number;
+            /** Expected Published Version Id */
+            expected_published_version_id: string | null;
             /**
              * Expected References Hash
              * @description Required when a browser publishes an editing or draft version.
              */
             expected_references_hash?: string | null;
+            /**
+             * Idempotency Key
+             * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
+             */
+            idempotency_key: string;
+            /** On Conflict */
+            on_conflict?: ("keep_both" | "latest") | null;
             /**
              * Publish Despite Findings
              * @default false
@@ -10595,6 +10334,14 @@ export interface components {
             publish_despite_findings: boolean;
             /** Reason */
             reason: string;
+            /** Result Body Md */
+            result_body_md?: string | null;
+            /** Result Hash */
+            result_hash: string;
+            /** Result Page Metadata */
+            result_page_metadata?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * PublishedVersionInfo
@@ -11263,8 +11010,22 @@ export interface components {
              * @enum {string}
              */
             decision_type: "approve" | "reject" | "request_changes";
+            /** Expected Editing Revision */
+            expected_editing_revision?: number | null;
             /** Expected Impact Fingerprint */
             expected_impact_fingerprint?: string | null;
+            /** Expected Published Version Id */
+            expected_published_version_id?: string | null;
+            /** On Conflict */
+            on_conflict?: ("keep_both" | "latest") | null;
+            /** Result Body Md */
+            result_body_md?: string | null;
+            /** Result Hash */
+            result_hash?: string | null;
+            /** Result Page Metadata */
+            result_page_metadata?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * ReviewDecisionUndo
@@ -11554,6 +11315,10 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Merge Preview */
+            merge_preview?: {
+                [key: string]: unknown;
+            } | null;
             /** Reason */
             reason?: string | null;
             /** Reason Code */
@@ -11995,6 +11760,11 @@ export interface components {
         SubmitContextEditRequest: {
             /** Expected Editing Revision */
             expected_editing_revision: number;
+            /**
+             * Feedback Id
+             * @description The feedback item this request addresses. It is linked to the request and marked draft_created.
+             */
+            feedback_id?: string | null;
             /**
              * Idempotency Key
              * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
@@ -12468,7 +12238,7 @@ export interface components {
             /** Graph Status */
             graph_status?: string | null;
             /** History Status */
-            history_status?: ("state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            history_status?: ("closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**
              * Is Alternative
              * @default false
@@ -12517,6 +12287,8 @@ export interface components {
             merged_into_version_id?: string | null;
             /** Parent Version Id */
             parent_version_id?: string | null;
+            /** Parent Version Ids */
+            parent_version_ids?: string[];
             /**
              * Prior Relation
              * @default root
@@ -12559,7 +12331,7 @@ export interface components {
             /** Graph Status */
             graph_status?: string | null;
             /** History Status */
-            history_status?: ("state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            history_status?: ("closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**
              * Is Alternative
              * @default false
@@ -12587,6 +12359,8 @@ export interface components {
             is_visible_head: boolean;
             /** Parent Version Id */
             parent_version_id?: string | null;
+            /** Parent Version Ids */
+            parent_version_ids?: string[];
             /**
              * Review Disposition
              * @default none
@@ -20724,6 +20498,78 @@ export interface operations {
             };
         };
     };
+    bring_in_context_version_api_v1_workspaces__workspace_id__context_pages__page_id__bring_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                page_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BringInContextVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextPageWriteResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTConflictErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     list_page_inline_comments_api_v1_workspaces__workspace_id__context_pages__page_id__comments_get: {
         parameters: {
             query?: {
@@ -21278,6 +21124,78 @@ export interface operations {
             };
         };
     };
+    preview_context_merge_api_v1_workspaces__workspace_id__context_pages__page_id__merge_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                page_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContextMergePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTConflictErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     get_context_page_neighbors_api_v1_workspaces__workspace_id__context_pages__page_id__neighbors_get: {
         parameters: {
             query?: {
@@ -21698,148 +21616,6 @@ export interface operations {
             };
         };
     };
-    get_page_reconciliation_api_v1_workspaces__workspace_id__context_pages__page_id__versions__branch_id__reconciliation_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                page_id: string;
-                branch_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ContextReconciliationDetailResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTConflictErrorBody"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-        };
-    };
-    reconcile_page_branch_api_v1_workspaces__workspace_id__context_pages__page_id__versions__branch_id__reconciliation_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                page_id: string;
-                branch_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ContextReconciliationRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ContextReconciliationResultResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTConflictErrorBody"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-        };
-    };
     read_context_media_version_content: {
         parameters: {
             query?: never;
@@ -21902,79 +21678,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-        };
-    };
-    discard_alternative_draft_api_v1_workspaces__workspace_id__context_pages__page_id__versions__version_id__discard_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                page_id: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ContextReconciliationDiscardRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageVersionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTConflictErrorBody"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -26359,77 +26062,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewDecisionRecentListResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
-                };
-            };
-        };
-    };
-    discard_reconciliations_bulk_api_v1_workspaces__workspace_id__reviews_reconciliations_discard_bulk_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ContextReconciliationBulkDiscardRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ContextReconciliationBulkDiscardResponse"];
                 };
             };
             /** @description Unauthorized */

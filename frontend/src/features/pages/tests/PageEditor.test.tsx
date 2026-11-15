@@ -44,6 +44,7 @@ vi.mock("../../../shared/auth/AuthContext", () => ({
 // assertions do exactly that, so the fixture is completed here rather than
 // cast away at the call site.
 const page = {
+  autosave_merged: false,
   references_hash: "b".repeat(64),
   id: "22222222-2222-4222-8222-222222222222",
   workspace_id: "11111111-1111-4111-8111-111111111111",
@@ -116,7 +117,37 @@ function installLogicalPerformanceClock() {
   };
 }
 
-function renderWithRouter(initialEntry: string, routes: ReactNode) {
+function renderWithRouter(initialEntry: string, routes: ReactNode, mergeKind: "fast_forward" | "automatic_merge" = "fast_forward") {
+  const fetchMock = vi.mocked(globalThis.fetch);
+  const fetchImplementation = fetchMock.getMockImplementation();
+  const readSnapshots = new Map<string, Record<string, unknown>>();
+  if (fetchImplementation) fetchMock.mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/begin-edit")) {
+      const from = JSON.parse(String(init?.body)).from;
+      const readUrl = url.slice(0, -"/begin-edit".length) + (from ? `?version_id=${encodeURIComponent(from)}` : "");
+      const selected = readSnapshots.get(readUrl);
+      if (selected) return jsonResponse({ data: { ...selected, version_status: "draft" } });
+      const response = await fetchImplementation(readUrl);
+      if (!response.ok) return response;
+      const fallback = await response.json();
+      return jsonResponse({ data: { ...fallback.data, version_status: "draft" } });
+    }
+    if (url.endsWith("/merge-preview")) {
+      const request = JSON.parse(String(init?.body));
+      return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
+        published_version_id: null, parent_version_ids: [], kind: mergeKind,
+        result: { body_md: mergeKind === "automatic_merge" ? "Exact combined publication content." : page.body_md,
+          page_metadata: mergeKind === "automatic_merge" ? { title: "Merged publication", tags: ["release"], aliases: ["combined"], page_type: "guide" } : {},
+          block_map: [], result_hash: "c".repeat(64) } } });
+    }
+    const response = await fetchImplementation(input, init);
+    if ((!init?.method || init.method === "GET") && response.ok && /\/context\/pages\/[^/?]+(?:\?|$)/.test(url)) {
+      const payload = await response.clone().json();
+      if (payload.data?.id) readSnapshots.set(url, payload.data);
+    }
+    return response;
+  });
   const router = createMemoryRouter(createRoutesFromElements(
     <>
       {routes}
@@ -216,7 +247,6 @@ function mockPublicationFlow({
   rejectAutosave = false,
   rejectPublishWithoutOverride = false,
   publishResponse,
-  reviewDecisionResponse,
   rejectWarnings = [
     {
       code: "lint_publish_blocked",
@@ -229,12 +259,17 @@ function mockPublicationFlow({
   rejectAutosave?: boolean;
   rejectPublishWithoutOverride?: boolean;
   publishResponse?: Promise<Response>;
-  reviewDecisionResponse?: Promise<Response>;
   rejectWarnings?: { code: string; message: string }[];
   initialPage?: Partial<typeof page>;
 } = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
+    if (url.endsWith("/merge-preview")) {
+      const request = JSON.parse(String(init?.body));
+      return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
+        published_version_id: null, parent_version_ids: [], kind: "fast_forward",
+        result: { body_md: page.body_md, page_metadata: {}, block_map: [], result_hash: "c".repeat(64) } } });
+    }
     if (url === `${BASE}/api/v1/workspaces`) {
       return workspaceResponse();
     }
@@ -305,14 +340,6 @@ function mockPublicationFlow({
           : {}),
       });
     }
-    if (
-      init?.method === "POST" &&
-      url.includes("/reviews/") &&
-      url.endsWith("/decision") &&
-      reviewDecisionResponse
-    ) {
-      return reviewDecisionResponse;
-    }
     return jsonResponse({ data: { ...page, ...initialPage } });
   });
 }
@@ -335,6 +362,7 @@ describe("PageEditor", () => {
       user_id: "user-1",
     };
     window.localStorage.clear();
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -432,8 +460,8 @@ describe("PageEditor", () => {
     await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(2));
     const saved = JSON.parse(String(autosaveCalls(fetchMock)[1][1]?.body));
     expect(saved.expected_editing_revision).toBe(3);
-    expect(saved.share_draft).toBe(true);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/begin-edit"))).toBe(false);
+    expect(saved.version_id).toBe("v2");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/begin-edit"))).toBe(true);
     expect(parsePageDocument(saved.body_md).body).toBe(newerBody);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/publish"))).toBe(false);
   });
@@ -467,8 +495,8 @@ describe("PageEditor", () => {
     const remove = calls.findIndex(([input]) => String(input).endsWith("/references"));
     expect(save).toBeGreaterThanOrEqual(0);
     expect(remove).toBeGreaterThan(save);
-    expect(JSON.parse(String(calls[save][1]?.body)).share_draft).toBe(true);
-    expect(calls.some(([input]) => String(input).endsWith("/begin-edit"))).toBe(false);
+    expect(JSON.parse(String(calls[save][1]?.body)).version_id).toBe(page.version_id);
+    expect(calls.some(([input]) => String(input).endsWith("/begin-edit"))).toBe(true);
     expect(JSON.parse(String(calls[remove][1]?.body))).toMatchObject({ version_id: "v2", add: [], remove: [{ reference_id: publishedReferenceId }] });
     const request = publicationActions().getByRole("button", { name: "Request review" });
     await waitFor(() => expect(request).toBeEnabled());
@@ -850,7 +878,7 @@ describe("PageEditor", () => {
     });
 
     renderWithRouter(
-      "/pages/release-notes/edit",
+      "/pages/release-notes/edit?version_id=v2",
       <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
     );
 
@@ -977,6 +1005,8 @@ describe("PageEditor", () => {
       publish_despite_findings: true,
       expected_content_hash: expect.any(String),
       expected_references_hash: "b".repeat(64),
+      expected_editing_revision: 1, expected_published_version_id: null,
+      result_hash: "c".repeat(64), idempotency_key: expect.any(String),
     });
     // I18N-08(b): the warning is now resolved through `apiWarnings.<code>`
     // rather than rendering the server's raw message verbatim, so a ko
@@ -1205,11 +1235,12 @@ describe("PageEditor", () => {
     });
   });
 
-  it("enables Save draft and Publish together and publishes a dirty edit directly", async () => {
+  it("publishes a dirty edit after confirming the exact automatically merged result", async () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
       "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
       <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
+      "automatic_merge",
     );
 
     await setEditorTitle(await findTitleEditor(), "Published directly");
@@ -1219,6 +1250,13 @@ describe("PageEditor", () => {
     expect(publishButton).toBeEnabled();
 
     await typist().click(publishButton);
+    const dialog = await screen.findByRole("dialog", { name: "Review merged page" });
+    expect(within(dialog).getByText("Exact combined publication content.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Merged publication" })).toBeInTheDocument();
+    expect(within(dialog).getByText("release")).toBeInTheDocument();
+    expect(within(dialog).getByText("combined")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/publish"))).toBe(false);
+    await typist().click(within(dialog).getByRole("button", { name: "Publish merged page" }));
 
     await waitFor(() => {
       expect(
@@ -1244,6 +1282,8 @@ describe("PageEditor", () => {
       publish_despite_findings: false,
       expected_content_hash: "b".repeat(64),
       expected_references_hash: "b".repeat(64),
+      expected_editing_revision: 1, expected_published_version_id: null,
+      result_hash: "c".repeat(64), idempotency_key: expect.any(String),
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
@@ -1384,9 +1424,9 @@ describe("PageEditor", () => {
       /draft saved · not published yet/i,
     ],
     [
-      "a fully published page",
+      "a fresh draft opened from the published page",
       { version_status: "published_snapshot", current_published_version_id: "v1" },
-      /^saved$/i,
+      /unpublished draft saved/i,
     ],
   ])(
     // PUB-09: the clean-state SyncPill used to say "Saved" for every
@@ -1794,7 +1834,6 @@ describe("PageEditor", () => {
   });
 
   it("completes a routed review edit after a manual save", async () => {
-    let decisionBody: Record<string, unknown> | null = null;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -1837,14 +1876,6 @@ describe("PageEditor", () => {
           },
         });
       }
-      if (
-        url ===
-          `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/reviews/review-1/decision` &&
-        init?.method === "POST"
-      ) {
-        decisionBody = JSON.parse(String(init.body));
-        return jsonResponse({ data: { id: "review-1", status: "approved" } });
-      }
       return jsonResponse({ data: page });
     });
 
@@ -1860,20 +1891,10 @@ describe("PageEditor", () => {
     await waitFor(() => expect(publicationActions().getByRole("button", { name: "Publish" })).toBeEnabled());
     await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
 
-    await waitFor(() => {
-      expect(
-        fetchMock.mock.calls.some(
-          (call) =>
-            call[0] ===
-              `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/reviews/review-1/decision` &&
-            call[1]?.method === "POST",
-        ),
-      ).toBe(true);
-    });
-    expect(decisionBody).toEqual({
-      decision_type: "approve",
-      decision_reason: "Edited directly in Page editor.",
-    });
+    await waitFor(() => expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/publish")),
+    ).toHaveLength(1));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/decision"))).toBe(false);
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
         pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
@@ -1883,94 +1904,44 @@ describe("PageEditor", () => {
     });
   });
 
-  it.each(["resolves", "rejects"] as const)(
-    "does not redirect when a pending review completion %s after the editor route unmounts",
+  it.each(["network", "server"] as const)(
+    "replays the prepared publication after an uncertain %s response",
     async (outcome) => {
-      let settleDecision!: (response: Response) => void;
-      const pendingDecision = new Promise<Response>((resolve, reject) => {
-        settleDecision = outcome === "resolves"
-          ? resolve
-          : () => reject(new Error("review service unavailable"));
+      const fetchMock = mockPublicationFlow();
+      const original = fetchMock.getMockImplementation()!;
+      let publicationAttempts = 0;
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/publish") && ++publicationAttempts === 1) {
+          if (outcome === "network") throw new TypeError("Failed to fetch");
+          return jsonResponse({ error_code: "internal_error", message: "Unavailable", request_id: "r1", warnings: [] }, 500);
+        }
+        return original(input, init);
       });
-      let resolvePublish!: (response: Response) => void;
-      const pendingPublish = new Promise<Response>((resolve) => {
-        resolvePublish = resolve;
-      });
-      const fetchMock = mockPublicationFlow({
-        publishResponse: pendingPublish,
-        reviewDecisionResponse: pendingDecision,
-      });
-      const router = renderWithRouter(
-        "/pages/hello/edit?from=review&reviewItemId=review-1",
-        <>
-          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
-          <Route path="/settings" element={<div>Settings destination</div>} />
-        </>,
+      let router = renderWithRouter(
+        "/pages/hello/edit",
+        <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
       );
-
-      await setEditorTitle(await findTitleEditor(), "Hello revised");
+      await setEditorTitle(await findTitleEditor(), "Ready to publish");
       await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
-      await waitFor(() => {
-        expect(
-          fetchMock.mock.calls.some(([input]) => String(input).endsWith("/publish")),
-        ).toBe(true);
-      });
-
-      // Handling the publish response requests the review decision in the same
-      // turn, but the render that records "published", and the effects that give
-      // the router a guard that lets the route go, are left to the scheduler.
-      // Outside act the decision can be seen before they have run, and leaving
-      // then is refused as unsaved work. Inside act they have run by the time
-      // it returns, with the decision still pending.
-      await act(async () => {
-        resolvePublish(jsonResponse({
-          data: {
-            ...page,
-            content_hash: "b".repeat(64),
-            current_version_id: "v2",
-            parent_version_id: "v1",
-            version_id: "v2",
-          },
-        }));
-        await vi.waitFor(() => {
-          expect(
-            fetchMock.mock.calls.some(
-              ([input, init]) =>
-                String(input).endsWith("/reviews/review-1/decision") &&
-                init?.method === "POST",
-            ),
-          ).toBe(true);
-        });
-      });
-      // The page shows nothing for that render -- the sync pill reads "Saving…"
-      // until the decision settles -- but the beforeunload handler is
-      // re-registered in the same commit as the router's guard, and stops
-      // asking to keep the page once that commit's effects have run.
-      expect(
-        window.dispatchEvent(new Event("beforeunload", { cancelable: true })),
-      ).toBe(true);
-
-      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-      await act(async () => {
-        await router.navigate("/settings");
-      });
-      expect(confirmSpy).not.toHaveBeenCalled();
-      expect(router.state.location.pathname).toBe("/settings");
-      expect(await screen.findByText("Settings destination")).toBeInTheDocument();
-
-      await act(async () => {
-        settleDecision(jsonResponse({
-          data: { id: "review-1", status: "approved" },
-        }));
-        await pendingDecision.catch(() => undefined);
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      expect(router.state.location).toMatchObject({
-        pathname: "/settings",
-        search: "",
-      });
+      await screen.findByText("Publish failed. Your saved draft is still available.");
+      const firstCommand = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/publish"))?.[1]?.body;
+      if (outcome === "server") {
+        cleanup();
+        router = renderWithRouter(
+          "/pages/hello/edit?version_id=v2",
+          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
+        );
+      } else {
+        await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
+      }
+      await waitFor(() => expect(router.state.location.pathname).toBe(
+        "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222",
+      ));
+      const commands = fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/publish"));
+      expect(commands).toHaveLength(2);
+      expect(commands[1][1]?.body).toEqual(firstCommand);
+      expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/merge-preview"))).toHaveLength(1);
+      expect(autosaveCalls(fetchMock)).toHaveLength(1);
     },
   );
 
@@ -2468,148 +2439,6 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("region", { name: "Page properties" })).not.toBeInTheDocument();
   });
 
-  it("preserves stale updates as alternative drafts and rebases the editor onto the server head", async () => {
-    // PUB-02 (2): _preserve_alternative parks the caller's bytes on a
-    // branched version that never becomes page.current_version_id, so
-    // adopting the PATCH response directly (old behavior) would leave the
-    // session autosaving onto a version the server no longer treats as
-    // editable -- guaranteeing the very next autosave 409s again. The fix
-    // rebases onto the server head via reloadLatest instead, so this test
-    // asserts on the server head content, not the preserved alternative's.
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const serverHead = {
-      ...page,
-      title: "Server head",
-      body_md: "# Server head",
-      version_id: "v2",
-      current_version_id: "v2",
-      content_hash: "b".repeat(64),
-    };
-    let pageReadCount = 0;
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return workspaceResponse();
-      }
-      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
-        return jsonResponse({ data: contextTreeNodes() });
-      }
-      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
-        return jsonResponse({ data: [] });
-      }
-      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
-        return jsonResponse({ data: [page], next_cursor: null });
-      }
-      if ((!init?.method || init.method === "GET") && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
-        // First read is the editor's initial load; the reload triggered by
-        // preserveAlternative's rebase is the one that must see the head
-        // that made the earlier autosave stale.
-        pageReadCount += 1;
-        return jsonResponse({ data: pageReadCount === 1 ? page : serverHead });
-      }
-      if (init?.method === "POST" && url.endsWith("/autosave")) {
-        const body = JSON.parse(String(init.body));
-        if (body.base_version_id === "v1") {
-          return jsonResponse(
-            {
-              error_code: "stale_base_version",
-              message: "stale",
-              request_id: "r1",
-              warnings: [],
-              server_version_id: "v2",
-              server_content_hash: "b".repeat(64),
-            },
-            409,
-          );
-        }
-        return jsonResponse({
-          data: {
-            ...serverHead,
-            title: body.title,
-            version_id: "v3",
-            current_version_id: "v3",
-            content_hash: "c".repeat(64),
-          },
-        });
-      }
-      if (init?.method === "PATCH") {
-        const body = JSON.parse(String(init.body));
-        if (body.on_stale === "preserve_as_alternative") {
-          return jsonResponse({
-            data: {
-              ...page,
-              version_id: "v-alt",
-              parent_version_id: "v1",
-              alternative_draft_id: "v-alt",
-              change_set_id: "change-1",
-              review_item_id: "review-1",
-              preserved_as_alternative: true,
-            },
-          });
-        }
-      }
-      return jsonResponse({ data: page });
-    });
-
-    renderWithRouter(
-      "/pages/hello/edit",
-      <>
-          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
-      </>,
-    );
-
-    await setEditorTitle(await findTitleEditor(), "My alternative");
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-
-    expect(await screen.findByText(/Someone else updated this page/)).toBeInTheDocument();
-    expect(syncStatus()).toHaveTextContent("Out of date · Resolve");
-    expect(document.querySelectorAll(".status-banner")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Reload latest" })).toBeInTheDocument();
-    await typist().click(
-      screen.getByRole("button", { name: "Preserve mine as alternative" }),
-    );
-
-    await screen.findByText(/Preserved as alternative draft v-alt/);
-    const preserveCall = fetchMock.mock.calls.find((call) =>
-      String(call[1]?.body).includes("preserve_as_alternative"),
-    );
-    expect(JSON.parse(String(preserveCall?.[1]?.body))).toMatchObject({
-      on_stale: "preserve_as_alternative",
-      base_version_id: "v1",
-      base_content_hash: "a".repeat(64),
-    });
-
-    // Rebased onto the server head, not left on the preserved branch: the
-    // buffer now shows "Server head", not "My alternative".
-    expect(
-      fetchMock.mock.calls.some((call) => String(call[0]).includes("/context/pages/22222222-2222-4222-8222-222222222222")),
-    ).toBe(true);
-    await expectEditorTitle("Server head");
-
-    const titleEditor = getTitleEditor();
-    await setEditorTitle(titleEditor, "Temporary title");
-    await setEditorTitle(titleEditor, "Server head edited");
-    await advanceAutosaveCheckpoint();
-    // Two /autosave POSTs total across the whole test: the original stale
-    // attempt (base v1, 409'd before the reload) and this new checkpoint.
-    // The latter must carry the server head as its base, proving the
-    // session rebased instead of continuing to autosave onto the parked
-    // alternative branch.
-    await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(2));
-    expect(
-      JSON.parse(String(autosaveCalls(fetchMock)[1][1]?.body)),
-    ).toMatchObject({
-      base_version_id: "v2",
-      base_content_hash: "b".repeat(64),
-    });
-    await waitFor(() => {
-      expect(document.querySelector(".page-workspace")).toHaveAttribute(
-        "data-save-state",
-        "clean",
-      );
-    });
-  });
-
   it("shows a conflict banner on stale updates and blocks stale retry saves", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let pageReadCount = 0;
@@ -2632,7 +2461,7 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if ((!init?.method || init.method === "GET") && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
+      if ((!init?.method || init.method === "GET") && url.split("?")[0] === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
         pageReadCount += 1;
         return jsonResponse({ data: pageReadCount === 1 ? page : serverLatest });
       }
@@ -2948,7 +2777,7 @@ describe("PageEditor", () => {
           },
         });
       }
-      return jsonResponse({ data: page });
+      return jsonResponse({ data: { ...page, current_published_version_id: "v0" } });
     });
 
     renderWithRouter(
@@ -2966,7 +2795,7 @@ describe("PageEditor", () => {
     fireEvent.change(titleEditor, { target: { value: "Autosaved title" } });
     expect(document.activeElement).toBe(titleEditor);
     expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+    expect(autosaveCalls(fetchMock)).toHaveLength(0);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(AUTOSAVE_CHECKPOINT_MS - 1);
     });
@@ -2983,7 +2812,7 @@ describe("PageEditor", () => {
     expect(JSON.parse(String(autosaveCall?.[1]?.body))).toMatchObject({
       title: "Autosaved title",
       base_version_id: "v1",
-      session_version_id: null,
+      version_id: "v1",
       destination_node_id: "77777777-7777-4777-8777-777777777777",
     });
     expect(screen.queryByText("reader page")).not.toBeInTheDocument();
@@ -3383,7 +3212,7 @@ describe("PageEditor", () => {
           },
         });
       }
-      return jsonResponse({ data: page });
+      return jsonResponse({ data: { ...page, current_published_version_id: "v0" } });
     });
 
     renderWithRouter(
@@ -3991,10 +3820,10 @@ describe("PageEditor", () => {
 
     expect(await screen.findByText("Add a title before saving.")).toBeInTheDocument();
     expect(titleInput).toHaveFocus();
-    expect(fetchMock.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+    expect(autosaveCalls(fetchMock)).toHaveLength(0);
 
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-    expect(fetchMock.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+    expect(autosaveCalls(fetchMock)).toHaveLength(0);
 
     await setEditorTitle(titleInput, "Now titled");
     await waitFor(() => {
@@ -4032,7 +3861,7 @@ describe("PageEditor", () => {
       if (init?.method === "POST" && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages`) {
         return createPromise;
       }
-      if ((!init?.method || init.method === "GET") && url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`) {
+      if ((!init?.method || init.method === "GET") && url.startsWith(`${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222`)) {
         return jsonResponse({
           data: {
             ...savedDraft,
@@ -4054,8 +3883,8 @@ describe("PageEditor", () => {
           slug: "first-title",
           title: body.title,
           body_md: body.body_md,
-          version_id: body.session_version_id,
-          current_version_id: body.session_version_id,
+          version_id: body.version_id,
+          current_version_id: body.version_id,
           content_hash: "c".repeat(64),
         };
         return jsonResponse({ data: savedDraft });
@@ -4098,7 +3927,7 @@ describe("PageEditor", () => {
         title: "Second title",
         base_version_id: "v1",
         base_content_hash: "a".repeat(64),
-        session_version_id: "v1",
+        version_id: "v1",
       });
     });
     const liveTitleEditor = getTitleEditor();
@@ -4154,7 +3983,7 @@ describe("PageEditor", () => {
       title: "Third title",
       base_version_id: "v2",
       base_content_hash: "b".repeat(64),
-      session_version_id: "v2",
+      version_id: "v2",
     });
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
@@ -4296,14 +4125,14 @@ describe("PageEditor", () => {
       title: "Second title",
       base_version_id: "v1",
       base_content_hash: "a".repeat(64),
-      session_version_id: "v1",
+      version_id: "v1",
     });
     // Retry replaces the create editor after saving; its tree is already present
     // before the response settles, so await the new editor and its saved content.
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
         pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
-        search: "",
+        search: "?version_id=v2",
       });
       expect(createTitleEditor).not.toBeInTheDocument();
       expect(getTitleEditor()).toHaveValue("Second title");
@@ -4343,8 +4172,8 @@ describe("PageEditor", () => {
             ...page,
             title: body.title,
             body_md: body.body_md,
-            version_id: body.session_version_id,
-            current_version_id: body.session_version_id,
+            version_id: body.version_id,
+            current_version_id: body.version_id,
             content_hash: secondContentHash,
             updated_at: new Date().toISOString(),
           },
@@ -4399,7 +4228,7 @@ describe("PageEditor", () => {
     expect(staged).toMatchObject({
       base_version_id: "v2",
       base_content_hash: "b".repeat(64),
-      session_version_id: "v2",
+      version_id: "v2",
     });
     expect(fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/publish"))).toHaveLength(0);
   });
@@ -4893,7 +4722,7 @@ describe("PageEditor", () => {
     await saveDraft("# Hello\n\nEdited.", 1);
     expect(noticeText()).toBe("This page already links to Incident runbook. Publish it to resolve the lint finding.");
     await typist().click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(window.location.search).toBe("");
+    expect(window.location.search).toBe("?version_id=v1");
     await saveDraft("# Hello\n\nEdited again.", 2);
     expect(noticeText()).toBeNull();
     cleanup();
@@ -4924,7 +4753,7 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("heading", { name: /Edit Hello/ })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Split" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /split preview/i })).not.toBeInTheDocument();
-    expect(syncStatus()).toHaveTextContent("Saved");
+    expect(syncStatus()).toHaveTextContent(/draft saved/i);
     expect(document.querySelector(".editor-command-status")).not.toBeInTheDocument();
     expect(document.querySelector(".preview-pane")).not.toBeInTheDocument();
 
@@ -7183,7 +7012,7 @@ describe("PageEditor", () => {
       "00000000-0000-4000-8000-000000000842",
     ] as const;
     let markerIndex = 0;
-    vi.spyOn(crypto, "randomUUID").mockImplementation(
+    vi.spyOn(crypto, "randomUUID").mockImplementationOnce(() => "00000000-0000-4000-8000-000000000840").mockImplementation(
       () => markers[Math.min(markerIndex++, markers.length - 1)],
     );
     let capabilityRequests = 0;
@@ -7893,7 +7722,7 @@ describe("PageEditor", () => {
     await waitFor(() => {
       expect(router.state.location).toMatchObject({
         pathname: "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
-        search: "",
+        search: `?version_id=${savedPage.version_id}`,
       });
       expect(createTitleEditor).not.toBeInTheDocument();
       expect(getTitleEditor()).toHaveValue("Release notes");
@@ -8486,7 +8315,8 @@ function mockEditorPage(bodyMd: string) {
 function writeCalls(fetchMock: { mock: { calls: Array<[unknown, RequestInit?]> } }) {
   return fetchMock.mock.calls.filter((call) => {
     const method = call[1]?.method;
-    return method === "PATCH" || method === "POST";
+    return (method === "PATCH" || method === "POST") &&
+      !String(call[0]).endsWith("/begin-edit") && !String(call[0]).endsWith("/merge-preview");
   });
 }
 

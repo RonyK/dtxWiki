@@ -47,6 +47,7 @@ from backend.services.context_media_upload import ContextMediaUploadService
 from backend.services.library_ingest import LibraryUploadAdmissionService
 from backend.services.public_page_exposure import grant_public_page_exposure
 from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.utils.context_commands import merge_binding, review_binding
 
 # 1x1 transparent PNG accepted by both Library and Context validators.
 # Route-shape parameters only need a well-formed id that no row carries: the
@@ -227,7 +228,7 @@ def _create_editing_page(
     assert response.status_code == 201, response.text
     page = response.json()["data"]
     assert page["workspace_id"] == str(workspace_id)
-    assert page["version_status"] == "editing"
+    assert page["version_status"] == "draft"
     return page
 
 
@@ -629,17 +630,20 @@ def _publish_editing(client: TestClient, page: dict, *, body_md: str) -> dict:
     )
     assert submitted_response.status_code == 200, submitted_response.text
     saved = submitted_response.json()["data"]
-    if saved.get("review_item_id") is not None:
-        decision = client.post(
-            f"/api/v1/workspaces/{_workspace_id(client)}/reviews/"
-            f"{saved['review_item_id']}/decision",
-            json={"decision_type": "approve"},
-        )
-        assert decision.status_code == 200, decision.text
+    preview_response = client.post(
+        f"{_pages_url(client)}/{page['id']}/merge-preview",
+        json={"version_id": saved["version_id"]},
+    )
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()["data"]
     response = client.post(
         f"{_pages_url(client)}/{page['id']}/versions/{saved['version_id']}/publish",
         json={
             "reason": "media integration fixture",
+            "idempotency_key": f"publish-{uuid4()}",
+            "expected_editing_revision": preview["editing_revision"],
+            "expected_published_version_id": preview["published_version_id"],
+            "result_hash": preview["result"]["result_hash"],
             "publish_despite_findings": False,
             "expected_content_hash": saved["content_hash"],
             "expected_references_hash": saved["references_hash"],
@@ -665,16 +669,27 @@ def _submit_editing(client: TestClient, page: dict) -> dict:
 
 
 def _autosave(client: TestClient, page: dict, *, body_md: str) -> dict:
+    if page["version_status"] != "draft":
+        opened = client.post(
+            f"{_pages_url(client)}/{page['id']}/begin-edit",
+            json={"from": page["version_id"], "idempotency_key": f"begin-{uuid4()}"},
+        )
+        assert opened.status_code == 200, opened.text
+        page = opened.json()["data"]
     response = client.post(
         f"{_pages_url(client)}/{page['id']}/autosave",
         json={
             "idempotency_key": f"autosave-{uuid4()}",
             "title": "Context Media",
             "body_md": body_md,
+            "version_id": page["version_id"],
             "base_version_id": page["version_id"],
             "base_content_hash": page["content_hash"],
             "expected_editing_revision": page["editing_revision"],
-            "session_version_id": page["version_id"],
+            "base_snapshot": {
+                "body_md": page["body_md"],
+                "page_metadata": page.get("page_metadata", {}),
+            },
         },
     )
     assert response.status_code == 200, response.text
@@ -937,6 +952,9 @@ def test_context_media_http_vertical_editing_preview_public_and_delete(
     published = client.post(
         f"{_pages_url(client)}/{page['id']}/versions/{draft['version_id']}/publish",
         json={
+            **merge_binding(
+                client, _pages_url(client), page["id"], draft["version_id"]
+            ),
             "reason": "publish retained media",
             "publish_despite_findings": False,
             "expected_content_hash": draft["content_hash"],
@@ -1026,7 +1044,7 @@ def test_context_media_in_place_autosave_replaces_exact_version_usage(
     assert client.get(_version_content_url(client, second, asset_b)).status_code == 404
 
 
-def test_asset_uploaded_then_orphaned_by_discard_cannot_be_adopted_later(
+def test_withdrawn_draft_upload_can_be_reused_from_its_retained_commit(
     session_factory,
     tmp_path,
     monkeypatch,
@@ -1062,7 +1080,10 @@ def test_asset_uploaded_then_orphaned_by_discard_cannot_be_adopted_later(
 
     reopened = client.post(
         f"{_pages_url(client)}/{editing_page['id']}/begin-edit",
-        json={"idempotency_key": f"begin-{uuid4()}"},
+        json={
+            "idempotency_key": f"begin-{uuid4()}",
+            "from": editing_page["version_id"],
+        },
     )
     assert reopened.status_code == 200, reopened.text
     reopened_page = reopened.json()["data"]
@@ -1077,11 +1098,10 @@ def test_asset_uploaded_then_orphaned_by_discard_cannot_be_adopted_later(
             "base_version_id": reopened_page["version_id"],
             "base_content_hash": reopened_page["content_hash"],
             "expected_editing_revision": reopened_page["editing_revision"],
-            "session_version_id": reopened_page["version_id"],
+            "version_id": reopened_page["version_id"],
         },
     )
-    assert late_association.status_code == 409, late_association.text
-    assert late_association.json()["error_code"] == "media_editing_not_open"
+    assert late_association.status_code == 200, late_association.text
 
 
 def test_security_blocker_hides_context_private_public_and_editing_content(
@@ -1194,6 +1214,7 @@ def test_context_media_save_rolls_back_on_foreign_reference(
             "idempotency_key": "t-6",
             "title": "Context Media",
             "body_md": f"![foreign](dtx-media://asset/{uuid4()})",
+            "version_id": page["version_id"],
             "base_version_id": page["version_id"],
             "base_content_hash": page["content_hash"],
             "expected_editing_revision": 1,
@@ -1212,7 +1233,7 @@ def test_context_media_save_rolls_back_on_foreign_reference(
             )
         ).all()
     assert persisted_page is not None
-    assert version is not None and version.version_status == "editing"
+    assert version is not None and version.version_status == "draft"
     assert version.body_md == page["body_md"]
     assert version.editing_revision == 1
     assert asset is not None and asset.page_id == UUID(page["id"])
@@ -1242,8 +1263,7 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
         role="editor",
     )
     foreign = _upload_editing_png(other_editor, page=page, marker_uuid=uuid4())
-    assert foreign.status_code == 404, foreign.text
-    assert foreign.json()["error_code"] == "not_found"
+    assert foreign.status_code == 200, foreign.text
     wrong_page = _upload_editing_png(
         client,
         page={**page, "version_id": other_page["version_id"]},
@@ -1263,13 +1283,18 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
         },
     )
     assert submitted.status_code == 200, submitted.text
+    withdrawn = client.post(
+        f"{_pages_url(client)}/{page['id']}/discard-edit",
+        json={"version_id": page["version_id"], "idempotency_key": "close-upload"},
+    )
+    assert withdrawn.status_code == 204, withdrawn.text
     closed = _upload_editing_png(client, page=page, marker_uuid=uuid4())
     assert closed.status_code == 409, closed.text
     assert closed.json()["error_code"] == "media_editing_not_open"
     with session_factory() as session:
-        assert session.scalar(select(func.count()).select_from(ContextMediaAsset)) == 0
+        assert session.scalar(select(func.count()).select_from(ContextMediaAsset)) == 1
         untouched = session.get(ContextPageVersion, UUID(other_page["version_id"]))
-        assert untouched.version_status == "editing"
+        assert untouched.version_status == "draft"
 
     # Browser saves share their drafts. Attachments may target that owner's
     # mutable shared draft, but submitting it locks the same evidence again.
@@ -1278,7 +1303,6 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
         json={
             "title": "Shared upload",
             "body_md": "# Shared upload",
-            "share_draft": True,
         },
     ).json()["data"]
     uploaded = _upload_editing_png(client, page=shared, marker_uuid=uuid4())
@@ -1293,7 +1317,7 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
     )
     assert submitted.status_code == 200, submitted.text
     locked = _upload_editing_png(client, page=shared, marker_uuid=uuid4())
-    assert locked.status_code == 409, locked.text
+    assert locked.status_code == 200, locked.text
 
 
 @pytest.mark.parametrize("close_version", [False, True])
@@ -1339,7 +1363,7 @@ def test_asset_delete_enforces_editing_author_before_usage_token(
     assert listing.status_code == 200, listing.text
     assert [item["id"] for item in listing.json()["data"]] == [asset["asset_id"]]
     token = listing.json()["data"][0]["usage_token"]
-    deleting_actor = editor if close_version else owner
+    deleting_actor = owner
     deleted = deleting_actor.delete(url, headers={"If-Match": token})
     assert deleted.status_code == 200, deleted.text
     assert owner.get(asset["content_url"]).status_code == 404
@@ -1378,7 +1402,10 @@ def test_page_media_listing_shares_another_authors_editing_uploads(
     submitted_data = submitted.json()["data"]
     decided = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/{submitted_data['review_item_id']}/decision",
-        json={"decision_type": "approve"},
+        json={
+            "decision_type": "approve",
+            **review_binding(owner, workspace_id, submitted_data["review_item_id"]),
+        },
     )
     assert decided.status_code == 200, decided.text
 
@@ -1387,7 +1414,7 @@ def test_page_media_listing_shares_another_authors_editing_uploads(
     )
     assert editing.status_code == 200, editing.text
     editing_page = editing.json()["data"]
-    assert editing_page["version_status"] == "editing"
+    assert editing_page["version_status"] == "draft"
     media_url = f"{pages_url}/{page_id}/media"
     upload_response = owner.post(
         media_url,

@@ -13,6 +13,7 @@ import {
 describe("Context history presentation", () => {
   it("maps every lifecycle state to one exact non-heuristic tone", () => {
     expect(CONTEXT_HISTORY_STATUSES).toEqual([
+      "closed",
       "state_inconsistent",
       "current_editing",
       "current_draft",
@@ -30,6 +31,7 @@ describe("Context history presentation", () => {
         ]),
       ),
     ).toEqual({
+      closed: "neutral",
       state_inconsistent: "danger",
       current_editing: "info",
       current_draft: "warn",
@@ -44,6 +46,7 @@ describe("Context history presentation", () => {
 
   it("keeps the authoritative English and Korean labels and descriptions in both readers", () => {
     const expectedEnglish = {
+      closed: { label: "Closed", description: "This draft ended and is preserved as a commit." },
       state_inconsistent: {
         label: "State review required",
         description: "Operator repair is required",
@@ -80,6 +83,7 @@ describe("Context history presentation", () => {
       },
     };
     const expectedKorean = {
+      closed: { label: "끝남", description: "종료된 초안이며 커밋으로 보존됩니다." },
       state_inconsistent: { label: "상태 확인 필요", description: "운영 점검 필요" },
       current_editing: {
         label: "편집 중",

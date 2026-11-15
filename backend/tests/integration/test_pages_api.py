@@ -26,11 +26,13 @@ from backend.policy.auth import ActorContext, get_rest_actor
 from backend.repositories import context_page_repo
 from backend.services.context_lifecycle import apply_context_publication
 from backend.services.domain_read import DomainReadService
-from backend.services.page_service import PageConflictError
-from backend.services.read_errors import StaleContextDraftError
 from backend.tests.conftest import (
     authenticate_test_client,
     authenticate_test_client_in_workspace,
+)
+from backend.tests.utils.context_git import (
+    merge_preview_binding,
+    review_preview_binding,
 )
 from backend.tests.utils.prepared_body import prepare_context_body
 from backend.utils.content_hash import content_hash as calculate_content_hash
@@ -180,6 +182,10 @@ def make_client(page_service, authenticated: bool = True) -> TestClient:
 
 def _publish_created_version(client, page_service, created, **payload_overrides):
     payload = {
+        **merge_preview_binding(
+            client,
+            f"{pages_url(page_service)}/{created['id']}/versions/{created['version_id']}/publish",
+        ),
         "reason": "publish page-first editing version",
         "publish_despite_findings": False,
         "expected_content_hash": created["content_hash"],
@@ -208,7 +214,6 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
         json={
             "title": "Shared references",
             "body_md": "# Shared references",
-            "share_draft": True,
         },
     )
     assert created.status_code == 201, created.text
@@ -238,16 +243,23 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
     assert viewer.get(page_url).status_code == 404
 
     def save(value, key, body=None):
+        if value["version_status"] != "draft":
+            begun = owner.post(
+                f"{page_url}/begin-edit",
+                json={"from": value["version_id"], "idempotency_key": key + "-begin"},
+            )
+            assert begun.status_code == 200, begun.text
+            value = begun.json()["data"]
         response = owner.post(
             f"{page_url}/autosave",
             json={
+                "version_id": value["version_id"],
                 "body_md": body or value["body_md"],
                 "base_version_id": value["version_id"],
                 "base_content_hash": value["content_hash"],
                 "expected_editing_revision": value["editing_revision"],
                 "session_version_id": value["version_id"],
                 "idempotency_key": key,
-                "share_draft": True,
             },
         )
         assert response.status_code == 200, response.text
@@ -343,9 +355,12 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
             "add": [reference],
         },
     )
-    assert blocked.status_code == 409, blocked.text
-    successor = save(reviewed, "fork-reviewed-references")
-    assert successor["version_id"] != reviewed["version_id"]
+    assert blocked.status_code == 200, blocked.text
+    latest = owner.get(page_url, params={"version_id": reviewed["version_id"]}).json()[
+        "data"
+    ]
+    successor = save(latest, "save-reviewed-references")
+    assert successor["version_id"] == reviewed["version_id"]
     changed = owner.post(
         f"{page_url}/references",
         json={
@@ -359,7 +374,7 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
     historical = owner.get(
         page_url, params={"version_id": reviewed["version_id"]}
     ).json()["data"]
-    assert not historical["references"]
+    assert historical["references"][0]["target_id"] == target["id"]
     current = editor.get(
         page_url, params={"version_id": successor["version_id"]}
     ).json()["data"]
@@ -379,13 +394,20 @@ def test_browser_reference_draft_stays_shared_through_save_review_and_publish(
         owner,
         page_service,
         current,
-        expected_references_hash=successor["references_hash"],
+        expected_references_hash=draft["references_hash"],
     )
     assert stale.status_code == 409, stale.text
     missing_hash = owner.post(
         f"{page_url}/versions/{current['version_id']}/publish",
         json={
-            "reason": "Missing reference fingerprint",
+            **{
+                key: value
+                for key, value in merge_preview_binding(
+                    owner, f"{page_url}/versions/{current['version_id']}/publish"
+                ).items()
+                if key != "result_hash"
+            },
+            "reason": "Missing merge result fingerprint",
             "expected_content_hash": current["content_hash"],
         },
     )
@@ -414,13 +436,13 @@ def _browser_save(client, page_url, value, key, body):
     response = client.post(
         f"{page_url}/autosave",
         json={
+            "version_id": value["version_id"],
             "body_md": body,
             "base_version_id": value["version_id"],
             "base_content_hash": value["content_hash"],
             "expected_editing_revision": value["editing_revision"],
             "session_version_id": value["version_id"],
             "idempotency_key": key,
-            "share_draft": True,
         },
     )
     return response
@@ -455,340 +477,6 @@ def _mcp_private_save(page_service, page_id, user_id, body, key):
     )
 
 
-def test_browser_save_keeps_the_same_users_mcp_edit_separate(page_service):
-    # Browser and MCP authentication resolve to the same human. The browser
-    # continues the shared draft line and keeps the MCP session separate.
-    owner = make_client(page_service)
-    page = create_published_page(
-        owner, page_service, title="Private edit", body_md="# Private edit"
-    )
-    target = create_published_page(
-        owner, page_service, title="Private source", body_md="# Private source"
-    )
-    page_url = f"{pages_url(page_service)}/{page['id']}"
-    user_id = _human_user_id(page_service)
-    edit = _mcp_private_save(
-        page_service,
-        page["id"],
-        user_id,
-        "# Private edit\n\nMCP private notes.",
-        "mcp-private-save",
-    )
-    editor = _editor_client(page_service, "private-edit-peer@example.com")
-    loaded = owner.get(page_url).json()["data"]
-    assert loaded["version_id"] == page["version_id"]
-
-    saved = _browser_save(
-        owner,
-        page_url,
-        loaded,
-        "browser-shared-save",
-        "# Private edit\n\nBrowser addition.",
-    )
-    assert saved.status_code == 200, saved.text
-    saved = saved.json()["data"]
-    assert saved["version_id"] not in {page["version_id"], str(edit.version_id)}
-    assert saved["version_status"] == "draft"
-    cited = owner.post(
-        f"{page_url}/references",
-        json={
-            "version_id": saved["version_id"],
-            "expected_editing_revision": saved["editing_revision"],
-            "idempotency_key": "browser-shared-reference",
-            "add": [{"target_kind": "context_page", "target_id": target["id"]}],
-        },
-    )
-    assert cited.status_code == 200, cited.text
-    assert cited.json()["data"]["publication_state"] == "draft"
-    peer = editor.get(page_url, params={"version_id": saved["version_id"]}).json()[
-        "data"
-    ]
-    assert peer["version_id"] == saved["version_id"]
-    assert "MCP private notes" not in peer["body_md"]
-
-    continued = page_service.autosave_page(
-        page_id=UUID(page["id"]),
-        workspace_id=UUID(default_workspace_id(page_service)),
-        title=None,
-        body_md="# Private edit\n\nMCP continues privately.",
-        actor_kind="human",
-        actor_id=user_id,
-        base_version_id=edit.version_id,
-        base_content_hash=edit.content_hash,
-        actor_provenance="oauth_client",
-        idempotency_key="mcp-private-continue",
-        expected_editing_revision=edit.editing_revision,
-        editing_version_id=edit.version_id,
-    )
-    assert continued.version_id == edit.version_id
-    assert continued.version_status == "editing"
-    assert (
-        editor.get(page_url, params={"version_id": saved["version_id"]}).json()["data"][
-            "version_id"
-        ]
-        == saved["version_id"]
-    )
-    # One draft line per page: the private edit cannot replace the pending
-    # shared draft by being submitted over it.
-    with pytest.raises(PageConflictError):
-        page_service.submit_context_edit_for_review(
-            page_id=UUID(page["id"]),
-            version_id=edit.version_id,
-            workspace_id=UUID(default_workspace_id(page_service)),
-            actor_kind="human",
-            actor_id=user_id,
-            actor_provenance="oauth_client",
-            expected_editing_revision=continued.editing_revision,
-            idempotency_key="mcp-private-submit",
-        )
-    assert (
-        editor.get(page_url, params={"version_id": saved["version_id"]}).json()["data"][
-            "version_id"
-        ]
-        == saved["version_id"]
-    )
-
-
-def test_browser_keeps_an_opened_edit_owned_until_review(page_service):
-    # The browser resumes its author's MCP session. Other editors can read it;
-    # saving and references keep its editing state until review is requested.
-    owner = make_client(page_service)
-    target = create_published_page(
-        owner, page_service, title="Opened source", body_md="# Opened source"
-    )
-    user_id = _human_user_id(page_service)
-    created = page_service.create_page_first(
-        workspace_slug="default",
-        actor_kind="human",
-        actor_id=user_id,
-        actor_provenance="oauth_client",
-        title="MCP page",
-        body_md="# MCP page\n\nMCP private notes.",
-    )
-    page_url = f"{pages_url(page_service)}/{created.id}"
-    editor = _editor_client(page_service, "opened-edit-peer@example.com")
-    loaded = owner.get(page_url).json()["data"]
-    assert loaded["version_id"] == str(created.version_id)
-    assert loaded["version_status"] == "editing"
-    assert loaded["can_submit_for_review"] is True
-
-    saved = _browser_save(
-        owner,
-        page_url,
-        loaded,
-        "browser-opened-save",
-        loaded["body_md"] + "\n\nBrowser addition.",
-    )
-    assert saved.status_code == 200, saved.text
-    saved = saved.json()["data"]
-    assert saved["version_id"] == str(created.version_id)
-    assert saved["version_status"] == "editing"
-    cited = owner.post(
-        f"{page_url}/references",
-        json={
-            "version_id": saved["version_id"],
-            "expected_editing_revision": saved["editing_revision"],
-            "idempotency_key": "browser-opened-reference",
-            "add": [{"target_kind": "context_page", "target_id": target["id"]}],
-        },
-    )
-    assert cited.status_code == 200, cited.text
-    assert cited.json()["data"]["publication_state"] == "editing"
-    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
-
-    submitted = owner.post(
-        f"{page_url}/submit-for-review",
-        json={
-            "version_id": saved["version_id"],
-            "expected_editing_revision": cited.json()["data"]["editing_revision"],
-            "idempotency_key": "browser-opened-review",
-        },
-    )
-    assert submitted.status_code == 200, submitted.text
-    assert submitted.json()["data"]["can_submit_for_review"] is False
-    assert editor.get(page_url).json()["data"]["version_id"] == saved["version_id"]
-
-
-def test_private_mcp_save_neither_hides_nor_blocks_shared_drafts(page_service):
-    owner = make_client(page_service)
-    page = create_published_page(
-        owner, page_service, title="Shared line", body_md="# Shared line"
-    )
-    page_url = f"{pages_url(page_service)}/{page['id']}"
-    user_id = _human_user_id(page_service)
-    author = _editor_client(page_service, "shared-line-author@example.com")
-    reader = _editor_client(page_service, "shared-line-reader@example.com")
-
-    # A private save on a published page leaves every other editor able to
-    # start a shared draft from the version they can read.
-    edit = _mcp_private_save(
-        page_service, page["id"], user_id, "# Shared line\n\nMCP one.", "mcp-one"
-    )
-    loaded = author.get(page_url).json()["data"]
-    assert loaded["version_id"] == page["version_id"]
-    first = _browser_save(
-        author, page_url, loaded, "author-first", "# Shared line\n\nAuthor draft."
-    )
-    assert first.status_code == 200, first.text
-    draft = first.json()["data"]
-    assert draft["version_status"] == "draft"
-    assert (
-        reader.get(page_url, params={"version_id": draft["version_id"]}).json()["data"][
-            "version_id"
-        ]
-        == draft["version_id"]
-    )
-
-    # Saving the private edit again neither hides that shared draft nor stops
-    # its author from continuing it.
-    page_service.autosave_page(
-        page_id=UUID(page["id"]),
-        workspace_id=UUID(default_workspace_id(page_service)),
-        title=None,
-        body_md="# Shared line\n\nMCP two.",
-        actor_kind="human",
-        actor_id=user_id,
-        base_version_id=edit.version_id,
-        base_content_hash=edit.content_hash,
-        actor_provenance="oauth_client",
-        idempotency_key="mcp-two",
-        expected_editing_revision=edit.editing_revision,
-        editing_version_id=edit.version_id,
-    )
-    assert (
-        reader.get(page_url, params={"version_id": draft["version_id"]}).json()["data"][
-            "version_id"
-        ]
-        == draft["version_id"]
-    )
-    second = _browser_save(
-        author, page_url, draft, "author-second", "# Shared line\n\nAuthor again."
-    )
-    assert second.status_code == 200, second.text
-    assert second.json()["data"]["version_id"] == draft["version_id"]
-    with page_service.session_factory() as session:
-        stored = session.get(ContextPage, UUID(page["id"]))
-        assert stored.latest_draft_version_id == UUID(draft["version_id"])
-        private = session.get(ContextPageVersion, edit.version_id)
-        assert private.version_status == "editing"
-
-
-def test_shared_save_starts_from_the_readable_head_over_a_foreign_private_pointer(
-    page_service,
-):
-    # Rows written before private saves stopped moving the page pointers can
-    # still leave them on one author's private edit. Other editors start from
-    # the version they can read instead of failing as stale.
-    owner = make_client(page_service)
-    page = create_published_page(
-        owner, page_service, title="Legacy pointer", body_md="# Legacy pointer"
-    )
-    page_url = f"{pages_url(page_service)}/{page['id']}"
-    edit = _mcp_private_save(
-        page_service,
-        page["id"],
-        _human_user_id(page_service),
-        "# Legacy pointer\n\nMCP private notes.",
-        "legacy-mcp",
-    )
-    with page_service.session_factory() as session:
-        stored = session.get(ContextPage, UUID(page["id"]))
-        stored.current_version_id = edit.version_id
-        stored.latest_draft_version_id = edit.version_id
-        session.commit()
-    editor = _editor_client(page_service, "legacy-pointer-editor@example.com")
-    loaded = editor.get(page_url).json()["data"]
-    assert loaded["version_id"] == page["version_id"]
-
-    saved = _browser_save(
-        editor, page_url, loaded, "legacy-editor", "# Legacy pointer\n\nEditor."
-    )
-    assert saved.status_code == 200, saved.text
-    saved = saved.json()["data"]
-    assert saved["parent_version_id"] == page["version_id"]
-    assert "MCP private notes" not in saved["body_md"]
-    assert (
-        editor.get(page_url, params={"version_id": saved["version_id"]}).json()["data"][
-            "version_id"
-        ]
-        == saved["version_id"]
-    )
-
-
-def test_only_the_author_can_request_review_of_a_shared_browser_draft(page_service):
-    owner = make_client(page_service)
-    base = pages_url(page_service)
-    created = owner.post(
-        base,
-        json={"title": "Shared review", "body_md": "# Shared", "share_draft": True},
-    )
-    assert created.status_code == 201, created.text
-    draft = created.json()["data"]
-    assert draft["can_submit_for_review"] is True
-    page_url = f"{base}/{draft['id']}"
-    assert owner.get(page_url).json()["data"]["can_submit_for_review"] is True
-    editor = make_client(page_service, authenticated=False)
-    authenticate_test_client_in_workspace(
-        editor,
-        page_service.session_factory,
-        email="shared-review-peer@example.com",
-        role="editor",
-    )
-    shared = editor.get(page_url).json()["data"]
-    assert shared["version_id"] == draft["version_id"]
-    assert shared["can_submit_for_review"] is False
-    review = {
-        "version_id": draft["version_id"],
-        "expected_editing_revision": draft["editing_revision"],
-        "idempotency_key": "shared-review-request",
-    }
-    # Not the editor's own open edit: refused with the editor's own state.
-    refused = editor.post(f"{page_url}/submit-for-review", json=review)
-    assert refused.status_code == 409, refused.text
-    assert refused.json()["error_code"] == "no_open_edit"
-
-    submitted = owner.post(f"{page_url}/submit-for-review", json=review)
-    assert submitted.status_code == 200, submitted.text
-    assert submitted.json()["data"]["can_submit_for_review"] is False
-    assert owner.get(page_url).json()["data"]["can_submit_for_review"] is False
-    replay = owner.post(f"{page_url}/submit-for-review", json=review)
-    assert replay.status_code == 200, replay.text
-    assert replay.json()["data"]["can_submit_for_review"] is False
-
-    # A later save forks the reviewed draft; the successor can be requested.
-    saved = owner.post(
-        f"{page_url}/autosave",
-        json={
-            "body_md": "# Shared\n\nRevised.",
-            "base_version_id": draft["version_id"],
-            "base_content_hash": draft["content_hash"],
-            "expected_editing_revision": draft["editing_revision"],
-            "session_version_id": draft["version_id"],
-            "idempotency_key": "shared-review-revise",
-            "share_draft": True,
-        },
-    )
-    assert saved.status_code == 200, saved.text
-    saved = saved.json()["data"]
-    assert saved["version_id"] != draft["version_id"]
-    assert saved["superseded_review_count"] == 1
-    assert saved["can_submit_for_review"] is True
-    replayed_save = owner.post(
-        f"{page_url}/autosave",
-        json={
-            "body_md": "# Shared\n\nRevised.",
-            "base_version_id": draft["version_id"],
-            "base_content_hash": draft["content_hash"],
-            "expected_editing_revision": draft["editing_revision"],
-            "session_version_id": draft["version_id"],
-            "idempotency_key": "shared-review-revise",
-            "share_draft": True,
-        },
-    )
-    assert replayed_save.status_code == 200, replayed_save.text
-    assert replayed_save.json()["data"]["can_submit_for_review"] is True
-
-
 def test_browser_owner_can_publish_its_active_page_first_editing_version(page_service):
     client = make_client(page_service)
     created = client.post(
@@ -799,7 +487,7 @@ def test_browser_owner_can_publish_its_active_page_first_editing_version(page_se
         },
     ).json()["data"]
 
-    assert created["version_status"] == "editing"
+    assert created["version_status"] == "draft"
     before = page_version_and_pointer_snapshot(page_service, UUID(created["id"]))
     assert before[0] == (UUID(created["version_id"]), None, None)
 
@@ -818,146 +506,6 @@ def test_browser_owner_can_publish_its_active_page_first_editing_version(page_se
         assert page.current_published_version_id == version.id
         assert page.latest_draft_version_id is None
         assert version.version_status == "published_snapshot"
-
-
-def test_browser_cannot_publish_another_actors_private_editing_version(page_service):
-    owner = make_client(page_service)
-    created = owner.post(
-        pages_url(page_service),
-        json={
-            "title": "Foreign private edit",
-            "body_md": "# Foreign private edit\n\nOwner only.",
-        },
-    ).json()["data"]
-    page_id = UUID(created["id"])
-    before = page_version_and_pointer_snapshot(page_service, page_id)
-
-    with pytest.raises(StaleContextDraftError):
-        page_service.publish_draft(
-            page_id=page_id,
-            version_id=UUID(created["version_id"]),
-            reason="foreign editor guessed the version",
-            publish_despite_findings=False,
-            actor_kind="human",
-            actor_id=str(uuid4()),
-            actor_provenance="browser_session",
-            expected_content_hash=created["content_hash"],
-            expected_references_hash=created["references_hash"],
-        )
-
-    assert page_version_and_pointer_snapshot(page_service, page_id) == before
-
-
-def test_non_browser_actor_cannot_direct_publish_its_editing_version(page_service):
-    client = make_client(page_service)
-    actor_id = client.get("/api/v1/auth/me").json()["data"]["user_id"]
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "No direct bearer publish",
-            "body_md": "# Bearer-owned private edit\n\nKeep staged.",
-        },
-    ).json()["data"]
-    page_id = UUID(created["id"])
-    before = page_version_and_pointer_snapshot(page_service, page_id)
-
-    # Each refusal leaves the editing version exactly as it was, so one page
-    # serves every non-browser provenance in turn.
-    for actor_provenance in ("personal_access_token", "oauth_client", "mcp_client"):
-        with pytest.raises(StaleContextDraftError):
-            page_service.publish_draft(
-                page_id=page_id,
-                version_id=UUID(created["version_id"]),
-                reason="non-browser direct publish",
-                publish_despite_findings=False,
-                actor_kind="human",
-                actor_id=actor_id,
-                actor_provenance=actor_provenance,
-                expected_content_hash=created["content_hash"],
-                expected_references_hash=created["references_hash"],
-            )
-
-        assert page_version_and_pointer_snapshot(page_service, page_id) == before, (
-            actor_provenance
-        )
-
-
-def test_browser_editing_publish_does_not_replace_a_competing_submitted_draft(
-    page_service,
-):
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Competing submitted draft",
-            "body_md": "# Private editing version\n\nDo not publish over review.",
-        },
-    ).json()["data"]
-    page_id = UUID(created["id"])
-    with page_service.session_factory.begin() as session:
-        page = session.get(ContextPage, page_id)
-        assert page is not None
-        competing_body = "# Submitted draft\n\nAwaiting review."
-        fixture_actor_id = str(uuid4())
-        competing = context_page_repo.insert_version(
-            session,
-            page_id=page.id,
-            parent_version_id=None,
-            body=prepare_context_body(
-                session,
-                page_id=page.id,
-                body_md=competing_body,
-                actor_kind="human",
-                actor_id=fixture_actor_id,
-            ),
-            actor_kind="human",
-            actor_id=fixture_actor_id,
-            version_status="draft",
-        )
-        page.latest_draft_version_id = competing.id
-        competing_id = competing.id
-    before = page_version_and_pointer_snapshot(page_service, page_id)
-
-    response = _publish_created_version(client, page_service, created)
-
-    assert response.status_code == 409, response.text
-    assert response.json()["error_code"] == "stale_context_draft"
-    assert page_version_and_pointer_snapshot(page_service, page_id) == before
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, page_id)
-        assert page is not None
-        assert page.latest_draft_version_id == competing_id
-
-
-def test_failed_browser_editing_publish_rolls_back_the_state_bridge(page_service):
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Malformed direct publish",
-            "body_md": "# Malformed direct publish\n\n```python\nprint('open')",
-        },
-    ).json()["data"]
-    page_id = UUID(created["id"])
-    before = page_version_and_pointer_snapshot(page_service, page_id)
-
-    blocked = _publish_created_version(client, page_service, created)
-
-    assert blocked.status_code == 403, blocked.text
-    assert blocked.json()["error_code"] == "rejected_by_policy"
-    assert page_version_and_pointer_snapshot(page_service, page_id) == before
-
-    overridden = _publish_created_version(
-        client,
-        page_service,
-        created,
-        publish_despite_findings=True,
-    )
-    assert overridden.status_code == 200, overridden.text
-    assert (
-        overridden.json()["data"]["current_published_version_id"]
-        == created["version_id"]
-    )
 
 
 def canonical_not_found_bytes(response) -> bytes:
@@ -1040,6 +588,7 @@ def test_pages_api_update_and_autosave_reject_unsafe_media_without_mutation(
     draft_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
         json={
+            "version_id": created["version_id"],
             "idempotency_key": "t-12",
             "title": created["title"],
             "body_md": "# Safe draft body",
@@ -1112,6 +661,7 @@ def test_pages_api_update_and_autosave_reject_unsafe_media_without_mutation(
     autosave_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
         json={
+            "version_id": draft["version_id"],
             "idempotency_key": "t-13",
             "title": created["title"],
             "body_md": unsafe_body,
@@ -1202,72 +752,8 @@ def test_pages_api_restore_rejects_unsafe_legacy_version_without_mutation(
     )
 
 
-def test_pages_api_stale_autosave_preserve_rejects_unsafe_media_without_mutation(
-    page_service,
-):
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Unsafe media stale autosave",
-            "body_md": "# Safe original body",
-        },
-    ).json()["data"]
-    current = client.patch(
-        f"{pages_url(page_service)}/{created['id']}",
-        json={
-            "title": created["title"],
-            "body_md": "# Safe current body",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-        },
-    ).json()["data"]
-    page_id = UUID(created["id"])
-    before = page_version_and_pointer_snapshot(page_service, page_id)
-
-    invalid_base = client.post(
-        f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={
-            "idempotency_key": "t-14-invalid-base",
-            "title": created["title"],
-            "body_md": "![inline](data:image/png;base64,aGVsbG8=)",
-            "base_version_id": created["version_id"],
-            "base_content_hash": "0" * 64,
-            "expected_editing_revision": created["editing_revision"],
-            "on_stale": "preserve_as_alternative",
-        },
-    )
-    assert invalid_base.status_code == 409, invalid_base.text
-    assert page_version_and_pointer_snapshot(page_service, page_id) == before
-
-    response = client.post(
-        f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={
-            "idempotency_key": "t-14",
-            "title": created["title"],
-            "body_md": "![inline](data:image/png;base64,aGVsbG8=)",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-            "on_stale": "preserve_as_alternative",
-        },
-    )
-
-    assert_media_markdown_policy_error(response)
-    assert page_version_and_pointer_snapshot(page_service, page_id) == before
-    assert before[0] == (
-        UUID(current["version_id"]),
-        UUID(current["version_id"]),
-        None,
-    )
-
-
 def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
-    """autosave_page reuses the caller's own in-progress row in place across
-    repeated calls, rather than minting a new version each time. The row
-    stays "editing" through any number of autosaves (P8.1) -- an ordinary
-    autosave is not an implicit submit; only an explicit
-    submit-for-review call may flip it to "draft"."""
+    """Autosaves and durable receipt retries preserve the selected shared row."""
 
     client = make_client(page_service)
     created = client.post(
@@ -1278,6 +764,7 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
 
     autosave_url = f"{pages_url(page_service)}/{page_id}/autosave"
     first_request = {
+        "version_id": created["version_id"],
         "idempotency_key": "t-15",
         "title": created["title"],
         "body_md": "# First autosave\n",
@@ -1288,11 +775,12 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
     first = client.post(autosave_url, json=first_request)
     assert first.status_code == 200, first.text
     first_data = first.json()["data"]
-    assert first_data["version_status"] == "editing"
+    assert first_data["version_status"] == "draft"
 
     second = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
         json={
+            "version_id": first_data["version_id"],
             "idempotency_key": "t-16",
             "title": created["title"],
             "body_md": "# Second autosave\n",
@@ -1326,6 +814,7 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
     missing_retry = client.post(
         autosave_url,
         json={
+            "version_id": second_data["version_id"],
             **first_request,
             "idempotency_key": "never-sent-autosave",
             "body_md": "# Must not autosave\n",
@@ -1355,10 +844,7 @@ def test_autosave_resumes_the_same_row_instead_of_duplicating(page_service):
 def test_begin_context_edit_gives_each_author_an_independent_readable_row(
     page_service,
 ):
-    """P8.1/P8.3/P8.4: each author's `begin-edit` opens its own private
-    "editing" row (enforced by uq_cpv_current_editing_per_author), and no
-    other author -- reader or would-be hijacker -- can see it, read it by
-    exact id, or act on it by naming its version_id."""
+    """Beginning twice from a commit creates two independently shared drafts."""
 
     owner_client = make_client(page_service)
     # Independent authors each own a session based on the published page.
@@ -1394,7 +880,7 @@ def test_begin_context_edit_gives_each_author_an_independent_readable_row(
         editing_rows = session.scalars(
             select(ContextPageVersion).where(
                 ContextPageVersion.page_id == UUID(page_id),
-                ContextPageVersion.version_status == "editing",
+                ContextPageVersion.version_status == "draft",
             )
         ).all()
     assert len(editing_rows) == 2
@@ -1407,176 +893,23 @@ def test_begin_context_edit_gives_each_author_an_independent_readable_row(
     assert forbidden.status_code == 200
     assert forbidden.json()["data"]["draft"]["is_editing"] is True
 
-    # Naming the owner's real editing version_id in a mutation is refused
-    # with the caller's OWN open edit, exactly as a made-up id is, so the
-    # answer never confirms that the owner's id exists (P2.2/P2.6).
-    def _refusal(version_id, key, action, **extra):
-        response = other_client.post(
-            f"{pages_url(page_service)}/{page_id}/{action}",
-            json={"idempotency_key": key, "version_id": version_id, **extra},
-        )
-        body = response.json()
-        return response.status_code, body["error_code"], body["server_version_id"]
-
-    own = (409, "editing_revision_conflict", other_editing["version_id"])
-    submit_extra = {"expected_editing_revision": 1}
-    assert (
-        _refusal(owner_version_id, "t-19", "submit-for-review", **submit_extra) == own
-    )
-    assert _refusal(str(uuid4()), "t-19b", "submit-for-review", **submit_extra) == own
-    assert _refusal(owner_version_id, "t-20", "discard-edit") == own
-
-    with page_service.session_factory() as session:
-        untouched = session.get(ContextPageVersion, UUID(owner_version_id))
-    assert untouched.version_status == "editing"
-    assert untouched.body_md == "# Shared Editing Target\n\nPublished body."
-
-
-def test_second_editors_own_save_lands_on_their_own_row_not_the_first_drafts(
-    page_service,
-):
-    """P8.4: `autosave_page` must resolve "the version to edit" per-actor
-    once that actor has an open editing row -- `editable_context_version_id`'s
-    page-global pointer alone would collide a second author's own save onto
-    the first author's still-open row."""
-
-    owner_client = make_client(page_service)
-    created = create_published_page(
-        owner_client,
-        page_service,
-        title="Two Editor Target",
-        body_md="# Two Editor Target\n\nPublished body.",
-    )
-    page_id = created["id"]
-
-    owner_editing = owner_client.post(
-        f"{pages_url(page_service)}/{page_id}/begin-edit",
-        json={"idempotency_key": "t-21"},
-    ).json()["data"]
-
-    other_client = make_client(page_service, authenticated=False)
-    authenticate_test_client_in_workspace(
-        other_client,
-        page_service.session_factory,
-        email="second-editor@example.com",
-        role="editor",
-    )
-    other_editing = other_client.post(
-        f"{pages_url(page_service)}/{page_id}/begin-edit",
-        json={"idempotency_key": "t-22"},
-    ).json()["data"]
-
-    other_saved = other_client.post(
-        f"{pages_url(page_service)}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-23",
-            "body_md": "# Two Editor Target\n\nSecond editor's own edit.",
-            "base_version_id": other_editing["version_id"],
-            "base_content_hash": other_editing["content_hash"],
-            "expected_editing_revision": other_editing["editing_revision"],
-        },
-    )
-    assert other_saved.status_code == 200, other_saved.text
-    other_saved_data = other_saved.json()["data"]
-    assert other_saved_data["version_id"] == other_editing["version_id"]
-    assert other_saved_data["version_status"] == "editing"
-
-    with page_service.session_factory() as session:
-        owner_row = session.get(ContextPageVersion, UUID(owner_editing["version_id"]))
-        other_row = session.get(ContextPageVersion, UUID(other_editing["version_id"]))
-    assert owner_row.body_md == "# Two Editor Target\n\nPublished body."
-    assert other_row.body_md == "# Two Editor Target\n\nSecond editor's own edit."
-
-
-def test_second_authors_submit_conflicts_instead_of_orphaning_the_first_draft(
-    page_service,
-):
-    """P8.2 mitigation: `page.latest_draft_version_id` is still a
-    page-global pointer (full removal is out of scope this pass). A second
-    author's `submit-for-review` must not silently steal it out from under
-    a first author's still-pending draft -- that would make
-    `assert_context_publish_candidate(require_latest_draft=True)` and
-    ReviewService's supersession check treat the first, still-unreviewed
-    submission as stale. It must conflict instead, leaving the first
-    author's draft publishable."""
-
-    owner_client = make_client(page_service)
-    created = owner_client.post(
-        pages_url(page_service),
-        json={
-            "title": "Concurrent Submit Target",
-            "body_md": "# Concurrent Submit Target\n\nPublished body.",
-        },
-    ).json()["data"]
-    page_id = created["id"]
-    with page_service.session_factory() as session:
-        workspace_id = str(
-            session.scalar(select(Workspace.id).where(Workspace.slug == "default"))
-        )
-
-    owner_editing = owner_client.post(
-        f"{pages_url(page_service)}/{page_id}/begin-edit",
-        json={"idempotency_key": "t-24"},
-    ).json()["data"]
-    owner_submitted = owner_client.post(
+    # A shared row can be reviewed by either editor, independently from the
+    # second draft opened from the same immutable published snapshot.
+    submitted = other_client.post(
         f"{pages_url(page_service)}/{page_id}/submit-for-review",
         json={
-            "idempotency_key": "t-25",
-            "version_id": owner_editing["version_id"],
+            "idempotency_key": "t-19",
+            "version_id": owner_version_id,
             "expected_editing_revision": owner_editing["editing_revision"],
         },
     )
-    assert owner_submitted.status_code == 200, owner_submitted.text
-    owner_submitted_data = owner_submitted.json()["data"]
-    assert owner_submitted_data["version_status"] == "draft"
-
-    other_client = make_client(page_service, authenticated=False)
-    authenticate_test_client_in_workspace(
-        other_client,
-        page_service.session_factory,
-        email="second-submitter@example.com",
-        role="editor",
-    )
-    other_editing = other_client.post(
-        f"{pages_url(page_service)}/{page_id}/begin-edit",
-        json={"idempotency_key": "t-26"},
-    ).json()["data"]
-    other_submitted = other_client.post(
-        f"{pages_url(page_service)}/{page_id}/submit-for-review",
-        json={
-            "idempotency_key": "t-27",
-            "version_id": other_editing["version_id"],
-            "expected_editing_revision": other_editing["editing_revision"],
-        },
-    )
-    assert other_submitted.status_code == 409, other_submitted.text
-
-    # The first author's draft is untouched and still points at it.
+    assert submitted.status_code == 200, submitted.text
     with page_service.session_factory() as session:
-        page = session.get(ContextPage, UUID(page_id))
-        assert page.latest_draft_version_id == UUID(owner_submitted_data["version_id"])
-        owner_row = session.get(
-            ContextPageVersion, UUID(owner_submitted_data["version_id"])
-        )
-        assert owner_row.version_status == "draft"
-
-    review_item_id = owner_submitted_data["review_item_id"]
-    if review_item_id:
-        decision = other_client.post(
-            f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decision",
-            json={"decision_type": "approve"},
-        )
-        assert decision.status_code == 200, decision.text
-
-    published = owner_client.post(
-        f"{pages_url(page_service)}/{page_id}/versions/{owner_submitted_data['version_id']}/publish",
-        json={
-            "reason": "ship it",
-            "expected_content_hash": owner_submitted_data["content_hash"],
-            "expected_references_hash": owner_submitted_data["references_hash"],
-        },
-    )
-    assert published.status_code == 200, published.text
+        reviewed = session.get(ContextPageVersion, UUID(owner_version_id))
+        other_draft = session.get(ContextPageVersion, UUID(other_editing["version_id"]))
+        assert reviewed.version_status == "draft"
+        assert reviewed.body_md == "# Shared Editing Target\n\nPublished body."
+        assert other_draft.version_status == "draft"
 
 
 def test_editing_full_flow_begin_save_submit_publish(page_service):
@@ -1624,13 +957,23 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
     if baseline_review_item_id:
         baseline_decision = other_client.post(
             f"/api/v1/workspaces/{workspace_id}/reviews/{baseline_review_item_id}/decision",
-            json={"decision_type": "approve"},
+            json={
+                "decision_type": "approve",
+                **review_preview_binding(
+                    other_client,
+                    f"{pages_url(page_service)}/{page_id}/versions/{created['version_id']}/publish",
+                ),
+            },
         )
         assert baseline_decision.status_code == 200, baseline_decision.text
 
     baseline_published = client.post(
         f"{pages_url(page_service)}/{page_id}/versions/{created['version_id']}/publish",
         json={
+            **merge_preview_binding(
+                client,
+                f"{pages_url(page_service)}/{page_id}/versions/{created['version_id']}/publish",
+            ),
             "reason": "seed baseline",
             "expected_content_hash": created["content_hash"],
             "expected_references_hash": created["references_hash"],
@@ -1657,6 +1000,7 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
     saved = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
         json={
+            "version_id": editing_version_id,
             "idempotency_key": "t-29",
             "body_md": "# Full Flow Target\n\nEdited body.",
             "base_version_id": editing_version_id,
@@ -1668,12 +1012,13 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
     saved_data = saved.json()["data"]
     assert saved_data["body_md"] == "# Full Flow Target\n\nEdited body."
     assert saved_data["version_id"] == editing_version_id
-    assert saved_data["version_status"] == "editing"
+    assert saved_data["version_status"] == "draft"
 
     # A stale expected_editing_revision must conflict, not silently apply.
     stale = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
         json={
+            "version_id": editing_version_id,
             "idempotency_key": "t-30",
             "body_md": "# Full Flow Target\n\nShould not land.",
             "base_version_id": editing_version_id,
@@ -1687,7 +1032,7 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
         editing_row = session.get(ContextPageVersion, UUID(editing_version_id))
         current_revision = editing_row.editing_revision
         assert editing_row.body_md == "# Full Flow Target\n\nEdited body."
-        assert editing_row.version_status == "editing"
+        assert editing_row.version_status == "draft"
 
     # Still invisible to the other editor -- editing, not yet submitted.
     still_hidden = other_client.get(f"{pages_url(page_service)}/{page_id}").json()[
@@ -1721,7 +1066,13 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
     if review_item_id:
         decision = other_client.post(
             f"/api/v1/workspaces/{workspace_id}/reviews/{review_item_id}/decision",
-            json={"decision_type": "approve"},
+            json={
+                "decision_type": "approve",
+                **review_preview_binding(
+                    other_client,
+                    f"{pages_url(page_service)}/{page_id}/versions/{editing_version_id}/publish",
+                ),
+            },
         )
         assert decision.status_code == 200, decision.text
 
@@ -1742,6 +1093,10 @@ def test_editing_full_flow_begin_save_submit_publish(page_service):
     published = client.post(
         f"{pages_url(page_service)}/{page_id}/versions/{editing_version_id}/publish",
         json={
+            **merge_preview_binding(
+                client,
+                f"{pages_url(page_service)}/{page_id}/versions/{editing_version_id}/publish",
+            ),
             "reason": "ship it",
             "expected_content_hash": saved_data["content_hash"],
             "expected_references_hash": saved_data["references_hash"],
@@ -1844,7 +1199,7 @@ def test_page_first_creation_defaults_title_slug_and_allows_empty_body(page_serv
     assert first_data["title"] == "제목 없음"
     assert first_data["slug"] == f"p-{first_data['id']}"
     assert first_data["body_md"] == ""
-    assert first_data["version_status"] == "editing"
+    assert first_data["version_status"] == "draft"
     # The workspace-scoped REST service must use the container's extra module.
     assert ("", UUID(first_data["workspace_id"])) in checked_bodies
 
@@ -1930,13 +1285,14 @@ def test_page_first_creation_is_readable_by_other_editors(
     assert forbidden_list.status_code == 200
     assert page_id in {p["id"] for p in forbidden_list.json()["data"]}
 
-    # Reading another author's work does not adopt their writing session.
+    # The other editor resumes the same shared draft explicitly.
     before = page_version_and_pointer_snapshot(page_service, UUID(page_id))
     forbidden_begin = other_client.post(
         f"{pages_url(page_service)}/{page_id}/begin-edit",
-        json={"idempotency_key": "private-page-cannot-be-forked"},
+        json={"from": created["version_id"], "idempotency_key": "resume-shared-page"},
     )
-    assert forbidden_begin.status_code == 404, forbidden_begin.text
+    assert forbidden_begin.status_code == 200, forbidden_begin.text
+    assert forbidden_begin.json()["data"]["version_id"] == created["version_id"]
     assert page_version_and_pointer_snapshot(page_service, UUID(page_id)) == before
 
     own_read = owner_client.get(f"{pages_url(page_service)}/{page_id}")
@@ -1944,339 +1300,34 @@ def test_page_first_creation_is_readable_by_other_editors(
     assert own_read.json()["data"]["title"] == "Never Published"
 
 
-def test_patch_conflict_response_never_discloses_another_authors_private_editing_row(
-    page_service,
-):
-    """P2.2/P2.6: `_validate_base` resolves `current` from the page-global
-    `current_version_id`/`latest_draft_version_id` pointer with no actor
-    check (both `write_page` and `update_page` are intentionally not
-    actor-scoped -- see their own comments). Since P8.1 that pointer can
-    durably name another author's private "editing" row. Before this fix,
-    ANY editor triggering a stale-base 409 against such a page learned that
-    private row's exact `version_id` and `content_hash` from the conflict
-    response itself -- a disclosure, independent of whether the write could
-    ever succeed."""
-
-    owner_client = make_client(page_service)
-    workspace_id = default_workspace_id(page_service)
-    pages_url = f"/api/v1/workspaces/{workspace_id}/context/pages"
-    created = owner_client.post(
-        pages_url,
-        json={"title": "Patch Conflict Race"},
-    ).json()["data"]
-    page_id = created["id"]
-
-    owner_saved = owner_client.post(
-        f"{pages_url}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-34",
-            "body_md": "# Patch Conflict Race\n\nOwner's private in-progress body.",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    )
-    assert owner_saved.status_code == 200, owner_saved.text
-    owner_version_id = owner_saved.json()["data"]["version_id"]
-    owner_content_hash = owner_saved.json()["data"]["content_hash"]
-
-    other_client = make_client(page_service, authenticated=False)
-    authenticate_test_client_in_workspace(
-        other_client,
-        page_service.session_factory,
-        email="patch-conflict-other@example.com",
-        role="editor",
-    )
-
-    conflicted = other_client.patch(
-        f"{pages_url}/{page_id}",
-        json={
-            "title": "Patch Conflict Race",
-            "body_md": "# Patch Conflict Race\n\nSomeone else's guess.",
-            # A real, existing version id -- the page's original head, now
-            # stale -- not a random UUID, so this exercises the "current
-            # mismatches the caller's base" conflict branch rather than the
-            # earlier "base version does not exist at all" 404 branch.
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-        },
-    )
-    assert conflicted.status_code == 409, conflicted.text
-    conflict_body = conflicted.json()
-    assert conflict_body.get("server_version_id") is None
-    assert conflict_body.get("server_content_hash") is None
-    assert conflict_body.get("server_version_id") != owner_version_id
-    assert conflict_body.get("server_content_hash") != owner_content_hash
-
-
-def test_autosave_session_version_mismatch_never_discloses_another_authors_editing_row(
-    page_service,
-):
-    """A DIFFERENT leak site than the one above: `autosave_page`'s
-    `session_version_id`-mismatch branch (the "was my session's rejected
-    draft resumed by someone else" check) raised its own PageConflictError
-    directly, bypassing `_validate_base`'s masking entirely. An actor with
-    no editing row of their own resolves `current` via the page-global
-    pointer fallback -- which can durably name a different author's private
-    "editing" row -- and naming that row's id/hash back to a non-owning
-    caller here was the same P2.2/P2.6 disclosure, through a different
-    branch than the one covered above."""
-
-    owner_client = make_client(page_service)
-    workspace_id = default_workspace_id(page_service)
-    pages_url = f"/api/v1/workspaces/{workspace_id}/context/pages"
-    created = owner_client.post(
-        pages_url,
-        json={"title": "Session Mismatch Race"},
-    ).json()["data"]
-    page_id = created["id"]
-
-    owner_saved = owner_client.post(
-        f"{pages_url}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-session-mismatch",
-            "body_md": "# Session Mismatch Race\n\nOwner's private in-progress body.",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    )
-    assert owner_saved.status_code == 200, owner_saved.text
-    owner_version_id = owner_saved.json()["data"]["version_id"]
-    owner_content_hash = owner_saved.json()["data"]["content_hash"]
-
-    # A second, unrelated version on the same page so `session_version_id`
-    # below names a real row (avoiding the earlier 404 branch) that is
-    # neither the owner's live editing row nor anything the other actor
-    # could legitimately resume.
-    with page_service.session_factory.begin() as session:
-        page = session.get(ContextPage, UUID(page_id))
-        unrelated_version = context_page_repo.insert_version(
-            session,
-            page_id=page.id,
-            parent_version_id=UUID(owner_version_id),
-            body=prepare_context_body(
-                session,
-                page_id=page.id,
-                body_md="# Unrelated historical body",
-                actor_kind="human",
-                actor_id="00000000-0000-0000-0000-0000000000aa",
-            ),
-            actor_kind="human",
-            actor_id="00000000-0000-0000-0000-0000000000aa",
-            version_status="discarded",
-        )
-        unrelated_version_id = str(unrelated_version.id)
-
-    other_client = make_client(page_service, authenticated=False)
-    authenticate_test_client_in_workspace(
-        other_client,
-        page_service.session_factory,
-        email="session-mismatch-other@example.com",
-        role="editor",
-    )
-
-    conflicted = other_client.post(
-        f"{pages_url}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-session-mismatch-other",
-            "body_md": "# Session Mismatch Race\n\nSomeone else's guess.",
-            "base_version_id": unrelated_version_id,
-            "base_content_hash": calculate_content_hash("# Unrelated historical body"),
-            "expected_editing_revision": 1,
-            "session_version_id": unrelated_version_id,
-        },
-    )
-
-    # The page's only version is the owner's private edit, so this actor has
-    # no readable version to save onto: the save is not found rather than a
-    # conflict against the owner's row. Either way nothing of it is disclosed.
-    assert conflicted.status_code == 404, conflicted.text
-    conflict_body = conflicted.json()
-    assert conflict_body.get("server_version_id") is None
-    assert conflict_body.get("server_content_hash") is None
-    assert conflict_body.get("server_version_id") != owner_version_id
-    assert conflict_body.get("server_content_hash") != owner_content_hash
-
-
-def test_publish_hash_mismatch_never_discloses_a_foreign_authors_private_editing_row(
-    page_service,
-):
-    """A THIRD leak site, same P2.2/P2.6 class as the two tests above but on
-    the publish path: `PageService.publish_draft`'s own `expected_content_
-    hash` mismatch check raised a raw `PageConflictError(server_version_id=
-    staged.id, server_content_hash=staged.content_hash)` naming whatever row
-    `version_id` (a caller-supplied path parameter) resolves to, with no
-    check that the caller actually owns it and no version_status gate ahead
-    of it. Any workspace editor could name a foreign author's private
-    "editing" row's UUID here (if discovered) and force a wrong hash to
-    have its real id/content_hash echoed back in the 409 body -- the exact
-    disclosure `_disclosable_version_fields` exists to prevent everywhere
-    else."""
-
-    owner_client = make_client(page_service)
-    workspace_id = default_workspace_id(page_service)
-    pages_url = f"/api/v1/workspaces/{workspace_id}/context/pages"
-    created = owner_client.post(
-        pages_url,
-        json={"title": "Publish Hash Mismatch Race"},
-    ).json()["data"]
-    page_id = created["id"]
-
-    owner_saved = owner_client.post(
-        f"{pages_url}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-publish-hash-mismatch",
-            "body_md": (
-                "# Publish Hash Mismatch Race\n\nOwner's private in-progress body."
-            ),
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    )
-    assert owner_saved.status_code == 200, owner_saved.text
-    owner_version_id = owner_saved.json()["data"]["version_id"]
-    owner_content_hash = owner_saved.json()["data"]["content_hash"]
-
-    other_client = make_client(page_service, authenticated=False)
-    authenticate_test_client_in_workspace(
-        other_client,
-        page_service.session_factory,
-        email="publish-mismatch-other@example.com",
-        role="editor",
-    )
-
-    conflicted = other_client.post(
-        f"{pages_url}/{page_id}/versions/{owner_version_id}/publish",
-        json={
-            "reason": "not my draft",
-            "expected_content_hash": calculate_content_hash("wrong guess"),
-        },
-    )
-
-    assert conflicted.status_code == 409, conflicted.text
-    conflict_body = conflicted.json()
-    assert conflict_body.get("server_version_id") is None
-    assert conflict_body.get("server_content_hash") is None
-    assert conflict_body.get("server_version_id") != owner_version_id
-    assert conflict_body.get("server_content_hash") != owner_content_hash
-
-
-def test_editing_autosave_does_not_leak_into_the_page_name_index(page_service):
-    """P2.6/P8.4: search/link/autocomplete must not expose an unshared
-    "editing" row either -- `_name_index_live_versions` decided "draft"
-    scope purely from `current_version_id != current_published_version_id`,
-    with no `version_status` check, which was correct back when nothing but
-    "draft" could ever occupy that gap. Page-first creation puts a private
-    "editing" row directly behind `current_version_id` (with
-    `latest_draft_version_id` staying `None`), so that old heuristic would
-    reclassify a still-private autosave as globally role-visible "draft" --
-    P8.1's fix (autosave no longer eagerly promotes "editing" -> "draft")
-    is what makes this observable/testable again."""
-
-    from backend.services.indexing.doc_source import compose_context_page_doc_sources
-
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={},
-    ).json()["data"]
-    page_id = UUID(created["id"])
-    version_id = created["version_id"]
-
-    saved = client.post(
-        f"{pages_url(page_service)}/{page_id}/autosave",
-        json={
-            "idempotency_key": "t-35",
-            "title": "Zebra Confidential Draft Name",
-            "body_md": "# Zebra Confidential Draft Name\n\nNot shared yet.",
-            "base_version_id": version_id,
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    )
-    assert saved.status_code == 200, saved.text
-    saved_data = saved.json()["data"]
-    assert saved_data["version_status"] == "editing"
-
-    with page_service.session_factory() as session:
-        rows = session.scalars(
-            select(PageNameIndex).where(PageNameIndex.page_id == page_id)
-        ).all()
-    assert rows == [], (
-        "a still-private 'editing' autosave must not appear in the name "
-        f"index under any scope, found: {[(r.name, r.visibility_scope) for r in rows]}"
-    )
-    # Same id-only "draft" classification bug in doc_source.py's
-    # `_context_live_versions`: the FTS producer must not manufacture a
-    # "draft"-scoped document from the private editing row's body either.
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, page_id)
-        documents = compose_context_page_doc_sources(session, page)
-    assert documents == [], (
-        "a still-private 'editing' row must not produce any FTS doc source "
-        f"under any scope, found: {[(d.visibility_scope, d.body) for d in documents]}"
-    )
-
-    # The other side of the same fix: once the SAME row is legitimately
-    # submitted (no longer "editing"), it must actually appear under
-    # "draft" -- proving `_name_index_live_versions` excludes editing rows
-    # by checking their real status, not just by refusing to index this
-    # pointer shape at all.
-    submitted = client.post(
-        f"{pages_url(page_service)}/{page_id}/submit-for-review",
-        json={
-            "idempotency_key": "t-36",
-            "version_id": version_id,
-            "expected_editing_revision": saved_data["editing_revision"],
-        },
-    )
-    assert submitted.status_code == 200, submitted.text
-
-    with page_service.session_factory() as session:
-        rows_after_submit = session.scalars(
-            select(PageNameIndex).where(PageNameIndex.page_id == page_id)
-        ).all()
-    assert {(r.name, r.visibility_scope) for r in rows_after_submit} >= {
-        ("Zebra Confidential Draft Name", "draft"),
-        (created["slug"], "draft"),
-    }, [(r.name, r.visibility_scope) for r in rows_after_submit]
-
-
 def test_second_editing_session_does_not_contaminate_an_already_submitted_draft(
     page_service,
 ):
-    """A real Codex review found this by static tracing: `should_stage_page_
-    metadata` used to gate staging on `page.current_published_version_id is
-    not None`, treating "this page has never published" as "nothing to
-    protect." That was only true while the page had at most one live
-    version. Once a never-published page ALSO has an already-submitted
-    draft D, a second editing session E on the same page could still write
-    straight through to the shared `page.title`/`tags`/`aliases` columns --
-    the same columns D's own payload and name-index entry read verbatim,
-    since `should_stage_page_metadata(page, D)` used the SAME page-global
-    condition and would (wrongly) also see "never published" and skip
-    overlaying D's own staged patch. Already fixed (see
-    `should_stage_page_metadata`'s own docstring/comment) -- this proves it
-    through the live begin-edit/autosave/submit-for-review surface, not a
-    hand-built row, now that a second concurrent editing session is an
-    actually-reachable path (P8.3)."""
+    """Two drafts started from the same published version keep their own
+    metadata: a later draft E renaming the page must not change what the
+    already-submitted draft D reads, and the name index records E's title
+    against E only."""
 
     client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={"title": "Legit Public Title"},
+    published = create_published_page(
+        client,
+        page_service,
+        title="Legit Public Title",
+        body_md="# Legit Public Title\n\nPublished.",
+    )
+    page_id = published["id"]
+    begun_d = client.post(
+        f"{pages_url(page_service)}/{page_id}/begin-edit",
+        json={"idempotency_key": "t-37", "from": published["version_id"]},
     ).json()["data"]
-    page_id = created["id"]
-    d_version_id = created["version_id"]
+    d_version_id = begun_d["version_id"]
 
     submitted = client.post(
         f"{pages_url(page_service)}/{page_id}/submit-for-review",
         json={
             "idempotency_key": "t-38",
             "version_id": d_version_id,
-            "expected_editing_revision": created["editing_revision"],
+            "expected_editing_revision": begun_d["editing_revision"],
         },
     )
     assert submitted.status_code == 200, submitted.text
@@ -2291,6 +1342,7 @@ def test_second_editing_session_does_not_contaminate_an_already_submitted_draft(
     saved_e = client.post(
         f"{pages_url(page_service)}/{page_id}/autosave",
         json={
+            "version_id": e_version_id,
             "idempotency_key": "t-40",
             "title": "Confidential Second Session Title",
             "body_md": "# Confidential Second Session Title\n\nNot shared yet.",
@@ -2322,8 +1374,10 @@ def test_second_editing_session_does_not_contaminate_an_already_submitted_draft(
         index_rows = session.scalars(
             select(PageNameIndex).where(PageNameIndex.page_id == UUID(page_id))
         ).all()
-    assert not any(
-        row.name == "Confidential Second Session Title" for row in index_rows
+    assert any(
+        row.name == "Confidential Second Session Title"
+        and row.source_version_id == UUID(e_version_id)
+        for row in index_rows
     ), [(r.name, r.visibility_scope) for r in index_rows]
 
 
@@ -2343,7 +1397,7 @@ def test_pages_api_create_list_read_update(page_service):
     assert created_response.status_code == 201
     created_body = created_response.json()
     assert created_body["envelope"]["schema_version"] == "llmwiki.rest.v1"
-    assert created_body["envelope"]["result_status"] == "succeeded"
+    assert created_body["envelope"]["result_status"] == "partial"
     assert created_body["envelope"]["request_id"]
     created = created_body["data"]
     # P9.1: `create_page_first` never derives a slug from title (always
@@ -2436,6 +1490,9 @@ def test_pages_api_create_list_read_update(page_service):
         session.flush()
         destination_id = destination.id
 
+    published = _publish_created_version(client, page_service, created)
+    assert published.status_code == 200, published.text
+    created = published.json()["data"]
     update_response = client.patch(
         f"{pages_url(page_service)}/{created['id']}",
         json={
@@ -2470,18 +1527,25 @@ def test_pages_api_create_list_read_update(page_service):
         )
     assert moved_placement.parent_id == destination_id
 
+    begun = client.post(
+        f"{pages_url(page_service)}/{created['id']}/begin-edit",
+        json={"from": updated["version_id"], "idempotency_key": "t-42-begin"},
+    )
+    assert begun.status_code == 200, begun.text
+    editing = begun.json()["data"]
     autosave_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
         json={
+            "version_id": editing["version_id"],
             "idempotency_key": "t-42",
             "title": "Hello v3",
             "body_md": "# Hello v3",
             "page_type": "guide",
             "tags": ["autosaved"],
             "aliases": ["Autosaved Alias"],
-            "base_version_id": updated["version_id"],
-            "base_content_hash": updated["content_hash"],
-            "expected_editing_revision": updated["editing_revision"],
+            "base_version_id": editing["version_id"],
+            "base_content_hash": editing["content_hash"],
+            "expected_editing_revision": editing["editing_revision"],
         },
     )
     assert autosave_response.status_code == 200
@@ -2495,6 +1559,7 @@ def test_pages_api_create_list_read_update(page_service):
     session_autosave_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
         json={
+            "version_id": autosaved["version_id"],
             "idempotency_key": "t-43",
             "title": "Hello v4",
             "body_md": "# Hello v4",
@@ -2835,173 +1900,6 @@ def test_pages_api_returns_401_404_and_409(page_service):
     assert stale.json()["server_version_id"] == current["version_id"]
 
 
-def test_pages_api_can_preserve_stale_update_as_alternative(page_service):
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Hello",
-            "body_md": "# Hello",
-        },
-    ).json()["data"]
-    current = client.patch(
-        f"{pages_url(page_service)}/{created['id']}",
-        json={
-            "title": "Hello v2",
-            "body_md": "# Hello v2",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-        },
-    ).json()["data"]
-
-    preserved = client.patch(
-        f"{pages_url(page_service)}/{created['id']}",
-        json={
-            "title": "Alternative title",
-            "body_md": "# Local alternative",
-            "page_type": "source",
-            "tags": ["local", "alternative"],
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "on_stale": "preserve_as_alternative",
-        },
-    )
-
-    assert preserved.status_code == 200
-    data = preserved.json()["data"]
-    assert data["preserved_as_alternative"] is True
-    assert data["alternative_draft_id"] == data["version_id"]
-    assert data["review_item_id"]
-    assert data["change_set_id"]
-    assert data["current_version_id"] == current["version_id"]
-    assert data["parent_version_id"] == created["version_id"]
-    assert data["page_type"] == "source"
-    assert data["tags"] == ["local", "alternative"]
-    assert "type: source" in data["body_md"]
-    assert 'tags: ["local", "alternative"]' in data["body_md"]
-
-    current_read = client.get(f"{pages_url(page_service)}/{created['id']}")
-    assert current_read.json()["data"]["body_md"] == "# Hello v2"
-    assert current_read.json()["data"]["page_type"] == "overview"
-    assert current_read.json()["data"]["tags"] == []
-
-    alternative_read = client.get(
-        f"{pages_url(page_service)}/{created['id']}?version_id={data['alternative_draft_id']}",
-    )
-    assert alternative_read.json()["data"]["body_md"] == data["body_md"]
-    assert alternative_read.json()["data"]["page_type"] == "source"
-    assert alternative_read.json()["data"]["tags"] == ["local", "alternative"]
-
-    versions = client.get(f"{pages_url(page_service)}/{created['id']}/versions").json()[
-        "data"
-    ]
-    alternative = next(
-        item for item in versions if item["version_id"] == data["version_id"]
-    )
-    assert alternative["is_alternative"] is True
-    discarded = client.post(
-        f"{pages_url(page_service)}/{created['id']}/versions/{data['version_id']}/discard",
-        json={"reason": "alternative is obsolete"},
-    )
-    assert discarded.status_code == 200
-    assert discarded.json()["data"]["is_discarded"] is True
-
-
-def test_preserve_alternative_after_in_place_autosave_conflict_rebases_editable_head(
-    page_service,
-):
-    # PUB-02: since commit 60593953, a second autosave from the *same* actor
-    # overwrites the draft row in place instead of forking. That means a
-    # stale conflict against your own earlier autosave names your own
-    # current draft as the "base" -- and _preserve_alternative's base-hash
-    # recheck used to refuse that unconditionally, so preserve-as-alternative
-    # could never actually resolve this specific conflict shape.
-    client = make_client(page_service)
-    created = create_published_page(
-        client,
-        page_service,
-        title="Hello",
-        body_md="# Hello",
-    )
-
-    # First autosave forks a draft D off the published head.
-    first_autosave = client.post(
-        f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={
-            "idempotency_key": "t-44",
-            "title": "Hello",
-            "body_md": "# Draft H0",
-            "base_version_id": created["version_id"],
-            "base_content_hash": created["content_hash"],
-            "expected_editing_revision": created["editing_revision"],
-        },
-    ).json()["data"]
-    draft_id = first_autosave["version_id"]
-    assert draft_id != created["version_id"]
-
-    # Second autosave from the same actor/session overwrites D in place
-    # (same version id, new hash H1) rather than forking a new version.
-    second_autosave = client.post(
-        f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={
-            "idempotency_key": "t-45",
-            "title": "Hello",
-            "body_md": "# Draft H1",
-            "base_version_id": draft_id,
-            "base_content_hash": first_autosave["content_hash"],
-            "expected_editing_revision": first_autosave["editing_revision"],
-        },
-    ).json()["data"]
-    assert second_autosave["version_id"] == draft_id
-    assert second_autosave["content_hash"] != first_autosave["content_hash"]
-
-    # A stale client (e.g. a second tab) still believes the base is D@H0.
-    # Before the fix this always re-fails with 409 because base_version.id
-    # (D) already equals current.id (D) and their hashes differ.
-    preserved = client.patch(
-        f"{pages_url(page_service)}/{created['id']}",
-        json={
-            "title": "Alternative title",
-            "body_md": "# Local alternative",
-            "base_version_id": draft_id,
-            "base_content_hash": first_autosave["content_hash"],
-            "on_stale": "preserve_as_alternative",
-        },
-    )
-    assert preserved.status_code == 200
-    preserved_data = preserved.json()["data"]
-    assert preserved_data["preserved_as_alternative"] is True
-    branch_id = preserved_data["alternative_draft_id"]
-    assert branch_id != draft_id
-
-    # The branch is parked, not adopted: the page's editable head is still D,
-    # not the new branch E, so a session cannot keep autosaving onto E.
-    current_read = client.get(f"{pages_url(page_service)}/{created['id']}").json()[
-        "data"
-    ]
-    assert current_read["current_version_id"] == draft_id
-    assert current_read["body_md"] == created["body_md"]
-    explicit_draft = client.get(
-        f"{pages_url(page_service)}/{created['id']}",
-        params={"version_id": draft_id},
-    ).json()["data"]
-    assert explicit_draft["body_md"] == "# Draft H1"
-
-    stuck = client.post(
-        f"{pages_url(page_service)}/{created['id']}/autosave",
-        json={
-            "idempotency_key": "t-46",
-            "title": "Alternative title",
-            "body_md": "# Local alternative, continued",
-            "base_version_id": branch_id,
-            "base_content_hash": preserved_data["content_hash"],
-            "expected_editing_revision": preserved_data["editing_revision"],
-        },
-    )
-    assert stuck.status_code == 409
-    assert stuck.json()["server_version_id"] == draft_id
-
-
 def test_autosave_updates_title_on_never_published_page(page_service):
     # PUB-03: autosave_page computed next_title but never passed it into
     # _set_current_version, so the sibling write paths (write_page,
@@ -3022,6 +1920,7 @@ def test_autosave_updates_title_on_never_published_page(page_service):
     autosaved = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
         json={
+            "version_id": created["version_id"],
             "idempotency_key": "t-47",
             "title": "Retitled draft",
             "body_md": "# Draft body v2",
@@ -3057,10 +1956,15 @@ def test_autosave_title_change_on_published_page_stays_staged_not_published(
         body_md="# Published body",
     )
     published_version_id = created["version_id"]
+    created = client.post(
+        f"{pages_url(page_service)}/{created['id']}/begin-edit",
+        json={"from": published_version_id, "idempotency_key": "t-48-begin"},
+    ).json()["data"]
 
     autosaved = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
         json={
+            "version_id": created["version_id"],
             "idempotency_key": "t-48",
             "title": "Staged title",
             "body_md": "# Staged body",
@@ -3111,8 +2015,9 @@ def test_pages_api_metadata_only_update_writes_frontmatter_version(page_service)
 
     assert updated.status_code == 200
     data = updated.json()["data"]
-    assert data["version_id"] != created["version_id"]
-    assert data["parent_version_id"] == created["version_id"]
+    assert data["version_id"] == created["version_id"]
+    assert data["editing_revision"] == created["editing_revision"] + 1
+    assert data["parent_version_id"] is None
     assert data["content_hash"] != created["content_hash"]
     assert data["page_type"] == "decision"
     assert data["tags"] == ["policy", "release"]
@@ -3538,15 +2443,14 @@ def test_pages_api_resolves_korean_wikilink_targets(page_service):
 
 def test_pages_api_lists_versions_and_diff(page_service):
     client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "History Page",
-            "body_md": "# History\n\nOriginal line",
-            "page_type": "concept",
-            "tags": ["history"],
-        },
-    ).json()["data"]
+    created = create_published_page(
+        client,
+        page_service,
+        title="History Page",
+        body_md="# History\n\nOriginal line",
+        page_type="concept",
+        tags=["history"],
+    )
     updated = client.patch(
         f"{pages_url(page_service)}/{created['id']}",
         json={
@@ -3652,13 +2556,9 @@ def test_pages_api_empty_baseline_reports_metadata_only_first_version(page_servi
 
 def test_pages_api_version_cursor_is_stable_newest_first(page_service):
     client = make_client(page_service)
-    current = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Cursor history",
-            "body_md": "# Cursor history\n\nv1",
-        },
-    ).json()["data"]
+    current = create_published_page(
+        client, page_service, title="Cursor history", body_md="# Cursor history\n\nv1"
+    )
     for version_no in range(2, 6):
         current = client.patch(
             f"{pages_url(page_service)}/{current['id']}",
@@ -3729,14 +2629,9 @@ def test_pages_api_version_cursor_is_stable_newest_first(page_service):
 
 def test_pages_api_signals_metadata_only_diff(page_service):
     client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Old title",
-            "body_md": "# Shared body",
-            "tags": ["old"],
-        },
-    ).json()["data"]
+    created = create_published_page(
+        client, page_service, title="Old title", body_md="# Shared body", tags=["old"]
+    )
     body = upsert_page_frontmatter(
         "# Shared body",
         title="New title",
@@ -3788,51 +2683,14 @@ def test_pages_api_signals_metadata_only_diff(page_service):
     assert diff["metadata_changes"] == ["title", "tags"]
 
 
-def test_pages_api_update_on_a_discarded_ancestor_is_a_clean_conflict_not_500(
-    page_service,
-):
-    """update_page's shared _set_current_version -> apply_context_publication
-    path can legitimately raise StaleContextDraftError (a ReadServiceError,
-    not a PageServiceError) when the version chain it walks hits a
-    non-linear/discarded ancestor. The route must map that to a clean 409,
-    not let it fall through to the app's unhandled-exception 500 handler."""
-
-    client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={"title": "Ancestor goes stale", "body_md": "# Original"},
-    ).json()["data"]
-
-    base_version_id = created["version_id"]
-    base_content_hash = created["content_hash"]
-
-    with page_service.session_factory.begin() as session:
-        version = session.get(ContextPageVersion, UUID(created["version_id"]))
-        assert version is not None
-        version.graph_status = "discarded"
-
-    response = client.patch(
-        f"{pages_url(page_service)}/{created['id']}",
-        json={
-            "body_md": "# Edited after ancestor was discarded",
-            "base_version_id": base_version_id,
-            "base_content_hash": base_content_hash,
-        },
-    )
-
-    assert response.status_code == 409, response.text
-    assert response.json()["error_code"] == "stale_context_draft"
-
-
 def test_pages_api_backfills_missing_actor_display_names(page_service):
     client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Legacy Actor History",
-            "body_md": "# Legacy Actor History\n\nOriginal",
-        },
-    ).json()["data"]
+    created = create_published_page(
+        client,
+        page_service,
+        title="Legacy Actor History",
+        body_md="# Legacy Actor History\n\nOriginal",
+    )
     updated = client.patch(
         f"{pages_url(page_service)}/{created['id']}",
         json={
@@ -3942,7 +2800,6 @@ def test_version_metadata_is_actor_aware_and_batched(page_service):
         )
         session.add_all([operation, review])
         session.flush()
-        page.latest_draft_version_id = rejected.id
         for version in session.scalars(
             select(ContextPageVersion).where(ContextPageVersion.page_id == page.id)
         ):
@@ -3974,23 +2831,19 @@ def test_version_metadata_is_actor_aware_and_batched(page_service):
     rejected_row = by_id[rejected_id]
     neither_row = by_id[neither_id]
     assert published_row.is_current_published is True
-    assert published_row.is_latest_draft is False
     assert published_row.is_visible_head is True
     assert rejected_row.is_current_published is False
-    assert rejected_row.is_latest_draft is True
     assert rejected_row.is_visible_head is False
     assert rejected_row.review_status == "rejected"
     assert rejected_row.review_item_id == rejected_review_id
     assert rejected_row.parent_version_id == UUID(published["version_id"])
     assert neither_row.is_current_published is False
-    assert neither_row.is_latest_draft is False
     assert neither_row.is_visible_head is False
     assert neither_row.review_status is None
     assert neither_row.review_item_id is None
 
     viewer_rows = page_service.list_versions(UUID(created["id"]), actor=viewer).versions
     assert rejected_id not in {row.version_id for row in viewer_rows}
-    assert all(row.is_latest_draft is False for row in viewer_rows)
     assert all(row.review_item_id != rejected_review_id for row in viewer_rows)
     assert next(row for row in viewer_rows if row.is_visible_head).version_id == UUID(
         published["version_id"]
@@ -4043,17 +2896,16 @@ def test_version_metadata_is_actor_aware_and_batched(page_service):
     assert select_count(1) == select_count(10) == 5
 
 
-def test_pages_api_restores_historical_version_as_new_draft(page_service):
+def test_pages_api_restores_historical_version_and_repairs_its_draft_copy(page_service):
     client = make_client(page_service)
-    created = client.post(
-        pages_url(page_service),
-        json={
-            "title": "Restore Page",
-            "body_md": "# Restore Page\n\nOriginal line\n\n[[restore-target]]",
-            "page_type": "decision",
-            "tags": ["restore"],
-        },
-    ).json()["data"]
+    created = create_published_page(
+        client,
+        page_service,
+        title="Restore Page",
+        body_md="# Restore Page\n\nOriginal line\n\n[[restore-target]]",
+        page_type="decision",
+        tags=["restore"],
+    )
     updated = client.patch(
         f"{pages_url(page_service)}/{created['id']}",
         json={
@@ -4095,7 +2947,7 @@ def test_pages_api_restores_historical_version_as_new_draft(page_service):
     assert restored["block_map_stale"] is True
 
     default_read = client.get(f"{pages_url(page_service)}/{created['id']}")
-    assert default_read.json()["data"]["version_id"] == updated["version_id"]
+    assert default_read.json()["data"]["version_id"] == restored["version_id"]
     read_response = client.get(
         f"{pages_url(page_service)}/{created['id']}",
         params={"version_id": restored["version_id"]},
@@ -4109,7 +2961,7 @@ def test_pages_api_restores_historical_version_as_new_draft(page_service):
     versions = versions_response.json()["data"]
     assert [entry["version_no"] for entry in versions] == [3, 2, 1]
     assert versions[0]["version_id"] == restored["version_id"]
-    assert versions[0]["version_status"] == "draft"
+    assert versions[0]["version_status"] == "published_snapshot"
     assert versions[0]["content_hash"] == created["content_hash"]
     assert versions[0]["is_current"] is True
     assert versions[1]["version_id"] == updated["version_id"]
@@ -4130,13 +2982,13 @@ def test_pages_api_restores_historical_version_as_new_draft(page_service):
     assert operation is not None
     assert operation.target_id == UUID(created["id"])
     assert operation.diff_ref == f"context_page_version:{restored['version_id']}"
-    assert page.current_published_version_id == UUID(updated["version_id"])
-    assert page.latest_draft_version_id == UUID(restored["version_id"])
+    assert page.current_published_version_id == UUID(restored["version_id"])
+    assert page.latest_draft_version_id is None
     # The editor payload above overlays the draft metadata, but the canonical
     # page row stays on the published head until the draft is published.
-    assert page.title == "Restore Page v2"
-    assert page.page_type == "guide"
-    assert page.tags == ["current"]
+    assert page.title == "Restore Page"
+    assert page.page_type == "decision"
+    assert page.tags == ["restore"]
     # Sprint-2 keeps published and draft PageLink projections side by side.
     # The restored draft revives the historical wikilink while the published
     # head remains the v2 body with no wikilinks.
@@ -4144,9 +2996,19 @@ def test_pages_api_restores_historical_version_as_new_draft(page_service):
     assert links[0].source_version_id == UUID(restored["version_id"])
     assert links[0].target_slug == "restore-target"
 
+    begun = client.post(
+        f"{pages_url(page_service)}/{created['id']}/begin-edit",
+        json={
+            "from": restored["version_id"],
+            "idempotency_key": "repair-restore-begin",
+        },
+    )
+    assert begun.status_code == 200, begun.text
+    restored = begun.json()["data"]
     saved_response = client.post(
         f"{pages_url(page_service)}/{created['id']}/autosave",
         json={
+            "version_id": restored["version_id"],
             "body_md": restored["body_md"],
             "base_version_id": restored["version_id"],
             "base_content_hash": restored["content_hash"],

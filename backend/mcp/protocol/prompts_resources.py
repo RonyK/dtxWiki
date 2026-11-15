@@ -237,7 +237,7 @@ def get_dtxwiki_prompt(
                             "image must be uploaded with upload_image first. Store "
                             "data.markdown or data.logical_ref, never data.content_url "
                             "or another /api/v1 transport URL. upload_image always "
-                            "requires an existing page_id and your own open "
+                            "requires an existing page_id and an open draft "
                             "version_id -- for a new page, create it first, "
                             "then upload into it and call update_context_edit. Never "
                             "fall back to a data: "

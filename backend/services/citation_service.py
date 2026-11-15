@@ -20,7 +20,7 @@ from backend.services.mcp_write_idempotency import (
     execute_idempotent_write,
     request_fingerprint,
 )
-from backend.services.page_service import PageConflictError, PageService
+from backend.services.page_service import PageConflictError
 from backend.services.read_errors import (
     ReadNotFoundError,
     ReadValidationError,
@@ -70,27 +70,13 @@ class CitationService:
                 workspace_id=workspace_id,
                 resource_id=request.version_id,
             )
-            if (
-                version is None
-                or version.page_id != page.id
-                or version.created_by_actor_kind != actor.actor_kind
-                or version.created_by_actor_id != actor.actor_id
-            ):
+            if version is None or version.page_id != page.id:
                 raise ReadNotFoundError("context page version not found")
             # Refresh under the page lock: a long-lived identity map is not a
             # concurrency check, particularly for metadata-only changes.
             session.refresh(version)
-            # Browser saves share drafts with Editors. A reviewed version is
-            # immutable evidence: autosave must fork it before this command.
-            browser_draft = PageService._is_unreviewed_browser_draft(
-                session=session,
-                page=page,
-                version=version,
-                actor_provenance=actor.provenance,
-            )
             if (
-                (version.version_status != "editing" and not browser_draft)
-                or version.graph_status != "linear"
+                version.version_status != "draft"
                 or version.editing_revision != request.expected_editing_revision
             ):
                 raise PageConflictError(
@@ -98,7 +84,7 @@ class CitationService:
                     server_content_hash=version.content_hash,
                     server_editing_revision=(
                         version.editing_revision
-                        if version.version_status in {"editing", "draft"}
+                        if version.version_status == "draft"
                         else None
                     ),
                 )
@@ -120,6 +106,16 @@ class CitationService:
                 version.editing_revision += 1
                 version.last_saved_at = utc_now()
                 page.updated_at = utc_now()
+                from backend.services.context_draft_workflow import record_draft_save
+
+                record_draft_save(
+                    session,
+                    page,
+                    version,
+                    actor_kind=actor.actor_kind,
+                    actor_id=actor.actor_id,
+                    reason="context_page.references.update",
+                )
                 event = self.audit_service.emit(
                     session=session,
                     workspace_id=workspace_id,

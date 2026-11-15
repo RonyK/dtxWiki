@@ -129,6 +129,7 @@ describe("ContextScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
+    window.sessionStorage.clear();
     window.localStorage.setItem(
       "dtxwiki:workspace-layout:v2:context:left",
       "true",

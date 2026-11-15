@@ -1,3 +1,4 @@
+import { ContextMergeResultPreview } from "../pages/ContextMergeResultPreview";
 import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import {
   ArrowDown,
@@ -30,8 +31,9 @@ import {
   listReviews,
   undoReviewDecision,
 } from "../../shared/api/operations";
-import { restorePageVersion } from "../../shared/api/pages";
+import { previewPageMerge, restorePageVersion, type ContextMergePreview } from "../../shared/api/pages";
 import type {
+  ContextMergeBinding,
   ReviewAudienceKind,
   ReviewBulkDecisionResult,
   ReviewContentTarget,
@@ -53,6 +55,7 @@ import { ApiError } from "../../shared/api/client";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { CountChip } from "../../shared/components/CountChip";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
+import { Dialog } from "../../shared/components/Dialog";
 import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { FormField } from "../../shared/components/FormField";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
@@ -120,6 +123,7 @@ type PendingReviewDecision = {
   decision: ReviewDecisionType;
   reason: string | null;
   expectedImpactFingerprint?: string | null;
+  mergeBinding?: ContextMergeBinding | null;
 };
 
 const LIFECYCLE_TABS: ReviewLifecycleTab[] = [
@@ -186,6 +190,24 @@ export function ReviewScreen() {
   const [searchParams] = useSearchParams();
   const auth = useOptionalAuth();
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
+  const [mergeApprovalPrompt, setMergeApprovalPrompt] = useState<{ preview: ContextMergePreview; resolve: (accepted: boolean) => void } | null>(null);
+  const mergeApprovalResolveRef = useRef<((accepted: boolean) => void) | null>(null);
+  useEffect(() => {
+    setMergeApprovalPrompt(null);
+    return () => { mergeApprovalResolveRef.current?.(false); mergeApprovalResolveRef.current = null; };
+  }, [reviewRouteIdentity]);
+  function confirmAutomaticMerge(preview: ContextMergePreview): Promise<boolean> {
+    return new Promise((resolve) => {
+      mergeApprovalResolveRef.current = resolve;
+      setMergeApprovalPrompt({ preview, resolve });
+    });
+  }
+  function settleAutomaticMerge(accepted: boolean) {
+    mergeApprovalPrompt?.resolve(accepted);
+    mergeApprovalResolveRef.current = null;
+    setMergeApprovalPrompt(null);
+  }
+
   // Queue filters stay in the query; the selected review is owned by the path.
   // Keep the existing workflow's synchronous selection snapshot for in-flight
   // receipt/retry guards, without writing a competing review query parameter.
@@ -777,12 +799,33 @@ export function ReviewScreen() {
     setError(null);
     try {
       let receipt: ReviewItem;
+      let decisionRequestStarted = false;
       try {
+        if (decision === "approve") {
+          const operation = selectedDetail.review.evidence?.operations.find((entry) =>
+            entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
+          const pageId = operation?.document?.document_id;
+          const versionId = operation?.content?.candidate_version_id;
+          pending.mergeBinding = null;
+          if (pageId && versionId) {
+            const preview = await previewPageMerge(workspaceId, pageId, versionId);
+            if (!preview.result) throw new ApiError(409, { error_code: "context_merge_conflict",
+              message: t("workflow.mergeConflict"), request_id: "", warnings: [] });
+            if (preview.kind === "automatic_merge" && !await confirmAutomaticMerge(preview)) return "failed";
+            pending.mergeBinding = { expected_editing_revision: preview.editing_revision,
+              expected_published_version_id: preview.published_version_id, result_hash: preview.result.result_hash };
+          }
+        }
         // Save before POST so navigation/reload cannot enable a duplicate POST
         // when the response is lost after the server commits.
         if (key) setPendingDecision(key, pending);
+        decisionRequestStarted = true;
         receipt = await sendReviewDecision(pending);
       } catch (exc) {
+        if (!decisionRequestStarted) {
+          if (generation === loadMoreGenerationRef.current) setError(reviewErrorMessage(exc, t("errors.decide")));
+          return "failed";
+        }
         if (exc instanceof ApiError && exc.status >= 400 && exc.status < 500) {
           if (key) setPendingDecision(key, null);
           throw exc;
@@ -1337,7 +1380,8 @@ export function ReviewScreen() {
         setBusyId((current) => current === review.id ? null : current);
         return;
       }
-      navigate(`${contextEditHref(state.workspaceId, targetPageId)}?from=review&reviewItemId=${encodeURIComponent(review.id)}`);
+      const versionId = target?.content?.candidate_version_id;
+      navigate(`${contextEditHref(state.workspaceId, targetPageId)}?from=review&reviewItemId=${encodeURIComponent(review.id)}${versionId ? `&version_id=${encodeURIComponent(versionId)}` : ""}`);
     } catch (exc) {
       if (generation === loadMoreGenerationRef.current && reviewRouteIdentityRef.current === operationRouteIdentity) {
         setError(reviewErrorMessage(exc, t("errors.claim")));
@@ -1934,6 +1978,19 @@ export function ReviewScreen() {
           </section>
         }
       />
+      {mergeApprovalPrompt?.preview.result ? (
+          <Dialog labelledBy="merge-approval-dialog-title" onClose={() => settleAutomaticMerge(false)}
+            title={t("workflow.mergePreviewTitle")}>
+            <section className="dialog-form">
+              <p>{t("workflow.mergePreviewDescription")}</p>
+              <ContextMergeResultPreview candidate={mergeApprovalPrompt.preview.result} workspaceId={state.workspaceId} />
+              <div className="dialog-actions">
+                <button type="button" className="icon-button text-button" onClick={() => settleAutomaticMerge(false)}>{t("workflow.mergePreviewCancel")}</button>
+                <button type="button" className="icon-button primary" onClick={() => settleAutomaticMerge(true)}>{t("workflow.mergePreviewApprove")}</button>
+              </div>
+            </section>
+          </Dialog>
+      ) : null}
       {bulkDialog ? (
         <ConfirmDialog
           busy={bulkBusy}
@@ -1988,6 +2045,12 @@ export function ReviewScreen() {
               <li key={item.id}>
                 <strong>{item.target_title ?? t("workflow.unavailableReview")}{item.target_version_no != null ? ` · v${item.target_version_no}` : ""}</strong>
                 <span>{item.will_auto_settle ? t("workflow.autoSettled") : item.eligible ? t("workflow.eligible") : reviewOutcomeReason(item.reason_code, item.reason, t)}</span>
+                {item.eligible && selectionMergePreview(item)?.kind === "automatic_merge" ? (
+                  <section className="review-bulk-merge-preview">
+                    <p>{t("workflow.mergePreviewDescription")}</p>
+                    {selectionMergePreview(item)?.result ? <ContextMergeResultPreview candidate={selectionMergePreview(item)!.result!} workspaceId={state.workspaceId} /> : null}
+                  </section>
+                ) : null}
                 {item.eligible && !item.will_auto_settle && (item.auto_settled_review_item_ids?.length ?? 0) > 0 ? (
                   <span className="review-bulk-item-impact">
                     {t("bulk.approvalImpact", { count: item.auto_settled_review_item_ids?.length ?? 0 })}
@@ -4129,9 +4192,14 @@ function reviewSelectionError(error: unknown, t: TFunction): string {
 function sendReviewDecision(pending: PendingReviewDecision): Promise<ReviewItem> {
   return decideReview(pending.workspaceId, pending.reviewId, pending.decision, pending.reason, {
     decision_id: pending.decisionId,
+    merge_binding: pending.mergeBinding ?? null,
     ...(pending.audienceKind ? { audience_kind: pending.audienceKind } : {}),
     ...(pending.decision === "reject" ? { expected_impact_fingerprint: pending.expectedImpactFingerprint } : {}),
   });
+}
+
+function selectionMergePreview(item: ReviewSelection["items"][number]): ContextMergePreview | null {
+  return (Reflect.get(item, "merge_preview") as ContextMergePreview | null | undefined) ?? null;
 }
 
 function readPendingReviewDecision(key: string): PendingReviewDecision | null {

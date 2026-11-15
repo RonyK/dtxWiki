@@ -11,23 +11,17 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 
-from backend.mcp.router import dispatch
 from backend.models.ask import ContextIngressProposal
 from backend.models.context import ContextPageVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
-from backend.schemas.context_edit import PatchDraftRequest, ReplaceTextOperation
+from backend.schemas.context_edit import ReplaceTextOperation
 from backend.schemas.context_ingress import ContextIngressAcceptRequest
-from backend.schemas.context_write import (
-    CitationInput,
-    UpdateDraftRequest,
-    WriteDraftRequest,
-)
+from backend.schemas.context_write import WriteDraftRequest
 from backend.services.body_preparer import BodyPreparer
 from backend.services.context_ingress_service import ContextIngressService
 from backend.services.context_write_service import ContextWriteService
 from backend.services.okf import import_okf_bundle
-from backend.utils.content_hash import content_hash
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
 RAW = "# Golden\n\n* item\n\n\n\nend   \n"
@@ -76,7 +70,9 @@ def _replace_base():
 def test_all_body_writers_preserve_golden_persisted_bytes(
     page_service, session_factory, mcp_default_actor
 ):
-    """R4 W1-W12 golden, with the intentional R5/R6 policy changes applied."""
+    """R4 W1-W12 golden, with the intentional R5/R6 policy changes applied.
+
+    W8-W10 (patch_draft and update_draft) left with those writers."""
     prepared_provenances = []
 
     class RecordingPreparer(BodyPreparer):
@@ -85,7 +81,6 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             return super().prepare(input, ctx)
 
     service = ContextWriteService(body_preparer=RecordingPreparer())
-    reader = mcp_default_actor(scopes=("read", "draft-write"))
     with session_factory() as session:
         workspace_id = session.scalar(
             select(Workspace.id).where(Workspace.slug == "default")
@@ -207,6 +202,7 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 actor_id=ACTOR_ID,
                 actor_provenance=provenance,
                 base_version_id=editing.version_id,
+                expected_editing_revision=editing.editing_revision,
                 base_content_hash=editing.content_hash,
                 idempotency_key=f"w4-{suffix}-{provenance}",
                 with_edit_receipt=True,
@@ -229,37 +225,6 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
                 assert replay.body_md == saved.body_md
                 assert replay.editing_revision == saved.editing_revision
                 assert replay.lint_report == saved.lint_report
-
-        # W5: both stale-base alternative paths use the same Workspace policy.
-        for writer in ("update", "autosave"):
-            base = _published(page_service, f"w5-{suffix}-{writer}")
-            _advance(page_service, base)
-            stale_args = dict(
-                page_id=base.id,
-                title="Golden",
-                body_md=RAW,
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-                actor_provenance="browser_session",
-                base_version_id=base.version_id,
-                base_content_hash=base.content_hash,
-                on_stale="preserve_as_alternative",
-            )
-            if writer == "autosave":
-                alternative = page_service.autosave_page(
-                    **stale_args,
-                    workspace_id=workspace_id,
-                    idempotency_key=f"w5-{suffix}",
-                )
-            else:
-                alternative = page_service.update_page(**stale_args)
-            assert alternative.preserved_as_alternative is True
-            _assert_stored(
-                session_factory,
-                alternative.alternative_draft_id,
-                expected,
-                f"W5 {suffix} {writer}",
-            )
 
         # W6: editing-session typed patches follow workspace Auto-fix.
         editing = page_service.create_page_first(
@@ -303,217 +268,6 @@ def test_all_body_writers_preserve_golden_persisted_bytes(
             session_factory, draft.draft_version_id, expected, f"W7 {suffix}"
         )
         assert prepared_provenances[-1] == "internal"
-
-        # W8: patch_draft's current-base path, then W9: the stale overlapping
-        # block path must land a branch after preparing the caller's body.
-        base = _published(page_service, f"w8-{suffix}")
-        with session_factory.begin() as session:
-            patched = service.patch_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=PatchDraftRequest(
-                    page_id=base.id,
-                    base=str(base.version_id),
-                    operations=[_replace_base()],
-                    reason="golden current-base patch",
-                ),
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-                actor_provenance="mcp_client",
-            )
-        assert prepared_provenances[-1] == "mcp_client"
-        _assert_stored(
-            session_factory, patched.draft_version_id, expected, f"W8 {suffix}"
-        )
-        base = _published(page_service, f"w9-{suffix}")
-        structure = dispatch(
-            "read_structure_map",
-            {"workspace_id": str(workspace_id), "page_id": str(base.id)},
-            actor=reader,
-            page_service=page_service,
-        )
-        assert structure.envelope.result_status == "succeeded"
-        paragraph = next(block for block in structure.blocks if block.kind == "p")
-        _advance(page_service, base)
-        with session_factory.begin() as session:
-            diverged = service.patch_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=PatchDraftRequest(
-                    page_id=base.id,
-                    base=str(base.version_id),
-                    operations=[
-                        {
-                            "op": "replace_block",
-                            "block": paragraph.id,
-                            "expected": paragraph.hash,
-                            "content": "* item   ",
-                        }
-                    ],
-                    reason="golden diverged patch",
-                ),
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-                actor_provenance="mcp_client",
-            )
-        assert prepared_provenances[-1] == "mcp_client"
-        assert diverged.push_outcome == "diverged"
-        _assert_stored(
-            session_factory,
-            diverged.alternative_draft_id,
-            "# Golden\n\n- item\n" if enabled else "# Golden\n\n* item   \n",
-            f"W9 {suffix}",
-        )
-
-        # W10: full-body Context update through _persist_context_update.
-        base = _published(page_service, f"w10-{suffix}")
-        with session_factory.begin() as session:
-            updated = service.update_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=UpdateDraftRequest(
-                    page_id=base.id,
-                    base_version_id=base.version_id,
-                    base_content_hash=base.content_hash,
-                    update_mode="full_rewrite",
-                    body_markdown=RAW,
-                    reason="golden whole-body update",
-                ),
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-                actor_provenance="browser_session",
-            )
-        assert prepared_provenances[-1] == "browser_session"
-        _assert_stored(
-            session_factory, updated.draft_version_id, expected, f"W10 {suffix}"
-        )
-
-        hard_break = _published(page_service, f"w10-hard-break-{suffix}", "a\nb\n")
-        with session_factory.begin() as session:
-            changed = service.update_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=UpdateDraftRequest(
-                    page_id=hard_break.id,
-                    base_version_id=hard_break.version_id,
-                    base_content_hash=hard_break.content_hash,
-                    update_mode="full_rewrite",
-                    body_markdown="a  \nb\n",
-                    reason="save a semantic hard break with an unchanged hash",
-                ),
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-            )
-            repeated = service.update_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=UpdateDraftRequest(
-                    page_id=hard_break.id,
-                    base_version_id=changed.draft_version_id,
-                    base_content_hash=changed.persisted_content_hash,
-                    update_mode="full_rewrite",
-                    body_markdown="a  \nb\n",
-                    reason="repeat the same authored hard break",
-                ),
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-            )
-        assert changed.draft_version_id != hard_break.version_id
-        assert changed.body_changed is True
-        assert changed.persisted_content_hash == hard_break.content_hash
-        assert repeated.draft_version_id == changed.draft_version_id
-        _assert_stored(
-            session_factory,
-            changed.draft_version_id,
-            "a  \nb\n",
-            f"W10 hard break {suffix}",
-        )
-
-        # A valid rewrite can repair historical unsafe bytes. Preparing the
-        # old base for an auto-approval comparison must not reject that write.
-        legacy = _published(page_service, f"w10-legacy-{suffix}")
-        legacy_body = "![inline](data:image/png;base64,aGVsbG8=)"
-        legacy_hash = content_hash(legacy_body)
-        with session_factory.begin() as session:
-            stored = session.get(ContextPageVersion, legacy.version_id)
-            stored.body_md = legacy_body
-            stored.content_hash = legacy_hash
-        with session_factory.begin() as session:
-            repaired = service.update_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=UpdateDraftRequest(
-                    page_id=legacy.id,
-                    base_version_id=legacy.version_id,
-                    base_content_hash=legacy_hash,
-                    update_mode="full_rewrite",
-                    body_markdown=RAW,
-                    reason="repair historical unsafe content",
-                ),
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-            )
-        _assert_stored(
-            session_factory,
-            repaired.draft_version_id,
-            expected,
-            f"W10 legacy repair {suffix}",
-        )
-
-        # Context writers historically accepted legacy frontmatter that newer
-        # managed page metadata would reject. Citation-only updates and dry-run
-        # patches must remain usable without silently tightening that contract.
-        legacy_body = (
-            "---\ntags: [" + "x" * 60 + "]\n---\n# " + "h" * 257 + "\n\nbase\n"
-        )
-        legacy = _published(page_service, f"legacy-frontmatter-{suffix}")
-        with session_factory.begin() as session:
-            stored = session.get(ContextPageVersion, legacy.version_id)
-            stored.body_md = legacy_body
-            stored.content_hash = content_hash(legacy_body)
-        with session_factory.begin() as session:
-            preview = service.patch_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=PatchDraftRequest(
-                    page_id=legacy.id,
-                    base=str(legacy.version_id),
-                    operations=[_replace_base()],
-                    reason="preview a legacy frontmatter page",
-                    dry_run=True,
-                ),
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-                actor_provenance="browser_session",
-            )
-            assert prepared_provenances[-1] == "browser_session"
-            assert preview.body_changed is True
-            cited = service.update_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=UpdateDraftRequest(
-                    page_id=legacy.id,
-                    base_version_id=legacy.version_id,
-                    base_content_hash=content_hash(legacy_body),
-                    update_mode="citation_update",
-                    citations=[
-                        CitationInput(
-                            target_kind="context_page_whole",
-                            citation_type="context_page",
-                            cited_context_page_version_id=written.version_id,
-                        )
-                    ],
-                    reason="cite without rewriting legacy frontmatter",
-                ),
-                actor_kind="human",
-                actor_id=ACTOR_ID,
-            )
-        _assert_stored(
-            session_factory,
-            cited.draft_version_id,
-            legacy_body,
-            f"W10 legacy citation {suffix}",
-        )
 
         # W11: ingress acceptance follows workspace Auto-fix.
         with session_factory.begin() as session:

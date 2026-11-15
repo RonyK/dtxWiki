@@ -65,6 +65,10 @@ from backend.models.context_media import (
 from backend.repositories.context_media_orphans import (
     context_media_orphan_clause,
 )
+from backend.repositories.workspace_scoped import (
+    join_correlated_workspace_projection,
+    select_in_workspace,
+)
 
 _SWEEP_ACTOR = ActorIdentity("system", "context_media_orphan_sweep")
 """The sweep is a system process, not a specific user's action. It only
@@ -126,7 +130,7 @@ class OrphanSweepResult:
     run_at: datetime
 
 
-def _page_orphan_statement(workspace_id: UUID):
+def _page_orphan_statement(workspace_id: UUID, *, conditions=()):
     """Page-bound orphans: owned by a Page, never referenced by any of its
     versions' Markdown (draft, published, or historical), AND not currently
     protected by an open "editing" session (see module docstring).
@@ -135,10 +139,14 @@ def _page_orphan_statement(workspace_id: UUID):
     so the workspace attachment listing can filter on exactly the definition
     this sweep reclaims by, instead of a second copy that would drift."""
 
-    return select(ContextMediaAsset).where(
-        ContextMediaAsset.workspace_id == workspace_id,
-        ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
-        context_media_orphan_clause(),
+    return select_in_workspace(
+        ContextMediaAsset,
+        workspace_id=workspace_id,
+        conditions=(
+            ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
+            context_media_orphan_clause(),
+            *conditions,
+        ),
     )
 
 
@@ -162,22 +170,28 @@ def list_orphans(
     """
 
     del now
+    from backend.policy.trust_boundaries import actor_can_read_drafts
     from backend.repositories.context_visibility import (
         foreign_editing_version_exists,
         visible_context_page_expression,
     )
 
-    statement = (
-        _page_orphan_statement(workspace_id)
-        .join(ContextPage, ContextPage.id == ContextMediaAsset.page_id)
-        .where(
-            ContextPage.workspace_id == workspace_id,
-            visible_context_page_expression(actor),
-            ~foreign_editing_version_exists(
-                ContextMediaAsset.created_for_version_id,
-                None if actor is None else (actor.actor_kind, actor.actor_id),
+    statement = join_correlated_workspace_projection(
+        _page_orphan_statement(
+            workspace_id,
+            conditions=(
+                (ContextPage.lifecycle_status != "archived")
+                if actor_can_read_drafts(actor)
+                else visible_context_page_expression(actor),
+                ~foreign_editing_version_exists(
+                    ContextMediaAsset.created_for_version_id,
+                    None if actor is None else (actor.actor_kind, actor.actor_id),
+                ),
             ),
-        )
+        ),
+        ContextMediaAsset.workspace_id,
+        ContextPage,
+        on=ContextPage.id == ContextMediaAsset.page_id,
     )
     page_assets = tuple(session.scalars(statement))
     page_titles = _page_titles(

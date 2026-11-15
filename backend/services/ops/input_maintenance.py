@@ -47,6 +47,7 @@ CONSTRAINED_REVISIONS = frozenset(
         # MCP call lifecycle columns; input CHECKs are unchanged.
         "872d9c3e104b",
         "e4f7a2c901bd",
+        "c3d2e4f601ab",
     }
 )
 SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
@@ -64,6 +65,7 @@ _OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset(
         "9d8695419436",
         "872d9c3e104b",
         "e4f7a2c901bd",
+        "c3d2e4f601ab",
     }
 )
 FIELDS = {

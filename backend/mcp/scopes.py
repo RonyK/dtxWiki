@@ -48,7 +48,6 @@ TOOL_REQUIRED_SCOPES = {
     # require a review-WRITE capability — a draft-write-only token must not be
     # able to close a routed review by known id. review-write is granted only by
     # the mcp:write umbrella (below), never by mcp:read.
-    "submit_revision_for_review": ("review-write",),
     "wiki_maintenance": ("maintenance-write",),
     "read_context_outline": ("read",),
     "read_structure_map": ("read",),
@@ -79,7 +78,6 @@ CONTENT_TOOLS = frozenset(
         "submit_feedback",
         "write_agent_page_draft",
         "build_agent_input_bundle",
-        "submit_revision_for_review",
         "wiki_maintenance",
     }
 )
@@ -112,7 +110,6 @@ TOOL_REQUIRED_ROLES = {
     "write_agent_page_draft": "editor",
     "build_agent_input_bundle": "editor",
     "list_requested_changes": "editor",
-    "submit_revision_for_review": "editor",
     "wiki_maintenance": "editor",
     "read_context_outline": "viewer",
     "read_structure_map": "viewer",

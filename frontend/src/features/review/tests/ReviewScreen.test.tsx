@@ -282,6 +282,9 @@ describe("ReviewScreen", () => {
       decision_type: "approve",
       decision_reason: null,
       decision_id: expect.any(String),
+      expected_editing_revision: 1,
+      expected_published_version_id: null,
+      result_hash: "c".repeat(64),
     });
     // The rail empty state now names the lane it is empty for, so "nothing to
     // review" no longer reads as "nothing anywhere".
@@ -1988,6 +1991,7 @@ describe("ReviewScreen", () => {
           auto_settled_review_item_ids: ["sibling-1", "sibling-2"],
         });
         preview.items[0].auto_settled_review_item_ids = ["sibling-1", "sibling-2"];
+        Object.assign(preview.items[0], { merge_preview: { kind: "automatic_merge", result: { body_md: "Combined publication content.", page_metadata: { title: "Combined title" }, result_hash: "c".repeat(64) } } });
         return jsonResponse({ data: preview });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/decide-bulk`) {
@@ -2033,6 +2037,8 @@ describe("ReviewScreen", () => {
         "2 other reviews of this version or its earlier drafts will also be settled.",
       ),
     ).toHaveLength(2); // Global union and the selected document/version row.
+    expect(within(dialog).getByText("Combined publication content.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Combined title")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: /Approve/ }));
 
     await waitFor(() =>
@@ -3572,6 +3578,12 @@ const reviewFixtures = new Map<string, ReviewItem>();
 function mockReviewFetch(handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input.toString();
+    if (url.endsWith("/merge-preview")) {
+      const request = JSON.parse(String(init?.body));
+      return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
+        published_version_id: null, parent_version_ids: [], kind: "fast_forward",
+        result: { body_md: "Exact candidate body", page_metadata: {}, block_map: [], result_hash: "c".repeat(64) } } });
+    }
     let response: Response;
     try { response = await handler(input, init); }
     catch (error) {
@@ -3855,7 +3867,7 @@ function reviewItem(
 
 function exactPage(workspaceId: string, pageId: string, versionId: string): pagesApi.PagePayload {
   return {
-    id: pageId, workspace_id: workspaceId, version_id: versionId,
+    id: pageId, workspace_id: workspaceId, version_id: versionId, autosave_merged: false,
     block_map_stale: false,
     title: "Feedback Target", slug: "feedback-target", body_md: "Exact candidate body",
     page_type: "guide", content_hash: "a".repeat(64), references_hash: "b".repeat(64), editing_revision: 1,

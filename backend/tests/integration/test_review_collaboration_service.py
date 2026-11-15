@@ -18,7 +18,6 @@ from backend.policy.auth import ActorContext
 from backend.policy.rbac import grant_workspace_membership
 from backend.schemas.context_write import (
     ReviewDecisionRequest,
-    UpdateDraftRequest,
     WriteDraftRequest,
 )
 from backend.services.context_write_service import ContextWriteService
@@ -923,119 +922,6 @@ def test_detail_chat_owner_available_flag(session_factory):
     assert chat_detail.chat_owner_available is True
     assert plain_detail.chat_owner_available is False
     assert ownerless_detail.chat_owner_available is False
-
-
-def _author_and_changes_requested(session, service, writer, *, body, suffix):
-    ws = _workspace(session)
-    author = _make_user(session, f"rev-author-{suffix}@example.com", ws.id)
-    reviewer = _make_user(
-        session, f"rev-reviewer-{suffix}@example.com", ws.id, role="owner"
-    )
-    created = writer.write_draft(  # Auto-fix OFF -> body stored as authored
-        session=session,
-        workspace_id=ws.id,
-        request=WriteDraftRequest(
-            title=f"Rev {suffix}",
-            page_type="overview",
-            body_markdown=body,
-            reason="v1",
-        ),
-        actor_kind="human",
-        actor_id=str(author.id),
-        actor_role="owner",
-    )
-    review = session.get(ReviewItem, created.review_item_id)
-    _request_changes(
-        service,
-        session,
-        ws.id,
-        review,
-        audience_kind="workspace_editors",
-        actor=reviewer.id,
-    )
-    ws.auto_fix_enabled = True
-    base_hash = session.get(ContextPageVersion, created.draft_version_id).content_hash
-    return ws, author, created, review, base_hash
-
-
-def test_revision_format_only_is_not_auto_approved(session_factory):
-    # re-review r2 #1/#2: under Auto-fix, a format-only revision of a
-    # changes_requested review must go to a human (pending), never be
-    # system-auto-approved — "the AI never approves" (Risk 6).
-    service = ReviewService()
-    writer = ContextWriteService()
-    with session_factory.begin() as session:
-        ws, author, created, review, base_hash = _author_and_changes_requested(
-            session,
-            service,
-            writer,
-            body="# Rev\n\n* item\n\nBody.\n",
-            suffix="fo",
-        )
-        result = service.submit_revision_for_review(
-            session=session,
-            workspace_id=ws.id,
-            review_item_id=review.id,
-            principal=author.id,
-            actor_kind="human",
-            actor_id=str(author.id),
-            principal_role="editor",
-            context_write_service=writer,
-            update=UpdateDraftRequest(
-                page_id=created.page_id,
-                base_version_id=created.draft_version_id,
-                base_content_hash=base_hash,
-                update_mode="full_rewrite",
-                body_markdown="# Rev\n\n* item\n\nBody.\n",  # normalizes "*"->"-"
-                citations=[],
-                reason="reformat",
-            ),
-        )
-        # the NEW review is a genuine reformat (bytes changed) but must be pending
-        assert session.get(ReviewItem, result.new_review_item_id).status == "pending"
-        content = service.get_review(
-            session, ws.id, result.new_review_item_id, actor_user_id=author.id,
-            actor_role="editor", actor=_actor(author, ws.id, "editor"),
-        ).evidence.operations[0].content
-        # Approval publishes the whole revision; the page was never published.
-        assert (content.baseline_kind, content.baseline_version_id) == ("empty", None)
-
-
-def test_revision_noop_is_rejected_not_superseded(session_factory):
-    # re-review r2: a true no-op revision (resubmitted body identical to the
-    # canonical draft) is rejected, NOT silently superseded/auto-approved.
-    service = ReviewService()
-    writer = ContextWriteService()
-    with session_factory.begin() as session:
-        ws, author, created, review, base_hash = _author_and_changes_requested(
-            session,
-            service,
-            writer,
-            body="# NoopRev\n\n- item\n\nBody.\n",
-            suffix="noop",  # already canonical
-        )
-        with pytest.raises(ReadValidationError):
-            service.submit_revision_for_review(
-                session=session,
-                workspace_id=ws.id,
-                review_item_id=review.id,
-                principal=author.id,
-                actor_kind="human",
-                actor_id=str(author.id),
-                principal_role="editor",
-                context_write_service=writer,
-                update=UpdateDraftRequest(
-                    page_id=created.page_id,
-                    base_version_id=created.draft_version_id,
-                    base_content_hash=base_hash,
-                    update_mode="full_rewrite",
-                    body_markdown="# NoopRev\n\n- item\n\nBody.\n",
-                    citations=[],
-                    reason="noop",
-                ),
-            )
-        session.refresh(review)
-        assert review.status == "changes_requested"  # not superseded
 
 
 def test_workspace_editors_broadcast_visible_to_any_editor_not_viewer(

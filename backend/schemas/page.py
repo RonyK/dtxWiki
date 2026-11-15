@@ -29,6 +29,8 @@ from backend.schemas.read import (
     WikilinkTarget,
 )
 
+BODY_MD_MAX_LENGTH = 1_000_000
+
 SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 PAGE_SLUG_PATTERN = r"^[\p{L}\p{N}-]+$"
 CONTENT_HASH_PATTERN = r"^[a-f0-9]{64}$"
@@ -120,6 +122,9 @@ class PagePayload(PageSummary):
     # metadata-only change (see PageUpdateRequest's docstring).
     editing_revision: int = 1
     parent_version_id: UUID | None = None
+    parent_version_ids: list[UUID] = Field(default_factory=list)
+    page_metadata: dict[str, Any] = Field(default_factory=dict)
+    autosave_merged: bool = False
     created_at: datetime
     alternative_draft_id: UUID | None = None
     change_set_id: UUID | None = None
@@ -188,6 +193,13 @@ class PublishPageRequest(BaseModel):
 
 
 class PublishPageVersionRequest(InputRequest):
+    result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
+    result_page_metadata: dict[str, Any] | None = None
+    expected_editing_revision: int = Field(ge=1)
+    expected_published_version_id: UUID | None
+    result_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
+    on_conflict: Literal["keep_both", "latest"] | None = None
+    idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     reason: str = Field(min_length=1)
     publish_despite_findings: bool = False
     # The content the caller staged and means to publish. A draft row is
@@ -230,7 +242,6 @@ ALIASES_MAX_ITEMS = 32
 # multi-megabyte pages, and bounds DB write / version_diff cost.
 # 1 MB is generous for real markdown; raise only after re-checking the
 # resolver and diff paths above.
-BODY_MD_MAX_LENGTH = 1_000_000
 
 
 def _check_tag_lengths(tags: list[str] | None) -> list[str] | None:
@@ -426,38 +437,30 @@ class PageUpdateRequest(InputRequest):
         return _check_alias_lengths(value)
 
 
+class DraftBaseSnapshot(BaseModel):
+    body_md: str = Field(max_length=BODY_MD_MAX_LENGTH)
+    page_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class PageAutosaveRequest(PageUpdateRequest):
-    """Save an actor's edit with revision CAS, including metadata changes.
+    """Save the named shared draft using its revision and browser baseline."""
 
-    Browser saves explicitly stage a shared draft with ``share_draft``;
-    private editing clients retain their existing default behavior.
-    """
-
+    base_version_id: UUID | None = None
+    base_content_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
+    version_id: UUID
+    base_snapshot: DraftBaseSnapshot | None = None
+    on_conflict: Literal["keep_both", "latest"] | None = None
     expected_editing_revision: int = Field(ge=1)
-    share_draft: bool = Field(
-        default=False,
-        description="Browser-session save: stage a shared, unpublished draft.",
-    )
+
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     # REST retains lookup-only retries; MCP uses get_operation_status instead.
     retry_only: bool = False
 
 
 class UpdateContextEditRequest(InputRequest):
-    """P8.6: the MCP `update_context_edit` wire command -- the same autosave
-    command as `PageAutosaveRequest`, minus `session_version_id`/`on_stale`.
-
-    Those two fields back `PageService.autosave_page`'s
-    `on_stale="preserve_as_alternative"` branch: resuming a REJECTED,
-    already-submitted draft session by forking a successor from its exact
-    rejected bytes. That flow predates the P8 editing/draft state machine and
-    is out of scope for this tool (P8.6) -- MCP's plain editing-row autosave
-    always targets the caller's own open "editing" row and always conflicts
-    (never silently forks) on a stale base, matching `on_stale`'s default.
-    Omitting the fields here (rather than accepting-and-ignoring them) keeps
-    an agent from ever believing it can request the fork behavior through
-    this tool.
-    """
+    """Replace the named shared draft body with a revision check."""
 
     title: str | None = Field(default=None, min_length=1)
     body_md: str = Field(min_length=1, max_length=BODY_MD_MAX_LENGTH)
@@ -465,14 +468,14 @@ class UpdateContextEditRequest(InputRequest):
     tags: list[str] | None = Field(default=None, max_length=TAGS_MAX_ITEMS)
     aliases: list[str] | None = Field(default=None, max_length=ALIASES_MAX_ITEMS)
     # Binds the save to the editing row the caller read. The revision alone
-    # cannot say WHICH row that was: a row discarded or submitted since, and a
+    # cannot say WHICH row that was: a draft closed since, and a
     # new one opened in its place, used to start from the same revisions.
     version_id: UUID = Field(
         description=(
-            "Your open edit's version_id, from your last create/begin/update/"
-            "patch response (or read_structure_map with version='my_edit'). "
+            "The shared draft version_id, from your last create/begin/update/"
+            "patch response (or read_structure_map with that version_id). "
             "The save applies only to that edit: if it was "
-            "discarded or submitted, or another edit is open now, the call is "
+            "closed or the editing revision has changed, the call is "
             "a conflict and nothing is saved."
         ),
     )
@@ -501,14 +504,7 @@ class UpdateContextEditRequest(InputRequest):
 
 
 class MyContextEditSummary(BaseModel):
-    """One row of `list_my_context_edits` (P8.3/P8.6): the caller's own open
-    "editing" version on some page in the workspace. Deliberately omits an
-    uninserted-media count and a conflict/reconciliation status -- there is no
-    existing cheap per-version media-count helper (P4's artifact model has no
-    such index) and no cheap per-version conflict signal today; adding either
-    would be new machinery beyond this tool's read, not a cost this list
-    should carry silently.
-    """
+    """A shared draft the caller created or contributed to, without its body."""
 
     page_id: UUID
     version_id: UUID
@@ -558,14 +554,10 @@ class PageRestoreRequest(BaseModel):
 
 
 class BeginContextEditCommand(BaseModel):
-    """P8.3: resume-or-open the caller's own editing session.
+    """Join a named draft, or start a new draft from selected commits."""
 
-    Both fields optional: omit both to start from whatever the current head
-    happens to be (an idempotent resume of an already-open session ignores
-    them entirely). Pass both together to assert the base explicitly and get
-    a 409 instead of silently building on a head that moved.
-    """
-
+    from_version_id: UUID | list[UUID] | None = Field(default=None, alias="from")
+    on_conflict: Literal["keep_both", "latest"] | None = None
     base_version_id: UUID | None = None
     base_content_hash: str | None = None
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
@@ -583,6 +575,13 @@ class SubmitContextEditCommand(InputRequest):
     version_id: UUID
     expected_editing_revision: int = Field(ge=1)
     reason: str = Field(default="author submitted for review", min_length=1)
+    feedback_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The feedback item this request addresses. It is linked to the "
+            "request and marked draft_created."
+        ),
+    )
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
 
     model_config = ConfigDict(extra="forbid")
@@ -630,14 +629,7 @@ class PageInlineCommentCreateRequest(InputRequest):
 
 
 class PrivateContextPageCreateRequest(InputRequest):
-    """Private page-first creation input, also used by MCP.
-
-    Deliberately has no ``slug``/``as_draft`` field: the canonical create
-    command always runs ``create_page_first`` (new page + empty editing),
-    regardless of whether a title/body is supplied. It never branches into
-    ``write_page``'s upsert-by-slug behavior -- that ambiguity is exactly what
-    P8.1 retired this route to get away from.
-    """
+    """Create a new page with its first shared mutable draft."""
 
     title: str | None = Field(default=None, min_length=1)
     body_md: str = Field(default="", max_length=BODY_MD_MAX_LENGTH)
@@ -660,12 +652,7 @@ class PrivateContextPageCreateRequest(InputRequest):
 
 
 class ContextPageCreateRequest(PrivateContextPageCreateRequest):
-    """REST creation can explicitly save a shared draft in a browser session."""
-
-    share_draft: bool = Field(
-        default=False,
-        description="Browser-session creation: save a shared, unpublished draft.",
-    )
+    """Create a page with its first shared mutable draft."""
 
 
 class ContextPageWriteDetail(PagePayload):
@@ -674,12 +661,13 @@ class ContextPageWriteDetail(PagePayload):
     Write commands preserve their original page fields and default enrichment
     values. Only a dedicated read computes the draft discovery metadata.
     """
+
     latest_draft_version_id: UUID | None = None
     can_submit_for_review: bool = Field(
         default=False,
         description=(
             "Whether the caller may submit this exact version for review now: "
-            "its own edit or unreviewed shared browser draft."
+            "an editable shared draft without an existing open review request."
         ),
     )
     published_version_info: PublishedVersionInfo | None = None
@@ -695,6 +683,7 @@ class ContextPageWriteDetail(PagePayload):
     )
     wikilink_targets: list[WikilinkTarget] = Field(default_factory=list)
     link_targets: list[ContextLinkTarget] = Field(default_factory=list)
+
     warnings: list[str] = Field(
         default_factory=list,
         description=(
@@ -804,4 +793,21 @@ class PageInlineCommentResponse(RESTResponseBase):
 class PageInlineCommentListResponse(RESTResponseBase):
     data: list[PageInlineComment]
 
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMergePreviewRequest(BaseModel):
+    version_id: UUID
+    on_conflict: Literal["keep_both", "latest"] | None = None
+    body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
+    page_metadata: dict[str, Any] | None = None
+    model_config = ConfigDict(extra="forbid")
+
+
+class BringInContextVersionRequest(BaseModel):
+    version_id: UUID
+    commit_version_id: UUID | None = None
+    expected_editing_revision: int = Field(ge=1)
+    on_conflict: Literal["keep_both", "latest"] | None = None
+    idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     model_config = ConfigDict(extra="forbid")

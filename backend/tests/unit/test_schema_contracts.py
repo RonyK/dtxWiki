@@ -16,15 +16,13 @@ from backend.schemas.common import (
     MCPResultEnvelope,
 )
 from backend.schemas.context_write import (
-    CitationInput,
-    UpdateDraftRequest,
     WriteDraftRequest,
 )
 from backend.schemas.page import (
     BODY_MD_MAX_LENGTH,
     PageCreateRequest,
-    PageMetadataPatch,
     PageUpdateRequest,
+    UpdateContextEditRequest,
 )
 from backend.schemas.read import RankedResult
 
@@ -388,7 +386,6 @@ def test_page_update_request_caps_body_md_length():
 
 def test_context_write_requests_cap_body_markdown_length():
     at_limit = "x" * BODY_MD_MAX_LENGTH
-    base_version_id = UUID("00000000-0000-0000-0000-000000000001")
 
     WriteDraftRequest(
         title="Hello",
@@ -396,13 +393,11 @@ def test_context_write_requests_cap_body_markdown_length():
         body_markdown=at_limit,
         reason="test cap",
     )
-    UpdateDraftRequest(
-        page_id=UUID("00000000-0000-0000-0000-000000000002"),
-        base_version_id=base_version_id,
-        base_content_hash="a" * 64,
-        update_mode="full_rewrite",
-        body_markdown=at_limit,
-        reason="test cap",
+    UpdateContextEditRequest(
+        version_id=UUID("00000000-0000-0000-0000-000000000002"),
+        expected_editing_revision=1,
+        idempotency_key="test-cap",
+        body_md=at_limit,
     )
 
     with pytest.raises(ValidationError):
@@ -414,23 +409,19 @@ def test_context_write_requests_cap_body_markdown_length():
         )
 
     with pytest.raises(ValidationError):
-        UpdateDraftRequest(
-            page_id=UUID("00000000-0000-0000-0000-000000000002"),
-            base_version_id=base_version_id,
-            base_content_hash="a" * 64,
-            update_mode="full_rewrite",
-            body_markdown=at_limit + "x",
-            reason="test cap",
+        UpdateContextEditRequest(
+            version_id=UUID("00000000-0000-0000-0000-000000000002"),
+            expected_editing_revision=1,
+            idempotency_key="test-cap",
+            body_md=at_limit + "x",
         )
 
     with pytest.raises(ValidationError):
-        UpdateDraftRequest(
-            page_id=UUID("00000000-0000-0000-0000-000000000002"),
-            base_version_id=base_version_id,
-            base_content_hash="a" * 64,
-            update_mode="full_rewrite",
-            body_markdown="",
-            reason="test cap",
+        UpdateContextEditRequest(
+            version_id=UUID("00000000-0000-0000-0000-000000000002"),
+            expected_editing_revision=1,
+            idempotency_key="test-cap",
+            body_md="",
         )
 
 
@@ -521,108 +512,3 @@ def _update_draft_kwargs(**overrides):
     }
     base.update(overrides)
     return base
-
-
-def test_replace_section_update_mode_is_rejected_with_actionable_message():
-    """D-1: `replace_section` never scoped to a section.
-
-    `_body_for_update` special-cases only `append_section`; every other mode
-    (including `replace_section`) returned `body_markdown` verbatim, so this
-    "section" mode silently replaced the ENTIRE document body. It had zero
-    production and zero test callers before this fix -- there was previously
-    NO coverage of `replace_section` semantics at all, which is exactly how a
-    whole-document-wipe path shipped unnoticed. This is the first test to
-    assert its removal, and the message must redirect the caller to the
-    correct mode rather than surface a bare enum-mismatch error.
-    """
-    with pytest.raises(ValidationError, match="full_rewrite"):
-        UpdateDraftRequest(
-            **_update_draft_kwargs(
-                update_mode="replace_section",
-                body_markdown="# Replacement",
-            )
-        )
-
-
-def test_update_draft_request_rejects_target_location():
-    """D-2: `target_location` was accepted but never read on the update path.
-
-    The only real per-citation location field is `CitationInput.target_locator`
-    (a different field on a different model); the update body itself has
-    nothing that consumes `target_location`. The model is `extra="forbid"`, so
-    a caller sending it now gets a clear unknown-field rejection instead of a
-    silently-ignored parameter. No prior test covered this field's absence of
-    effect, so this is the first regression test pinning its removal.
-    """
-    with pytest.raises(ValidationError, match="target_location"):
-        UpdateDraftRequest(
-            **_update_draft_kwargs(
-                update_mode="full_rewrite",
-                body_markdown="# Body",
-                target_location={"section": "body"},
-            )
-        )
-
-
-@pytest.mark.parametrize("update_mode", ["citation_update", "metadata_update"])
-def test_body_markdown_is_rejected_on_non_body_update_modes(update_mode):
-    """`citation_update` / `metadata_update` never write the page body.
-
-    Before this fix nothing stopped a caller from sending `body_markdown`
-    alongside these modes -- it was silently ignored by `_body_for_update`,
-    which only inspects `body_markdown` for `append_section`/`full_rewrite`
-    (falling through to `patch_description` or the unchanged base body
-    otherwise). Reject it explicitly at the schema boundary so a caller's
-    mistaken belief that it did something is caught immediately rather than
-    discovered later as a "why didn't my edit apply" bug report. First
-    coverage of this rejection.
-    """
-    kwargs = _update_draft_kwargs(update_mode=update_mode, body_markdown="# Body")
-    if update_mode == "citation_update":
-        kwargs["citations"] = [
-            CitationInput(
-                citation_type="context_page",
-                cited_context_page_version_id=UUID(
-                    "00000000-0000-0000-0000-000000000003"
-                ),
-            )
-        ]
-    else:
-        kwargs["metadata_patch"] = PageMetadataPatch(title="New title")
-    with pytest.raises(ValidationError, match="body_markdown"):
-        UpdateDraftRequest(**kwargs)
-
-
-def test_update_draft_request_supported_modes_still_work():
-    """Guard the four surviving `update_mode` values against regressions
-
-    from the `replace_section` / `target_location` removal and the new
-    `body_markdown` rejection on `citation_update` / `metadata_update`.
-    """
-    UpdateDraftRequest(
-        **_update_draft_kwargs(update_mode="full_rewrite", body_markdown="# Body")
-    )
-    UpdateDraftRequest(
-        **_update_draft_kwargs(
-            update_mode="append_section", body_markdown="More content"
-        )
-    )
-    UpdateDraftRequest(
-        **_update_draft_kwargs(
-            update_mode="citation_update",
-            citations=[
-                CitationInput(
-                    citation_type="context_page",
-                    cited_context_page_version_id=UUID(
-                        "00000000-0000-0000-0000-000000000003"
-                    ),
-                )
-            ],
-        )
-    )
-    UpdateDraftRequest(
-        **_update_draft_kwargs(
-            update_mode="metadata_update",
-            metadata_patch=PageMetadataPatch(title="New title"),
-        )
-    )
