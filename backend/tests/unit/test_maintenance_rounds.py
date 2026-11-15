@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import func, select
 
 from backend.models.coverage import KnowledgeCoverageGap
@@ -28,6 +29,7 @@ from backend.services.maintenance_rounds import (
     lease_round,
     submit_answers,
 )
+from backend.tests.conftest import captured_log_records
 
 NOW = datetime(2026, 7, 12, 1, 0, tzinfo=UTC)
 
@@ -1358,6 +1360,20 @@ def test_generated_answer_string_limits_match_wire_schema_contract():
         )
         is None
     )
+    assert (
+        golden(
+            {
+                "queries": [
+                    {
+                        "query": "valid query",
+                        "expected_kind": [],
+                        "expected_id": "00000000-0000-4000-8000-000000000001",
+                    }
+                ]
+            }
+        )
+        is None
+    )
 
 
 def test_valid_answer_stages_finding_and_replay_is_rejected(session_factory):
@@ -1444,10 +1460,15 @@ def test_answer_for_task_outside_signed_batch_is_rejected(session_factory):
         assert outside_task.status == "pending"
 
 
-def test_stager_exception_never_leaves_task_staged(
+@pytest.mark.parametrize("failure_stage", ["stager", "validator"])
+def test_task_exception_does_not_abort_valid_sibling(
     session_factory,
     monkeypatch,
+    failure_stage,
 ):
+    # The validator parameter adds one DB case: a pre-staging exception must
+    # preserve the batch, which the stager SAVEPOINT and pure input validation
+    # cannot prove. The original stager failure remains covered separately.
     with session_factory.begin() as session:
         workspace_id = _workspace_id(session)
         task = _seed_folder_task(session, workspace_id)
@@ -1458,11 +1479,20 @@ def test_stager_exception_never_leaves_task_staged(
         token = round_.resume_token
         task_id = task.id
 
-    def fail_stager(*_args, **_kwargs):
-        raise RuntimeError("staging failed")
+    failure = RuntimeError(f"{failure_stage} failed")
 
-    monkeypatch.setitem(TASK_STAGERS, "folder_nav_summary", fail_stager)
-    with session_factory.begin() as session:
+    def fail_step(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setitem(
+        TASK_STAGERS if failure_stage == "stager" else TASK_VALIDATORS,
+        "folder_nav_summary",
+        fail_step,
+    )
+    with (
+        captured_log_records("backend.services.maintenance_rounds") as records,
+        session_factory.begin() as session,
+    ):
         outcome = submit_answers(
             session,
             workspace_id=workspace_id,
@@ -1482,11 +1512,19 @@ def test_stager_exception_never_leaves_task_staged(
         )
         assert outcome.staged == (sibling.id,)
         assert outcome.rejected == ((task_id, "staging_failed"),)
+        assert any(
+            str(task_id) in record.getMessage()
+            and record.exc_info
+            and record.exc_info[1] is failure
+            for record in records
+        )
     with session_factory() as session:
         task = session.get(ClientDelegatedTask, task_id)
         sibling = session.get(ClientDelegatedTask, sibling.id)
         assert task.status == "pending"
+        assert task.lease_expires_at is None
         assert sibling.status == "staged"
+        assert sibling.lease_expires_at is None
         assert session.scalar(select(func.count(LintFinding.id))) == 1
 
 
