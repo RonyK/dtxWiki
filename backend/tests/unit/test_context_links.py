@@ -22,7 +22,7 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
     edit_view = page_href + "/edit?view=source#section"
     absolute_edit = "https://wiki.example" + edit_view
     body = (
-        "한글 [normal](/context/normal.md#part) [[known|Label]] [reference][r].\n\n"
+        f"한글 [normal]({page_href}#part) [[known|Label]] [reference][r].\n\n"
         f"[Edit document]({edit_href})\n\n"
         f"[Edit view]({absolute_edit})\n\n"
         "`[inline code](/context/inline-code.md)`\n\n"
@@ -31,18 +31,18 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
         "<span>[html](/context/html.md)</span>\n\n"
         "![image](/context/image.md)\n\n"
         "[shared][s] ![shared image][s]\n\n"
-        "[r]: /context/reference.md\n"
+        f"[r]: {page_href}\n"
         "[s]: /context/shared.md\n"
     )
 
     occurrences = extract_links(body)
 
     assert [item.href for item in occurrences] == [
-        "/context/normal.md#part",
+        f"{page_href}#part",
         "[[known|Label]]",
         edit_href,
         absolute_edit,
-        "/context/reference.md",
+        page_href,
     ]
     assert [item.span.text(body) for item in occurrences] == [
         item.href for item in occurrences
@@ -76,13 +76,13 @@ def test_extract_links_keeps_only_authored_destinations_and_exact_spans(monkeypa
     rewritten, fixes, details = rewrite_links_with_report(body, ctx)
     canonical = f"/p/{workspace_id}/{target_id}"
     assert rewritten == (
-        body.replace("/context/normal.md#part", canonical + "#part")
+        body.replace(f"{page_href}#part", canonical + "#part")
         .replace("[[known|Label]]", f"[Label]({canonical})")
-        .replace("/context/reference.md", canonical)
+        .replace(f"[r]: {page_href}", f"[r]: {canonical}")
         .replace(absolute_edit, edit_view)
     )
     assert len(fixes) == len(details) == 4
-    assert details[0]["before"] == "/context/normal.md#part"
+    assert details[0]["before"] == f"{page_href}#part"
     assert details[0]["after"] == canonical + "#part"
     assert rewrite_links_with_report(rewritten, ctx) == (rewritten, (), ())
 
@@ -92,24 +92,29 @@ def test_index_normalizer_preserves_source_and_aggregates_general_link_fixes(
 ):
     # Budget exception: two syntax inputs exercise different source spans: an
     # inline destination with a title, and an angle autolink that replaces its
-    # whole span. They share one body and resolver. A third ordinary link proves
-    # normalizer/fixer aggregate counts; replacing it with another index ref
-    # cannot detect the two-phase count regression.
+    # whole span. They share one body and resolver. The third destination is
+    # reused by two ordinary references: normalization must retain its query
+    # and fragment in suggest mode, without consulting the destination.
     workspace_id = UUID("11111111-1111-4111-8111-111111111111")
     target_id = UUID("22222222-2222-4222-8222-222222222222")
     ref = f"dtxwiki://index/context/{target_id}"
     canonical = f"/p/{workspace_id}/{target_id}"
     body = (
         f'한글 [Title *kept*]({ref} "Preserved title")  \n'
-        f"<{ref}> [Ordinary](/context/target.md)\n"
+        f"<{ref}> [Ordinary][p] [Again][p]\n\n"
+        f"[p]: /p/{target_id}?tab=history#part\n"
     )
 
     def resolve_target(locator, _ctx, **_kwargs):
+        assert locator.kind != "stable_short", "short URLs must not resolve a target"
         if locator.kind == "unknown":
             return Resolution("ignored")
         return Resolution(
-            "ok", page_id=target_id, href=canonical,
-            target_slug="target", published=True,
+            "ok",
+            page_id=target_id,
+            href=canonical + (f"#{locator.fragment}" if locator.fragment else ""),
+            target_slug="target",
+            published=True,
         )
 
     # Construct before patching: the builtin module imports the shared batch
@@ -122,18 +127,28 @@ def test_index_normalizer_preserves_source_and_aggregates_general_link_fixes(
     monkeypatch.setattr(
         "backend.services.lint.rules_links.link_decision_batch", lambda *_args: object()
     )
-    workspace = SimpleNamespace(id=workspace_id, auto_fix_enabled=False, lint_policy={})
+    workspace = SimpleNamespace(
+        id=workspace_id,
+        auto_fix_enabled=False,
+        lint_policy={"link_fix_mode": "suggest"},
+    )
     result = preparer.prepare(
         BodyInput(body),
         WriteContext(
-            workspace=workspace, session=object(), actor_kind="human",
-            actor_id="author", actor_provenance="browser_session",
+            workspace=workspace,
+            session=object(),
+            actor_kind="human",
+            actor_id="author",
+            actor_provenance="browser_session",
         ),
     )
     assert result.body == (
         body.replace(f'({ref} "Preserved title")', f'({canonical} "Preserved title")')
         .replace(f"<{ref}>", f"[{ref}]({canonical})")
-        .replace("(/context/target.md)", f"({canonical})")
+        .replace(
+            f"[p]: /p/{target_id}?tab=history#part",
+            f"[p]: {canonical}?tab=history#part",
+        )
     )
     assert result.module_fix_counts == (("links", 3),)
     assert len(result.fix_details) == 3

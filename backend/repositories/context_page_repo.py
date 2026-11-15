@@ -22,6 +22,7 @@ from backend.repositories.context_visibility import (
     PUBLISHED_CONTEXT_VERSION_STATUSES,
     visible_context_version_expression,
 )
+from backend.repositories.page_links import active_page_link_condition
 from backend.repositories.workspace_scoped import get_in_workspace
 from backend.utils.actor_display import resolve_actor_display_name
 from backend.utils.block_identity import (
@@ -440,6 +441,7 @@ def context_link_advisory_row(
         )
         .where(
             PageLink.workspace_id == workspace_id,
+            active_page_link_condition(),
             PageLink.source_page_id == page_id,
             PageLink.source_version_id == version_id,
             PageLink.target_page_id.is_not(None),

@@ -25,6 +25,7 @@ from backend.models.workspace import Workspace
 from backend.repositories.context_visibility import (
     PUBLISHED_CONTEXT_VERSION_STATUSES,
 )
+from backend.repositories.page_links import active_page_link_condition
 
 _VERSION_CITATION_TARGET_KINDS = (
     "context_page_version",
@@ -193,6 +194,7 @@ def _load_page_links(
         )
         .where(
             PageLink.workspace_id == workspace_id,
+            active_page_link_condition(),
             ContextPage.lifecycle_status != "archived",
             PageLink.target_page_id.is_not(None),
         )

@@ -73,14 +73,14 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
     }
     # An address the save would make permanent previews as that document.
     converted = client.post(url, json={
-        **request, "body_md": f"@cite{{/pages/{source['slug']}}}",
+        **request, "body_md": f"@cite{{/p/{source['id']}}}",
         "request_id": "convert",
     })
     assert converted.status_code == 200, converted.text
     assert [
         (item["target_id"], item["occurrences"][0]["href"])
         for item in converted.json()["data"]["references"]
-    ] == [(source["id"], f"/pages/{source['slug']}")]
+    ] == [(source["id"], f"/p/{source['id']}")]
     with page_service.session_factory() as session:
         version = session.get(ContextPageVersion, UUID(source["version_id"]))
         assert version.body_md == source["body_md"]

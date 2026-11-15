@@ -1,6 +1,6 @@
 export type ContextLinkKind =
   | "page_id" | "stable_full" | "stable_short" | "canonical_route"
-  | "nav_target" | "concept_path" | "slug" | "resource_uri" | "wikilink"
+  | "nav_target" | "resource_uri" | "wikilink"
   | "workspace_navigation" | "unknown" | "external" | "public_reader" | "local" | "media";
 
 // The REST projection as served: an omitted href/target_page_id means null.
@@ -147,6 +147,31 @@ export function formatContextPageMarkdown(title: string, workspaceId: string, pa
   return `[${escapeContextLinkLabel(title)}](${formatContextPageUrl(workspaceId, pageId, fragment)})`;
 }
 
+/** Identify authored app paths without turning invalid paths into locators. */
+export function isAppLink(value: string, options: ContextLinkOptions = {}): boolean {
+  // Match URI parsing for recognition only; classifyContextLink still rejects
+  // authored whitespace, controls and encoded separators as valid locators.
+  const href = value.replace(/^[\u0000-\u0020]+/, "").replace(/[\r\n\t]/g, "");
+  let pathname = href;
+  if (/^https?:\/\//i.test(href)) {
+    let url: URL;
+    try { url = new URL(href); } catch { return false; }
+    const selfOrigins = options.selfOrigins ?? (typeof window === "undefined" ? [] : [window.location.origin]);
+    if (!selfOrigins.some((origin) => {
+      try { return new URL(origin).origin === url.origin; } catch { return false; }
+    })) return false;
+    pathname = /^https?:\/\/[^/?#]*(.*)$/i.exec(href)?.[1] || "/";
+  } else if (!href.startsWith("/") || href.startsWith("//")) {
+    return false;
+  }
+  pathname = pathname.split(/[?#]/, 1)[0];
+  try {
+    // URI decoding preserves malformed percent escapes, but rejects bad UTF-8.
+    pathname = decodeURIComponent(pathname.replace(/%(?![0-9a-f]{2})/gi, "%25"));
+  } catch { return false; }
+  return /^\/(?:p|context|workspaces|pages)(?:\/|$)/.test(pathname);
+}
+
 export function classifyContextLink(value: string, options: ContextLinkOptions = {}): ContextLink {
   const empty: ContextLink = {
     kind: "unknown", workspaceId: null, pageId: null, fragment: null,
@@ -227,10 +252,6 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
     const targets = new URLSearchParams(query).getAll("target");
     if (targets.length === 1 && UUID.test(targets[0])) return result("nav_target", { lookup: targets[0].toLowerCase(), fragment });
   }
-  match = /^\/context\/(?:[^/]+\/)*([^/]+)\.md$/.exec(pathname);
-  if (match) return result("concept_path", { lookup: match[1].normalize("NFKC").trim(), fragment });
-  match = /^\/pages\/([^/]+)$/.exec(pathname);
-  if (match) return result("slug", { lookup: match[1].normalize("NFKC").trim(), fragment });
   match = /^dtxwiki:\/\/workspaces\/([^/]+)\/context\/pages\/([^/]+)$/.exec(pathname);
   if (match && UUID.test(match[1])) return result("resource_uri", {
     workspaceId: match[1].toLowerCase(), lookup: match[2].normalize("NFKC").trim(), fragment,

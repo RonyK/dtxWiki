@@ -1008,6 +1008,10 @@ MCP clients first call `list_my_workspaces`, then `guide` with the chosen
 Context page inputs accept UUIDs and stable `/p/<workspace_id>/<page_id>` links.
 Short `/p/<page_id>` locators resolve only inside the supplied workspace and
 are not browser permalinks. Use a read result's `link_markdown` in responses.
+Context saves expand short `/p/<page_id>` Markdown destinations using the source
+workspace ID, independently of optional lint fixes. Legacy `/context/<name>.md`
+and `/pages/<slug>` body destinations remain authored text and are reported as
+unavailable links; unresolved links do not block saving.
 Library inputs use canonical `/workspaces/<workspace_id>/library/items/<item_id>`
 URLs. Documents are identified by kind and ID throughout REST and MCP; use
 `stable_url` for browser links. `read_concept.path` also accepts the exact

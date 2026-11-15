@@ -26,9 +26,11 @@ from backend.services.context_links import (
     LinkResolutionBatch,
     Locator,
     _visible_index_route,
+    active_page_link_condition,
     classify,
     configured_self_origins,
     extract_links,
+    is_app_link,
     resolve,
 )
 from backend.services.index_refs import parse_index_ref
@@ -57,13 +59,16 @@ def page_link_target_condition(page: ContextPage):
     slug_locator = or_(
         *(
             PageLink.locator_key.startswith(kind + ":")
-            for kind in ("wikilink", "concept_path", "slug", "resource_uri")
+            for kind in ("wikilink", "resource_uri")
         )
     )
-    return (PageLink.target_page_id == page.id) | (
-        PageLink.target_page_id.is_(None)
-        & (PageLink.target_slug == page.slug)
-        & slug_locator
+    return active_page_link_condition() & (
+        (PageLink.target_page_id == page.id)
+        | (
+            PageLink.target_page_id.is_(None)
+            & (PageLink.target_slug == page.slug)
+            & slug_locator
+        )
     )
 
 
@@ -226,6 +231,12 @@ def markdown_link_targets(
         # not a failed internal destination. In particular, do not probe the
         # source workspace for unknown/custom paths or protocols.
         if locator.kind == "unknown":
+            if is_app_link(occurrence.href, context.self_origins):
+                targets.append(
+                    ContextLinkTarget(
+                        locator=occurrence.href, href=None, state="unavailable"
+                    )
+                )
             continue
         resolution = _resolve_context_locator(locator, context, resolution_batch)
         if resolution.state == "ignored":
@@ -369,8 +380,6 @@ def ask_context_link_targets(
         "stable_short",
         "canonical_route",
         "nav_target",
-        "concept_path",
-        "slug",
         "wikilink",
         "resource_uri",
         "index_ref",

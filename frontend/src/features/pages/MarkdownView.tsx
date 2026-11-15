@@ -57,7 +57,7 @@ import { useTranslation } from "react-i18next";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
 
-import { CONTEXT_HEADING_ID_PREFIX as CLOBBER_PREFIX, withContextHeadingFragment, classifyContextLink, formatContextPageUrl, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
+import { CONTEXT_HEADING_ID_PREFIX as CLOBBER_PREFIX, withContextHeadingFragment, classifyContextLink, formatContextPageUrl, isAppLink, isContextId, normalizeContextHeading, type ContextLinkTarget } from "../../shared/lib/contextLinks";
 import { canPreservePageHref } from "../../shared/lib/customPageHref";
 import { createReferenceReturnState } from "../../shared/lib/navigationRecovery";
 import { hasConflictingWorkspaceQuery, workspacePath } from "../../shared/lib/workspaceRoutes";
@@ -666,19 +666,20 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         allowWorkspaceNavigation: true,
       });
       const wikilink = reference?.wikilink === true;
-      // An unrecognized href belongs to its author. Only a positively known
-      // app locator or a server-resolved target can acquire internal policy.
-      // A system index ref is known but never a browser URL: without a server
-      // target it stays an unavailable reference.
-      const internal = target || wikilink || locator.startsWith(SYSTEM_INDEX_REF_PREFIX) || [
+      // Unsupported app paths cannot be resolved by probing the server. Other
+      // authored URLs keep their existing external-link behavior.
+      const unsupportedAppLink = classification.kind === "unknown" && isAppLink(locator)
+        && !referenceNavigationHref(locator, options.workspaceId ?? "");
+      const internal = target || wikilink || unsupportedAppLink || locator.startsWith(SYSTEM_INDEX_REF_PREFIX) || [
         "page_id", "stable_full", "stable_short", "canonical_route",
-        "nav_target", "concept_path", "slug", "resource_uri", "workspace_navigation",
+        "nav_target", "resource_uri", "workspace_navigation",
       ].includes(classification.kind);
       // The server also resolves supported routes the browser classifies as
       // unknown, such as legacy `/library?target=` links. Ask about them too,
       // but keep rendering them as authored until a target arrives.
-      if (reference && (internal || classification.kind === "unknown")) linksToCheck.add(locator);
+      if (reference && !unsupportedAppLink && (internal || classification.kind === "unknown")) linksToCheck.add(locator);
       if (!internal) return [child];
+      if (unsupportedAppLink) return unavailable();
       delete props.dataContextLinkLocator;
       delete props["data-context-link-locator"];
       const legacyPageId = props.dataInternalPageId ?? props["data-internal-page-id"];
@@ -1548,12 +1549,13 @@ function referenceNavigationHref(href: string, workspaceId: string): string | nu
     if (!hasConflictingWorkspaceQuery(query)) {
       const withoutQuery = href.slice(0, queryAt) + (hashAt < 0 ? "" : href.slice(hashAt));
       const route = classifyContextLink(withoutQuery, options);
-      if (route.kind === "stable_full") classification = route;
+      if (["stable_full", "stable_short", "canonical_route"].includes(route.kind)) classification = route;
     }
   }
   const recognized = classification.kind === "workspace_navigation" ||
     classification.kind === "canonical_route" ||
-    classification.kind === "stable_full";
+    classification.kind === "stable_full" ||
+    classification.kind === "stable_short";
   if (!recognized) return null;
   // Classify the authored path before stripping the origin: URL.pathname
   // would silently normalize dot segments that must remain rejected.

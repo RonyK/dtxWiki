@@ -87,7 +87,7 @@ describe("editor paste conversion", () => {
       </table>
     `, { workspaceId: "11111111-1111-4111-8111-111111111111", selfOrigins: ["https://wiki.example"] });
 
-    expect(markdown).toContain("[Release Notes](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222)");
+    expect(markdown).toContain("[Release Notes](/pages/release-notes)");
     expect(markdown).toContain("[Editor target](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222#details)");
     expect(markdown).toContain("[External](https://external.example/p/22222222-2222-4222-8222-222222222222)");
     // A full copied href carries authority even when legacy page metadata exists.

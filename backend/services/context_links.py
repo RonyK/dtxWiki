@@ -27,6 +27,9 @@ from backend.models.context import (
     PageLink,
     PageNameIndex,
 )
+from backend.repositories.page_links import (
+    active_page_link_condition as active_page_link_condition,
+)
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.index_refs import (
@@ -231,19 +234,35 @@ def classify(href: str, self_origins=()) -> Locator:
             values = query.get("target", [])
             if len(values) == 1 and (node_id := _uuid(values[0])) is not None:
                 return Locator("nav_target", node_id=node_id, **base)
-        if match := re.fullmatch(r"/context/(?:[^/]+/)*([^/]+)\.md", decoded):
-            return Locator("concept_path", slug=_slug(match[1]), **base)
-        if match := re.fullmatch(r"/pages/([^/]+)", decoded):
-            return Locator("slug", slug=_slug(match[1]), **base)
         return Locator(
             "unknown"
             if absolute
-            or decoded.startswith(("/p/", "/context", "/workspaces/", "/pages/"))
+            or is_app_link(href, self_origins)
             else "external",
             **base,
         )
     except (ValueError, UnicodeError):
         return Locator("unknown", href=href)
+
+
+def is_app_link(href: str, self_origins=()) -> bool:
+    """Recognize unsupported app destinations without resolving a target."""
+    try:
+        parts = urlsplit(href)
+        if parts.scheme.lower() not in {"", "http", "https"}:
+            return False
+        if parts.netloc and (
+            parts.scheme.lower() not in {"http", "https"}
+            or not _self_origin(parts, self_origins)
+        ):
+            return False
+        path = unquote(parts.path, errors="strict")
+    except (ValueError, UnicodeError):
+        return False
+    return any(
+        path == namespace or path.startswith(namespace + "/")
+        for namespace in ("/p", "/context", "/workspaces", "/pages")
+    )
 
 
 def parse_page_input(value: str | UUID) -> Locator:
@@ -637,6 +656,8 @@ def resolve(
     preserved_pins: Mapping[str, UUID] | None = None,
     batch: LinkResolutionBatch | None = None,
 ) -> Resolution:
+    if locator.kind in {"unknown", "concept_path", "slug"}:
+        return Resolution("unavailable")
     if locator.workspace_id is not None and locator.workspace_id != ctx.workspace_id:
         return Resolution("foreign")
     if locator.kind in {"external", "public_reader", "local", "media"}:
@@ -904,11 +925,24 @@ def _plain_text_nodes(body: str, *, tokens: Sequence[Token] | None = None) -> li
 
 @memoize_markdown_analysis
 def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
+    """Verified authored links, excluding shared reference definitions."""
+    return _extract_links(body)
+
+
+@memoize_markdown_analysis
+def _normalizable_links(body: str) -> tuple[LinkOccurrence, ...]:
+    return _extract_links(body, allow_shared_link_definitions=True)
+
+
+def _extract_links(
+    body: str, *, allow_shared_link_definitions: bool = False
+) -> tuple[LinkOccurrence, ...]:
     """Verify exact source destinations against the original rendered structure.
 
-    Shared reference definitions are deliberately not rewritable: a definition
-    may serve an image or another link. The probe never creates eligibility;
-    original text-node membership is checked before probing a wikilink.
+    Shared definitions are excluded by default. The short-link normalizer may
+    include one only when every rendered use is an ordinary link. The probe
+    never creates eligibility; original text-node membership is checked before
+    probing a wikilink.
     """
     from collections import Counter
     from hashlib import sha256
@@ -1125,9 +1159,23 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
         if any(marker in node for node in qualified_nodes):
             candidates.append((start, end, raw, "wikilink", slug, label))
 
+    reference_link_counts = Counter(key for key, _ in reference_uses)
+    reference_multiplicity = {}
     for label_key, label in reference_uses:
         definition = definitions[label_key]
-        if uses[label_key] == 1 and definition_counts[label_key] == 1:
+        span = (definition.destination_start, definition.destination_end)
+        if (
+            definition_counts[label_key] == 1
+            and (
+                uses[label_key] == 1
+                or (
+                    allow_shared_link_definitions
+                    and uses[label_key] == reference_link_counts[label_key]
+                )
+            )
+            and span not in reference_multiplicity
+        ):
+            reference_multiplicity[span] = reference_link_counts[label_key]
             candidates.append(
                 (
                     definition.destination_start,
@@ -1194,7 +1242,8 @@ def extract_links(body: str) -> tuple[LinkOccurrence, ...]:
     for index, (start, end, href, kind, slug, label) in enumerate(ordered):
         if index not in probes or (
             kind not in {"wikilink", "literal_autolink"}
-            and rendered_probes[probes[index]] != 1
+            and rendered_probes[probes[index]]
+            != reference_multiplicity.get((start, end), 1)
         ):
             continue
         raw_href = (
@@ -1274,7 +1323,8 @@ def decide(
             return LinkDecision("fix", relative, "link.internal-noncanonical")
         return LinkDecision("keep")
     noncanonical = (
-        locator.kind not in {"stable_full", "wikilink", "page_id"} or locator.absolute
+        locator.kind not in {"stable_full", "stable_short", "wikilink", "page_id"}
+        or locator.absolute
     )
     if locator.kind == "wikilink" and locator.slug != resolution.target_slug:
         noncanonical = True
@@ -1539,6 +1589,8 @@ def decide_link(
                     else LinkDecision("finding", finding="link.unresolved")
                 ),
             )
+        if is_app_link(href, ctx.self_origins):
+            return locator, None, LinkDecision("finding", finding="link.unresolved")
     resolution = resolve(locator, ctx, batch=batch)
     return (
         locator,
@@ -1723,6 +1775,61 @@ def rewrite_links_with_report(
         body, ctx, index_refs_only=index_refs_only
     )
     return rewritten, fixes, details
+
+
+def normalize_short_page_links_with_report(
+    body: str, ctx: LinkContext
+) -> tuple[str, tuple[str, ...], tuple[dict, ...]]:
+    """Expand MCP page shorthand using only the source workspace identity."""
+    from backend.services.context_link_targets import _classify_context_navigation
+
+    changes = []
+    details = []
+    for occurrence in _normalizable_links(body):
+        locator = _classify_context_navigation(occurrence.href, ctx.self_origins)
+        if locator.kind != "stable_short":
+            continue
+        canonical_path = format_stable_url(ctx.workspace_id, locator.page_id)
+        href = urlsplit(occurrence.href)._replace(
+            scheme="", netloc="", path=canonical_path
+        ).geturl()
+        raw = body[occurrence.span.char_start : occurrence.span.char_end]
+        if occurrence.kind == "autolink":
+            raw = raw[1:-1]
+        suffix = re.search(
+            r"(?:&#(?:0*(?:35|63)|[xX]0*(?:23|3[fF]));|&(?:num|quest);|\\?[?#])",
+            raw,
+        )
+        replacement = canonical_path + (raw[suffix.start() :] if suffix else "")
+        if occurrence.kind in {"autolink", "literal_autolink"}:
+            label = occurrence.label or occurrence.href
+            replacement = f"[{escape_link_label(label)}](<{replacement}>)"
+        changes.append((occurrence.span, replacement))
+        details.append(
+            {
+                "module_id": "links",
+                "rule_id": "link.internal-noncanonical",
+                "before": occurrence.href,
+                "after": href,
+                "category": "format",
+            }
+        )
+    parts = []
+    cursor = 0
+    order = sorted(range(len(changes)), key=lambda index: changes[index][0].char_start)
+    changes = [changes[index] for index in order]
+    details = [details[index] for index in order]
+    for span, replacement in changes:
+        if span.char_start < cursor:
+            return body, (), ()
+        parts.extend((body[cursor : span.char_start], replacement))
+        cursor = span.char_end
+    parts.append(body[cursor:])
+    return (
+        "".join(parts),
+        tuple("link.internal-noncanonical" for _ in changes),
+        tuple(details),
+    )
 
 
 def normalize_index_refs_with_report(

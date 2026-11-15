@@ -4,6 +4,7 @@ import {
   classifyContextLink,
   formatContextPageMarkdown,
   formatContextPageUrl,
+  isAppLink,
 } from "../contextLinks";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -57,5 +58,11 @@ describe("Context link locators", () => {
     expect(classifyContextLink(`/p/${workspaceId}/%2e%2e/${pageId}`).kind).toBe("unknown");
     expect(classifyContextLink(`//wiki.example/p/${workspaceId}/${pageId}`).kind).toBe("unknown");
     expect(classifyContextLink(`dtxwiki://index/context/${pageId}`).kind).toBe("unknown");
+    expect(classifyContextLink("/context/old-name.md")).toMatchObject({ kind: "unknown", lookup: null });
+    expect(classifyContextLink("/pages/old-name")).toMatchObject({ kind: "unknown", lookup: null });
+    expect(isAppLink("/context/old-name.md")).toBe(true);
+    expect(isAppLink("/contextual/guide")).toBe(false);
+    expect(isAppLink("https://wiki.example/manual/topic", { selfOrigins: ["https://wiki.example"] })).toBe(false);
+    expect(isAppLink("https://other.example/context/old-name.md", { selfOrigins: ["https://wiki.example"] })).toBe(false);
   });
 });

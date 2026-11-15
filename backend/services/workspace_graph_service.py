@@ -40,6 +40,7 @@ from backend.models.document_reference import (
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.policy.auth import ActorContext
+from backend.repositories.page_links import active_page_link_condition
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 from backend.schemas.workspace_graph import (
     WORKSPACE_GRAPH_CONTAINMENT_KIND,
@@ -1108,6 +1109,7 @@ class WorkspaceGraphService:
             )
             .where(
                 PageLink.workspace_id == workspace_id,
+                active_page_link_condition(),
                 ContextPage.workspace_id == workspace_id,
                 ContextPage.lifecycle_status != "archived",
                 PageLink.target_page_id.is_not(None),

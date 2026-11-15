@@ -26,6 +26,7 @@ from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
     actor_can_read_sensitive_agent_pages,
 )
+from backend.repositories.page_links import active_page_link_edge_condition
 from backend.services.actor_visible_read import agent_page_requires_sensitive_access
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.delegated_tasks import create_task
@@ -331,6 +332,7 @@ def _stage_hot_paths(session: Session, workspace_id: UUID, *, now: datetime) -> 
                     EdgeProjection.edge_kind == "wikilink",
                     EdgeProjection.source_kind == EntityKind.CONTEXT_PAGE.value,
                     EdgeProjection.target_kind == EntityKind.CONTEXT_PAGE.value,
+                    active_page_link_edge_condition(EdgeProjection),
                 )
             ).all()
         }
