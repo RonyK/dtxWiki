@@ -29,7 +29,6 @@ export type ContextLink = {
   fragment: string | null;
   stableUrl: string | null;
   navigationHref: string | null;
-  edit: boolean;
   lookup: string | null;
 };
 
@@ -112,7 +111,7 @@ export function isAppLink(value: string, options: ContextLinkOptions = {}): bool
 export function classifyContextLink(value: string, options: ContextLinkOptions = {}): ContextLink {
   const empty: ContextLink = {
     kind: "unknown", workspaceId: null, pageId: null, fragment: null,
-    stableUrl: null, navigationHref: null, edit: false, lookup: null,
+    stableUrl: null, navigationHref: null, lookup: null,
   };
   const result = (kind: ContextLinkKind, extra: Partial<ContextLink> = {}): ContextLink => ({ ...empty, kind, ...extra });
   const wiki = /^\[\[([^\]|\n]+)(?:\|[^\]\n]*)?\]\]$/.exec(value);
@@ -166,10 +165,10 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   if (input.startsWith("#")) return result("local", { fragment });
   if (/^\/w\/[^/]+\/pages\/[^/]+$/.test(pathname)) return result("public_reader", { fragment });
   if (/^\/(?:api|uploads)\//.test(pathname)) return result("media", { fragment });
-  const withPage = (kind: ContextLinkKind, workspaceId: string | null, pageId: string, edit = false): ContextLink => {
+  const withPage = (kind: ContextLinkKind, workspaceId: string | null, pageId: string): ContextLink => {
     const resolvedWorkspaceId = workspaceId ?? options.workspaceId;
     return result(kind, {
-      workspaceId, pageId: pageId.toLowerCase(), fragment, edit,
+      workspaceId, pageId: pageId.toLowerCase(), fragment,
       stableUrl: resolvedWorkspaceId
         ? formatContextPageUrl(resolvedWorkspaceId, pageId.toLowerCase()) + (query ? `?${query}` : "") + fragmentSuffix(fragment)
         : null,
@@ -179,15 +178,8 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   const documentRoute = matchContextReference(rawPathname);
   if (documentRoute?.route.locatorKind) {
     if ((query && !options.allowWorkspaceNavigation) || !isSafeBrowserQuery(query, rawPathname)) return result("unknown", { fragment });
-    return withPage(documentRoute.route.locatorKind, documentRoute.params.workspaceId ?? null, documentRoute.params.pageId, documentRoute.route.edit);
+    return withPage(documentRoute.route.locatorKind, documentRoute.params.workspaceId ?? null, documentRoute.params.pageId);
   }
-  if (options.allowWorkspaceNavigation && query && isWorkspaceNavigationPath(rawPathname, query)) {
-    return result("workspace_navigation", {
-      stableUrl: input, fragment,
-      navigationHref: legacyWorkspaceEntryPath(rawPathname, query) !== null ? input : null,
-    });
-  }
-  if (query && pathname !== "/context" && /^\/(?:p|context|workspaces|pages)\//.test(pathname)) return result("unknown", { fragment });
   if (options.allowWorkspaceNavigation && isWorkspaceNavigationPath(rawPathname, query)) {
     return result("workspace_navigation", {
       stableUrl: input, fragment,

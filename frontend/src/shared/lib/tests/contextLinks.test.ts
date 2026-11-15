@@ -24,9 +24,9 @@ describe("Context link locators", () => {
     const editorHref = `/workspaces/${workspaceId}/context/pages/${pageId}/edit/?view=source#details`;
     const readerHref = `/workspaces/${workspaceId}/context/pages/${pageId}/?tab=history#details`;
     expect(classifyContextLink(editorHref, { allowWorkspaceNavigation: true }))
-      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: `/p/${workspaceId}/${pageId}?view=source#details`, edit: true, navigationHref: editorHref });
+      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: `/p/${workspaceId}/${pageId}?view=source#details`, navigationHref: editorHref });
     expect(classifyContextLink(readerHref, { allowWorkspaceNavigation: true }))
-      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: `/p/${workspaceId}/${pageId}?tab=history#details`, edit: false, navigationHref: readerHref });
+      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: `/p/${workspaceId}/${pageId}?tab=history#details`, navigationHref: readerHref });
     expect(contextNavigationHref(editorHref, workspaceId)).toBe(editorHref);
     expect(contextNavigationHref(readerHref, workspaceId)).toBe(readerHref);
     expect(classifyContextLink(`${readerHref.split("?")[0]}?target=${pageId}`).kind).toBe("unknown");

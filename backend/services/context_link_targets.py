@@ -233,9 +233,9 @@ def markdown_link_targets(
                 )
             )
             continue
-        # A locator outside the supported URL grammar is opaque authored text,
-        # not a failed internal destination. In particular, do not probe the
-        # source workspace for unknown/custom paths or protocols.
+        # An app path outside the supported URL grammar is retired, and this
+        # answer is what readers show. Other unknown locators are opaque
+        # authored text; do not probe the source workspace for them.
         if locator.kind == "unknown":
             if is_app_link(occurrence.href, context.self_origins):
                 targets.append(
@@ -1116,13 +1116,8 @@ def _navigation_batch(
     )
 
 
-def _safe_workspace_query(query: str, path: str = "") -> bool:
-    """Reject identity override parameters while allowing presentation state."""
-    return safe_browser_query(query, path)
-
-
 def _classify_context_navigation(href: str, self_origins: frozenset[str]):
-    """Classify typed Context links after validating harmless UI query state."""
+    """Classify a body link, reading system index refs as their typed targets."""
     ref = parse_index_ref(href)
     if ref is not None:
         return Locator(
@@ -1143,7 +1138,7 @@ def _preserve_workspace_view_query(
         return None
     original_parts = urlsplit(original)
     query = original_parts.query
-    if query and not _safe_workspace_query(query, original_parts.path):
+    if query and not safe_browser_query(query, original_parts.path):
         return destination
     destination_parts = urlsplit(destination)
     fragment = (

@@ -592,7 +592,6 @@ describe("appRoutes role gating", () => {
         const document = classifyContextLink(`${pathname}?view=source#section`, { allowWorkspaceNavigation: true });
         expect(document.pageId, pathname).toBe(matched?.params.pageId);
         expect(["stable_full", "canonical_route"], pathname).toContain(document.kind);
-        expect(document.edit, pathname).toBe(browserRoute.edit);
       }
     }
     const route = findRoute(appRoutes, "/workspaces/find");

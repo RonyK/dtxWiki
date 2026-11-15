@@ -110,7 +110,7 @@ export function isSafeBrowserQuery(search: string, pathname = ""): boolean {
 
 export function isWorkspaceNavigationPath(pathname: string, search: string): boolean {
   if (matchBrowserRoute(pathname) !== null) return isSafeBrowserQuery(search, pathname);
-  // Only aliases inside the app-link fallback's namespace need a confirmed
-  // navigation projection. Other authored alias links keep their reader mode.
+  // Landing aliases are navigation only inside the app-link namespaces, as
+  // the server projects them. Other authored alias links keep their reader mode.
   return isAppLinkPath(pathname) && legacyWorkspaceEntryPath(pathname, search) !== null;
 }
