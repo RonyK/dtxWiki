@@ -671,20 +671,19 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         return [child];
       }
       const wikilink = reference?.wikilink === true;
-      // Unsupported app paths cannot be resolved by probing the server. Other
-      // authored URLs keep their existing external-link behavior.
-      const unsupportedAppLink = classification.kind === "unknown" && isAppLink(locator)
-        && !contextNavigationHref(locator, options.workspaceId ?? "");
-      const internal = target || wikilink || unsupportedAppLink || locator.startsWith(SYSTEM_INDEX_REF_PREFIX) || [
+      // The server resolves app paths the browser does not recognize, such as
+      // trailing-slash aliases, so it decides them like any other app link:
+      // they wait for its answer and are unavailable only without a target.
+      const appLink = classification.kind === "unknown" && isAppLink(locator);
+      const internal = target || wikilink || appLink || locator.startsWith(SYSTEM_INDEX_REF_PREFIX) || [
         "page_id", "stable_full", "stable_short", "canonical_route",
         "nav_target", "resource_uri", "workspace_navigation",
       ].includes(classification.kind);
       // The server also resolves supported routes the browser classifies as
       // unknown, such as legacy `/library?target=` links. Ask about them too,
-      // but keep rendering them as authored until a target arrives.
-      if (reference && !unsupportedAppLink && (internal || classification.kind === "unknown")) linksToCheck.add(locator);
+      // but keep rendering non-app paths as authored until a target arrives.
+      if (reference && (internal || classification.kind === "unknown")) linksToCheck.add(locator);
       if (!internal) return [child];
-      if (unsupportedAppLink) return unavailable();
       delete props.dataContextLinkLocator;
       delete props["data-context-link-locator"];
       const legacyPageId = props.dataInternalPageId ?? props["data-internal-page-id"];

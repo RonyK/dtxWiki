@@ -590,6 +590,7 @@ describe("MarkdownView", () => {
             { locator: "/context/missing.md", href: null, target_page_id: null, state: "unavailable" },
             { locator: "/context/missing-image.md", href: null, target_page_id: null, state: "unavailable" },
             { locator: "/context?view=source#section", href: "/context?view=source#section", target_page_id: null, state: "ok" },
+            { locator: "/context/?target=44444444-4444-4444-8444-444444444444", href: "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/44444444-4444-4444-8444-444444444444", target_page_id: null, state: "ok" },
           ]}
           body={[
             "# Release Notes",
@@ -612,6 +613,7 @@ describe("MarkdownView", () => {
             '',
             '[Retired page](/pages/release-notes)',
             '[Context entry](/context?view=source#section)',
+            '[Folder alias](/context/?target=44444444-4444-4444-8444-444444444444)',
             `[Own docs](${window.location.origin}/manual/topic?view=print#raw-anchor)`,
             '[Parent relative](../manual/topic?view=print#raw-anchor)',
             '[Unrecognized root](/unregistered/path?x=1#raw-anchor)',
@@ -693,9 +695,15 @@ describe("MarkdownView", () => {
     expect(screen.getByRole("button", { name: "Index ref" }))
       .toHaveClass("unavailable-reference__trigger");
     expect(screen.getByRole("button", { name: "Retired page" })).toBeInTheDocument();
+    // The server decides app paths the browser grammar does not recognize: a
+    // confirmed alias opens its target, and the rest are asked about.
+    expect(screen.getByRole("link", { name: /Folder alias/ })).toHaveAttribute(
+      "href", "/workspaces/11111111-1111-4111-8111-111111111111/context/folders/44444444-4444-4444-8444-444444444444",
+    );
     expect(onLinksToCheck).toHaveBeenCalled();
-    expect(onLinksToCheck.mock.calls.at(-1)?.[0]).not.toContain("/pages/release-notes");
-    expect(onLinksToCheck.mock.calls.at(-1)?.[0]).not.toContain("/context/missing.md");
+    expect(onLinksToCheck.mock.calls.at(-1)?.[0]).toEqual(expect.arrayContaining([
+      "/pages/release-notes", "/context/missing.md", "/context/?target=44444444-4444-4444-8444-444444444444",
+    ]));
     // Budget exception: explicit destination pins, short preview inheritance,
     // reference links, and unavailable navigation are distinct render paths.
     expect(screen.queryByRole("link", { name: "Missing" })).not.toBeInTheDocument();
