@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from string import punctuation
 from urllib.parse import urlsplit
 
 from markdown_it import MarkdownIt
@@ -74,10 +75,14 @@ class LinkRewrite:
     preserve_suffix: bool = True
 
 
-def _escape_label(label: str) -> str:
-    import re
+def escape_link_label(title: str) -> str:
+    """Serialize a literal label with CommonMark ASCII-punctuation escapes.
 
-    return re.sub(r"([\\`*_\[\]<>!&~])", r"\\\1", label)
+    Escape the complete punctuation alphabet rather than guessing which
+    delimiters the page's inline extensions recognize, including math dollars.
+    This affects only label syntax; it never changes the destination URL.
+    """
+    return "".join("\\" + char if char in punctuation else char for char in title)
 
 
 def _encode_destination(href: str) -> str:
@@ -115,7 +120,7 @@ def _unescaped_bang_before(body: str, start: int) -> bool:
     return (start - 2 - cursor) % 2 == 0
 
 
-def _rendered_structure(parser: MarkdownIt, body: str):
+def _link_image_inventory(parser: MarkdownIt, body: str):
     links = Counter()
     images = Counter()
     rendered, _ = _rendered_page_body(body)
@@ -131,14 +136,18 @@ def _rendered_structure(parser: MarkdownIt, body: str):
 def apply_link_rewrites(
     body: str, changes: list[LinkRewrite], *, parser: MarkdownIt
 ) -> tuple[str, tuple[int, ...]]:
-    """Emit one source patch batch and prove destination/node preservation.
+    """Emit one source patch batch and check link/image destination inventory.
+
+    This CommonMark check detects changed link/image destinations and counts.
+    It does not prove label or inline-extension equivalence; literal-label
+    serialization and the actual reader's contract fixtures cover those.
 
     Ambiguous overlapping patches or an unexpected parser result retain the
     source, matching the existing authored-link writer's safe fallback.
     """
     if not changes:
         return body, ()
-    expected_links, expected_images = _rendered_structure(parser, body)
+    expected_links, expected_images = _link_image_inventory(parser, body)
     edits = []
     for index, change in enumerate(changes):
         source = change.source
@@ -156,7 +165,7 @@ def apply_link_rewrites(
             destination = replacement
             if any(character in destination for character in " ()\t\r\n"):
                 destination = f"<{destination}>"
-            replacement = f"[{_escape_label(change.label)}]({destination})"
+            replacement = f"[{escape_link_label(change.label)}]({destination})"
             if _unescaped_bang_before(body, start):
                 start -= 1
                 replacement = r"\!" + replacement
@@ -176,7 +185,7 @@ def apply_link_rewrites(
         accepted.append(index)
     parts.append(body[cursor:])
     rewritten = "".join(parts)
-    links, images = _rendered_structure(parser, rewritten)
+    links, images = _link_image_inventory(parser, rewritten)
     if (
         any(count < 0 for count in expected_links.values())
         or +expected_links != links

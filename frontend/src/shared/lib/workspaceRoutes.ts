@@ -1,6 +1,6 @@
 import { useLocation } from "react-router-dom";
 
-import { hasConflictingBrowserQuery } from "./browserRoutes";
+import { hasConflictingBrowserQuery, legacyWorkspaceEntryPath } from "./browserRoutes";
 import { IDENTITY_QUERY_KEYS, WORKSPACE_SECTIONS } from "./browserRoutes.gen";
 
 import type { TreeNodePayload } from "../api/workspace";
@@ -135,11 +135,5 @@ export function workspaceSwitchHref(workspaceId: string, pathname: string): stri
 
 /** Only target-free legacy entry points can use the last-used landing hint. */
 export function legacyWorkspaceEntry(pathname: string, search: string): string | null {
-  if (hasConflictingWorkspaceQuery(search)) return null;
-  const path = pathname.replace(/\/+$/, "") || "/";
-  if (path === "/") return "dashboard";
-  if (path === "/settings/integrations") return "settings/integrations";
-  if (/^\/activity\/(?:pending|advisory|history)$/.test(path)) return path.slice(1);
-  const section = path.slice(1) as WorkspaceSection;
-  return sections.has(section) ? section : null;
+  return legacyWorkspaceEntryPath(pathname, search);
 }

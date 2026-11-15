@@ -11,7 +11,7 @@ import {
   useLocation,
 } from "react-router-dom";
 
-import { BROWSER_ROUTES } from "../shared/lib/browserRoutes.gen";
+import { BROWSER_ROUTES, LEGACY_WORKSPACE_ROUTES } from "../shared/lib/browserRoutes.gen";
 import { WorkspaceGraphGate } from "../features/graph/WorkspaceGraphGate";
 import { AuthProvider, useAuth } from "../shared/auth/AuthContext";
 import { Shell } from "../shared/components/Shell";
@@ -222,11 +222,7 @@ export function createAppRoutes() {
       <Route path={BROWSER_ROUTES.setup.path} element={<RequireAuth><SetupScreen /></RequireAuth>} />
       <Route path={BROWSER_ROUTES.inbox.path} element={<RequireAuth><InboxScreen /></RequireAuth>} />
       <Route path="/inbox" element={<RequireAuth><InboxScreen /></RequireAuth>} />
-      {[
-        "/", "/dashboard", "/graph", "/context", "/library", "/agent", "/ask",
-        "/chats", "/activity", "/activity/:lane", "/review", "/lint",
-        "/search", "/settings", "/settings/integrations", "/setup",
-      ].map((path) => (
+      {Object.values(LEGACY_WORKSPACE_ROUTES).map(({ path }) => (
         <Route key={path} path={path} element={<RequireAuth><LegacyWorkspaceLanding /></RequireAuth>} />
       ))}
       <Route path="*" element={<RequireAuth><NotFoundScreen /></RequireAuth>} />

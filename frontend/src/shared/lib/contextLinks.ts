@@ -1,4 +1,4 @@
-import { isSafeBrowserQuery, isWorkspaceNavigationPath, matchBrowserRoute } from "./browserRoutes";
+import { isAppLinkPath, isSafeBrowserQuery, isWorkspaceNavigationPath, legacyWorkspaceEntryPath, matchBrowserRoute } from "./browserRoutes";
 
 export type ContextLinkKind =
   | "page_id" | "stable_full" | "stable_short" | "canonical_route"
@@ -39,7 +39,9 @@ export function isContextId(value: string): boolean {
 }
 
 export function escapeContextLinkLabel(title: string): string {
-  return title.replace(/[\\`*_[\]<>!&~]/g, "\\$&");
+  // CommonMark backslash escapes keep label text literal in the page's
+  // extended Markdown profile too, including dollar-delimited inline math.
+  return title.replace(/[!-/:-@[-`{-~]/g, "\\$&");
 }
 
 export function normalizeContextHeading(value: string): string {
@@ -104,7 +106,7 @@ export function isAppLink(value: string, options: ContextLinkOptions = {}): bool
     // URI decoding preserves malformed percent escapes, but rejects bad UTF-8.
     pathname = decodeURIComponent(pathname.replace(/%(?![0-9a-f]{2})/gi, "%25"));
   } catch { return false; }
-  return /^\/(?:p|context|workspaces|pages)(?:\/|$)/.test(pathname);
+  return isAppLinkPath(pathname);
 }
 
 export function classifyContextLink(value: string, options: ContextLinkOptions = {}): ContextLink {
@@ -178,7 +180,10 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
     return withPage("canonical_route", browserRoute.params.workspaceId, browserRoute.params.pageId, browserRoute.route.edit);
   }
   if (options.allowWorkspaceNavigation && query && isWorkspaceNavigationPath(rawPathname, query)) {
-    return result("workspace_navigation", { stableUrl: input, fragment });
+    return result("workspace_navigation", {
+      stableUrl: input, fragment,
+      navigationHref: legacyWorkspaceEntryPath(rawPathname, query) !== null ? input : null,
+    });
   }
   if (query && pathname !== "/context" && /^\/(?:p|context|workspaces|pages)\//.test(pathname)) return result("unknown", { fragment });
   let match = /^\/p\/([^/]+)\/([^/]+)$/.exec(pathname);
@@ -186,7 +191,10 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
   match = /^\/p\/([^/]+)$/.exec(pathname);
   if (match && UUID.test(match[1])) return withPage("stable_short", null, match[1]);
   if (options.allowWorkspaceNavigation && isWorkspaceNavigationPath(rawPathname, query)) {
-    return result("workspace_navigation", { stableUrl: input, fragment });
+    return result("workspace_navigation", {
+      stableUrl: input, fragment,
+      navigationHref: legacyWorkspaceEntryPath(rawPathname, query) !== null ? input : null,
+    });
   }
   if (pathname === "/context" && query) {
     const targets = new URLSearchParams(query).getAll("target");

@@ -35,9 +35,14 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
         f"/workspaces/{workspace_id}/context/pages/{source['id']}"
         "/%65dit/?view=source#section"
     )
+    # A separate navigation input verifies the authorized preview preserves the
+    # session-relative landing instead of binding it to the source workspace.
+    # Parser recognition alone cannot check this end-to-end response contract.
+    landing_href = "/context?view=source#section"
     buffer = (
         f"[Draft]({ref})  \nUnsaved\n@cite{{{citation_href}}}\n"
         f"[Edit]({edit_href})\n"
+        f"[Context]({landing_href})\n"
     )
     request = {
         "body_md": buffer,
@@ -84,6 +89,8 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
              "href": f"/workspaces/{workspace_id}/context/pages/{source['id']}"
                      "/edit?view=source#section",
              "state": "ok", "target_page_id": source["id"]},
+            {"locator": landing_href, "href": landing_href,
+             "state": "ok", "target_page_id": None},
         ],
     }
     # An address the save would make permanent previews as that document.

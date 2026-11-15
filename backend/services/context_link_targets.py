@@ -21,7 +21,12 @@ from backend.models.workspace import Workspace
 from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
 from backend.schemas.read import ContextLinkTarget, WikilinkTarget
 from backend.services.actor_visible_read import agent_page_visible, library_item_visible
-from backend.services.browser_routes import match_browser_route, safe_browser_query
+from backend.services.browser_routes import (
+    is_app_link_path,
+    legacy_workspace_entry,
+    match_browser_route,
+    safe_browser_query,
+)
 from backend.services.context_links import (
     LinkContext,
     LinkResolutionBatch,
@@ -838,7 +843,7 @@ def _parse_workspace_navigation_reference(
     self_origins: frozenset[str] = frozenset(),
 ) -> tuple[str, str, UUID | None, UUID | None] | None:
     try:
-        if href != href.strip() or any(
+        if href.startswith("//") or href != href.strip() or any(
             ord(char) < 32 or ord(char) == 127 for char in href
         ):
             return None
@@ -849,10 +854,15 @@ def _parse_workspace_navigation_reference(
             locator = classify(href, self_origins)
             if not locator.absolute:
                 return None
+            if parts.path.startswith("//"):
+                return None
             href = f"{parts.path}?{parts.query}" if parts.query else parts.path
             parts = urlsplit(href)
         if parts.scheme or parts.netloc or parts.username or parts.password:
             return None
+        landing = legacy_workspace_entry(parts.path, parts.query)
+        if landing is not None and is_app_link_path(parts.path):
+            return landing.split("/", 1)[0], "overview", None, None
         if "//" in parts.path:
             return None
         if parts.path.endswith("/"):

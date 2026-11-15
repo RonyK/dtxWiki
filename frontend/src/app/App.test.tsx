@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "../shared/auth/AuthContext";
 import { setLocale } from "../shared/i18n";
-import { BROWSER_ROUTES } from "../shared/lib/browserRoutes.gen";
+import { APP_LINK_NAMESPACES, BROWSER_ROUTES, LEGACY_WORKSPACE_ROUTES } from "../shared/lib/browserRoutes.gen";
 import { WorkspaceGraphGate } from "../features/graph/WorkspaceGraphGate";
 import {
   appRoutes,
@@ -549,8 +549,18 @@ describe("appRoutes role gating", () => {
   it("keeps workspace discovery behind a browser session", () => {
     // Compare the complete registered workspace surface, so a new app route
     // cannot silently bypass the browser-link grammar or remain undeclared.
-    expect(routePaths(appRoutes).filter((path) => path.startsWith("/workspaces/")).sort())
-      .toEqual(Object.values(BROWSER_ROUTES).map((route) => route.path).sort());
+    const appLinkNamespace = (path: string) => APP_LINK_NAMESPACES.some(
+      (namespace) => path === namespace || path.startsWith(`${namespace}/`),
+    );
+    // The two permalink declarations have their own contract; the short
+    // browser route deliberately rejects shorthand accepted by authoring.
+    const declaredPaths = [
+      ...Object.values(BROWSER_ROUTES).map((route) => route.path),
+      ...Object.values(LEGACY_WORKSPACE_ROUTES).map((route) => route.path),
+      "/p/:workspaceId/:pageId", "/p/:pageId",
+    ];
+    expect(routePaths(appRoutes).filter(appLinkNamespace).sort())
+      .toEqual(declaredPaths.filter(appLinkNamespace).sort());
     const route = findRoute(appRoutes, "/workspaces/find");
     expect(route).not.toBeNull();
     const element = route?.element;

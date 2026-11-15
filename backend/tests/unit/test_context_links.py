@@ -1,5 +1,7 @@
 """Source-boundary checks for authored Context links."""
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -145,7 +147,11 @@ def test_index_normalizer_preserves_source_and_aggregates_general_link_fixes(
     )
     assert result.body == (
         body.replace(f'({ref} "Preserved title")', f'({canonical} "Preserved title")')
-        .replace(f"<{ref}>", f"[{ref}]({canonical})")
+        .replace(
+            f"<{ref}>",
+            r"[dtxwiki\:\/\/index\/context\/22222222\-2222\-4222\-8222\-222222222222]"
+            f"({canonical})",
+        )
         .replace(
             f"[p]: /p/{target_id}?tab=history#part",
             f"[p]: {canonical}?tab=history#part",
@@ -172,20 +178,26 @@ def test_short_autolink_expansion_preserves_visible_bang_and_link_kind():
     # Budget exception: this pure source-boundary input is independent of the
     # existing PR's cached-link DB traversal and shared-reference input. Those
     # cannot expose a mandatory rewrite turning a link into an image after !.
-    workspace_id = UUID("11111111-1111-4111-8111-111111111111")
-    page_id = "22222222-2222-4222-8222-222222222222"
-    href = f"https://wiki.example/p/{page_id}?tab=history#details"
-    body = f"Before !<{href}> after.\n"
+    # The same vector is rendered by MarkdownView with its real plugin profile.
+    # CommonMark link counts alone cannot detect a label becoming inline math.
+    fixture = json.loads(
+        Path("shared/fixtures/context_link_rewrite_vectors.json").read_text()
+    )
+    vector = fixture["vectors"][0]
+    workspace_id = UUID(fixture["workspace_id"])
+    body = f"Before !{vector['source']} after.\n"
     ctx = LinkContext(
-        object(), workspace_id, None, self_origins=frozenset({"https://wiki.example"})
+        object(), workspace_id, None, self_origins=frozenset({fixture["self_origin"]})
     )
 
     normalized, _, _ = normalize_short_page_links_with_report(body, ctx)
 
     before_kinds, _, before_text = _rendered_link_state(body)
     after_kinds, after_hrefs, after_text = _rendered_link_state(normalized)
+    assert normalized == f"Before \\!{vector['normalized']} after.\n"
     assert before_kinds == after_kinds == ["link_open"]
-    assert after_hrefs == [f"/p/{workspace_id}/{page_id}?tab=history#details"]
+    assert after_hrefs == [vector["href"]]
+    assert [item.href for item in extract_links(normalized)] == [vector["href"]]
     assert before_text == after_text
     assert normalize_short_page_links_with_report(normalized, ctx) == (
         normalized,
@@ -226,3 +238,24 @@ def test_short_link_source_mapping_matches_rendered_character_references():
         (),
         (),
     )
+
+
+def test_network_path_is_not_retargeted_to_a_workspace_landing():
+    # Budget exception: a network-path reference has a different authority in
+    # the browser. Valid landing and document inputs cannot expose urlsplit
+    # collapsing leading slashes into a same-app path. Two logical inputs cover
+    # the initial parse and the separate self-origin reparse; neither covers the
+    # other's branch. No database is needed.
+    from backend.services.context_link_targets import markdown_link_targets
+    from backend.services.context_links import is_app_link
+
+    origins = frozenset({"https://wiki.example"})
+    for href in ("///context", "https://wiki.example///context"):
+        assert not is_app_link(href, origins)
+        assert markdown_link_targets(
+            object(),
+            body=f"[External]({href})",
+            workspace_id=UUID("11111111-1111-4111-8111-111111111111"),
+            actor=None,
+            self_origins=origins,
+        ) == []

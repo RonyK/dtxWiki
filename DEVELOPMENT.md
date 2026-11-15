@@ -592,11 +592,14 @@ make export-schemas
 make gen-client
 ```
 
-Workspace 브라우저 경로는 `backend/services/browser_routes.py`에서 정의합니다.
+Workspace 브라우저 경로와 등록된 landing alias는
+`backend/services/browser_routes.py`에서 정의합니다.
 경로를 변경한 뒤 `.venv/bin/python scripts/export_browser_routes.py`로 프런트엔드
 계약을 재생성합니다. 라우터와 본문 링크 판정은 이 계약을 사용하며,
 `make check-frontend`가 생성물의 일치를 검사합니다. 경로 판정과 접근 권한 검사는
 분리되어 있고, 기존 화면의 인증·권한 gate가 접근 여부를 결정합니다.
+생성 링크 label의 문자 보존은 `shared/fixtures/context_link_rewrite_vectors.json`을
+backend 정규화 테스트와 실제 MarkdownView 렌더링 테스트가 함께 검증합니다.
 
 ## Frontend 변경 반영
 

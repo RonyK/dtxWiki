@@ -1,4 +1,4 @@
-import { BROWSER_ROUTES, IDENTITY_QUERY_KEYS } from "./browserRoutes.gen";
+import { APP_LINK_NAMESPACES, BROWSER_ROUTES, IDENTITY_QUERY_KEYS, LEGACY_WORKSPACE_ROUTES } from "./browserRoutes.gen";
 import { isWorkspaceUuid } from "./workspaceIdentity";
 
 type BrowserRoute = {
@@ -15,6 +15,37 @@ export type BrowserRouteMatch = {
   route: BrowserRoute;
   params: Readonly<Record<string, string>>;
 };
+
+type LegacyWorkspaceRoute = {
+  readonly path: string;
+  readonly suffix: string;
+  readonly choices: Readonly<Record<string, readonly string[]>>;
+};
+
+export function isAppLinkPath(pathname: string): boolean {
+  return APP_LINK_NAMESPACES.some((namespace) => pathname === namespace || pathname.startsWith(namespace + "/"));
+}
+
+/** Keep the existing landing screen's raw, case-sensitive alias semantics. */
+export function legacyWorkspaceEntryPath(pathname: string, search: string): string | null {
+  if (hasConflictingBrowserQuery(search)) return null;
+  const parts = (pathname.replace(/\/+$/, "") || "/").split("/");
+  for (const route of Object.values(LEGACY_WORKSPACE_ROUTES) as readonly LegacyWorkspaceRoute[]) {
+    const expected = route.path.split("/");
+    if (expected.length !== parts.length) continue;
+    let suffix = route.suffix;
+    const valid = expected.every((pattern, index) => {
+      const value = parts[index];
+      if (!pattern.startsWith(":")) return value === pattern;
+      const choices = route.choices[pattern.slice(1)];
+      if (!choices.includes(value)) return false;
+      suffix = suffix.replace(pattern, value);
+      return true;
+    });
+    if (valid) return suffix;
+  }
+  return null;
+}
 
 /** Match exact registered paths without normalizing authored dot segments. */
 export function matchBrowserRoute(pathname: string): BrowserRouteMatch | null {
@@ -62,5 +93,8 @@ export function isSafeBrowserQuery(search: string, pathname = ""): boolean {
 }
 
 export function isWorkspaceNavigationPath(pathname: string, search: string): boolean {
-  return matchBrowserRoute(pathname) !== null && isSafeBrowserQuery(search, pathname);
+  if (matchBrowserRoute(pathname) !== null) return isSafeBrowserQuery(search, pathname);
+  // Only aliases inside the app-link fallback's namespace need a confirmed
+  // navigation projection. Other authored alias links keep their reader mode.
+  return isAppLinkPath(pathname) && legacyWorkspaceEntryPath(pathname, search) !== null;
 }

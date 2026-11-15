@@ -98,8 +98,8 @@ describe("editor paste conversion", () => {
     // folder navigation, and unknown origins exercise separate paste branches.
     const clipboard = (plain: string) => ({ getData: (type: string) => type === "text/plain" ? plain : "" });
     const options = { workspaceId: "11111111-1111-4111-8111-111111111111", selfOrigins: ["https://wiki.example"] };
-    expect(markdownFromClipboard(clipboard("https://wiki.example/p/22222222-2222-4222-8222-222222222222"), options)).toBe("[https://wiki.example/p/22222222-2222-4222-8222-222222222222](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222)");
-    expect(markdownFromClipboard(clipboard("/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222"), options)).toBe("[/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222](/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222)");
+    expect(markdownFromClipboard(clipboard("https://wiki.example/p/22222222-2222-4222-8222-222222222222"), options)).toBe(String.raw`[https\:\/\/wiki\.example\/p\/22222222\-2222\-4222\-8222\-222222222222](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222)`);
+    expect(markdownFromClipboard(clipboard("/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222"), options)).toBe(String.raw`[\/p\/33333333\-3333\-4333\-8333\-333333333333\/22222222\-2222\-4222\-8222\-222222222222](/p/33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222)`);
     expect(markdownFromClipboard(clipboard("/context?target=22222222-2222-4222-8222-222222222222"), options)).toBeNull();
     expect(markdownFromClipboard(clipboard("https://external.example/p/22222222-2222-4222-8222-222222222222"), options)).toBeNull();
     expect(markdown).toContain("| Name | Status |");

@@ -30,7 +30,7 @@ from backend.repositories.page_links import (
     active_page_link_condition as active_page_link_condition,
 )
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
-from backend.services.browser_routes import match_browser_route
+from backend.services.browser_routes import is_app_link_path, match_browser_route
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.index_refs import (
     PAGE_INPUT_REF_GUIDANCE,
@@ -44,6 +44,9 @@ from backend.utils.markdown_link_rewrite import (
     apply_link_rewrites,
     decode_destination,
 )
+from backend.utils.markdown_link_rewrite import (
+    escape_link_label as escape_link_label,
+)
 from backend.utils.request_markdown_memo import memoize_markdown_analysis
 
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -56,10 +59,6 @@ def format_stable_url(
 ) -> str:
     href = f"/p/{workspace_id}/{page_id}"
     return href + (f"#{fragment.lstrip('#')}" if fragment else "")
-
-
-def escape_link_label(title: str) -> str:
-    return re.sub(r"([\\`*_\[\]<>!&~])", r"\\\1", title)
 
 
 def link_markdown(
@@ -258,6 +257,10 @@ def classify(href: str, self_origins=()) -> Locator:
 
 def is_app_link(href: str, self_origins=()) -> bool:
     """Recognize unsupported app destinations without resolving a target."""
+    href = re.sub(r"^[\x00-\x20]+", "", href)
+    href = href.replace("\r", "").replace("\n", "").replace("\t", "")
+    if href.startswith("//"):
+        return False
     try:
         parts = urlsplit(href)
         if parts.scheme.lower() not in {"", "http", "https"}:
@@ -270,10 +273,7 @@ def is_app_link(href: str, self_origins=()) -> bool:
         path = unquote(parts.path, errors="strict")
     except (ValueError, UnicodeError):
         return False
-    return any(
-        path == namespace or path.startswith(namespace + "/")
-        for namespace in ("/p", "/context", "/workspaces", "/pages")
-    )
+    return is_app_link_path(path)
 
 
 def parse_page_input(value: str | UUID) -> Locator:

@@ -656,15 +656,20 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         }) as typeof child.data;
         return [child];
       };
-      if (options.confirmedOnly) {
-        if (!target || target.state !== "ok" || !target.href || !target.href.startsWith("/") || target.href.startsWith("//")) return unavailable();
-        props.href = withContextHeadingFragment(target.href);
-        return [child];
-      }
       const classification = classifyContextLink(locator, {
         workspaceId: options.workspaceId,
         allowWorkspaceNavigation: true,
       });
+      // Landing aliases carry UI navigation state rather than document
+      // heading IDs in both normal and server-confirmed reader policies.
+      const referenceHref = (destination: string) => classification.kind === "workspace_navigation" && classification.navigationHref !== null
+        ? destination
+        : withContextHeadingFragment(destination);
+      if (options.confirmedOnly) {
+        if (!target || target.state !== "ok" || !target.href || !target.href.startsWith("/") || target.href.startsWith("//")) return unavailable();
+        props.href = referenceHref(target.href);
+        return [child];
+      }
       const wikilink = reference?.wikilink === true;
       // Unsupported app paths cannot be resolved by probing the server. Other
       // authored URLs keep their existing external-link behavior.
@@ -692,7 +697,7 @@ function rehypeResolveContextLinks(options: ContextLinkResolverOptions) {
         : classification.stableUrl ?? (wikilink && legacyPageId && href !== "#" ? href : null);
       if (options.publicReader && !resolvedHref) return unavailable();
       if (resolvedHref) {
-        props.href = withContextHeadingFragment(resolvedHref);
+        props.href = referenceHref(resolvedHref);
         if (wikilink) props.className = ["wikilink"];
         const pageId = target?.target_page_id ?? classification.pageId ?? legacyPageId;
         if (!options.publicReader && pageId) props.dataInternalPageId = pageId;

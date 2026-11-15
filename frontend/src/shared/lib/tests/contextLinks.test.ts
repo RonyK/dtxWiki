@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import rewriteVectors from "../../../../../shared/fixtures/context_link_rewrite_vectors.json";
 import {
   classifyContextLink,
   contextNavigationHref,
+  escapeContextLinkLabel,
   formatContextPageMarkdown,
   formatContextPageUrl,
   isAppLink,
@@ -35,6 +37,9 @@ describe("Context link locators", () => {
     expect(formatContextPageUrl(workspaceId, pageId, "details")).toBe(href);
     expect(formatContextPageMarkdown("Notes [draft]", workspaceId, pageId, "details"))
       .toBe(`[Notes \\[draft\\]](${href})`);
+    for (const vector of rewriteVectors.vectors) {
+      expect(`[${escapeContextLinkLabel(vector.label)}](${vector.href})`).toBe(vector.normalized);
+    }
   });
 
   it("accepts only explicit typed workspace navigation when the reader opts in", () => {
@@ -72,6 +77,12 @@ describe("Context link locators", () => {
       `${directory}?target=${pageId}`,
       { allowWorkspaceNavigation: true },
     ).kind).toBe("unknown");
+    const landingHref = "/context?view=source#section";
+    expect(classifyContextLink(landingHref, { allowWorkspaceNavigation: true })).toMatchObject({
+      kind: "workspace_navigation", stableUrl: landingHref, navigationHref: landingHref,
+    });
+    expect(classifyContextLink(`/context?target=${pageId}`, { allowWorkspaceNavigation: true }))
+      .toMatchObject({ kind: "nav_target", lookup: pageId, stableUrl: null });
   });
 
   it("keeps authored opaque schemes external and rejects normalization into trusted routes", () => {

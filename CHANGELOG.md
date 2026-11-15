@@ -18,6 +18,8 @@
   and edit routes also accept a trailing slash while retaining view state and
   fragments. Preserve link/image structure and character-reference semantics
   during normalization.
+- Preserve the existing session-relative `/context` landing link and keep
+  generated link labels literal under the page renderer's math and GFM rules.
 
 ### Document identifiers and URLs
 

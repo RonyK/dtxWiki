@@ -343,5 +343,95 @@ export const BROWSER_ROUTES = {
   }
 } as const;
 
+export const LEGACY_WORKSPACE_ROUTES = {
+  "home": {
+    "path": "/",
+    "suffix": "dashboard",
+    "choices": {}
+  },
+  "dashboard": {
+    "path": "/dashboard",
+    "suffix": "dashboard",
+    "choices": {}
+  },
+  "graph": {
+    "path": "/graph",
+    "suffix": "graph",
+    "choices": {}
+  },
+  "context": {
+    "path": "/context",
+    "suffix": "context",
+    "choices": {}
+  },
+  "library": {
+    "path": "/library",
+    "suffix": "library",
+    "choices": {}
+  },
+  "agent": {
+    "path": "/agent",
+    "suffix": "agent",
+    "choices": {}
+  },
+  "ask": {
+    "path": "/ask",
+    "suffix": "ask",
+    "choices": {}
+  },
+  "chats": {
+    "path": "/chats",
+    "suffix": "chats",
+    "choices": {}
+  },
+  "activity": {
+    "path": "/activity",
+    "suffix": "activity",
+    "choices": {}
+  },
+  "activity_lane": {
+    "path": "/activity/:lane",
+    "suffix": "activity/:lane",
+    "choices": {
+      "lane": [
+        "pending",
+        "advisory",
+        "history"
+      ]
+    }
+  },
+  "review": {
+    "path": "/review",
+    "suffix": "review",
+    "choices": {}
+  },
+  "lint": {
+    "path": "/lint",
+    "suffix": "lint",
+    "choices": {}
+  },
+  "search": {
+    "path": "/search",
+    "suffix": "search",
+    "choices": {}
+  },
+  "settings": {
+    "path": "/settings",
+    "suffix": "settings",
+    "choices": {}
+  },
+  "settings_integrations": {
+    "path": "/settings/integrations",
+    "suffix": "settings/integrations",
+    "choices": {}
+  },
+  "setup": {
+    "path": "/setup",
+    "suffix": "setup",
+    "choices": {}
+  }
+} as const;
+
+export const APP_LINK_NAMESPACES = ["/p", "/context", "/workspaces", "/pages"] as const;
 export const IDENTITY_QUERY_KEYS = ["target", "edit", "review", "finding", "new", "newFolder", "parentNodeId", "parentId", "workspaceId", "workspace_id", "ws"] as const;
 export const WORKSPACE_SECTIONS = ["dashboard", "graph", "context", "library", "agent", "activity", "review", "lint", "chats", "ask", "search", "settings", "setup", "inbox"] as const;
