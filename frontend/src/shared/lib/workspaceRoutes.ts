@@ -1,6 +1,6 @@
 import { useLocation } from "react-router-dom";
 
-import { hasConflictingBrowserQuery, legacyWorkspaceEntryPath } from "./browserRoutes";
+import { hasConflictingBrowserQuery, legacyWorkspaceEntryPath, matchBrowserRoute } from "./browserRoutes";
 import { IDENTITY_QUERY_KEYS, WORKSPACE_SECTIONS } from "./browserRoutes.gen";
 
 import type { TreeNodePayload } from "../api/workspace";
@@ -59,6 +59,13 @@ export function treeNodeHref(workspaceId: string, node: TreeNodePayload): string
 }
 
 export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
+  const registered = matchBrowserRoute(pathname);
+  if (registered?.params.workspaceId && registered.route.path.startsWith("/workspaces/")) {
+    // Registered URL variants enter the UI with the same canonical identity.
+    // Keep the broader fallback below for unknown routes' workspace context.
+    pathname = registered.route.path.split("/").map((part) => part.startsWith(":")
+      ? registered.params[part.slice(1)] : part).join("/");
+  }
   const match = /^\/workspaces\/([^/]+)(?:\/(.*))?$/.exec(pathname.replace(/\/+$/, ""));
   if (!match) return null;
   let workspaceId: string;
@@ -87,7 +94,7 @@ export function parseWorkspaceRoute(pathname: string): WorkspaceRoute | null {
 
 /** Read only a valid workspace UUID prefix, even when the rest of the route is unknown. */
 export function workspaceIdFromPathname(pathname: string): string | null {
-  const match = /^\/workspaces\/([^/]+)(?:\/|$)/.exec(pathname);
+  const match = /^\/workspaces\/([^/]+)(?:\/|$)/i.exec(pathname);
   if (!match) return null;
   try {
     const workspaceId = decodeURIComponent(match[1]);

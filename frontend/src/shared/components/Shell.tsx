@@ -49,6 +49,7 @@ import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolic
 import { SEARCH_QUERY_MAX_LENGTH } from "../lib/searchLimits";
 import { searchResultHref } from "../lib/searchResultHref";
 import { isValidWorkspaceRoute, legacyWorkspaceEntry, parseWorkspaceRoute, workspacePath, workspaceSwitchHref } from "../lib/workspaceRoutes";
+import { matchBrowserRoute } from "../lib/browserRoutes";
 import { NotFoundScreen } from "../../features/errors/NotFoundScreen";
 import { trapTabFocus } from "../lib/trapTabFocus";
 import { isEditorRole } from "../workspace/permissions";
@@ -792,7 +793,8 @@ function WorkspaceRouteBoundary({ children }: { children: ReactNode }) {
     route && validRoute && routeKey && initialized && !loading && !error &&
     selectedWorkspace?.id !== route.workspaceId && lastAttemptedRefreshKey !== routeKey,
   );
-  const normalizedPathname = location.pathname.replace(/\/+$/, "") || "/";
+  const entryPath = matchBrowserRoute(location.pathname)?.route.path ?? location.pathname;
+  const normalizedPathname = entryPath.replace(/\/+$/, "") || "/";
   const isLegacyWorkspaceLanding = legacyWorkspaceEntry(location.pathname, "") !== null;
   const workspaceIndependentRoute = [
     "/account", "/account/password", "/account/integrations", "/settings/server",

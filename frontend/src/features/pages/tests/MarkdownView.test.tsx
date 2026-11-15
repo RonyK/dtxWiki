@@ -586,6 +586,7 @@ describe("MarkdownView", () => {
           onLinksToCheck={onLinksToCheck}
           linkTargets={[
             { locator: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222", href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222", target_page_id: "22222222-2222-4222-8222-222222222222", state: "ok" },
+            { locator: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/?view=source#section", href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222?view=source#section", target_page_id: "22222222-2222-4222-8222-222222222222", state: "ok" },
             { locator: "/context/missing.md", href: null, target_page_id: null, state: "unavailable" },
             { locator: "/context/missing-image.md", href: null, target_page_id: null, state: "unavailable" },
             { locator: "/context?view=source#section", href: "/context?view=source#section", target_page_id: null, state: "ok" },
@@ -600,7 +601,7 @@ describe("MarkdownView", () => {
             "",
             "[target]: /p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
             "",
-            "[Internal](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222), [Hash](#user-content-release-notes), [External](https://example.com), and [Protocol](//example.com)",
+            "[Internal](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/?view=source#section), [Hash](#user-content-release-notes), [External](https://example.com), and [Protocol](//example.com)",
             '[![Linked image](https://images.example.test/linked.png)](/context/missing-image.md)',
             '<div><a href="https://raw-html.example.test"data-dtx-unavailable-reference="true" data-dtx-reference-wikilink="true" data-dtx-reference-locator="/context/missing.md">Raw HTML link</a></div>',
             '',
@@ -636,7 +637,7 @@ describe("MarkdownView", () => {
     expect(screen.getByText("Keep this cited.").closest(".markdown-alert"))
       .toHaveClass("markdown-alert-note");
     expect(screen.getByRole("link", { name: "Internal" }))
-      .toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222");
+      .toHaveAttribute("href", "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222?view=source#user-content-section");
     expect(screen.getByRole("link", { name: "Internal" }))
       .not.toHaveAttribute("node");
     expect(screen.getByRole("link", { name: "Hash" }))
@@ -1216,10 +1217,10 @@ describe("MarkdownView", () => {
     render(
       <MemoryRouter>
         <MarkdownView
-          body={'[Confirmed](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222) [Confirmed landing](/context?view=source#section) [External](https://example.test) [Custom](s://service/reference) ![Image](/x.png) <a href="/raw">Raw</a>'}
+          body={'[Confirmed](/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/?view=source#section) [Confirmed landing](/context?view=source#section) [External](https://example.test) [Custom](s://service/reference) ![Image](/x.png) <a href="/raw">Raw</a>'}
           linkTargets={[{
-            locator: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
-            href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+            locator: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/?view=source#section",
+            href: "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222?view=source#section",
             target_page_id: "22222222-2222-4222-8222-222222222222",
             state: "ok",
           }, {
@@ -1237,7 +1238,7 @@ describe("MarkdownView", () => {
 
     expect(screen.getByRole("link", { name: "Confirmed" })).toHaveAttribute(
       "href",
-      "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222",
+      "/p/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222?view=source#user-content-section",
     );
     expect(screen.getByRole("link", { name: "Confirmed landing" }))
       .toHaveAttribute("href", "/context?view=source#section");
@@ -1258,7 +1259,7 @@ describe("MarkdownView", () => {
     const itemId = "22222222-2222-4222-8222-222222222222";
     const itemHref = `/workspaces/${workspaceId}/library/items/${itemId}?page=2`;
     const absoluteItemHref = `${window.location.origin}${itemHref}#details`;
-    const stableHref = `/p/${workspaceId}/${itemId}?tab=history#overview`;
+    const stableHref = `/p/${workspaceId}/${itemId}/?view=source#section`;
     const absoluteStableHref = `${window.location.origin}${stableHref}`;
     const externalHref = `https://other.example${itemHref}`;
     const publicHref = `${window.location.origin}/w/sales/pages/launch`;
@@ -1290,6 +1291,8 @@ describe("MarkdownView", () => {
                   `[Context editor](${absoluteEditorHref})`,
                   `[Absolute item](${absoluteItemHref})`,
                   `[Absolute stable page](${absoluteStableHref})`,
+                  `[Raw stable page](${stableHref})`,
+                  `[Short stable page](/p/${itemId}?view=source#section)`,
                   `[Other origin](${externalHref})`,
                   `[Public reader](${publicHref})`,
                 ].join(" ")}
@@ -1324,7 +1327,11 @@ describe("MarkdownView", () => {
     expect(absoluteItem).not.toHaveAttribute("target");
     expect(within(absoluteItem).getByText("Other workspace")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Absolute stable page/ }))
-      .toHaveAttribute("href", stableHref.replace("#overview", "#user-content-overview"));
+      .toHaveAttribute("href", stableHref.replace("#section", "#user-content-section"));
+    expect(screen.getByRole("link", { name: /Raw stable page/ }))
+      .toHaveAttribute("href", stableHref.replace("#section", "#user-content-section"));
+    expect(screen.getByRole("link", { name: "Short stable page" }))
+      .toHaveAttribute("href", `/p/${sourceWorkspaceId}/${itemId}?view=source#user-content-section`);
     for (const [name, href] of [["Other origin", externalHref], ["Public reader", publicHref]]) {
       const link = screen.getByRole("link", { name });
       expect(link).toHaveAttribute("href", href);

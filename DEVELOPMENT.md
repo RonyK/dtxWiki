@@ -598,6 +598,10 @@ Workspace 브라우저 경로와 등록된 landing alias는
 계약을 재생성합니다. 라우터와 본문 링크 판정은 이 계약을 사용하며,
 `make check-frontend`가 생성물의 일치를 검사합니다. 경로 판정과 접근 권한 검사는
 분리되어 있고, 기존 화면의 인증·권한 gate가 접근 여부를 결정합니다.
+등록 경로는 permalink를 포함해 대소문자·trailing slash·UUID decoding 규칙을
+같이 적용합니다. 브라우저 이동과 저장 시 확장하는 짧은 참조는 같은 매처를 쓰되,
+workspace가 없는 짧은 참조는 브라우저 진입 경로로 허용하지 않습니다.
+MCP/OKF의 page 입력은 기존의 정확한 identity 형식을 유지합니다.
 생성 링크 label의 문자 보존은 `shared/fixtures/context_link_rewrite_vectors.json`을
 backend 정규화 테스트와 실제 MarkdownView 렌더링 테스트가 함께 검증합니다.
 

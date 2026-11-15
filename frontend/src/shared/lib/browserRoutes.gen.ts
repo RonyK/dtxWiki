@@ -9,7 +9,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "workspace_home": {
     "path": "/workspaces/:workspaceId",
@@ -18,7 +19,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "workspace_graph": {
     "path": "/workspaces/:workspaceId/graph",
@@ -27,7 +29,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "workspace_dashboard": {
     "path": "/workspaces/:workspaceId/dashboard",
@@ -36,7 +39,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "context": {
     "path": "/workspaces/:workspaceId/context",
@@ -45,7 +49,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "context_folder_new": {
     "path": "/workspaces/:workspaceId/context/folders/new",
@@ -54,7 +59,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": true,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "context_folder": {
     "path": "/workspaces/:workspaceId/context/folders/:nodeId",
@@ -63,7 +69,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "nodeId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "context_page_new": {
     "path": "/workspaces/:workspaceId/context/pages/new",
@@ -72,7 +79,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": true,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "context_page": {
     "path": "/workspaces/:workspaceId/context/pages/:pageId",
@@ -81,7 +89,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "pageId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": "canonical_route"
   },
   "context_page_edit": {
     "path": "/workspaces/:workspaceId/context/pages/:pageId/edit",
@@ -90,7 +99,18 @@ export const BROWSER_ROUTES = {
     "targetParam": "pageId",
     "create": false,
     "edit": true,
-    "choices": {}
+    "choices": {},
+    "locatorKind": "canonical_route"
+  },
+  "context_permalink": {
+    "path": "/p/:workspaceId/:pageId",
+    "section": "context",
+    "kind": "page",
+    "targetParam": "pageId",
+    "create": false,
+    "edit": false,
+    "choices": {},
+    "locatorKind": "stable_full"
   },
   "library": {
     "path": "/workspaces/:workspaceId/library",
@@ -99,7 +119,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "library_item_new": {
     "path": "/workspaces/:workspaceId/library/items/new",
@@ -108,7 +129,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": true,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "library_item": {
     "path": "/workspaces/:workspaceId/library/items/:itemId",
@@ -117,7 +139,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "itemId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "library_artifact": {
     "path": "/workspaces/:workspaceId/library/artifacts/:artifactId",
@@ -126,7 +149,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "artifactId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "library_folder_new": {
     "path": "/workspaces/:workspaceId/library/folders/new",
@@ -135,7 +159,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": true,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "library_folder": {
     "path": "/workspaces/:workspaceId/library/folders/:nodeId",
@@ -144,7 +169,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "nodeId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "agent": {
     "path": "/workspaces/:workspaceId/agent",
@@ -153,7 +179,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "agent_page_new": {
     "path": "/workspaces/:workspaceId/agent/pages/new",
@@ -162,7 +189,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": true,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "agent_page": {
     "path": "/workspaces/:workspaceId/agent/pages/:agentPageId",
@@ -171,7 +199,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "agentPageId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "agent_page_edit": {
     "path": "/workspaces/:workspaceId/agent/pages/:agentPageId/edit",
@@ -180,7 +209,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "agentPageId",
     "create": false,
     "edit": true,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "agent_folder_new": {
     "path": "/workspaces/:workspaceId/agent/folders/new",
@@ -189,7 +219,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": true,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "agent_folder": {
     "path": "/workspaces/:workspaceId/agent/folders/:nodeId",
@@ -198,7 +229,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "nodeId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "activity": {
     "path": "/workspaces/:workspaceId/activity",
@@ -207,7 +239,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "activity_lane": {
     "path": "/workspaces/:workspaceId/activity/:lane",
@@ -222,7 +255,8 @@ export const BROWSER_ROUTES = {
         "advisory",
         "history"
       ]
-    }
+    },
+    "locatorKind": null
   },
   "review": {
     "path": "/workspaces/:workspaceId/review",
@@ -231,7 +265,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "review_item": {
     "path": "/workspaces/:workspaceId/review/:reviewItemId",
@@ -240,7 +275,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "reviewItemId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "lint": {
     "path": "/workspaces/:workspaceId/lint",
@@ -249,7 +285,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "lint_finding": {
     "path": "/workspaces/:workspaceId/lint/findings/:findingId",
@@ -258,7 +295,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "findingId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "chats": {
     "path": "/workspaces/:workspaceId/chats",
@@ -267,7 +305,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "chat": {
     "path": "/workspaces/:workspaceId/chats/:chatId",
@@ -276,7 +315,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "chatId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "ask": {
     "path": "/workspaces/:workspaceId/ask",
@@ -285,7 +325,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "ask_session": {
     "path": "/workspaces/:workspaceId/ask/:askSessionId",
@@ -294,7 +335,8 @@ export const BROWSER_ROUTES = {
     "targetParam": "askSessionId",
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "search": {
     "path": "/workspaces/:workspaceId/search",
@@ -303,7 +345,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "settings": {
     "path": "/workspaces/:workspaceId/settings",
@@ -312,7 +355,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "settings_integrations": {
     "path": "/workspaces/:workspaceId/settings/integrations",
@@ -321,7 +365,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "setup": {
     "path": "/workspaces/:workspaceId/setup",
@@ -330,7 +375,8 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
   },
   "inbox": {
     "path": "/workspaces/:workspaceId/inbox",
@@ -339,7 +385,21 @@ export const BROWSER_ROUTES = {
     "targetParam": null,
     "create": false,
     "edit": false,
-    "choices": {}
+    "choices": {},
+    "locatorKind": null
+  }
+} as const;
+
+export const AUTHORING_ROUTES = {
+  "context_short": {
+    "path": "/p/:pageId",
+    "section": "context",
+    "kind": "page",
+    "targetParam": "pageId",
+    "create": false,
+    "edit": false,
+    "choices": {},
+    "locatorKind": "stable_short"
   }
 } as const;
 

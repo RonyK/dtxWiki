@@ -30,7 +30,12 @@ from backend.repositories.page_links import (
     active_page_link_condition as active_page_link_condition,
 )
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
-from backend.services.browser_routes import is_app_link_path, match_browser_route
+from backend.services.browser_routes import (
+    is_app_link_path,
+    match_browser_route,
+    match_context_reference,
+    safe_browser_query,
+)
 from backend.services.context_visibility import visible_context_version_id
 from backend.services.index_refs import (
     PAGE_INPUT_REF_GUIDANCE,
@@ -212,6 +217,7 @@ def classify(href: str, self_origins=()) -> Locator:
                 )
             return Locator("unknown", **base)
         browser_route = match_browser_route(path)
+        document_route = match_context_reference(path)
         if (
             parts.query
             and decoded != "/context"
@@ -220,26 +226,17 @@ def classify(href: str, self_origins=()) -> Locator:
                 or browser_route is not None
             )
         ):
-            return Locator("unknown", **base)
-        if match := re.fullmatch(rf"/p/({_UUID})/({_UUID})", decoded):
+            if not (
+                document_route is not None and safe_browser_query(parts.query, path)
+            ):
+                return Locator("unknown", **base)
+        if document_route is not None:
+            workspace_id = document_route.params.get("workspaceId")
             return Locator(
-                "stable_full",
-                workspace_id=UUID(match[1]),
-                page_id=UUID(match[2]),
-                **base,
-            )
-        if match := re.fullmatch(rf"/p/({_UUID})", decoded):
-            return Locator("stable_short", page_id=UUID(match[1]), **base)
-        if (
-            browser_route is not None
-            and browser_route.route.section == "context"
-            and browser_route.route.kind == "page"
-        ):
-            return Locator(
-                "canonical_route",
-                workspace_id=UUID(browser_route.params["workspaceId"]),
-                page_id=UUID(browser_route.params["pageId"]),
-                edit=browser_route.route.edit,
+                document_route.route.locator_kind,
+                workspace_id=UUID(workspace_id) if workspace_id else None,
+                page_id=UUID(document_route.params["pageId"]),
+                edit=document_route.route.edit,
                 **base,
             )
         if decoded == "/context":
@@ -282,6 +279,15 @@ def parse_page_input(value: str | UUID) -> Locator:
     locator = classify(str(value))
     if locator.kind not in {"page_id", "stable_full", "stable_short"}:
         raise ValueError("Expected a Context page UUID or permanent page URL")
+    # Browser navigation accepts case and trailing-slash variants. Page inputs
+    # retain their existing exact identity syntax through the same path grammar.
+    if locator.kind != "page_id":
+        parts = urlsplit(str(value))
+        if (
+            parts.query
+            or match_context_reference(parts.path, identity_input=True) is None
+        ):
+            raise ValueError("Expected a Context page UUID or permanent page URL")
     return locator
 
 

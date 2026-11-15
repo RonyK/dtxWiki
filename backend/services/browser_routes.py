@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from urllib.parse import parse_qs, unquote
 
@@ -41,6 +42,7 @@ class BrowserRoute:
     create: bool = False
     edit: bool = False
     choices: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    locator_kind: str | None = None
 
 
 _WS = "/workspaces/:workspaceId"
@@ -60,10 +62,26 @@ BROWSER_ROUTES = {
         f"{_WS}/context/pages/new", "context", create=True
     ),
     "context_page": BrowserRoute(
-        f"{_WS}/context/pages/:pageId", "context", "page", "pageId"
+        f"{_WS}/context/pages/:pageId",
+        "context",
+        "page",
+        "pageId",
+        locator_kind="canonical_route",
     ),
     "context_page_edit": BrowserRoute(
-        f"{_WS}/context/pages/:pageId/edit", "context", "page", "pageId", edit=True
+        f"{_WS}/context/pages/:pageId/edit",
+        "context",
+        "page",
+        "pageId",
+        edit=True,
+        locator_kind="canonical_route",
+    ),
+    "context_permalink": BrowserRoute(
+        "/p/:workspaceId/:pageId",
+        "context",
+        "page",
+        "pageId",
+        locator_kind="stable_full",
     ),
     "library": BrowserRoute(f"{_WS}/library", "library"),
     "library_item_new": BrowserRoute(
@@ -122,6 +140,14 @@ BROWSER_ROUTES = {
     "settings_integrations": BrowserRoute(f"{_WS}/settings/integrations", "settings"),
     "setup": BrowserRoute(f"{_WS}/setup", "setup"),
     "inbox": BrowserRoute(f"{_WS}/inbox", "inbox"),
+}
+
+# Short references expand on save using the source workspace. The browser
+# deliberately rejects this route because it carries no workspace authority.
+AUTHORING_ROUTES = {
+    "context_short": BrowserRoute(
+        "/p/:pageId", "context", "page", "pageId", locator_kind="stable_short"
+    ),
 }
 
 
@@ -202,17 +228,50 @@ class BrowserRouteMatch:
 
 
 def match_browser_route(path: str) -> BrowserRouteMatch | None:
-    """Match the authored path without dot-segment or slash normalization."""
+    """Match registered routes using the browser's case/trailing-slash rules."""
+    return _match_routes(path, BROWSER_ROUTES.values())
+
+
+def match_context_reference(
+    path: str, *, identity_input: bool = False
+) -> BrowserRouteMatch | None:
+    """Share document shapes while retaining exact page-input semantics."""
+    if not identity_input:
+        match = match_browser_route(path)
+        if match is not None and match.route.locator_kind is not None:
+            return match
+    identity_routes = (
+        route
+        for route in BROWSER_ROUTES.values()
+        if route.locator_kind == "stable_full"
+    )
+    return _match_routes(
+        path,
+        (*identity_routes, *AUTHORING_ROUTES.values()),
+        trailing_slashes=False,
+        case_sensitive=True,
+    )
+
+
+def _match_routes(
+    path: str,
+    routes: Iterable[BrowserRoute],
+    *,
+    trailing_slashes: bool = True,
+    case_sensitive: bool = False,
+) -> BrowserRouteMatch | None:
     if re.search(r"[\\\x00-\x20\x7f]|%(?:2f|5c|2e|25|00)|%(?![0-9a-f]{2})", path, re.I):
         return None
     try:
         decoded = unquote(path, errors="strict")
     except UnicodeError:
         return None
+    if trailing_slashes:
+        decoded = decoded.rstrip("/")
     if "//" in decoded:
         return None
-    parts = decoded.removesuffix("/").split("/")
-    for route in BROWSER_ROUTES.values():
+    parts = decoded.split("/")
+    for route in routes:
         expected = route.path.split("/")
         if len(expected) != len(parts):
             continue
@@ -220,7 +279,11 @@ def match_browser_route(path: str) -> BrowserRouteMatch | None:
         choices = dict(route.choices)
         for pattern, value in zip(expected, parts, strict=True):
             if not pattern.startswith(":"):
-                if not value.isascii() or value.lower() != pattern.lower():
+                if not value.isascii() or (
+                    value != pattern
+                    if case_sensitive
+                    else value.lower() != pattern.lower()
+                ):
                     break
             else:
                 name = pattern[1:]
@@ -256,18 +319,23 @@ def safe_browser_query(query: str, path: str = "") -> bool:
 
 def render_typescript() -> str:
     """Export immutable syntax data; frontend matching has no backend imports."""
-    routes = {
-        name: {
-            "path": route.path,
-            "section": route.section,
-            "kind": route.kind,
-            "targetParam": route.target_param,
-            "create": route.create,
-            "edit": route.edit,
-            "choices": dict(route.choices),
+
+    def route_data(routes):
+        return {
+            name: {
+                "path": route.path,
+                "section": route.section,
+                "kind": route.kind,
+                "targetParam": route.target_param,
+                "create": route.create,
+                "edit": route.edit,
+                "choices": dict(route.choices),
+                "locatorKind": route.locator_kind,
+            }
+            for name, route in routes.items()
         }
-        for name, route in BROWSER_ROUTES.items()
-    }
+
+    routes = route_data(BROWSER_ROUTES)
     identity_keys = json.dumps(IDENTITY_QUERY_KEYS)
     app_namespaces = json.dumps(APP_LINK_NAMESPACES)
     legacy_routes = {
@@ -291,6 +359,8 @@ def render_typescript() -> str:
         "// Generated by scripts/export_browser_routes.py; do not edit.\n"
         "// Route matching identifies destinations; existing guards authorize them.\n\n"
         f"export const BROWSER_ROUTES = {json.dumps(routes, indent=2)} as const;\n\n"
+        "export const AUTHORING_ROUTES = "
+        f"{json.dumps(route_data(AUTHORING_ROUTES), indent=2)} as const;\n\n"
         "export const LEGACY_WORKSPACE_ROUTES = "
         f"{json.dumps(legacy_routes, indent=2)} as const;\n\n"
         f"export const APP_LINK_NAMESPACES = {app_namespaces} as const;\n"

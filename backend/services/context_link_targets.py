@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from sqlalchemy import or_
@@ -863,10 +863,9 @@ def _parse_workspace_navigation_reference(
         landing = legacy_workspace_entry(parts.path, parts.query)
         if landing is not None and is_app_link_path(parts.path):
             return landing.split("/", 1)[0], "overview", None, None
-        if "//" in parts.path:
+        navigation_path = parts.path.rstrip("/")
+        if "//" in navigation_path:
             return None
-        if parts.path.endswith("/"):
-            parts = parts._replace(path=parts.path[:-1])
         legacy_sections = {
             "/context": "context",
             "/library": "library",
@@ -875,7 +874,7 @@ def _parse_workspace_navigation_reference(
             "/ask": "ask",
             "/lint": "lint",
         }
-        if parts.path in legacy_sections:
+        if navigation_path in legacy_sections:
             query = parse_qs(parts.query, strict_parsing=True)
             expected_query = {
                 "context": "target",
@@ -884,16 +883,16 @@ def _parse_workspace_navigation_reference(
                 "review": "review",
                 "ask": "target",
                 "lint": "finding",
-            }[legacy_sections[parts.path]]
+            }[legacy_sections[navigation_path]]
             if set(query) != {expected_query} or len(query[expected_query]) != 1:
                 return None
             return (
-                legacy_sections[parts.path],
+                legacy_sections[navigation_path],
                 "legacy_target",
                 UUID(query[expected_query][0]),
                 None,
             )
-        chat_match = re.fullmatch(r"/chats/([0-9a-fA-F-]{36})", parts.path)
+        chat_match = re.fullmatch(r"/chats/([0-9a-fA-F-]{36})", navigation_path)
         if chat_match is not None and not parts.query:
             return "chats", "legacy_target", UUID(chat_match[1]), None
         if not safe_browser_query(parts.query, parts.path):
@@ -902,7 +901,7 @@ def _parse_workspace_navigation_reference(
         if match is None:
             return None
         route, params = match.route, match.params
-        if route.section == "context" and route.kind == "page":
+        if route.locator_kind is not None:
             # Context document reads keep the existing pin/version resolver.
             return None
         return (
@@ -1131,21 +1130,7 @@ def _classify_context_navigation(href: str, self_origins: frozenset[str]):
             href=href,
             page_id=ref.target_id if ref.kind == "context" else None,
         )
-    try:
-        parts = urlsplit(href)
-        if not parts.query:
-            return classify(href, self_origins)
-        if not _safe_workspace_query(parts.query, parts.path):
-            return classify(href, self_origins)
-        stripped = urlunsplit(
-            (parts.scheme, parts.netloc, parts.path, "", parts.fragment)
-        )
-        locator = classify(stripped, self_origins)
-        if locator.kind not in {"stable_full", "stable_short", "canonical_route"}:
-            return classify(href, self_origins)
-        return replace(locator, href=href)
-    except ValueError:
-        return classify(href, self_origins)
+    return classify(href, self_origins)
 
 
 def _preserve_workspace_view_query(

@@ -25,7 +25,10 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
     )
     assert source_response.status_code == 201, source_response.text
     source = source_response.json()["data"]
-    ref = f"dtxwiki://index/context/{source['id']}"
+    # Reuse the positive document input for a router-valid full permalink.
+    # Its preview must retain harmless view/fragment state after lookup while
+    # leaving the selected editing version and authored buffer untouched.
+    ref = f"/p/{workspace_id}/{source['id']}///?view=source#section"
     citation_href = f"/p/{workspace_id}/{source['id']}#missing-section"
     # Budget exception: one additional DB URL input verifies a registered edit
     # route reaches the authorized target and retains its action after preview.
@@ -83,7 +86,8 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
             }
         ],
         "link_targets": [
-            {"locator": ref, "href": f"/p/{workspace_id}/{source['id']}",
+            {"locator": ref,
+             "href": f"/p/{workspace_id}/{source['id']}?view=source#section",
              "state": "ok", "target_page_id": source["id"]},
             {"locator": edit_href,
              "href": f"/workspaces/{workspace_id}/context/pages/{source['id']}"

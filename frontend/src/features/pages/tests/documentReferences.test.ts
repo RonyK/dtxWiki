@@ -16,6 +16,10 @@ describe("document references", () => {
     expect(referenceTarget("dtxwiki://index/agent/22222222-2222-4222-8222-222222222222", "11111111-1111-4111-8111-111111111111"))
       .toEqual({ target_kind: "agent_page", target_id: "22222222-2222-4222-8222-222222222222" });
     expect(referenceTarget("dtxwiki://index/agent/22222222-2222-4222-8222-222222222222#fragment", "11111111-1111-4111-8111-111111111111")).toBeNull();
+    const libraryHref = "/WORKSPACES/11111111-1111-4111-8111-111111111111/LIBRARY/ITEMS/22222222-2222-4222-8222-22222222222%32///?view=source#section";
+    expect(referenceTarget(libraryHref, "11111111-1111-4111-8111-111111111111"))
+      .toEqual({ target_kind: "library_item", target_id: "22222222-2222-4222-8222-222222222222" });
+    expect(referenceTarget(libraryHref.replace("view=source", "target=other"), "11111111-1111-4111-8111-111111111111")).toBeNull();
     expect(selected.label).toBe("**Research**");
     expect(body.slice(0, selected.from)).toBe("😀 ");
     expect(body.slice(selected.to)).toBe(body.slice(body.indexOf("\n")));

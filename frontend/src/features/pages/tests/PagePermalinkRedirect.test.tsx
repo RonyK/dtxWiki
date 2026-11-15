@@ -17,9 +17,9 @@ describe("PagePermalinkRedirect", () => {
     const state = { from: "shared", keep: true };
     render(
       <MemoryRouter initialEntries={[{
-        pathname: `/p/${WORKSPACE_ID}/${PAGE_ID}`,
-        search: "?tab=history",
-        hash: "#v2",
+        pathname: `/p/${WORKSPACE_ID}/${PAGE_ID}/`,
+        search: "?view=source",
+        hash: "#section",
         state,
       }]}>
         <Routes>
@@ -31,8 +31,8 @@ describe("PagePermalinkRedirect", () => {
 
     const location = JSON.parse((await screen.findByTestId("location")).textContent ?? "{}");
     expect(location.pathname).toBe(`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`);
-    expect(location.search).toBe("?tab=history");
-    expect(location.hash).toBe("#v2");
+    expect(location.search).toBe("?view=source");
+    expect(location.hash).toBe("#section");
     expect(location.state).toEqual(state);
   });
 

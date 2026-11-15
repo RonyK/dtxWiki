@@ -11,7 +11,7 @@ import {
   useLocation,
 } from "react-router-dom";
 
-import { BROWSER_ROUTES, LEGACY_WORKSPACE_ROUTES } from "../shared/lib/browserRoutes.gen";
+import { AUTHORING_ROUTES, BROWSER_ROUTES, LEGACY_WORKSPACE_ROUTES } from "../shared/lib/browserRoutes.gen";
 import { WorkspaceGraphGate } from "../features/graph/WorkspaceGraphGate";
 import { AuthProvider, useAuth } from "../shared/auth/AuthContext";
 import { Shell } from "../shared/components/Shell";
@@ -183,8 +183,8 @@ export function createAppRoutes() {
       <Route path="/account/integrations" element={<RequireAuth><SettingsScreen scope="account" /></RequireAuth>} />
       <Route path="/settings/server" element={<RequireAuth><SettingsScreen scope="server" /></RequireAuth>} />
       <Route path={BROWSER_ROUTES.workspace_directory.path} element={<RequireAuth><WorkspaceDirectoryScreen /></RequireAuth>} />
-      <Route path="/p/:workspaceId/:pageId" element={<RequireAuth><PagePermalinkRedirect /></RequireAuth>} />
-      <Route path="/p/:pageId" element={<RequireAuth><NotFoundScreen /></RequireAuth>} />
+      <Route path={BROWSER_ROUTES.context_permalink.path} element={<RequireAuth><PagePermalinkRedirect /></RequireAuth>} />
+      <Route path={AUTHORING_ROUTES.context_short.path} element={<RequireAuth><NotFoundScreen /></RequireAuth>} />
       <Route path={BROWSER_ROUTES.workspace_home.path} element={<RequireAuth><WorkspaceHomeRedirect /></RequireAuth>} />
       <Route path={BROWSER_ROUTES.workspace_graph.path} element={<RequireAuth><WorkspaceGraphGate><WorkspaceGraphScreen /></WorkspaceGraphGate></RequireAuth>} />
       <Route path={BROWSER_ROUTES.workspace_dashboard.path} element={<RequireAuth><DashboardScreen /></RequireAuth>} />

@@ -949,8 +949,11 @@ describe("Shell", () => {
     ).toBeInTheDocument();
   });
 
-  it.each(["/workspaces/find", "/workspaces/find/"])(
-    "keeps workspace discovery reachable at %s while membership recovery is needed",
+  it.each([
+    "/WORKSPACES/%66IND///",
+    "/%50/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222///",
+  ])(
+    "keeps workspace-independent entry points reachable at %s while membership recovery is needed",
     async (pathname) => {
       await i18n.changeLanguage("en");
       mockSession(true, [], [], {

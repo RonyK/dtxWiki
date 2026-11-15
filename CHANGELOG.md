@@ -20,6 +20,8 @@
   during normalization.
 - Preserve the existing session-relative `/context` landing link and keep
   generated link labels literal under the page renderer's math and GFM rules.
+- Match registered Context permalinks and workspace routes with the same
+  browser case and trailing-slash rules, retaining query and fragment state.
 
 ### Document identifiers and URLs
 

@@ -1,7 +1,5 @@
 import { classifyContextLink, isContextId } from "./contextLinks";
-import { parseWorkspaceRoute } from "./workspaceRoutes";
-
-const UUID_PATH = /^\/p\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/i;
+import { matchBrowserRoute } from "./browserRoutes";
 
 /** Return the destination workspace for a recognized same-origin product URL. */
 export function workspaceLinkDestinationId(
@@ -42,20 +40,7 @@ export function workspaceLinkDestinationId(
     selfOrigins,
     allowWorkspaceNavigation: true,
   } as const;
-  let classification = classifyContextLink(href, options);
-
-  // Context page URLs may carry harmless view state. The shared Context
-  // classifier keeps query-bearing /p URLs unknown, so classify the exact
-  // route separately after rejecting identity overrides.
-  if (
-    classification.kind === "unknown" &&
-    UUID_PATH.test(parsed.pathname) &&
-    parsed.searchParams.size > 0 &&
-    !hasIdentityQuery(parsed.search)
-  ) {
-    const withoutQuery = removeQuery(href);
-    classification = classifyContextLink(withoutQuery, options);
-  }
+  const classification = classifyContextLink(href, options);
 
   if (
     classification.kind === "stable_full" ||
@@ -65,10 +50,8 @@ export function workspaceLinkDestinationId(
   }
   if (classification.kind !== "workspace_navigation") return null;
 
-  // The shared classifier has already checked the exact route grammar and
-  // identity-query policy; parseWorkspaceRoute supplies its workspace ID.
-  const route = parseWorkspaceRoute(parsed.pathname);
-  return differentWorkspace(route?.workspaceId ?? null, sourceWorkspaceId);
+  const route = matchBrowserRoute(parsed.pathname);
+  return differentWorkspace(route?.params.workspaceId ?? null, sourceWorkspaceId);
 }
 
 function differentWorkspace(
@@ -78,31 +61,4 @@ function differentWorkspace(
   if (!destinationWorkspaceId || !isContextId(destinationWorkspaceId)) return null;
   const destination = destinationWorkspaceId.toLowerCase();
   return destination === sourceWorkspaceId.toLowerCase() ? null : destination;
-}
-
-function hasIdentityQuery(search: string): boolean {
-  const params = new URLSearchParams(search);
-  return [
-    "target",
-    "edit",
-    "review",
-    "finding",
-    "new",
-    "newFolder",
-    "parentNodeId",
-    "parentId",
-    "workspaceId",
-    "workspace_id",
-    "ws",
-    "parent",
-  ].some((key) => params.has(key));
-}
-
-function removeQuery(href: string): string {
-  const queryIndex = href.indexOf("?");
-  if (queryIndex < 0) return href;
-  const fragmentIndex = href.indexOf("#", queryIndex);
-  return fragmentIndex < 0
-    ? href.slice(0, queryIndex)
-    : `${href.slice(0, queryIndex)}${href.slice(fragmentIndex)}`;
 }

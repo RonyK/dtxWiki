@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
+import pytest
+
 from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.context_links import (
     LinkContext,
@@ -259,3 +261,90 @@ def test_network_path_is_not_retargeted_to_a_workspace_landing():
             actor=None,
             self_origins=origins,
         ) == []
+
+
+def test_registered_browser_routes_accept_router_variants_and_project_full_links():
+    # Budget exception: one composite URL per registered native route (38
+    # logical inputs) checks a general router-acceptance rule instead of a
+    # slash-only example. Mixed static case, one encoded workspace UUID and
+    # multiple trailing slashes share each input. This inventory must cover a
+    # newly registered document shape even when older route fixtures pass.
+    # The full permalink input also goes through observable reader projection;
+    # a foreign explicit workspace makes any accidental target lookup fail
+    # without adding a database scenario.
+    from backend.services.browser_routes import BROWSER_ROUTES, match_browser_route
+    from backend.services.context_link_targets import (
+        _parse_workspace_navigation_reference,
+        markdown_link_targets,
+    )
+    from backend.services.context_links import classify
+
+    source_workspace = UUID("11111111-1111-4111-8111-111111111111")
+    destination_workspace = "33333333-3333-4333-8333-333333333333"
+    page_id = "22222222-2222-4222-8222-222222222222"
+    full_href = None
+    for route in BROWSER_ROUTES.values():
+        parts = []
+        choices = dict(route.choices)
+        for segment in route.path.split("/"):
+            if segment == ":workspaceId":
+                parts.append("%33" + destination_workspace[1:])
+            elif segment.startswith(":"):
+                options = choices.get(segment[1:])
+                parts.append(options[0] if options else page_id)
+            else:
+                parts.append(segment.swapcase())
+        path = "/".join(parts) + "///"
+        href = path + "?view=source#details"
+        assert match_browser_route(path) is not None, href
+        if route.locator_kind is not None:
+            locator = classify(href)
+            assert locator.kind == route.locator_kind, href
+            assert locator.page_id == UUID(page_id)
+            assert locator.workspace_id == UUID(destination_workspace)
+            assert locator.fragment == "details"
+            assert locator.edit is route.edit
+            if route.locator_kind == "stable_full":
+                full_href = href
+        else:
+            assert _parse_workspace_navigation_reference(href) is not None, href
+
+    assert full_href is not None
+    authored = f"[Foreign document]({full_href})"
+    authenticated = markdown_link_targets(
+        object(), body=authored, workspace_id=source_workspace
+    )
+    assert [(item.locator, item.href, item.state) for item in authenticated] == [
+        (full_href, full_href, "ok")
+    ]
+    anonymous = markdown_link_targets(
+        object(), body=authored, workspace_id=source_workspace, public=True
+    )
+    assert [(item.href, item.state) for item in anonymous] == [(None, "unavailable")]
+    # The bibliography consumes the same body URL without a classifier mode.
+    from backend.services.document_references import document_ref_from_href
+
+    reference = document_ref_from_href(full_href, UUID(destination_workspace))
+    assert reference.target_kind == "context_page"
+    assert reference.target_id == UUID(page_id)
+
+
+def test_page_identity_inputs_keep_their_exact_stable_url_profile():
+    # Budget exception: eight logical inputs (two accepted, six rejected)
+    # distinguish the existing full/short identity shapes from tolerant browser
+    # routing. Each shape retains encoded UUIDs but rejects a trailing slash,
+    # presentation query or upper-case static prefix. Browser-only tests cannot
+    # detect accidental MCP/OKF input widening through the shared classifier.
+    from backend.services.context_links import parse_page_input
+
+    workspace_id = "11111111-1111-4111-8111-111111111111"
+    page_id = "22222222-2222-4222-8222-222222222222"
+    accepted = (
+        f"/p/%31{workspace_id[1:]}/{page_id}",
+        f"/p/%32{page_id[1:]}",
+    )
+    for href in accepted:
+        assert parse_page_input(href).page_id == UUID(page_id)
+        for rejected in (href + "/", href + "?view=source", href.replace("/p/", "/P/")):
+            with pytest.raises(ValueError, match="Context page UUID"):
+                parse_page_input(rejected)

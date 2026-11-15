@@ -11,8 +11,8 @@ describe("workspace link badge destinations", () => {
     const cases: Array<[string, string | null]> = [
       [`/p/${foreign}/${page}`, foreign],
       [`/p/${source}/${page}`, null],
-      [`/p/${foreign}/${page}?tab=history#chapter`, foreign],
-      [`https://wiki.example/workspaces/${foreign}/agent/pages/${page}/edit`, foreign],
+      [`/p/${foreign}/${page}/?view=source#section`, foreign],
+      [`https://wiki.example/WORKSPACES/${foreign}/AGENT/PAGES/${page}/EDIT`, foreign],
       [`https://elsewhere.example/workspaces/${foreign}/context`, null],
       [`//wiki.example/workspaces/${foreign}/context`, null],
       [`/workspaces/${foreign}/context/unknown/${page}`, null],

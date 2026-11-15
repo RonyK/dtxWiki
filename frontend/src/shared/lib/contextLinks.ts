@@ -1,4 +1,4 @@
-import { isAppLinkPath, isSafeBrowserQuery, isWorkspaceNavigationPath, legacyWorkspaceEntryPath, matchBrowserRoute } from "./browserRoutes";
+import { isAppLinkPath, isSafeBrowserQuery, isWorkspaceNavigationPath, legacyWorkspaceEntryPath, matchBrowserRoute, matchContextReference } from "./browserRoutes";
 
 export type ContextLinkKind =
   | "page_id" | "stable_full" | "stable_short" | "canonical_route"
@@ -170,14 +170,16 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
     const resolvedWorkspaceId = workspaceId ?? options.workspaceId;
     return result(kind, {
       workspaceId, pageId: pageId.toLowerCase(), fragment, edit,
-      stableUrl: resolvedWorkspaceId ? formatContextPageUrl(resolvedWorkspaceId, pageId.toLowerCase(), fragment) : null,
-      navigationHref: kind === "canonical_route" ? input : null,
+      stableUrl: resolvedWorkspaceId
+        ? formatContextPageUrl(resolvedWorkspaceId, pageId.toLowerCase()) + (query ? `?${query}` : "") + fragmentSuffix(fragment)
+        : null,
+      navigationHref: matchBrowserRoute(rawPathname) ? input : null,
     });
   };
-  const browserRoute = matchBrowserRoute(rawPathname);
-  if (browserRoute?.route.section === "context" && browserRoute.route.kind === "page") {
+  const documentRoute = matchContextReference(rawPathname);
+  if (documentRoute?.route.locatorKind) {
     if ((query && !options.allowWorkspaceNavigation) || !isSafeBrowserQuery(query, rawPathname)) return result("unknown", { fragment });
-    return withPage("canonical_route", browserRoute.params.workspaceId, browserRoute.params.pageId, browserRoute.route.edit);
+    return withPage(documentRoute.route.locatorKind, documentRoute.params.workspaceId ?? null, documentRoute.params.pageId, documentRoute.route.edit);
   }
   if (options.allowWorkspaceNavigation && query && isWorkspaceNavigationPath(rawPathname, query)) {
     return result("workspace_navigation", {
@@ -186,10 +188,6 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
     });
   }
   if (query && pathname !== "/context" && /^\/(?:p|context|workspaces|pages)\//.test(pathname)) return result("unknown", { fragment });
-  let match = /^\/p\/([^/]+)\/([^/]+)$/.exec(pathname);
-  if (match && UUID.test(match[1]) && UUID.test(match[2])) return withPage("stable_full", match[1].toLowerCase(), match[2]);
-  match = /^\/p\/([^/]+)$/.exec(pathname);
-  if (match && UUID.test(match[1])) return withPage("stable_short", null, match[1]);
   if (options.allowWorkspaceNavigation && isWorkspaceNavigationPath(rawPathname, query)) {
     return result("workspace_navigation", {
       stableUrl: input, fragment,
@@ -200,7 +198,7 @@ export function classifyContextLink(value: string, options: ContextLinkOptions =
     const targets = new URLSearchParams(query).getAll("target");
     if (targets.length === 1 && UUID.test(targets[0])) return result("nav_target", { lookup: targets[0].toLowerCase(), fragment });
   }
-  match = /^dtxwiki:\/\/workspaces\/([^/]+)\/context\/pages\/([^/]+)$/.exec(pathname);
+  const match = /^dtxwiki:\/\/workspaces\/([^/]+)\/context\/pages\/([^/]+)$/.exec(pathname);
   if (match && UUID.test(match[1])) return result("resource_uri", {
     workspaceId: match[1].toLowerCase(), lookup: match[2].normalize("NFKC").trim(), fragment,
   });
@@ -214,26 +212,11 @@ export function contextNavigationHref(href: string, workspaceId: string): string
     workspaceId,
     allowWorkspaceNavigation: true,
   };
-  let classification = classifyContextLink(href, options);
-  const hashAt = href.indexOf("#");
-  const queryAt = href.indexOf("?");
-  if (classification.kind === "unknown" && queryAt >= 0 && (hashAt < 0 || queryAt < hashAt)) {
-    const query = href.slice(queryAt, hashAt < 0 ? undefined : hashAt);
-    if (isSafeBrowserQuery(query, href.slice(0, queryAt))) {
-      const withoutQuery = href.slice(0, queryAt) + (hashAt < 0 ? "" : href.slice(hashAt));
-      const route = classifyContextLink(withoutQuery, options);
-      if (["stable_full", "stable_short", "canonical_route"].includes(route.kind)) classification = route;
-    }
-  }
+  const classification = classifyContextLink(href, options);
   const recognized = classification.kind === "workspace_navigation" ||
     classification.kind === "canonical_route" ||
     classification.kind === "stable_full" ||
     classification.kind === "stable_short";
   if (!recognized) return null;
-  if (classification.navigationHref) return classification.navigationHref;
-  // Classify the authored path before stripping the origin: URL.pathname
-  // would silently normalize dot segments that must remain rejected.
-  return /^https?:\/\//i.test(href)
-    ? /^https?:\/\/[^/?#]*(.*)$/i.exec(href)?.[1] || "/"
-    : href;
+  return classification.navigationHref ?? classification.stableUrl;
 }

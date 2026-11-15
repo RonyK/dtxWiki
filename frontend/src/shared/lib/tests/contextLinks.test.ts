@@ -19,19 +19,26 @@ describe("Context link locators", () => {
     expect(classifyContextLink(`/p/${pageId}#details`, { workspaceId })).toMatchObject({
       kind: "stable_short", pageId, stableUrl: href,
     });
+    expect(contextNavigationHref(`/p/${pageId}#details`, workspaceId)).toBe(href);
     expect(classifyContextLink(`/p/${pageId}#details`).stableUrl).toBeNull();
     const editorHref = `/workspaces/${workspaceId}/context/pages/${pageId}/edit/?view=source#details`;
     const readerHref = `/workspaces/${workspaceId}/context/pages/${pageId}/?tab=history#details`;
     expect(classifyContextLink(editorHref, { allowWorkspaceNavigation: true }))
-      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: href, edit: true, navigationHref: editorHref });
+      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: `/p/${workspaceId}/${pageId}?view=source#details`, edit: true, navigationHref: editorHref });
     expect(classifyContextLink(readerHref, { allowWorkspaceNavigation: true }))
-      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: href, edit: false, navigationHref: readerHref });
+      .toMatchObject({ kind: "canonical_route", workspaceId, pageId, stableUrl: `/p/${workspaceId}/${pageId}?tab=history#details`, edit: false, navigationHref: readerHref });
     expect(contextNavigationHref(editorHref, workspaceId)).toBe(editorHref);
     expect(contextNavigationHref(readerHref, workspaceId)).toBe(readerHref);
     expect(classifyContextLink(`${readerHref.split("?")[0]}?target=${pageId}`).kind).toBe("unknown");
     expect(classifyContextLink(`/workspaces/${workspaceId}/context/pages/${pageId}/edit/arbitrary`).kind).toBe("unknown");
-    expect(classifyContextLink(`https://wiki.example${href}`, { selfOrigins: ["https://wiki.example"] }))
+    const trailingHref = `/p/${workspaceId}/${pageId}/?view=source#section`;
+    expect(classifyContextLink(`https://wiki.example/p/${workspaceId}/${pageId}/#details`, { selfOrigins: ["https://wiki.example"] }))
       .toMatchObject({ kind: "stable_full", workspaceId, pageId, stableUrl: href });
+    expect(classifyContextLink(trailingHref, { allowWorkspaceNavigation: true }))
+      .toMatchObject({ kind: "stable_full", workspaceId, pageId, stableUrl: `/p/${workspaceId}/${pageId}?view=source#section` });
+    expect(contextNavigationHref(trailingHref, workspaceId)).toBe(trailingHref);
+    expect(classifyContextLink(`/p/not-a-workspace/${pageId}/`, { allowWorkspaceNavigation: true }).kind).toBe("unknown");
+    expect(classifyContextLink(`/p/${workspaceId}/${pageId}/?target=${pageId}`, { allowWorkspaceNavigation: true }).kind).toBe("unknown");
     expect(classifyContextLink(`https://other.example${href}`, { selfOrigins: ["https://wiki.example"] }).kind)
       .toBe("external");
     expect(formatContextPageUrl(workspaceId, pageId, "details")).toBe(href);
