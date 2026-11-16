@@ -3,7 +3,7 @@ import type { GraphTimelineEvent } from "../../../../shared/api/graph";
 import { graphFixture } from "../../tests/graphFixture";
 import { deriveGraphScene, graphFacets } from "../../graphModel";
 import { buildLocalScene } from "../sceneInput";
-import { historySceneCatalog, renderHistoryScene } from "../historyScene";
+import { analyzeGraphHistory, renderHistoryScene } from "../historyScene";
 
 describe("history scene", () => {
   it("admits visible timeline topology while removals remain ghosts outside the active scene", () => {
@@ -20,7 +20,7 @@ describe("history scene", () => {
         node_ids: [edge.source, edge.target], edge_ids: [edge.id], edge_snapshots: [edge] },
     ];
     const filters = graphFacets(payload);
-    const catalog = historySceneCatalog(payload, filters);
+    const catalog = analyzeGraphHistory(payload, filters).catalog;
     const before = renderHistoryScene(catalog, deriveGraphScene(payload, filters, -1), { nodes: [], edges: [] }, undefined, false, false);
     const added = renderHistoryScene(catalog, deriveGraphScene(payload, filters, 0), deriveGraphScene(payload, filters, 0), payload.timeline[0], false, false);
     const active = deriveGraphScene(payload, filters, 1);
@@ -42,10 +42,10 @@ describe("history scene", () => {
     expect(creationPreview.edges[0]).toMatchObject({ ...original, hidden: false, highlighted: true, removed: false });
     expect(buildLocalScene(creationPreview).geometryKey).toBe(buildLocalScene(removed).geometryKey);
     const hiddenFilters = { ...filters, edgeKinds: [] };
-    const hidden = renderHistoryScene(historySceneCatalog(payload, hiddenFilters), deriveGraphScene(payload, hiddenFilters, 1), deriveGraphScene(payload, hiddenFilters, 0), payload.timeline[1], false, false);
+    const hidden = renderHistoryScene(analyzeGraphHistory(payload, hiddenFilters).catalog, deriveGraphScene(payload, hiddenFilters, 1), deriveGraphScene(payload, hiddenFilters, 0), payload.timeline[1], false, false);
     expect(hidden.edges).toEqual([]); // A removed ghost never bypasses a filter.
     const curated = { ...filters, provenances: ["curated" as const] };
-    const curatedCatalog = historySceneCatalog(payload, curated);
+    const curatedCatalog = analyzeGraphHistory(payload, curated).catalog;
     const curatedFrame = deriveGraphScene(payload, curated, 1);
     expect(deriveGraphScene(payload, curated, 0).edges).toEqual([]);
     expect(curatedFrame.edges).toEqual([]);
@@ -72,7 +72,7 @@ describe("history scene", () => {
     };
     payload.timeline = [event];
     const filters = { ...graphFacets(payload), provenances: ["curated" as const] };
-    const catalog = historySceneCatalog(payload, filters);
+    const catalog = analyzeGraphHistory(payload, filters).catalog;
     const frame = deriveGraphScene(payload, filters, -1);
     const eventFrame = deriveGraphScene(payload, filters, 0);
     expect(frame.edges).toEqual([]);
@@ -87,7 +87,7 @@ describe("history scene", () => {
     expect(buildLocalScene(preview).geometryKey).not.toBe(buildLocalScene(before).geometryKey);
 
     const hiddenFilters = { ...filters, statuses: filters.statuses.filter((status) => status !== "draft") };
-    const hidden = renderHistoryScene(historySceneCatalog(payload, hiddenFilters), deriveGraphScene(payload, hiddenFilters, -1),
+    const hidden = renderHistoryScene(analyzeGraphHistory(payload, hiddenFilters).catalog, deriveGraphScene(payload, hiddenFilters, -1),
       deriveGraphScene(payload, hiddenFilters, 0), event, false, true, true);
     expect(hidden.nodes.find((node) => node.id === historicalNode.id)).toMatchObject({ hidden: true, highlighted: false });
     expect(hidden.edges.find((edge) => edge.id === admittedCurrent.id)).toMatchObject({ hidden: true, highlighted: false });

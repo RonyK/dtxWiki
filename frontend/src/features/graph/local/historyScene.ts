@@ -1,17 +1,41 @@
 import type { GraphQueryPayload, GraphTimelineEvent } from "../../../shared/api/graph";
-import { deriveGraphScene, sortedTimeline, type GraphFilters, type GraphScene } from "../graphModel";
+import { filterGraphScene, visitGraphTimelineFrames, type GraphFilters, type GraphScene } from "../graphModel";
 import type { GraphRenderScene } from "../shared/rendererTypes";
 
-/** Collect actor-authorized, filtered records for timeline frames and previews. */
-export function historySceneCatalog(payload: GraphQueryPayload, filters: GraphFilters): GraphScene {
+/** Analyze visible changes and collect filtered records in one forward replay. */
+export function analyzeGraphHistory(
+  payload: GraphQueryPayload,
+  filters: GraphFilters,
+  applyVisibility: (scene: GraphScene) => GraphScene = (scene) => scene,
+): { visibleChanges: boolean[]; catalog: GraphScene } {
   const nodes = new Map<string, GraphScene["nodes"][number]>();
   const edges = new Map<string, GraphScene["edges"][number]>();
-  for (const cursor of [-1, ...sortedTimeline(payload).map((_, index) => index), null]) {
-    const scene = deriveGraphScene(payload, filters, cursor);
+  const visibleChanges: boolean[] = [];
+  let previous: GraphScene | undefined;
+  const collect = (scene: GraphScene) => {
     scene.nodes.forEach((node) => nodes.set(node.id, node));
     scene.edges.forEach((edge) => edges.set(edge.id, edge));
-  }
-  return { nodes: [...nodes.values()], edges: [...edges.values()] };
+  };
+  visitGraphTimelineFrames(payload, filters, (cursor, scene) => {
+    // Catalog membership precedes visibility, just as the original catalog did.
+    collect(scene);
+    const visible = applyVisibility(scene);
+    if (cursor >= 0) visibleChanges.push(!sameGraphScene(previous!, visible));
+    previous = visible;
+  });
+  // Current metadata wins without sorting or replaying the timeline again.
+  collect(filterGraphScene({ nodes: payload.nodes, edges: payload.edges }, filters, payload.nodes));
+  return { visibleChanges, catalog: { nodes: [...nodes.values()], edges: [...edges.values()] } };
+}
+
+/**
+ * Same order and same content. Frames share their unchanged node and edge
+ * objects, so identity settles almost every pair and JSON only the rest.
+ */
+function sameGraphScene(left: GraphScene, right: GraphScene) {
+  const same = <T,>(a: readonly T[], b: readonly T[]) => a.length === b.length
+    && a.every((item, index) => item === b[index] || JSON.stringify(item) === JSON.stringify(b[index]));
+  return same(left.nodes, right.nodes) && same(left.edges, right.edges);
 }
 
 /** Resolve the visible frame and event preview against the interval catalog. */

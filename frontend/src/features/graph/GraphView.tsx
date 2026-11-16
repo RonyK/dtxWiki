@@ -19,7 +19,7 @@ import {
 import { LocalGraphTimeline, LocalTimelineMark } from "./local/LocalGraphTimeline";
 import { readCanvasRatio, storeCanvasRatio, type GraphCanvasRatio } from "./local/canvasRatio";
 import { timelinePresentation } from "./local/timelinePresentation";
-import { historySceneCatalog, renderHistoryScene } from "./local/historyScene";
+import { analyzeGraphHistory, renderHistoryScene } from "./local/historyScene";
 import { LocalGraphCoverageInfo } from "./local/LocalGraphCoverageInfo";
 import { CitationEvidenceSection, type CitationPair } from "./shared/CitationEvidenceSection";
 import { analyzeLocalScene, type LocalSceneAnalysis } from "./local/localGraphList";
@@ -197,9 +197,13 @@ export function GraphView({
       && (historyTopology.recordedEdgeIds.has(edge.id) ? historyVisibility.recorded : historyVisibility.background));
     return withoutDetachedSessions(value.nodes, edges, historyTopology);
   }, [historical, historyTopology, historyVisibility]);
+  const historyAnalysis = useMemo(
+    () => analyzeGraphHistory(payload, filters, applyHistoryVisibility),
+    [applyHistoryVisibility, filters, payload],
+  );
   const timeline = useMemo(
-    () => localizedGraphTimeline(payload, filters, t, applyHistoryVisibility),
-    [applyHistoryVisibility, filters, payload, t],
+    () => localizedGraphTimeline(payload, historyAnalysis.visibleChanges, t),
+    [historyAnalysis.visibleChanges, payload, t],
   );
   const canvasScopeKey = localSceneScopeKey({
     workspaceId, query: payload.query, filters, historyMode: payload.history.mode,
@@ -224,8 +228,8 @@ export function GraphView({
     [applyHistoryVisibility, filters, payload, timelineCursor],
   );
   const scene = useMemo(() => localizedGraphScene(filteredScene, t), [filteredScene, t]);
-  const historyCatalog = useMemo(() => localizedGraphScene(applyHistoryVisibility(historySceneCatalog(payload, filters)), t),
-    [applyHistoryVisibility, filters, payload, t]);
+  const historyCatalog = useMemo(() => localizedGraphScene(applyHistoryVisibility(historyAnalysis.catalog), t),
+    [applyHistoryVisibility, historyAnalysis.catalog, t]);
   const sceneAnalysis = useMemo(() => analyzeLocalScene(scene, payload.query.seeds), [payload.query.seeds, scene]);
   // The document the graph is opened from is the primary query seed; seeds
   // added by expanding follow it and are not the current document.
@@ -1676,9 +1680,8 @@ function withCoAccessLabels(scene: GraphScene, t: TFunction<"graph">): GraphScen
 
 function localizedGraphTimeline(
   payload: GraphQueryPayload,
-  filters: GraphFilters,
+  visibleChanges: boolean[],
   t: TFunction,
-  applyVisibility: (scene: GraphScene) => GraphScene = (scene) => scene,
 ) {
   const events = sortedTimeline(payload);
   const nodes = new Map(payload.nodes.map((node) => [node.id, node]));
@@ -1687,10 +1690,7 @@ function localizedGraphTimeline(
     for (const node of timelineNodeSnapshots(event)) nodes.set(node.id, node);
     for (const edge of timelineEdgeSnapshots(event)) edges.set(edge.id, edge);
   }
-  // Each frame once: event i changes the view when frame i differs from i-1.
-  const frames = [-1, ...events.keys()].map((cursor) => applyVisibility(deriveGraphScene(payload, filters, cursor)));
   return events.map((event, index) => {
-    const visibleChange = !sameGraphScene(frames[index], frames[index + 1]);
     const action = graphLabel(t, "graphActionKind", event.action_kind);
     const edge = [
       ...timelineEdgeSnapshots(event),
@@ -1700,7 +1700,7 @@ function localizedGraphTimeline(
       return {
         ...event,
         ...timelinePresentation(event, payload.history.mode, nodes, edges, t),
-        visible_change: visibleChange,
+        visible_change: visibleChanges[index],
         label: t("graph.timeline.edgeEvent", {
           action,
           defaultValue: "{{source}} —{{action}}→ {{target}}",
@@ -1717,7 +1717,7 @@ function localizedGraphTimeline(
     return {
       ...event,
       ...timelinePresentation(event, payload.history.mode, nodes, edges, t),
-      visible_change: visibleChange,
+      visible_change: visibleChanges[index],
       label: subjectLabels.length
         ? t("graph.timeline.entityEvent", {
             action,
@@ -1727,16 +1727,6 @@ function localizedGraphTimeline(
         : action,
     };
   });
-}
-
-/**
- * Same order and same content. Frames share their unchanged node and edge
- * objects, so identity settles almost every pair and JSON only the rest.
- */
-function sameGraphScene(left: GraphScene, right: GraphScene) {
-  const same = <T,>(a: readonly T[], b: readonly T[]) => a.length === b.length
-    && a.every((item, index) => item === b[index] || JSON.stringify(item) === JSON.stringify(b[index]));
-  return same(left.nodes, right.nodes) && same(left.edges, right.edges);
 }
 
 function timelineNodeSnapshots(event: GraphTimelineEvent) {
