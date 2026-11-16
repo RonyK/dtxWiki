@@ -313,6 +313,41 @@ def test_context_activity_details_reviews_and_stable_cursor(session_factory):
         )
         assert viewer_submit.review_item_id is None
         assert viewer_submit.details.reason is None
+        # Draft activity is shown to viewers too, with its version label;
+        # only the draft's body stays behind the draft-read rule.
+        draft = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            version_no=9,
+            body_md="# Draft",
+            content_hash="draft-hash",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="activity-workspace-owner",
+            version_status="draft",
+        )
+        session.add(draft)
+        session.flush()
+        session.add(
+            AuditEvent(
+                workspace_id=workspace.id,
+                actor_kind="human",
+                actor_id=actor.actor_id,
+                action="page.submit_context_edit_for_review",
+                target_kind="context_page",
+                target_id=page.id,
+                payload={"version_id": str(draft.id)},
+            )
+        )
+        session.flush()
+        viewer_draft_save = next(
+            item
+            for item in service.list_activity(
+                **{**args, "actor": viewer}, limit=100
+            ).items
+            if item.details.version and item.details.version.id == draft.id
+        )
+        assert viewer_draft_save.body == "page.submit_context_edit_for_review"
         with pytest.raises(ReadValidationError):
             service.list_activity(
                 **{**args, "page_id": other_page.id}, limit=2, cursor=first.next_cursor

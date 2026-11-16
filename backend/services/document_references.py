@@ -197,9 +197,9 @@ def resolve_document_targets(session, workspace_id, refs, actor, *, public=False
                 conditions=(model.id.in_(ids[start : start + 400]),),
             )
             if model is ContextPage:
-                # The shared visibility predicate inspects draft access and
-                # discarded-row ownership. Load just those attributes in
-                # bounded batches, never one full draft body per page.
+                # The shared visibility predicate inspects draft access. Load
+                # just those attributes in bounded batches, never one full
+                # draft body per page.
                 columns = (
                     ContextPageVersion.id,
                     ContextPageVersion.workspace_id,

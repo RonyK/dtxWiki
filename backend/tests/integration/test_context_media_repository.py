@@ -901,7 +901,7 @@ def test_registration_hides_foreign_or_missing_editing_version(
 
 
 @pytest.mark.parametrize("submitted", [False, True])
-def test_version_content_usage_grant_and_author_only_uninserted_fallback(
+def test_version_content_usage_grant_and_version_bound_uninserted_fallback(
     session_factory,
     submitted,
 ) -> None:
@@ -935,7 +935,7 @@ def test_version_content_usage_grant_and_author_only_uninserted_fallback(
             session.flush()
         for target_workspace, target_version, actor, readable in (
             (workspace_id, version.id, owner, True),
-            (workspace_id, version.id, stranger, False),
+            (workspace_id, version.id, stranger, True),
             (workspace_id, other_version.id, owner, False),
             (uuid4(), version.id, owner, False),
         ):
@@ -968,7 +968,7 @@ def test_version_content_usage_grant_and_author_only_uninserted_fallback(
 
 
 @pytest.mark.parametrize("close_version", [False, True])
-def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
+def test_unused_delete_allows_other_editor_before_and_after_close(
     session_factory,
     close_version,
 ) -> None:
@@ -987,8 +987,7 @@ def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
         protected = repository.get_page_asset_usage(
             workspace_id, page.id, asset.asset_id
         )
-        assert protected.created_for_version_is_open_draft is True
-        with pytest.raises(ContextMediaOwnershipError):
+        with pytest.raises(StaleUsageTokenError):
             DeleteUnusedMedia().execute(
                 repository,
                 workspace_id=workspace_id,
@@ -1005,7 +1004,6 @@ def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
         unprotected = repository.get_page_asset_usage(
             workspace_id, page.id, asset.asset_id
         )
-        assert unprotected.created_for_version_is_open_draft is (not close_version)
         assert unprotected.usage_token == protected.usage_token
         DeleteUnusedMedia().execute(
             repository,
@@ -1013,7 +1011,7 @@ def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
             page_id=page.id,
             asset_id=asset.asset_id,
             usage_token=unprotected.usage_token,
-            actor=stranger if close_version else owner,
+            actor=stranger,
         )
         deleted = repository.get_asset(workspace_id, asset.asset_id)
         assert deleted.association_state is AssociationState.TOMBSTONED
@@ -1095,7 +1093,6 @@ def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
             workspace_id, page.id, viewer=author
         )
         assert foreign_snapshot.latest_draft_reference_count == 3
-        assert foreign_snapshot.viewer_visible_latest_draft_reference_count == 3
         assert foreign_snapshot.usage_token == unmasked.usage_token
 
         projection = ContextMediaAssetProjection.from_snapshot(foreign_snapshot)
@@ -1107,6 +1104,6 @@ def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
         [own_snapshot] = repository.list_page_usage(
             workspace_id, page.id, viewer=other_author
         )
-        assert own_snapshot.viewer_visible_latest_draft_reference_count == 3
+        assert own_snapshot.latest_draft_reference_count == 3
         own_projection = ContextMediaAssetProjection.from_snapshot(own_snapshot)
         assert own_projection.latest_draft_reference_count == 3

@@ -172,7 +172,6 @@ def list_orphans(
     del now
     from backend.policy.trust_boundaries import actor_can_read_drafts
     from backend.repositories.context_visibility import (
-        foreign_discarded_version_exists,
         visible_context_page_expression,
     )
 
@@ -183,10 +182,6 @@ def list_orphans(
                 (ContextPage.lifecycle_status != "archived")
                 if actor_can_read_drafts(actor)
                 else visible_context_page_expression(actor),
-                ~foreign_discarded_version_exists(
-                    ContextMediaAsset.created_for_version_id,
-                    None if actor is None else (actor.actor_kind, actor.actor_id),
-                ),
             ),
         ),
         ContextMediaAsset.workspace_id,

@@ -47,8 +47,7 @@ class ContextMediaRepository(Protocol):
         *,
         viewer: ActorIdentity | None = None,
     ) -> tuple[AssetUsageSnapshot, ...]:
-        # `viewer` controls discarded-version visibility and uploader-only
-        # previews of uninserted assets. Shared draft usage remains readable.
+        # Draft and discarded-version usage follow the same read permissions.
         ...
 
     def list_workspace_usage(

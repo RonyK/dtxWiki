@@ -23,9 +23,12 @@
 - Automatic review approval waits from a draft's last save and approves only
   the merge result it evaluated; publishing keeps the tree placement unless
   the published result moves the page.
-- Private drafts are gone: every draft is shared. Draft editing events show
-  in Activity like other changes, and account deletion keeps the account's
-  drafts and shows its author name on what it wrote instead of "Human editor".
+- Private drafts are gone: every draft is shared. Draft activity shows to
+  every member who can see the page, discarded drafts follow the same
+  draft-read rule as any draft, and an uploaded attachment is visible to
+  everyone who can see its draft whether or not it is in the body yet.
+  Account deletion keeps the account's drafts and shows its author name on
+  what it wrote instead of "Human editor".
 
 
 ### Context body links

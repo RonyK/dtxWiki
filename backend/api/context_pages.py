@@ -758,10 +758,10 @@ def restore_page_version(
         actor, page_service = _workspace_page_service(
             request, actor, workspace_id, required_role="editor"
         )
-        # P2.2/P2.6: restoring FROM a version this actor cannot otherwise see
-        # (another author's discarded row) must not be a back door to
-        # it -- reuse read_page's own explicit-version visibility gate rather
-        # than letting restore_version's bare page-scoped id lookup skip it.
+        # Restoring FROM a version this actor cannot otherwise see (a draft
+        # without draft access) must not be a back door to it -- reuse
+        # read_page's own explicit-version visibility gate rather than letting
+        # restore_version's bare page-scoped id lookup skip it.
         page_service.read_page(
             page_id=page_id, version_id=request_body.version_id, actor=actor
         )

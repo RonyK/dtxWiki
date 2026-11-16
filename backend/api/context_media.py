@@ -618,7 +618,7 @@ def _asset_payload(
             projection.current_published_reference_count
         ),
         "historical_reference_count": projection.historical_reference_count,
-        "can_delete": projection.can_delete_by(actor),
+        "can_delete": projection.can_delete,
         "usage_token": projection.usage_token,
         "content_url": (
             f"/api/v1/workspaces/{workspace_id}/context/pages/{asset.page_id}"

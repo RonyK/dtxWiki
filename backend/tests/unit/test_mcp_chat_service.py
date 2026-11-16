@@ -1060,9 +1060,8 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
         listed_titles = {item.resource_id: item.artifact_title for item in listed.items}
         listed_paths = {item.resource_id: item.navigation_path for item in listed.items}
 
-        # Discarding a private edit must not expose its upload. This transition
-        # independently catches a SQL/batch gate that recognizes only editing
-        # while the canonical Python policy also protects discarded content.
+        # A discarded draft follows the same draft-read rule as any draft, so
+        # its upload stays visible; the SQL and Python gates must still agree.
         editing_chat = service.list_chats(
             session=session, workspace_id=workspace.id, actor=reader
         )
@@ -1091,13 +1090,11 @@ def test_media_asset_link_sql_predicate_matches_python_gate(session_factory):
     assert listed_ids == editing_expected
     assert sql_visible_ids == editing_expected
     assert python_visible_ids == editing_expected
-    assert discarded_sql_ids == discarded_python_ids == expected
-    assert foreign_editing_asset.id in {
-        link.resource_id for link in editing_chat.items[0].linked_artifacts
-    }
-    assert foreign_editing_asset.id not in {
-        link.resource_id for link in discarded_chat.items[0].linked_artifacts
-    }
+    assert discarded_sql_ids == discarded_python_ids == editing_expected
+    for chat_list in (editing_chat, discarded_chat):
+        assert foreign_editing_asset.id in {
+            link.resource_id for link in chat_list.items[0].linked_artifacts
+        }
     assert listed_titles[page_visible_asset.id] == "diagram.png"
     assert listed_paths[page_visible_asset.id] == (
         f"/workspaces/{visible_page.workspace_id}/context/pages/{visible_page.id}"

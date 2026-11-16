@@ -171,13 +171,8 @@ def context_version_is_visible(
 
     if version.version_status in PUBLISHED_CONTEXT_VERSION_STATUSES:
         return True
-    if not actor_can_read_drafts(actor):
-        return False
-    # Drafts share the ordinary draft-read boundary. Discarded work keeps its
-    # author-only visibility until its later physical cleanup.
-    from backend.repositories.context_visibility import discarded_row_hidden_from_actor
-
-    return not discarded_row_hidden_from_actor(version, actor)
+    # Drafts, closed and discarded versions share the draft-read boundary.
+    return actor_can_read_drafts(actor)
 
 
 def context_parent_projection(

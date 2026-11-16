@@ -179,8 +179,7 @@ class MCPWriteIdempotency(UuidPrimaryKeyMixin, Base):
     # agent id are drawn from different namespaces but are both plain text),
     # so scoping by actor_id alone risks two different actor_kinds colliding
     # on the same string. Ledger identity is workspace + actor_kind +
-    # actor_id, matching every other actor-scoped privacy predicate in this
-    # codebase (e.g. `foreign_discarded_version_exists`).
+    # actor_id.
     actor_kind: Mapped[str] = mapped_column(Text, nullable=False)
     actor_id: Mapped[str] = mapped_column(Text, nullable=False)
     tool_name: Mapped[str] = mapped_column(Text, nullable=False)

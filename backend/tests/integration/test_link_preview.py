@@ -182,13 +182,11 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
 
     # Budget exception: the source itself must pass the reader's visibility
     # check before its pins are used; this is the one denial kept here.
-    # Foreign-workspace and archived sources fail inside the shared visibility
-    # helpers, which have their own tests. A page/version mismatch cannot
-    # widen which pins are readable, since the version is checked either way.
+    # Foreign-workspace sources fail inside the shared visibility helpers,
+    # which have their own tests. A page/version mismatch cannot widen which
+    # pins are readable, since the version is checked either way.
     with page_service.session_factory.begin() as session:
-        version = session.get(ContextPageVersion, UUID(source["version_id"]))
-        version.created_by_actor_id = "unrelated-author"
-        version.version_status = "discarded"
+        session.get(ContextPage, UUID(source["id"])).lifecycle_status = "archived"
     private_source = client.post(url, json=request)
     assert private_source.status_code == 404
     assert private_source.json()["error_code"] == "not_found"

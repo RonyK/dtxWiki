@@ -249,11 +249,8 @@ class ContextMediaAccessPolicy:
         existence check on workspace-plane data, not merely a role check
         like ``require_workspace``.
 
-        The fine-grained "is THIS actor the uploader while the creating
-        shared draft is still open" check stays in
-        DeleteUnusedMedia (context_media/application/use_cases.py) -- this
-        method only establishes the coarse workspace/editor-role boundary
-        and resolves the page_id the command needs.
+        Establish the workspace/editor-role boundary and resolve the page_id
+        the command needs. DeleteUnusedMedia checks usage and concurrency.
         """
 
         preauthorized_access = self._preauthorize_credential_target(

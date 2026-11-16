@@ -97,7 +97,7 @@ for (const locale of ["en", "ko"]) {
       `${base}/context/pages`,
       {
         data: {
-          title: "Uninserted upload without preview",
+          title: "Uninserted member upload",
           body_md: "# Uninserted",
           page_type: "concept",
           tags: [],
@@ -106,18 +106,18 @@ for (const locale of ["en", "ko"]) {
     );
     expect(memberCreated.ok(), await memberCreated.text()).toBeTruthy();
     const otherPage = (await memberCreated.json()).data;
-    const privateUpload = await memberContext.request.post(
+    const memberUploadResponse = await memberContext.request.post(
       `${base}/context/pages/${otherPage.id}/media`,
       {
         headers: { "X-DTX-Media-Policy-Revision": revision },
         multipart: {
-          file: { name: "no-preview.png", mimeType: "image/png", buffer: png },
+          file: { name: "member-upload.png", mimeType: "image/png", buffer: png },
           marker_uuid: randomUUID(),
           editing_version_id: otherPage.version_id,
         },
       },
     );
-    expect(privateUpload.ok(), await privateUpload.text()).toBeTruthy();
+    expect(memberUploadResponse.ok(), await memberUploadResponse.text()).toBeTruthy();
     const memberSubmitted = await memberContext.request.post(
       `${base}/context/pages/${otherPage.id}/submit-for-review`,
       {
@@ -210,10 +210,11 @@ for (const locale of ["en", "ko"]) {
     const checkboxSize = await fileSelect.boundingBox();
     expect(checkboxSize?.width).toBe(16);
     expect(checkboxSize?.height).toBe(16);
-    const noPreview = section
+    // An upload is public once it is uploaded, inserted into a body or not.
+    const memberUpload = section
       .locator(".attachments-card")
-      .filter({ hasText: "no-preview.png" });
-    await expect(noPreview.locator("img")).toHaveCount(0);
+      .filter({ hasText: "member-upload.png" });
+    await expect(memberUpload.locator("img")).toHaveCount(1);
     const card = section
       .locator(".attachments-card")
       .filter({ hasText: names[0] });

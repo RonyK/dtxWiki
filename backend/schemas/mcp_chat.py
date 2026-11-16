@@ -226,8 +226,7 @@ class McpChatEditSummary(BaseModel):
     # At least one preview of this call was deleted.
     previews_purged: bool = False
     # The call wrote into a version this reader cannot see (a draft without
-    # draft access, or another author's discarded row), so its previews are
-    # not shown to them.
+    # draft access), so its previews are not shown to them.
     previews_withheld: bool = False
 
     model_config = ConfigDict(extra="forbid")

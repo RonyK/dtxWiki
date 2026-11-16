@@ -27,7 +27,6 @@ from backend.schemas.activity import (
 )
 from backend.services.actor_visible_read import (
     context_page_visible,
-    context_version_is_visible,
 )
 from backend.services.tree_projection import TreeProjectionService
 from backend.services.tree_service import DEFAULT_TREE_MOVE_REASON
@@ -349,12 +348,10 @@ class ContextActivityProjection:
         return False
 
     def version(self, value, page_id: UUID) -> ActivityVersion | None:
+        # Activity is shown to everyone who can see the page, draft events
+        # included; the version label is event metadata, not its body.
         version = self.versions.get(audit_uuid(value))
-        if (
-            version is None
-            or version.page_id != page_id
-            or not context_version_is_visible(version, self.actor)
-        ):
+        if version is None or version.page_id != page_id:
             return None
         return ActivityVersion(
             id=version.id,

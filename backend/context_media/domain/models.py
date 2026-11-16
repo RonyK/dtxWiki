@@ -231,29 +231,10 @@ class AssetUsageSnapshot:
     latest_draft_reference_count: int
     current_published_reference_count: int
     historical_reference_count: int
-    created_for_version_is_open_draft: bool
-    """Whether the creating version is still an open shared draft.
-    While true, orphan reclamation is deferred and explicit deletion requires
-    the uploader. Once published or discarded, ordinary editor-wide deletion
-    and orphan rules apply to assets with zero usage."""
-    viewer_visible_latest_draft_reference_count: int | None = None
-    viewer_visible_current_published_reference_count: int | None = None
-    viewer_visible_historical_reference_count: int | None = None
-    """P8.4: a viewer-scoped projection of the three ``*_reference_count``
-    fields above, excluding usage on another author's discarded versions.
-    ``None`` means "no viewer given, use the
-    real count" (``get_page_asset_usage``'s CAS-critical read never passes a
-    viewer and always gets ``None`` here). These fields are deliberately NOT
-    inputs to ``usage_token`` below -- that stays a hash of the real,
-    unmasked facts so ``DeleteUnusedMedia``'s optimistic-concurrency check
-    never sees a viewer-dependent value. Only ``ContextMediaAssetProjection``
-    (the list/display projection) reads these."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.asset, ContextMediaAssetRecord):
             raise ValueError("asset must be a ContextMediaAssetRecord")
-        if not isinstance(self.created_for_version_is_open_draft, bool):
-            raise ValueError("created_for_version_is_open_draft must be a bool")
         for name in ("latest_draft_version_id", "current_published_version_id"):
             value = getattr(self, name)
             if value is not None:
@@ -266,16 +247,6 @@ class AssetUsageSnapshot:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
-        for name in (
-            "viewer_visible_latest_draft_reference_count",
-            "viewer_visible_current_published_reference_count",
-            "viewer_visible_historical_reference_count",
-        ):
-            value = getattr(self, name)
-            if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value < 0
-            ):
-                raise ValueError(f"{name} must be None or a non-negative integer")
 
     @property
     def state(self) -> UsageState:
@@ -310,61 +281,21 @@ class ContextMediaAssetProjection:
     current_published_reference_count: int
     historical_reference_count: int
     usage_token: str
-    created_for_version_is_open_draft: bool = False
 
     @classmethod
     def from_snapshot(cls, snapshot: AssetUsageSnapshot) -> ContextMediaAssetProjection:
-        # P8.4: display the viewer-scoped counts when the snapshot was built
-        # with a viewer (falls back to the real count otherwise, e.g.
-        # get_page_asset_usage's CAS-only, viewer-less snapshot). usage_state
-        # is recomputed from THESE counts, not `snapshot.state` -- passing
-        # through the real state while zeroing the displayed count would
-        # otherwise show "0 draft references" next to an "Active" badge,
-        # which discloses the same hidden discarded-work fact
-        # through a different field. usage_token is untouched: it always
-        # hashes the real, unmasked facts (see AssetUsageSnapshot's docstring)
-        # so DeleteUnusedMedia's optimistic-concurrency check never depends
-        # on who is viewing.
-        latest = (
-            snapshot.viewer_visible_latest_draft_reference_count
-            if snapshot.viewer_visible_latest_draft_reference_count is not None
-            else snapshot.latest_draft_reference_count
-        )
-        published = (
-            snapshot.viewer_visible_current_published_reference_count
-            if snapshot.viewer_visible_current_published_reference_count is not None
-            else snapshot.current_published_reference_count
-        )
-        historical = (
-            snapshot.viewer_visible_historical_reference_count
-            if snapshot.viewer_visible_historical_reference_count is not None
-            else snapshot.historical_reference_count
-        )
-        if latest or published:
-            usage_state = UsageState.ACTIVE
-        elif historical:
-            usage_state = UsageState.HISTORY_ONLY
-        else:
-            usage_state = UsageState.UNUSED
         return cls(
             asset=snapshot.asset,
-            usage_state=usage_state,
-            latest_draft_reference_count=latest,
-            current_published_reference_count=published,
-            historical_reference_count=historical,
+            usage_state=snapshot.state,
+            latest_draft_reference_count=snapshot.latest_draft_reference_count,
+            current_published_reference_count=snapshot.current_published_reference_count,
+            historical_reference_count=snapshot.historical_reference_count,
             usage_token=snapshot.usage_token,
-            created_for_version_is_open_draft=snapshot.created_for_version_is_open_draft,
         )
 
     @property
     def can_delete(self) -> bool:
         return self.usage_state is UsageState.UNUSED
-
-    def can_delete_by(self, actor: ActorIdentity) -> bool:
-        """Mirror the existing ownership guard for open-session uploads."""
-        return self.can_delete and (
-            not self.created_for_version_is_open_draft or self.asset.created_by == actor
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -437,8 +368,8 @@ class ContextMediaAttachmentProjection:
     """The display projection of :class:`ContextMediaAttachmentSnapshot`.
 
     Wraps :class:`ContextMediaAssetProjection` for the same reason the snapshot
-    wraps ``AssetUsageSnapshot``: the viewer-masking and ``usage_token``
-    behaviour of that type is exactly what the listing wants, unchanged.
+    wraps ``AssetUsageSnapshot``: usage counts and ``usage_token`` are shared
+    with the page-level listing.
     """
 
     asset: ContextMediaAssetProjection

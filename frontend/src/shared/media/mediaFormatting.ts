@@ -16,9 +16,7 @@ export function mediaDeleteErrorKind(error: unknown): MediaDeleteErrorKind {
     return "changed";
   }
   if (error instanceof ApiError && error.status === 409) {
-    // Still referenced by a page version. Reachable even when the row said
-    // can_delete: that flag is computed from viewer-MASKED usage, so an asset
-    // referenced only by another author's discarded version can look unused.
+    // A page version references this file. Usage may have changed since listing.
     return "inUse";
   }
   return "delete";

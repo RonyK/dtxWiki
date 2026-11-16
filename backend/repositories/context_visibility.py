@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import and_, case, not_, null
+from sqlalchemy import and_, case, null, true
 from sqlalchemy.orm import aliased, object_session
 
 from backend.models.context import ContextPage, ContextPageVersion
@@ -30,66 +30,6 @@ def editable_context_version_id(page: ContextPage) -> UUID | None:
     """Return the single Context version on which a new edit must be based."""
 
     return page.latest_draft_version_id or page.current_version_id
-
-
-def _actor_identity(actor: ActorContext | None) -> tuple[str, str] | None:
-    actor_kind = getattr(actor, "actor_kind", None)
-    actor_id = getattr(actor, "actor_id", None)
-    if actor_kind is None or actor_id is None:
-        return None
-    return actor_kind, actor_id
-
-
-def discarded_row_hidden_from_actor(
-    version: ContextPageVersion | None, actor: ActorContext | None
-) -> bool:
-    """Hide discarded work from other actors, independently of draft access."""
-
-    if version is None or version.version_status != "discarded":
-        return False
-    identity = _actor_identity(actor)
-    if identity is None:
-        return True
-    actor_kind, actor_id = identity
-    return not (
-        version.created_by_actor_kind == actor_kind
-        and version.created_by_actor_id == actor_id
-    )
-
-
-def foreign_discarded_version_exists(pointer_column, identity: tuple[str, str] | None):
-    """SQL equivalent of ``discarded_row_hidden_from_actor`` for read surfaces.
-
-    A correlated EXISTS rather than a join: callers embed this expression
-    against queries that may or may not already join `context_page_version`
-    under its own name, so an unaliased reference here would collide with
-    that unrelated join instead of naming a fresh row to inspect.
-    """
-
-    discarded = aliased(ContextPageVersion)
-    return (
-        select_in_workspace(
-            discarded,
-            workspace_id=pointer_column.class_.workspace_id,
-            conditions=(
-                discarded.id == pointer_column,
-                discarded.version_status == "discarded",
-                (
-                    not_(
-                        and_(
-                            discarded.created_by_actor_kind == identity[0],
-                            discarded.created_by_actor_id == identity[1],
-                        )
-                    )
-                    if identity is not None
-                    else True
-                ),
-            ),
-        )
-        .with_only_columns(discarded.id)
-        .correlate_except(discarded)
-        .exists()
-    )
 
 
 def visible_context_version_id(
@@ -283,13 +223,4 @@ def explicit_context_version_visible_expression(version, actor: ActorContext | N
     )
     if not actor_can_read_drafts(actor):
         return published
-    identity = _actor_identity(actor)
-    own = (
-        False
-        if identity is None
-        else and_(
-            version.created_by_actor_kind == identity[0],
-            version.created_by_actor_id == identity[1],
-        )
-    )
-    return published | (version.version_status != "discarded") | own
+    return true()

@@ -320,7 +320,7 @@ def _safe_downstream_message(error_code: str) -> str:
         "media_policy_changed": (
             "Media policy changed; refresh capabilities and retry the upload."
         ),
-        "media_owner_mismatch": "The media target belongs to another actor.",
+        "media_owner_mismatch": "Media reference is outside this page or workspace.",
         "media_editing_not_open": "The draft is no longer open.",
         "media_unavailable": "The media target is temporarily unavailable.",
         "media_quota_exceeded": "The Workspace media quota has been reached.",

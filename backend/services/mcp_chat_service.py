@@ -1922,8 +1922,8 @@ class _ReaderGate:
         """The Context version, if the reader may read both it and its page.
 
         A page can be public while one of its versions is not readable by this
-        actor (an unpublished draft for a viewer, or another author's discarded
-        work), so a page-level answer is not enough for anything a call wrote
+        actor (an unpublished draft for a viewer), so a page-level answer is
+        not enough for anything a call wrote
         into a specific version.
         """
 
@@ -2107,8 +2107,8 @@ class _ReaderGate:
         """Whether the reader may see what a context-edit call wrote.
 
         A page can be visible while the edit went into a version this reader
-        cannot see (a draft without draft access, or another author's
-        discarded row), so this is decided by the version the call wrote into.
+        cannot see (a draft without draft access), so this is decided by the
+        version the call wrote into.
         When capture did not record that version (older calls, and a failed
         whole-body update, which names none), only the caller -- the chat's
         owner -- may see the content.

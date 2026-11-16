@@ -229,8 +229,8 @@ ERROR_CODE_GUIDANCE = {
         "Media storage is temporarily unavailable. Retry the same call later."
     ),
     "media_owner_mismatch": (
-        "Use only a page owned by this actor, and use a new marker_uuid for a "
-        "different target. Do not retry unchanged."
+        "Use only media of this page in this workspace, and use a new "
+        "marker_uuid for a different target. Do not retry unchanged."
     ),
     "media_policy_changed": (
         "Refresh the current media policy and preflight guidance with guide, "

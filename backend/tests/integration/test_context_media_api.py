@@ -811,7 +811,7 @@ def test_context_media_http_vertical_editing_preview_public_and_delete(
     assert editing_read.content == PNG_BYTES
     assert editing_read.headers["cache-control"] == "no-store"
     assert used["sha256"] not in editing_read.headers["etag"]
-    assert other_editor.get(used["content_url"]).status_code == 404
+    assert other_editor.get(used["content_url"]).status_code == 200
 
     page = _publish_editing(
         client,
@@ -819,7 +819,7 @@ def test_context_media_http_vertical_editing_preview_public_and_delete(
         page=editing_page,
     )
     assert client.get(used["content_url"]).status_code == 200
-    assert other_editor.get(unused["content_url"]).status_code == 404
+    assert other_editor.get(unused["content_url"]).status_code == 200
 
     exact_url = _version_content_url(client, page, used)
     exact = client.get(exact_url)
@@ -888,7 +888,7 @@ def test_context_media_http_vertical_editing_preview_public_and_delete(
     assert [item["id"] for item in unused_assets] == [unused["asset_id"]]
     preview_url = unused_assets[0]["content_url"]
     assert client.get(preview_url).status_code == 200
-    assert viewer.get(preview_url).status_code == 404
+    assert viewer.get(preview_url).status_code == 200
 
     with session_factory.begin() as session:
         workspace = session.get(Workspace, workspace_id)
@@ -1321,7 +1321,7 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
 
 
 @pytest.mark.parametrize("close_version", [False, True])
-def test_asset_delete_enforces_editing_author_before_usage_token(
+def test_asset_delete_checks_usage_token_for_other_editor(
     session_factory,
     tmp_path,
     monkeypatch,
@@ -1343,12 +1343,11 @@ def test_asset_delete_enforces_editing_author_before_usage_token(
     )
     url = f"/api/v1/workspaces/{workspace_id}/context/media/assets/{asset['asset_id']}"
     denied = editor.delete(url, headers={"If-Match": "stale"})
-    assert denied.status_code == 403, denied.text
-    assert denied.json()["error_code"] == "media_owner_mismatch"
+    assert denied.status_code == 412, denied.text
+    assert denied.json()["error_code"] == "media_usage_token_stale"
     assert owner.get(asset["content_url"]).status_code == 200
     if close_version:
-        # P8.1: an "editing" row only closes on an explicit submit -- an
-        # ordinary autosave keeps it "editing" (author-private).
+        # Submit closes the draft; autosave keeps it open.
         saved = _autosave(owner, page, body_md="# closed\n")
         submitted = owner.post(
             f"{_pages_url(owner)}/{page['id']}/submit-for-review",
@@ -1363,7 +1362,7 @@ def test_asset_delete_enforces_editing_author_before_usage_token(
     assert listing.status_code == 200, listing.text
     assert [item["id"] for item in listing.json()["data"]] == [asset["asset_id"]]
     token = listing.json()["data"][0]["usage_token"]
-    deleting_actor = owner
+    deleting_actor = editor
     deleted = deleting_actor.delete(url, headers={"If-Match": token})
     assert deleted.status_code == 200, deleted.text
     assert owner.get(asset["content_url"]).status_code == 404
@@ -1374,7 +1373,7 @@ def test_page_media_listing_shares_another_authors_editing_uploads(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """Editing uploads are listed for editors; preview ownership is preserved."""
+    """Editors can list, preview and delete unused uploads by other authors."""
 
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DTXWIKI_LIBRARY_BLOB_ROOT", str(tmp_path / "library"))
@@ -1444,7 +1443,7 @@ def test_page_media_listing_shares_another_authors_editing_uploads(
     assert foreign_listing.status_code == 200, foreign_listing.text
     foreign_items = foreign_listing.json()["data"]
     assert [item["id"] for item in foreign_items] == [asset["asset_id"]]
-    assert foreign_items[0]["can_delete"] is False
+    assert foreign_items[0]["can_delete"] is True
     serialized = foreign_listing.text
     assert "owner-private-secret.png" in serialized
     assert editing_page["version_id"] in serialized
@@ -1454,7 +1453,6 @@ def test_page_media_listing_shares_another_authors_editing_uploads(
     assert used_listing.json()["data"] == []
     assert "owner-private-secret.png" not in used_listing.text
 
-    # An uninserted preview stays uploader-only. Referenced images follow
-    # their version's shared draft visibility.
-    assert editor.get(asset["content_url"]).status_code == 404
+    # Uninserted previews follow the creating version's visibility.
+    assert editor.get(asset["content_url"]).status_code == 200
     assert owner.get(asset["content_url"]).status_code == 200

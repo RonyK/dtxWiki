@@ -15,7 +15,6 @@ from backend.context_media.domain import (
     ContextMediaAssetRecord,
     ContextMediaAttachmentProjection,
     ContextMediaNotFoundError,
-    ContextMediaOwnershipError,
     ContextMediaUnavailableError,
     MediaInUseError,
     MediaUsedInHistoryError,
@@ -117,11 +116,8 @@ class ListPageMedia:
 class ListWorkspaceMedia:
     """One page of a workspace's attachments.
 
-    The ``usage`` filter runs AFTER the repository's viewer masking, on the
-    projection's recomputed ``usage_state``. That ordering is the point: a
-    ``used`` request must never surface an asset whose only reference lives in
-    somebody else's discarded work, and ``ContextMediaAssetProjection.
-    from_snapshot`` is what turns the masked counts into the state we filter on.
+    The ``usage`` filter uses the canonical reference counts, including
+    discarded versions. Pagination metadata comes from the SQL asset window.
 
     260912 review: that same ordering used to break pagination. ``has_more``
     and ``next_cursor`` were computed by the ROUTE from ``len(projections)``
@@ -208,17 +204,6 @@ class DeleteUnusedMedia:
             or snapshot.asset.association_state is AssociationState.TOMBSTONED
         ):
             raise ContextMediaNotFoundError("Context media asset was not found")
-        # While the creating version is an open shared draft, only the
-        # uploader may explicitly delete the asset. The orphan query also
-        # protects it from reclamation. Once the version closes, editor-wide
-        # deletion applies, same as any other zero-usage page asset.
-        if (
-            snapshot.created_for_version_is_open_draft
-            and snapshot.asset.created_by != actor
-        ):
-            raise ContextMediaOwnershipError(
-                "media belongs to another actor's open editing session"
-            )
         if usage_token != snapshot.usage_token:
             raise StaleUsageTokenError("usage token is stale")
         if snapshot.state is UsageState.ACTIVE:
@@ -239,19 +224,8 @@ class ResolveContent:
         asset_id: UUID,
         actor: ActorIdentity,
     ) -> ContentCapability:
-        # The version-scoped route is the content
-        # read -- it covers both an exact-version usage read (draft/
-        # published/history, unconditional once the caller's outer
-        # version-visibility check already passed) and, when no usage row
-        # exists yet, an uninserted upload's preview via
-        # `created_for_version_id`. The fallback is narrower than "may this
-        # actor see this version" -- an uninserted image was never actually
-        # published as content, so it stays private to its own uploader
-        # specifically even if the surrounding version is itself a
-        # role-visible shared draft; `actor` is what lets
-        # resolve_version_content enforce that. The versionless page
-        # preview this used to sit beside is gone; there is no
-        # owner-independent asset read left.
+        # The caller checks version visibility. Content must be referenced
+        # by that version or be an upload created for that exact version.
         capability = repository.resolve_version_content(
             workspace_id=workspace_id,
             page_id=page_id,

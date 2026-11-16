@@ -1012,39 +1012,19 @@ class PageService:
             if page is None:
                 raise PageNotFoundError("page not found")
             before_version_no = self._parse_version_cursor(cursor, page.id)
-            # `context_version_is_visible` additionally hides another author's
-            # discarded row that the coarser role-based `visible_statuses`
-            # filter above lets through. Filtering after a
-            # single `limit + 1` fetch would silently undercount `has_more`
-            # whenever a hidden row lands in that window -- fetch again from
-            # where the batch left off until a full page of actually-visible
-            # versions is assembled or the table is exhausted.
-            versions: list[ContextPageVersion] = []
-            fetch_cursor = before_version_no
-            while len(versions) <= limit:
-                batch = context_page_repo.list_versions(
-                    session,
-                    page.id,
-                    limit + 1,
-                    visible_statuses=(
-                        None
-                        if actor_can_read_drafts(actor)
-                        else PUBLISHED_CONTEXT_VERSION_STATUSES
-                    ),
-                    before_version_no=fetch_cursor,
-                )
-                if not batch:
-                    break
-                fetch_cursor = batch[-1].version_no
-                versions.extend(
-                    version
-                    for version in batch
-                    if context_version_is_visible(version, actor)
-                )
-                if len(batch) <= limit:
-                    # The repository had no more rows before this cursor --
-                    # nothing later to find regardless of visibility.
-                    break
+            # The role decides visibility: draft readers see every version,
+            # everyone else the published ones.
+            versions = context_page_repo.list_versions(
+                session,
+                page.id,
+                limit + 1,
+                visible_statuses=(
+                    None
+                    if actor_can_read_drafts(actor)
+                    else PUBLISHED_CONTEXT_VERSION_STATUSES
+                ),
+                before_version_no=before_version_no,
+            )
             has_more = len(versions) > limit
             versions = versions[:limit]
             review_metadata = context_version_review_metadata(
@@ -4992,11 +4972,8 @@ class PageService:
             else None
         )
         parent_version_id = version.parent_version_id
-        # Project the parent whenever there is an actor to project it for --
-        # not just when `can_read_drafts` (a coarse role gate) is False.
-        # `context_parent_projection` -> `context_version_is_visible` also
-        # hides another author's discarded parent, which the role gate alone
-        # would let through as this version's raw `parent_version_id`.
+        # Project the parent through the reader's visibility: a reader without
+        # draft access sees only published parents.
         if not can_read_drafts or parent_visibility_actor is not None:
             parent = (
                 context_page_repo.get_version(session, version.parent_version_id)

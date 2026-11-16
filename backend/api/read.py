@@ -4297,9 +4297,8 @@ def list_workspace_context_media_attachments(
     # other people's files and uploaders, so it carries the same owner gate
     # the orphan listing established.
     #
-    # An owner's "every attachment" excludes only another author's discarded
-    # rows and uploads not yet inserted into any body -- see
-    # ``list_workspace_usage``.
+    # An owner's "every attachment" is every attachment on a page they can
+    # read -- see ``list_workspace_usage``.
     #
     # ``orphan_only`` is not ``usage=unused``: unused still contains assets an
     # open editing version protects, while orphan_only applies the sweep's own
