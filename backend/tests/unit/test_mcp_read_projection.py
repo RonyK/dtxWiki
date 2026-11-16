@@ -34,7 +34,7 @@ from backend.services.mcp_trace_capture import persist_mcp_tool_trace
 BASE = datetime(2026, 10, 20, 9, tzinfo=UTC)
 
 
-def _snapshot(page_id=None, version_id=None, revision=2, status="editing"):
+def _snapshot(page_id=None, version_id=None, revision=2, status="draft"):
     page_id, version_id = page_id or uuid4(), version_id or uuid4()
     version = SimpleNamespace(
         id=version_id,
@@ -55,7 +55,7 @@ def test_recorder_keeps_served_revision_after_mutation_and_only_allowlist():
     version = SimpleNamespace(
         id=uuid4(),
         body_md="served SECRET",
-        version_status="editing",
+        version_status="draft",
         editing_revision=4,
     )
     with capture_served_reads() as snapshots:
@@ -295,7 +295,7 @@ def test_projection_uses_single_call_edge_and_hides_private_version(session_fact
             actor_type="human",
             created_by_actor_kind="human",
             created_by_actor_id="another-author",
-            version_status="editing",
+            version_status="draft",
             editing_revision=3,
         )
         session.add(private)
@@ -338,7 +338,7 @@ def test_captured_edit_stays_with_draft_readers_after_later_revision(
             actor_type="human",
             created_by_actor_kind="human",
             created_by_actor_id="editing-author",
-            version_status="editing",
+            version_status="draft",
             editing_revision=3,
         )
         session.add(version)
@@ -616,7 +616,7 @@ def test_context_read_handlers_capture_the_served_version_identity(
             actor_type=actor.actor_kind,
             created_by_actor_kind=actor.actor_kind,
             created_by_actor_id=actor.actor_id,
-            version_status="editing",
+            version_status="draft",
             editing_revision=7,
         )
         session.add(version)

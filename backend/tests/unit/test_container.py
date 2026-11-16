@@ -108,7 +108,10 @@ def test_tool_call_context_binds_workspace_sessions():
     )
     service = _context_edit_page_service(bound)
     assert service.session_factory is provider.session_factory
-    assert service.context_version_writer is registry.context_version_writer
+    assert (
+        service.context_version_writer
+        is provider.session_factory.kw["info"]["context_version_writer"]
+    )
 
 
 def test_database_provider_requires_settings_or_factory():
@@ -141,9 +144,7 @@ def test_conversion_installer_profile_rejects_spi_output_limit_drift(monkeypatch
     registry = ServiceRegistry()
 
     with pytest.raises(RuntimeError, match="profile is below the output limit"):
-        registry.durable_library_conversion_media_installer_factory(
-            object(), uuid4()
-        )
+        registry.durable_library_conversion_media_installer_factory(object(), uuid4())
 
 
 def test_conversion_installer_byte_profile_covers_configured_asset_boundary(

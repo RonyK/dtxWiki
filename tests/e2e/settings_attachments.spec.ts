@@ -10,6 +10,7 @@ import {
 } from "./auth";
 import type { APIRequestContext } from "./fixtures";
 import { evidenceScreenshot } from "./evidence";
+import { approveContextDraft } from "./context_workflow";
 
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAYAAACzzX7wAAAAFUlEQVR4nGOUq7jznwEPYMInSR0FAD1JAnlVwrsyAAAAAElFTkSuQmCC",
@@ -75,6 +76,16 @@ for (const locale of ["en", "ko"]) {
       },
     );
     expect(submitted.ok(), await submitted.text()).toBeTruthy();
+    const submittedVersion = (await submitted.json()).data;
+    // Review submission keeps the shared draft open and protects its uploads.
+    // Close it through approval before exercising unused-file cleanup.
+    await approveContextDraft(
+      page.request,
+      workspace.id,
+      created.id,
+      submittedVersion.version_id,
+      submittedVersion.review_item_id,
+    );
     const memberContext = await browser.newContext();
     const memberEmail = `attachments-member-${randomUUID()}@example.com`;
     await signUp(memberContext.request, memberEmail);
@@ -86,7 +97,7 @@ for (const locale of ["en", "ko"]) {
       `${base}/context/pages`,
       {
         data: {
-          title: "Uninserted upload without preview",
+          title: "Uninserted member upload",
           body_md: "# Uninserted",
           page_type: "concept",
           tags: [],
@@ -95,18 +106,18 @@ for (const locale of ["en", "ko"]) {
     );
     expect(memberCreated.ok(), await memberCreated.text()).toBeTruthy();
     const otherPage = (await memberCreated.json()).data;
-    const privateUpload = await memberContext.request.post(
+    const memberUploadResponse = await memberContext.request.post(
       `${base}/context/pages/${otherPage.id}/media`,
       {
         headers: { "X-DTX-Media-Policy-Revision": revision },
         multipart: {
-          file: { name: "no-preview.png", mimeType: "image/png", buffer: png },
+          file: { name: "member-upload.png", mimeType: "image/png", buffer: png },
           marker_uuid: randomUUID(),
           editing_version_id: otherPage.version_id,
         },
       },
     );
-    expect(privateUpload.ok(), await privateUpload.text()).toBeTruthy();
+    expect(memberUploadResponse.ok(), await memberUploadResponse.text()).toBeTruthy();
     const memberSubmitted = await memberContext.request.post(
       `${base}/context/pages/${otherPage.id}/submit-for-review`,
       {
@@ -118,6 +129,14 @@ for (const locale of ["en", "ko"]) {
       },
     );
     expect(memberSubmitted.ok(), await memberSubmitted.text()).toBeTruthy();
+    const memberSubmittedVersion = (await memberSubmitted.json()).data;
+    await approveContextDraft(
+      page.request,
+      workspace.id,
+      otherPage.id,
+      memberSubmittedVersion.version_id,
+      memberSubmittedVersion.review_item_id,
+    );
     await memberContext.close();
     await page.addInitScript(
       (language) => localStorage.setItem("dtxwiki.uiLanguage", language),
@@ -191,10 +210,11 @@ for (const locale of ["en", "ko"]) {
     const checkboxSize = await fileSelect.boundingBox();
     expect(checkboxSize?.width).toBe(16);
     expect(checkboxSize?.height).toBe(16);
-    const noPreview = section
+    // An upload is public once it is uploaded, inserted into a body or not.
+    const memberUpload = section
       .locator(".attachments-card")
-      .filter({ hasText: "no-preview.png" });
-    await expect(noPreview.locator("img")).toHaveCount(0);
+      .filter({ hasText: "member-upload.png" });
+    await expect(memberUpload.locator("img")).toHaveCount(1);
     const card = section
       .locator(".attachments-card")
       .filter({ hasText: names[0] });
@@ -412,6 +432,14 @@ async function uploadOrphan(request: APIRequestContext, filename: string) {
     },
   );
   expect(submitted.ok(), await submitted.text()).toBeTruthy();
+  const submittedVersion = (await submitted.json()).data;
+  await approveContextDraft(
+    request,
+    workspace.id,
+    created.id,
+    submittedVersion.version_id,
+    submittedVersion.review_item_id,
+  );
   return workspace;
 }
 

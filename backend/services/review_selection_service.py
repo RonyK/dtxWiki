@@ -72,33 +72,38 @@ def review_candidate_versions(
     """Each Context review's reviewed (page, version_no), in three queries."""
     if not review_ids:
         return {}
-    change_sets = dict(session.execute(
-        select_in_workspace(
-            ReviewItem, workspace_id=workspace_id,
-            criteria=[ReviewItem.id.in_(review_ids)],
-        ).with_only_columns(ReviewItem.id, ReviewItem.change_set_id)
-    ).all())
+    change_sets = dict(
+        session.execute(
+            select_in_workspace(
+                ReviewItem,
+                workspace_id=workspace_id,
+                criteria=[ReviewItem.id.in_(review_ids)],
+            ).with_only_columns(ReviewItem.id, ReviewItem.change_set_id)
+        ).all()
+    )
     prefix = "context_page_version:"
     version_by_change_set = {
         change_set_id: parse_uuid_or_none(diff_ref[len(prefix) :])
         for change_set_id, diff_ref in session.execute(
             select_in_workspace(
-                ChangeOperation, workspace_id=workspace_id,
+                ChangeOperation,
+                workspace_id=workspace_id,
                 criteria=[
                     ChangeOperation.change_set_id.in_(set(change_sets.values())),
                     ChangeOperation.target_type == "context_page",
                     ChangeOperation.diff_ref.startswith(prefix),
                 ],
-            ).with_only_columns(
-                ChangeOperation.change_set_id, ChangeOperation.diff_ref
-            ).order_by(ChangeOperation.created_at.asc(), ChangeOperation.id.asc())
+            )
+            .with_only_columns(ChangeOperation.change_set_id, ChangeOperation.diff_ref)
+            .order_by(ChangeOperation.created_at.asc(), ChangeOperation.id.asc())
         ).all()
     }
     versions = {
         version_id: (page_id, version_no)
         for version_id, page_id, version_no in session.execute(
             select_in_workspace_by_ids(
-                ContextPageVersion, workspace_id=workspace_id,
+                ContextPageVersion,
+                workspace_id=workspace_id,
                 resource_ids={v for v in version_by_change_set.values() if v},
             ).with_only_columns(
                 ContextPageVersion.id,
@@ -303,16 +308,24 @@ class ReviewSelectionService:
         if risks:
             criteria.append(ReviewItem.risk_level.in_(risks))
         if filters.target_page_id is not None:
-            criteria.extend([
-                _targets_context_page(filters.target_page_id),
-                ReviewItem.review_type == "context_update",
-            ])
+            criteria.extend(
+                [
+                    _targets_context_page(filters.target_page_id),
+                    ReviewItem.review_type == "context_update",
+                ]
+            )
         statement = select_in_workspace(
-            ReviewItem, workspace_id=workspace_id, criteria=criteria,
+            ReviewItem,
+            workspace_id=workspace_id,
+            criteria=criteria,
         ).with_only_columns(ReviewItem.id, func.count().over())
         statement, _scope = self.review.apply_list_visibility(
-            session=session, statement=statement, workspace_id=workspace_id,
-            audience_for=actor.user_id, scope=filters.scope, actor_role=role,
+            session=session,
+            statement=statement,
+            workspace_id=workspace_id,
+            audience_for=actor.user_id,
+            scope=filters.scope,
+            actor_role=role,
         )
         rows = session.execute(
             statement.order_by(
@@ -403,6 +416,7 @@ class ReviewSelectionService:
                 ReviewSelectionItem(
                     id=review_id,
                     eligible=preflight.eligible,
+                    merge_preview=preflight.merge_preview,
                     auto_settled_review_item_ids=(
                         sorted(preflight.visible_superseded_review_ids, key=str)
                         if preflight.eligible
@@ -644,7 +658,8 @@ class ReviewSelectionService:
                         )
                         internal_settled.update(preflight.superseded_review_ids)
                         sibling_versions = review_candidate_versions(
-                            session, workspace_id,
+                            session,
+                            workspace_id,
                             list(preflight.visible_superseded_review_ids),
                         )
                         for sibling_id in preflight.visible_superseded_review_ids:

@@ -207,9 +207,7 @@ def test_submit_with_only_self_link_warns(page_service, actor):
     submitted = _create_and_submit(
         page_service,
         actor,
-        body=lambda created: (
-            f"# Source\n\n[Self](/context?target={created.id})"
-        ),
+        body=lambda created: f"# Source\n\n[Self](/context?target={created.id})",
     )
 
     assert _warning_codes(submitted) == [WARNING_CODE]
@@ -258,19 +256,13 @@ def test_archived_page_does_not_create_a_warning_candidate(page_service, actor):
     assert WARNING_CODE not in _warning_codes(submitted)
 
 
-def test_link_example_inside_code_block_does_not_suppress_warning(
-    page_service, actor
-):
+def test_link_example_inside_code_block_does_not_suppress_warning(page_service, actor):
     target = _publish_target(page_service, slug="code-block-target")
 
     submitted = _create_and_submit(
         page_service,
         actor,
-        body=(
-            "# Source\n\n```markdown\n"
-            f"[Example](/context?target={target.id})\n"
-            "```"
-        ),
+        body=(f"# Source\n\n```markdown\n[Example](/context?target={target.id})\n```"),
     )
 
     assert _warning_codes(submitted) == [WARNING_CODE]
@@ -303,9 +295,7 @@ def test_advisory_lookup_failure_keeps_committed_submit_successful(
     assert records[0].page_id == str(submitted.data.id)
 
 
-def test_successful_submit_runs_advisory_lookup_once(
-    page_service, actor, monkeypatch
-):
+def test_successful_submit_runs_advisory_lookup_once(page_service, actor, monkeypatch):
     _publish_target(page_service, slug="lookup-spy-neighbor")
     calls = []
     real_lookup = context_tools.context_link_advisory_state
@@ -330,9 +320,7 @@ def test_successful_submit_runs_advisory_lookup_once(
     assert len(calls) == 1
 
 
-def test_conflicted_submit_never_runs_advisory_lookup(
-    page_service, actor, monkeypatch
-):
+def test_conflicted_submit_never_runs_advisory_lookup(page_service, actor, monkeypatch):
     workspace_id = _workspace_id(page_service)
     created = dispatch(
         "create_context_page",
@@ -491,9 +479,7 @@ def test_rest_submit_does_not_emit_mcp_link_warning(page_service, actor):
     assert submitted_response.status_code == 200, submitted_response.text
     rest_warning_codes = {
         warning["code"]
-        for warning in submitted_response.json().get("envelope", {}).get(
-            "warnings", []
-        )
+        for warning in submitted_response.json().get("envelope", {}).get("warnings", [])
     }
     assert WARNING_CODE not in rest_warning_codes
 
@@ -535,8 +521,7 @@ def test_runner_structured_content_preserves_submit_warning(page_service, actor)
     assert result.isError is False
     assert result.structuredContent is not None
     warning_codes = {
-        warning["code"]
-        for warning in result.structuredContent["envelope"]["warnings"]
+        warning["code"] for warning in result.structuredContent["envelope"]["warnings"]
     }
     assert WARNING_CODE in warning_codes
 
@@ -549,11 +534,18 @@ def test_non_live_submitted_version_cannot_emit_warning(page_service, actor):
         body="# Source\n\nNo authored links.",
     )
 
-    with page_service.session_factory.begin() as session:
-        page = session.get(ContextPage, submitted.data.id)
-        assert page is not None
-        page.current_version_id = None
-        page.latest_draft_version_id = None
+    closed = dispatch(
+        "discard_context_edit",
+        {
+            "workspace_id": str(_workspace_id(page_service)),
+            "page_id": str(submitted.data.id),
+            "version_id": str(submitted.data.version_id),
+            "idempotency_key": "advisory-close",
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert closed.envelope.result_status == "succeeded", closed.envelope
 
     with page_service.session_factory() as session:
         state = context_link_advisory_state(

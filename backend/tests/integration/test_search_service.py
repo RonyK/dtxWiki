@@ -1100,6 +1100,8 @@ def test_name_index_resyncs_on_rename_and_title_only_update():
     assert exact_title_hit("Fresh Tree Title")
     assert not exact_title_hit("Rename Target")
 
+    created = page_service.read_page(page_id=created.id)
+
     # BS-2: title-only PATCH with an unchanged body (same-hash branch).
     updated = page_service.update_page(
         page_id=created.id,
@@ -1120,9 +1122,19 @@ def test_name_index_resyncs_on_rename_and_title_only_update():
     # Autosave no longer moves the published pointer, so the staged title is
     # indexed for actors who can see drafts but must not resolve the page for a
     # reader until the author publishes.
+    opened = page_service.begin_context_edit(
+        page_id=created.id,
+        workspace_id=created.workspace_id,
+        actor_kind="human",
+        actor_id="00000000-0000-0000-0000-000000000010",
+        actor_provenance="browser_session",
+        idempotency_key="title-edit",
+    )
     autosaved = page_service.autosave_page(
         page_id=created.id,
         workspace_id=created.workspace_id,
+        version_id=opened.version_id,
+        expected_editing_revision=opened.editing_revision,
         title="Autosaved Title",
         body_md=updated.body_md,
         actor_kind="human",

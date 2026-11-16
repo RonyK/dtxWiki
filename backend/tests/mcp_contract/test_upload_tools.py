@@ -561,17 +561,10 @@ def test_upload_image_page_target_binds_asset_to_the_open_editing_version(
         assert asset.created_for_version_id == editing_page.version_id
 
 
-def test_upload_image_rejects_foreign_actor_editing_version_without_residue(
+def test_upload_image_allows_another_editor_on_shared_draft(
     page_service, actor, tmp_path, monkeypatch
 ):
-    """The version's own author gets media_editing_not_open once it stops
-    being "editing"; a DIFFERENT actor naming someone else's editing version
-    must instead see the same opaque not_found a nonexistent version gets --
-    a distinguishable answer would itself confirm this version id currently
-    exists in someone's private editing session (P3.2 opacity rule, see
-    backend/context_media/adapters/sqlalchemy.py's add_asset). This must also
-    have zero side effects: no asset, no request row, no quota charge.
-    """
+    """An editor can attach media to another editor's shared named draft."""
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path))
     workspace_id = _workspace_id(page_service)
     editing_page = _open_editing_page(page_service, actor)
@@ -595,7 +588,7 @@ def test_upload_image_rejects_foreign_actor_editing_version_without_residue(
             )
 
     before = snapshot()
-    refused = _dispatch_upload(
+    uploaded = _dispatch_upload(
         page_service,
         foreign_actor,
         _payload(
@@ -608,10 +601,11 @@ def test_upload_image_rejects_foreign_actor_editing_version_without_residue(
         ),
     )
 
-    assert refused.envelope.error_code == "not_found"
-    assert refused.envelope.result_status == "failed"
-    assert refused.envelope.retryable is False
-    assert snapshot() == before
+    assert uploaded.envelope.error_code is None
+    assert uploaded.envelope.result_status == "succeeded"
+    after = snapshot()
+    assert after[:2] == (before[0] + 1, before[1] + 1)
+    assert after[2][0] == (before[2][0] if before[2] else 0) + len(JPEG)
 
 
 @pytest.mark.parametrize(

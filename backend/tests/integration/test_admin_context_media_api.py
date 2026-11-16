@@ -72,15 +72,17 @@ def test_admin_lists_nonmember_workspaces_without_preview_and_preserves_normal_a
     actor = _user_id(page_service, "operator@example.com")
     wid = _workspace(page_service.session_factory, "Other team")
     _seed(page_service, wid, actor, filename="orphan.png")
-    _seed(page_service, wid, actor, filename="private-edit.png", editing=True)
+    _seed(page_service, wid, actor, filename="shared-draft.png", editing=True)
     response = admin.get(URL)
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     rows = response.json()["data"]["items"]
-    assert [r["original_filename"] for r in rows] == ["orphan.png"]
-    assert rows[0]["workspace_title"] == "Other team"
-    assert rows[0]["can_delete"] is True
-    assert rows[0]["content_url"] is None
+    # Drafts are shared, so their attachments are listed like any other.
+    assert [r["original_filename"] for r in rows] == ["shared-draft.png", "orphan.png"]
+    orphan = rows[1]
+    assert orphan["workspace_title"] == "Other team"
+    assert orphan["can_delete"] is True
+    assert orphan["content_url"] is None
     assert (
         admin.get(f"/api/v1/workspaces/{wid}/context/media/attachments").status_code
         == 404
@@ -178,7 +180,7 @@ def test_used_and_open_edit_assets_cannot_be_cleaned_by_operator(page_service):
             )
         )
     rows = admin.get(URL).json()["data"]["items"]
-    assert len(rows) == 1 and rows[0]["can_delete"] is False
+    assert len(rows) == 2 and not any(row["can_delete"] for row in rows)
     assert _delete(admin, rows[0]).status_code == 409
     with page_service.session_factory() as session:
         snapshot = SqlAlchemyContextMediaRepository(session).get_page_asset_usage(

@@ -244,7 +244,11 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  33 -- Document locators use kind/UUID and canonical URLs throughout reads,
 #        search, neighbors, OKF and maintenance; Library read input accepts
 #        its canonical URL. Refresh cached tool catalogs and result schemas.
-MCP_TOOL_CONTRACT_REVISION = 33
+#  34 -- Context tools address shared mutable drafts by version_id and revision.
+#        Exact-version reads replace private-edit selectors; review requests
+#        stay editable. Retire submit_revision_for_review and the legacy
+#        diverged-branch warning. Refresh cached tool catalogs and schemas.
+MCP_TOOL_CONTRACT_REVISION = 34
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be
@@ -342,7 +346,6 @@ ERROR_CODES = (
     "mcp_connection_disabled",
     "conversation_token_malformed",
     "conversation_token_required",
-    "revision_submission_required",
     "conversation_token_unknown",
     "conversation_token_owner_mismatch",
     "human_session_required",
@@ -372,8 +375,8 @@ ERROR_CODES = (
 )
 
 ContextHistoryStatus = Literal[
+    "closed",
     "state_inconsistent",
-    "current_editing",
     "current_draft",
     "published_snapshot",
     "alternative_draft",
@@ -396,7 +399,6 @@ WARNING_CODES = (
     "unsupported_retrieval_mode_fallback",
     "deprecated_tool",
     "conversation_token_not_supplied",
-    "unresolved_diverged_branch",
     "conversation_read_stale",
     # The write succeeded but the body failed the objective format floor, so it
     # is held as a draft rather than published. Carries the defect and its line.

@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Shared Context drafts
+
+- Save shared drafts in place using their version ID and editing revision.
+  Browser saves can merge a supplied baseline; stale MCP saves return a conflict.
+- Bind publication and review approval to a merge preview. Confirm automatic
+  merge results in the editor before publication, and retain closed drafts as
+  Git commits with their commit parents and version-owned metadata.
+- Collect all open drafts for indexing while preserving the existing
+  single-result search presentation. Existing draft-pointer and reconciliation
+  columns remain for the later cleanup.
+- MCP contract revision 34 adapts existing editing tools, removes
+  `submit_revision_for_review` and the retired `current_editing` history
+  status. Refresh cached tool catalogs and schemas.
+- Upgrade the draft schema after the document-identity migration. This data
+  conversion cannot be downgraded; recovery uses the pre-upgrade backup.
+- Opening the editor on a published version no longer creates a draft; the
+  first save starts one. Page updates through REST finish every writer the
+  same way: published, or held in a review when the policy wants a person.
+- Automatic review approval waits from a draft's last save and approves only
+  the merge result it evaluated; publishing keeps the tree placement unless
+  the published result moves the page.
+- Private drafts are gone: every draft is shared. Draft activity shows to
+  every member who can see the page, discarded drafts follow the same
+  draft-read rule as any draft, and an uploaded attachment is visible to
+  everyone who can see its draft whether or not it is in the body yet.
+  Account deletion keeps the account's drafts and shows its author name on
+  what it wrote instead of "Human editor".
+
+
 ### Context body links
 
 - Expand short `/p/<page_id>` Markdown destinations to workspace-qualified

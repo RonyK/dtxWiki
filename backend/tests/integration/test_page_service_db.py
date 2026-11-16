@@ -23,16 +23,16 @@ from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.repositories import context_page_repo
-from backend.schemas.context_write import PublishContextPageRequest
+from backend.schemas.context_write import ReviewDecisionRequest
 from backend.schemas.tree import TreeNodeUpdate
 from backend.scripts.seed_dev import seed_default_workspace
-from backend.services.context_write_service import ContextWriteService
 from backend.services.domain_read import DomainReadService
 from backend.services.page_service import (
-    PageConflictError,
     PageNotFoundError,
     PageService,
 )
+from backend.services.read_errors import StaleBaseVersionError
+from backend.services.review_service import ReviewService
 from backend.services.search_service import SearchService
 from backend.services.tree_service import TreeService
 from backend.tests.utils.context_git import configure_test_context_storage
@@ -84,8 +84,14 @@ def test_page_service_creates_reads_lists_and_audits_page():
     with service.session_factory() as session:
         audit_rows = _page_service_audit_rows(session)
 
-    assert [row.action for row in audit_rows] == ["page.create"]
-    assert audit_rows[0].actor_kind == "human"
+    assert sorted(row.action for row in audit_rows) == [
+        "context_page.draft.publish",
+        "page.create",
+    ]
+    assert all(row.actor_kind == "human" for row in audit_rows)
+    assert all(
+        row.payload["version_id"] == str(created.version_id) for row in audit_rows
+    )
 
 
 def test_page_service_first_touch_race_converges_on_existing_slug(monkeypatch):
@@ -127,7 +133,7 @@ def test_page_service_first_touch_race_converges_on_existing_slug(monkeypatch):
         actor_provenance="browser_session",
     )
 
-    assert calls >= 2
+    assert calls == 0
     assert updated.id == winner.id
     assert updated.version_id != winner.version_id
     assert updated.body_md.endswith("Second writer.")
@@ -250,8 +256,11 @@ def test_page_service_updates_with_linear_parent_and_audit_row():
 
     with service.session_factory() as session:
         created_audits = _page_service_audit_rows(session)
-    assert [audit.action for audit in created_audits] == ["page.create"]
-    created_audit_id = created_audits[0].id
+    assert sorted(audit.action for audit in created_audits) == [
+        "context_page.draft.publish",
+        "page.create",
+    ]
+    created_audit_ids = {audit.id for audit in created_audits}
 
     updated = service.write_page(
         workspace_slug="default",
@@ -274,10 +283,20 @@ def test_page_service_updates_with_linear_parent_and_audit_row():
 
     # The two service calls establish the order; wall-clock timestamps do not,
     # because the clock may step back between the writes.
-    assert len(audits) == 2
-    assert audits[created_audit_id].action == "page.create"
-    update_audits = [audit for key, audit in audits.items() if key != created_audit_id]
-    assert [audit.action for audit in update_audits] == ["page.update"]
+    assert len(audits) == 5
+    assert all(audits[audit.id].action == audit.action for audit in created_audits)
+    update_audits = [
+        audit for key, audit in audits.items() if key not in created_audit_ids
+    ]
+    assert {audit.action for audit in update_audits} == {
+        "context_page.draft.save",
+        "page.submit_context_edit_for_review",
+        "context_page.draft.publish",
+    }
+    saved = next(
+        audit for audit in update_audits if audit.action == "context_page.draft.save"
+    )
+    assert saved.payload["base_version_id"] == str(created.version_id)
 
 
 def test_page_service_emits_change_review_audit_bundle_for_writes():
@@ -293,8 +312,11 @@ def test_page_service_emits_change_review_audit_bundle_for_writes():
     )
     with service.session_factory() as session:
         created_audits = _page_service_audit_rows(session)
-    assert [audit.action for audit in created_audits] == ["page.create"]
-    created_audit_id = created_audits[0].id
+    assert sorted(audit.action for audit in created_audits) == [
+        "context_page.draft.publish",
+        "page.create",
+    ]
+    created_audit_ids = {audit.id for audit in created_audits}
 
     updated = service.write_page(
         workspace_slug="default",
@@ -314,49 +336,27 @@ def test_page_service_emits_change_review_audit_bundle_for_writes():
         reviews = session.scalars(select(ReviewItem)).all()
         audits = _page_service_audit_rows(session)
 
-    assert [change.status for change in change_sets] == ["applied", "applied"]
-    # A metadata patch is staged whenever the write actually carries one, not
-    # only on the review path, because comparing two versions has to be able to
-    # say the title or tags moved. That makes the ledger record the metadata
-    # change alongside the body write. The operations table has no order of its
-    # own, so each operation is matched by what it targets, not by position.
-    assert sorted(
-        (
-            operation.operation,
-            operation.target_type,
-            operation.target_id,
-            operation.diff_ref,
-        )
-        for operation in operations
-    ) == [
-        (
-            "create",
-            "context_page",
-            created.id,
-            f"context_page_version:{created.version_id}",
-        ),
-        (
-            "metadata_patch",
-            "context_page",
-            created.id,
-            f"context_page_version:{updated.version_id}",
-        ),
-        (
-            "update",
-            "context_page",
-            created.id,
-            f"context_page_version:{updated.version_id}",
-        ),
-    ]
+    # Every update is recorded like a submission the review policy decides.
+    assert len(change_sets) == 5
+    assert all(change.status == "applied" for change in change_sets)
+    assert {(operation.operation, operation.diff_ref) for operation in operations} == {
+        ("create", f"context_page_version:{created.version_id}"),
+        ("publish", f"context_page_version:{created.version_id}"),
+        ("save_draft", f"context_page_version:{updated.version_id}"),
+        ("update", f"context_page_version:{updated.version_id}"),
+        ("publish", f"context_page_version:{updated.version_id}"),
+    }
     assert [review.status for review in reviews] == ["approved", "approved"]
-    # The create audit was observed before the update ran, so it is matched by
-    # identity: the clock may step back between the writes, which would
-    # reorder a created_at listing.
     audits_by_id = {audit.id: audit for audit in audits}
-    assert len(audits) == 2
-    assert audits_by_id[created_audit_id].action == "page.create"
-    update_audits = [audit for audit in audits if audit.id != created_audit_id]
-    assert [audit.action for audit in update_audits] == ["page.update"]
+    assert len(audits) == 5
+    assert all(
+        audits_by_id[audit.id].action == audit.action for audit in created_audits
+    )
+    assert {audit.action for audit in audits if audit.id not in created_audit_ids} == {
+        "context_page.draft.save",
+        "page.submit_context_edit_for_review",
+        "context_page.draft.publish",
+    }
 
 
 class FailingRecorder:
@@ -408,7 +408,7 @@ def test_page_service_rejects_stale_update_without_overwriting():
         actor_id="dev-local-user",
         actor_provenance="browser_session",
     )
-    updated = service.write_page(
+    service.write_page(
         workspace_slug="default",
         slug="hello",
         title="Hello v2",
@@ -432,15 +432,59 @@ def test_page_service_rejects_stale_update_without_overwriting():
             base_content_hash=created.content_hash,
             actor_provenance="browser_session",
         )
-    except PageConflictError as exc:
+    except StaleBaseVersionError as exc:
         conflict = exc
     else:
         raise AssertionError("Expected stale update to raise PageConflictError")
 
-    assert conflict.error_code == "stale_base_version"
-    assert conflict.server_version_id == updated.version_id
-    assert conflict.server_content_hash == updated.content_hash
+    assert conflict.error_code == "context_merge_conflict"
     assert service.read_page(page_id=created.id).body_md == "# Hello v2"
+
+
+def test_page_update_finishes_every_writer_and_preserves_stale_bytes():
+    service = make_service()
+    created = service.write_page(
+        workspace_slug="default",
+        slug="hello",
+        title="Hello",
+        body_md="# Hello",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    # A token write in a workspace that wants a person opens a review instead
+    # of leaving a draft nobody is asked to decide.
+    staged = service.update_page(
+        page_id=created.id,
+        title="Hello",
+        body_md="# Hello\n\nFrom a token.",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        base_version_id=created.version_id,
+        base_content_hash=created.content_hash,
+        actor_provenance="personal_access_token",
+    )
+    assert staged.review_item_id is not None
+    assert service.read_page(page_id=created.id).body_md == "# Hello"
+    # A stale save of that shared draft is kept as its own draft, unpublished.
+    preserved = service.update_page(
+        page_id=created.id,
+        title="Hello",
+        body_md="# Hello\n\nMy stale edit.",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        base_version_id=staged.version_id,
+        base_content_hash=created.content_hash,
+        actor_provenance="browser_session",
+        on_stale="preserve_as_alternative",
+    )
+    assert preserved.alternative_draft_id not in {None, staged.version_id}
+    assert service.read_page(page_id=created.id).body_md == "# Hello"
+    with service.session_factory() as session:
+        kept = session.get(ContextPageVersion, preserved.alternative_draft_id)
+        assert kept.version_status == "draft"
+        assert kept.parent_version_id == created.version_id
+        assert kept.body_md == "# Hello\n\nMy stale edit."
 
 
 def test_page_service_rejects_version_id_belonging_to_another_page():
@@ -738,7 +782,7 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
             actor_type="human",
             created_by_actor_kind="human",
             created_by_actor_id="dev-local-user",
-            version_status="editing",
+            version_status="draft",
             parent_version_id=base.id,
         )
         session.add(competing)
@@ -749,7 +793,7 @@ def test_wikilink_pin_survives_rename_rescan_and_restore():
                 source_page_id=linked.id,
                 source_version_id=competing.id,
                 link_syntax="context_url",
-                locator_key="concept_path:한글-문서",
+                locator_key=f"page_id:{target.id}",
                 target_slug="한글-문서",
                 target_page_id=replacement.id,
             )
@@ -943,7 +987,7 @@ def _seed_restored_draft(service):
         version_id=created.version_id,
         actor_kind="human",
         actor_id="dev-local-user",
-        actor_provenance="browser_session",
+        actor_provenance="personal_access_token",
     )
     return created, updated, restored
 
@@ -956,16 +1000,19 @@ def test_page_and_context_publish_surfaces_dedup_same_content_embed_job():
     with service.session_factory.begin() as session:
         page = session.get(ContextPage, created.id)
         assert page is not None
-        ContextWriteService().publish_draft(
+        assert restored.review_item_id is not None
+        ReviewService().apply_decision(
             session=session,
             workspace_id=page.workspace_id,
-            page_id=page.id,
-            request=PublishContextPageRequest(
-                version_id=restored.version_id,
-                reason="cross-surface embed dedup",
+            review_item_id=restored.review_item_id,
+            request=ReviewDecisionRequest(
+                decision_type="approve",
+                decision_reason="cross-surface embed dedup",
             ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-000000000010",
+            actor_role="owner",
+            actor_provenance="browser_session",
         )
 
     expected_key = (
@@ -981,7 +1028,7 @@ def test_page_and_context_publish_surfaces_dedup_same_content_embed_job():
     assert jobs[0].trigger_type == "context_published"
 
 
-def test_autosave_from_reviewed_restore_forks_without_embed_job():
+def test_autosave_updates_restored_shared_draft_and_enqueues_projection_job():
     service = make_service()
     created, _updated, restored = _seed_restored_draft(service)
     with service.session_factory.begin() as session:
@@ -996,7 +1043,8 @@ def test_autosave_from_reviewed_restore_forks_without_embed_job():
         actor_id="dev-local-user",
         base_version_id=restored.version_id,
         base_content_hash=restored.content_hash,
-        session_version_id=restored.version_id,
+        version_id=restored.version_id,
+        expected_editing_revision=restored.editing_revision,
         actor_provenance="browser_session",
         idempotency_key="restore-meta-autosave",
     )
@@ -1007,8 +1055,8 @@ def test_autosave_from_reviewed_restore_forks_without_embed_job():
     # The restore action already has an approved ReviewItem bound to its exact
     # bytes.  Starting a browser autosave session must therefore fork once;
     # subsequent keystrokes may mutate that unreviewed successor in place.
-    assert autosaved.version_id != restored.version_id
-    assert jobs == []
+    assert autosaved.version_id == restored.version_id
+    assert len(jobs) == 1 and jobs[0].trigger_type == "context_draft"
 
 
 def test_metadata_only_update_keeps_restore_draft_unpublished(monkeypatch):
@@ -1033,7 +1081,7 @@ def test_metadata_only_update_keeps_restore_draft_unpublished(monkeypatch):
         actor_id="dev-local-user",
         base_version_id=restored.version_id,
         base_content_hash=restored.content_hash,
-        actor_provenance="browser_session",
+        actor_provenance="personal_access_token",
     )
 
     with service.session_factory() as session:
@@ -1057,7 +1105,7 @@ def test_metadata_only_update_keeps_restore_draft_unpublished(monkeypatch):
 
     assert patched.title == "Restore Meta Renamed"
     assert patched.version_id == restored.version_id
-    assert current_version_id == restored.version_id
+    assert current_version_id == updated.version_id
     assert published_version_id == updated.version_id
     assert draft_status == "draft"
     assert canonical_title == "Restore Meta"
@@ -1067,13 +1115,12 @@ def test_metadata_only_update_keeps_restore_draft_unpublished(monkeypatch):
         ("published", "restore-meta", updated.version_id),
         ("published", "Restore Meta", updated.version_id),
         ("draft", "restore-meta", restored.version_id),
-        ("draft", "Restore Meta", restored.version_id),
         ("draft", "Restore Meta Renamed", restored.version_id),
     }
     parsed_metadata_operations = [
         json.loads(operation.diff_summary) for operation in metadata_operations
     ]
-    assert parsed_metadata_operations == [{"title": "Restore Meta Renamed"}]
+    assert parsed_metadata_operations == []
 
     repeated = service.update_page(
         page_id=created.id,
@@ -1095,7 +1142,7 @@ def test_metadata_only_update_keeps_restore_draft_unpublished(monkeypatch):
         )
 
     assert repeated.version_id == restored.version_id
-    assert operation_count == 1
+    assert operation_count == 0
 
 
 def test_pending_title_is_editor_only_until_restore_draft_is_published():
@@ -1109,7 +1156,7 @@ def test_pending_title_is_editor_only_until_restore_draft_is_published():
         actor_id="dev-local-user",
         base_version_id=restored.version_id,
         base_content_hash=restored.content_hash,
-        actor_provenance="browser_session",
+        actor_provenance="personal_access_token",
     )
 
     with service.session_factory() as session:
@@ -1177,7 +1224,7 @@ def test_pending_title_is_editor_only_until_restore_draft_is_published():
         row.visibility_scope
         for row in renamed_rows
         if row.name == "Immediate Published Rename"
-    } == {"published", "draft"}
+    } == {"published"}
     assert any(
         row.visibility_scope == "draft" and row.name == "Pending Restore Name"
         for row in renamed_rows
@@ -1188,16 +1235,21 @@ def test_pending_title_is_editor_only_until_restore_draft_is_published():
     )
 
     with service.session_factory.begin() as session:
-        ContextWriteService().publish_draft(
+        assert restored.review_item_id is not None
+        ReviewService().apply_decision(
             session=session,
             workspace_id=workspace_id,
-            page_id=created.id,
-            request=PublishContextPageRequest(
-                version_id=restored.version_id,
-                reason="publish restored draft",
+            review_item_id=restored.review_item_id,
+            request=ReviewDecisionRequest(
+                decision_type="approve",
+                decision_reason="publish restored draft",
+                on_conflict="latest",
+                result_page_metadata={"title": "Pending Restore Name"},
             ),
             actor_kind="human",
             actor_id="00000000-0000-0000-0000-000000000010",
+            actor_role="owner",
+            actor_provenance="browser_session",
         )
 
     with service.session_factory() as session:
@@ -1214,14 +1266,14 @@ def test_pending_title_is_editor_only_until_restore_draft_is_published():
         )
 
     assert page.title == "Pending Restore Name"
-    assert page.current_published_version_id == restored.version_id
+    assert page.current_published_version_id != restored.version_id
     assert {row.visibility_scope for row in published_rows} == {"published"}
     [viewer_hit] = viewer_results.ranked_results
     assert viewer_hit.title == "Pending Restore Name"
-    assert viewer_hit.version_id == restored.version_id
+    assert viewer_hit.version_id == page.current_published_version_id
 
 
-def test_autosave_from_reviewed_restore_keeps_both_drafts_unpublished():
+def test_autosave_from_reviewed_restore_keeps_one_named_draft_unpublished():
     # A restore action is an immutable reviewed snapshot.  The browser forks a
     # mutable successor without advancing the published head.
     service = make_service()
@@ -1236,7 +1288,8 @@ def test_autosave_from_reviewed_restore_keeps_both_drafts_unpublished():
         actor_id="dev-local-user",
         base_version_id=restored.version_id,
         base_content_hash=restored.content_hash,
-        session_version_id=restored.version_id,
+        version_id=restored.version_id,
+        expected_editing_revision=restored.editing_revision,
         actor_provenance="browser_session",
         idempotency_key="restore-meta-v1-autosaved",
     )
@@ -1248,12 +1301,12 @@ def test_autosave_from_reviewed_restore_keeps_both_drafts_unpublished():
         published_version_id = page.current_published_version_id
         latest_draft_version_id = page.latest_draft_version_id
 
-    assert saved.version_id != restored.version_id
+    assert saved.version_id == restored.version_id
     assert published_version_id == updated.version_id
-    assert latest_draft_version_id == saved.version_id
+    assert latest_draft_version_id is None
     assert restored_draft.version_status == "draft"
     assert saved_draft.version_status == "draft"
-    assert restored_draft.body_md == restored.body_md
+    assert restored_draft.body_md == saved.body_md
     assert "v1 autosaved" in saved_draft.body_md
 
 
@@ -1270,7 +1323,8 @@ def test_autosave_stages_frontmatter_alias_for_draft_scope_only():
         actor_id="dev-local-user",
         base_version_id=restored.version_id,
         base_content_hash=restored.content_hash,
-        session_version_id=restored.version_id,
+        version_id=restored.version_id,
+        expected_editing_revision=restored.editing_revision,
         aliases=["Pending Restore Alias"],
         actor_provenance="browser_session",
         idempotency_key="pending-restore-alias-autosave",
@@ -1288,9 +1342,10 @@ def test_autosave_stages_frontmatter_alias_for_draft_scope_only():
             .order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
         )
 
-    assert saved.version_id != restored.version_id
+    assert saved.version_id == restored.version_id
     assert page.aliases == []
-    assert json.loads(patch.diff_summary) == {"aliases": ["Pending Restore Alias"]}
+    assert patch is None
+    assert saved.page_metadata["aliases"] == ["Pending Restore Alias"]
     assert any(
         row.visibility_scope == "draft" and row.name == "Pending Restore Alias"
         for row in rows
@@ -1329,7 +1384,7 @@ def test_agent_authenticated_legacy_write_is_draft_pending_review():
             review = session.scalar(select(ReviewItem))
         assert version.version_status == "draft"
         assert page.current_published_version_id is None
-        assert page.latest_draft_version_id == version.id
+        assert page.latest_draft_version_id is None
         assert review.status == "pending"
 
 

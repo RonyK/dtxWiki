@@ -83,8 +83,8 @@ def cite(payload: dict, ctx: ToolCallContext) -> CiteToolOutput:
         return CiteToolOutput(
             envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
         )
-    # The service returns the shared REST result. MCP edits are always private
-    # ``editing`` rows, so its narrower result model must be built explicitly.
+    # The service returns the shared REST result. Project the narrower MCP
+    # reference-metadata response explicitly.
     return CiteToolOutput(
         envelope=ok_envelope(actor),
         data=CiteResult.model_validate(data.model_dump()),
@@ -132,9 +132,13 @@ def submit_feedback(payload: dict, ctx: ToolCallContext) -> SubmitFeedbackToolOu
 # sharding overlay gives `session_for(workspace_id)` its own physical
 # database (DB D-2/backend/app/container.py's `DatabaseProvider` docstring).
 def _context_edit_page_service(ctx: ToolCallContext) -> PageService:
+    bindings = getattr(ctx.session_factory, "kw", {}).get("info", {})
+    writer = (
+        bindings.get("context_version_writer") or ctx.services.context_version_writer
+    )
     return PageService(
         ctx.session_factory,
-        context_version_writer=ctx.services.context_version_writer,
+        context_version_writer=writer,
         actor_context=ctx.actor,
         job_queue=ctx.services.job_queue,
         body_preparer=ctx.services.body_preparer,
@@ -144,12 +148,7 @@ def _context_edit_page_service(ctx: ToolCallContext) -> PageService:
 
 
 def _chat_session_id(ctx: ToolCallContext) -> UUID | None:
-    """The chat this call belongs to, for begin and submit to share.
-
-    A submission stamped with its chat is what lets the same chat reopen it
-    instead of branching a new version. Find-or-create, as the other write
-    tools stamp theirs (review_tools); trace capture converges on the same row.
-    """
+    """Resolve the conversation recorded in draft and review audit evidence."""
 
     if not ctx.conversation_token:
         return None
@@ -179,8 +178,8 @@ def _stale_base_message(exc: PageConflictError) -> str:
 
 
 _REREAD_OPEN_EDIT = (
-    "Re-read your open edit (read_structure_map or read_context_outline with "
-    "version='my_edit'), rebuild your change on the text you read, then send "
+    "Re-read the same draft with read_structure_map or read_context_outline "
+    "using its version_id, rebuild your change on the text you read, then send "
     "it with the version_id and editing_revision from that read. Do not "
     "resend the same body with only these values changed: whatever moved the "
     "edit may be work you have not seen."
@@ -188,21 +187,14 @@ _REREAD_OPEN_EDIT = (
 
 
 def _stale_base_details(exc: PageConflictError) -> list[MCPErrorDetail]:
-    """Where the caller's own open edit stands now, for a stale write to it.
-
-    Only the caller's own edit is ever named (PageConflictError fills
-    server_editing_revision for nothing else), so this discloses nothing a
-    my_edit read would not.
-    """
+    """Name the readable shared draft and revision for a stale write."""
 
     if exc.no_open_edit:
         return [
             MCPErrorDetail(
                 field="version_id",
                 code=exc.error_code,
-                message=(
-                    "You have no open edit on this page."
-                ),
+                message=("The named version is no longer an open draft."),
                 fix=(
                     "Read content by page_id and version_id if needed. To edit, "
                     "call begin_context_edit with a new key."
@@ -216,7 +208,7 @@ def _stale_base_details(exc: PageConflictError) -> list[MCPErrorDetail]:
             field="version_id",
             code=exc.error_code,
             message=(
-                f"Your open edit on this page is version_id={exc.server_version_id}."
+                f"The shared draft on this page is version_id={exc.server_version_id}."
             ),
             fix=_REREAD_OPEN_EDIT,
         ),
@@ -224,7 +216,8 @@ def _stale_base_details(exc: PageConflictError) -> list[MCPErrorDetail]:
             field="expected_editing_revision",
             code=exc.error_code,
             message=(
-                f"Your open edit is at editing_revision={exc.server_editing_revision}."
+                "The shared draft is at "
+                f"editing_revision={exc.server_editing_revision}."
             ),
             fix=_REREAD_OPEN_EDIT,
         ),
@@ -266,7 +259,9 @@ def _edit_result(data: PagePayload) -> ContextEditResult:
 def _begin_edit_result(data: PagePayload) -> BeginContextEditResult:
     result = BeginContextEditResult.model_validate(
         {
-            **data.model_dump(exclude={"id"}),
+            **data.model_dump(
+                include=set(BeginContextEditResult.model_fields) - {"id"}
+            ),
             "page_id": data.id,
             "replayed": data._replayed,
         }
@@ -368,6 +363,8 @@ def begin_context_edit(
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
             idempotency_key=request.idempotency_key,
+            from_version_id=request.from_version_id,
+            on_conflict=request.on_conflict,
             base_version_id=request.base_version_id,
             base_content_hash=request.base_content_hash,
             chat_session_id=_chat_session_id(ctx),
@@ -418,7 +415,7 @@ def update_context_edit(
             aliases=request.aliases,
             destination_node_id=request.placement_parent_node_id,
             with_edit_receipt=True,
-            editing_version_id=request.version_id,
+            version_id=request.version_id,
         )
         data = _edit_result(data)
     except ValidationError as exc:
@@ -460,6 +457,7 @@ def submit_context_edit_for_review(
             idempotency_key=request.idempotency_key,
             reason=request.reason,
             chat_session_id=_chat_session_id(ctx),
+            feedback_id=request.feedback_id,
         )
         data = _edit_result(data)
     except ValidationError as exc:
@@ -590,6 +588,7 @@ def patch_context_edit(
             actor_provenance=actor.provenance,
             expected_editing_revision=request.expected_editing_revision,
             idempotency_key=request.idempotency_key,
+            chat_session_id=_chat_session_id(ctx),
         )
         data = _edit_result(data)
     except ValidationError as exc:

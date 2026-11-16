@@ -3,12 +3,12 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPageVersion
 from backend.models.review import ReviewItem
+from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
 
 ContextReviewDisposition = Literal["rejected", "pending", "approved", "none"]
 
@@ -61,16 +61,10 @@ def context_version_review_metadata(
     *,
     workspace_id: UUID | None = None,
 ) -> Mapping[UUID, ContextVersionReviewMetadata]:
-    """Resolve review status and identity for a page of versions in one query.
+    """Resolve review status and identity in one scoped query per workspace.
 
-    LEAK-05: the WHERE clause always joins ``ReviewItem.workspace_id ==
-    ChangeSet.workspace_id`` for internal self-consistency, but that is not a
-    caller-scope check — without an explicit ``workspace_id`` pin, a
-    ChangeOperation belonging to a different workspace than the caller's could
-    still match one of ``versions`` by id collision-free coincidence (the
-    local dev profile shares one DB across workspaces). Pass ``workspace_id``
-    from every new caller; it is optional only so a caller this fix has not
-    reached yet keeps its prior behavior instead of raising.
+    Explicit caller scope takes priority. Internal callers that omit it use
+    the supplied versions' workspace identities; no query is ever unscoped.
     """
 
     versions = list(versions)
@@ -81,31 +75,63 @@ def context_version_review_metadata(
     }
     page_ids = {version.page_id for version in versions}
     conditions = [
-        ReviewItem.workspace_id == ChangeSet.workspace_id,
         ReviewItem.review_type == "context_update",
         ReviewItem.status != "superseded",
         ChangeOperation.target_type == "context_page",
         ChangeOperation.target_id.in_(page_ids),
         ChangeOperation.diff_ref.in_(diff_refs.keys()),
     ]
-    if workspace_id is not None:
-        conditions.append(ChangeSet.workspace_id == workspace_id)
-    rows = session.execute(
-        select(
-            ChangeOperation.diff_ref,
-            ReviewItem.id,
-            ReviewItem.status,
-            ReviewItem.created_at,
+    scopes = (
+        {workspace_id}
+        if workspace_id is not None
+        else {version.workspace_id for version in versions}
+    )
+    rows = []
+    for scope in scopes:
+        statement = select_in_workspace(
+            ReviewItem,
+            workspace_id=scope,
+            conditions=conditions,
         )
-        .join(ChangeSet, ChangeSet.id == ChangeOperation.change_set_id)
-        .join(ReviewItem, ReviewItem.change_set_id == ChangeSet.id)
-        .where(*conditions)
-        .distinct()
-    ).all()
+        statement = join_in_workspace(
+            statement,
+            ReviewItem,
+            ChangeSet,
+            workspace_id=scope,
+            on=ReviewItem.change_set_id == ChangeSet.id,
+        )
+        statement = join_in_workspace(
+            statement,
+            ReviewItem,
+            ChangeOperation,
+            workspace_id=scope,
+            on=ChangeSet.id == ChangeOperation.change_set_id,
+        )
+        rows.extend(
+            session.execute(
+                statement.with_only_columns(
+                    ChangeOperation.diff_ref,
+                    ReviewItem.id,
+                    ReviewItem.status,
+                    ReviewItem.created_at,
+                    ReviewItem.risk_signals,
+                )
+            ).all()
+        )
     by_version: dict[UUID, list[tuple[UUID, str, object]]] = {
         version.id: [] for version in versions
     }
-    for diff_ref, review_item_id, status, created_at in rows:
+    seen: set[tuple[str, UUID]] = set()
+    for diff_ref, review_item_id, status, created_at, risk_signals in rows:
+        correction = (risk_signals or {}).get("migration_parent_repaired")
+        if isinstance(correction, dict) and correction.get("inspection_only"):
+            # An ancestry acknowledgement never changes the content's original
+            # review outcome, including a rejection or withdrawal.
+            continue
+        identity = (diff_ref, review_item_id)
+        if identity in seen:
+            continue
+        seen.add(identity)
         version_id = diff_refs.get(diff_ref)
         if version_id is not None:
             by_version[version_id].append((review_item_id, status, created_at))

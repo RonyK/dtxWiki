@@ -13,13 +13,12 @@ from sqlalchemy.orm import Session
 
 from backend.context_media.domain import ContextMediaError
 from backend.domain.input_policy import InputPolicyError
-from backend.models.change import ChangeOperation, ChangeSet
+from backend.models.change import ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion, EdgeProjection
 from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
-    join_in_workspace,
     select_in_workspace,
 )
 from backend.services.audit_service import AuditService
@@ -182,47 +181,7 @@ class LintFixWriter:
             )
             if page is None or workspace is None or page.lifecycle_status == "archived":
                 return LintFixResult(state="skipped")
-            if (
-                page.current_published_version_id != base_version_id
-                or page.current_version_id not in {None, base_version_id}
-                or page.latest_draft_version_id not in {None, base_version_id}
-            ):
-                return LintFixResult(state="skipped")
-            editing = session.scalar(
-                select_in_workspace(
-                    ContextPageVersion,
-                    workspace_id=workspace_id,
-                    conditions=(
-                        ContextPageVersion.page_id == page_id,
-                        ContextPageVersion.version_status == "editing",
-                    ),
-                )
-                .with_only_columns(ContextPageVersion.id)
-                .limit(1)
-            )
-            pending = session.scalar(
-                join_in_workspace(
-                    select_in_workspace(
-                        ReviewItem,
-                        workspace_id=workspace_id,
-                        conditions=(
-                            ReviewItem.status.in_(("pending", "changes_requested")),
-                            ReviewItem.review_type.in_(
-                                ("context_update", "context_reconciliation")
-                            ),
-                            ChangeOperation.target_type == "context_page",
-                            ChangeOperation.target_id == page_id,
-                        ),
-                    ),
-                    ReviewItem,
-                    ChangeOperation,
-                    workspace_id=workspace_id,
-                    on=ChangeOperation.change_set_id == ReviewItem.change_set_id,
-                )
-                .with_only_columns(ReviewItem.id)
-                .limit(1)
-            )
-            if editing is not None or pending is not None:
+            if page.current_published_version_id != base_version_id:
                 return LintFixResult(state="skipped")
             base = session.scalar(
                 select_in_workspace(
@@ -319,6 +278,7 @@ class LintFixWriter:
                 idempotency_key=key + ":submit",
                 reason=reason,
                 needs_review=not proof,
+                force_pending_review=False,
                 risk_signals={"decision_page_type": page.page_type == "decision"},
             )
             review = get_in_workspace(

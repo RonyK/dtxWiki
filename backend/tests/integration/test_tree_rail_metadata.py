@@ -83,7 +83,7 @@ def _target(session, workspace_id, kind, *, review=False):
             )
             session.add(draft)
             session.flush()
-            target.latest_draft_version_id = target.current_version_id = draft.id
+            # Shared Context drafts do not populate the retired latest slot.
     elif kind == "agent_page":
         target = AgentPage(
             workspace_id=workspace_id,
@@ -305,6 +305,28 @@ def test_only_current_authorized_reviews_are_exposed_without_changing_content_ti
         workspace_id = _workspace(session)
         target, node = _target(session, workspace_id, kind, review=True)
         node_id = node.id
+        if kind == "context_page":
+            reviewed_draft_id = session.scalar(
+                select(ContextPageVersion.id).where(
+                    ContextPageVersion.page_id == target.id,
+                    ContextPageVersion.version_status == "draft",
+                )
+            )
+            # A newer independent draft must not hide an older live review.
+            session.add(
+                ContextPageVersion(
+                    workspace_id=workspace_id,
+                    page_id=target.id,
+                    version_no=3,
+                    body_md="independent draft without a review",
+                    content_hash="independent",
+                    actor_type="human",
+                    created_by_actor_kind="human",
+                    created_by_actor_id="test",
+                    version_status="draft",
+                    parent_version_id=target.current_published_version_id,
+                )
+            )
     with session_factory.begin() as session:
         owner = reader.get_node(session, workspace_id, node_id, actor=_actor())
         viewer = reader.get_node(session, workspace_id, node_id, actor=_actor("viewer"))
@@ -325,7 +347,10 @@ def test_only_current_authorized_reviews_are_exposed_without_changing_content_ti
         )
         target_model = ContextPage if kind == "context_page" else AgentPage
         target = session.get(target_model, target.id)
-        target.latest_draft_version_id = None
+        if kind == "context_page":
+            session.get(ContextPageVersion, reviewed_draft_id).version_status = "closed"
+        else:
+            target.latest_draft_version_id = None
     with session_factory() as session:
         stale = reader.get_node(session, workspace_id, node_id, actor=_actor())
         assert stale.review_status is None and stale.review_requested_at is None

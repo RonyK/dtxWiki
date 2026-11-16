@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { expect, test, type APIRequestContext } from "./fixtures";
 import { authenticatePage, backendBaseUrl, currentWorkspace } from "./auth";
+import { approveContextDraft } from "./context_workflow";
 
 const viewports = [
   { key: "desktop", width: 1440, height: 900 },
@@ -27,7 +28,7 @@ for (const viewport of viewports) {
       });
       const selected = await createAndPublishPage(page.request, workspace.id, {
         title: `Graph source ${suffix}`,
-        body_md: `# Graph source ${suffix}\n\nSee [[${related.slug}|related page]].`,
+        body_md: `# Graph source ${suffix}\n\nSee [related page](/p/${workspace.id}/${related.id}).`,
         page_type: "decision",
         tags: ["e2e", "graph-layout"],
       });
@@ -184,20 +185,9 @@ async function createAndPublishPage(
     content_hash: string;
     review_item_id: string;
   };
-  const decisionResponse = await request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/reviews/${submitted.review_item_id}/decision`,
-    { data: { decision_type: "approve" } },
+  await approveContextDraft(
+    request, workspaceId, created.id, submitted.version_id, submitted.review_item_id,
+    { decision_reason: "e2e: publish Context Graph layout fixture" },
   );
-  expect(decisionResponse.ok(), await decisionResponse.text()).toBeTruthy();
-  const publishResponse = await request.post(
-    `${base}/${created.id}/versions/${submitted.version_id}/publish`,
-    {
-      data: {
-        reason: "e2e: publish Context Graph layout fixture",
-        expected_content_hash: submitted.content_hash,
-      },
-    },
-  );
-  expect(publishResponse.ok(), await publishResponse.text()).toBeTruthy();
   return created;
 }

@@ -176,7 +176,7 @@ class ReplaceTextOperation(_AnchorScopedOperation):
         default=None,
         description=(
             "Where to look. Best: {by:'block', block, expected} from "
-            "read_structure_map (version='my_edit'); or a section. Omit to "
+            "read_structure_map (with the same version_id); or a section. Omit to "
             "search the whole document (exact and whitespace/Unicode-"
             "insensitive matching only)."
         ),

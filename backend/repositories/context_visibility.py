@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import and_, case, not_
+from sqlalchemy import and_, case, null, true
 from sqlalchemy.orm import aliased, object_session
 
 from backend.models.context import ContextPage, ContextPageVersion
@@ -32,101 +32,6 @@ def editable_context_version_id(page: ContextPage) -> UUID | None:
     return page.latest_draft_version_id or page.current_version_id
 
 
-def _actor_identity(actor: ActorContext | None) -> tuple[str, str] | None:
-    actor_kind = getattr(actor, "actor_kind", None)
-    actor_id = getattr(actor, "actor_id", None)
-    if actor_kind is None or actor_id is None:
-        return None
-    return actor_kind, actor_id
-
-
-# Unsubmitted rows: also used by retention and account cleanup. Reading an
-# editing row is governed separately so exposing it cannot change its lifetime.
-PRIVATE_VERSION_STATUSES = frozenset({"editing", "discarded"})
-
-
-def discarded_row_hidden_from_actor(
-    version: ContextPageVersion | None, actor: ActorContext | None
-) -> bool:
-    """Hide discarded work from other actors, independently of draft access."""
-
-    if version is None or version.version_status != "discarded":
-        return False
-    identity = _actor_identity(actor)
-    if identity is None:
-        return True
-    actor_kind, actor_id = identity
-    return not (
-        version.created_by_actor_kind == actor_kind
-        and version.created_by_actor_id == actor_id
-    )
-
-
-def foreign_editing_version_exists(pointer_column, identity: tuple[str, str] | None):
-    """SQL for an unsubmitted row owned by someone else.
-
-    A correlated EXISTS rather than a join: callers embed this expression
-    against queries that may (context_page_repo.py) or may not already join
-    `context_page_version` under its own name, so an unaliased reference here
-    would collide/ambiguously correlate with that unrelated join instead of
-    naming a fresh row to inspect.
-
-    Retention and account cleanup retain this rule even though editing rows
-    are readable by other editors.
-    """
-
-    return _foreign_version_exists(pointer_column, identity, PRIVATE_VERSION_STATUSES)
-
-
-def foreign_discarded_version_exists(pointer_column, identity: tuple[str, str] | None):
-    """SQL equivalent of ``discarded_row_hidden_from_actor`` for read surfaces."""
-
-    return _foreign_version_exists(pointer_column, identity, ("discarded",))
-
-
-def _foreign_version_exists(pointer_column, identity, statuses):
-    editing_row = aliased(ContextPageVersion)
-    return (
-        select_in_workspace(
-            editing_row,
-            workspace_id=pointer_column.class_.workspace_id,
-            conditions=(
-                editing_row.id == pointer_column,
-                editing_row.version_status.in_(tuple(statuses)),
-                (
-                    not_(
-                        and_(
-                            editing_row.created_by_actor_kind == identity[0],
-                            editing_row.created_by_actor_id == identity[1],
-                        )
-                    )
-                    if identity is not None
-                    else True
-                ),
-            ),
-        )
-        .with_only_columns(editing_row.id)
-        .correlate_except(editing_row)
-        .exists()
-    )
-
-
-def _editable_context_version(page: ContextPage) -> ContextPageVersion | None:
-    """The row `editable_context_version_id` names, via the matching relationship.
-
-    A page that has never published can have `current_version_id` name an
-    `editing` row directly, with `latest_draft_version_id` staying `None`
-    the whole time (page-first creation, before any Save draft) -- so this
-    cannot assume `latest_draft_version` is always the right object to
-    inspect just because `latest_draft_version_id` is usually where an open
-    session's id comes from.
-    """
-
-    if page.latest_draft_version_id is not None:
-        return page.latest_draft_version
-    return page.current_version
-
-
 def visible_context_version_id(
     page: ContextPage, actor: ActorContext | None
 ) -> tuple[UUID | None, bool]:
@@ -134,14 +39,20 @@ def visible_context_version_id(
 
     if page.current_published_version_id is not None:
         return page.current_published_version_id, False
+    version_id = latest_saved_context_draft_version_id(page, actor)
+    return version_id, version_id is not None
+
+
+def latest_saved_context_draft_version_id(
+    page: ContextPage, actor: ActorContext | None
+) -> UUID | None:
+    """Project the latest visible open draft without consulting retired slots."""
+
     if not actor_can_read_drafts(actor):
-        return None, False
+        return None
     session = object_session(page)
     if session is not None:
-        version_id = session.scalar(
-            _latest_saved_draft_statement(page.id, page.workspace_id)
-        )
-        return version_id, version_id is not None
+        return session.scalar(_latest_saved_draft_statement(page.id, page.workspace_id))
     # Detached/constructed pages can only inspect relationships already loaded.
     versions = list(page.__dict__.get("versions", ()))
     versions.extend(
@@ -149,13 +60,9 @@ def visible_context_version_id(
         for name in ("current_version", "latest_draft_version")
         if (version := page.__dict__.get(name)) is not None
     )
-    candidates = [
-        version
-        for version in versions
-        if version.version_status in {"editing", "draft"}
-    ]
+    candidates = [version for version in versions if version.version_status == "draft"]
     if not candidates:
-        return None, False
+        return None
     version = min(
         candidates,
         key=lambda row: (
@@ -165,7 +72,7 @@ def visible_context_version_id(
             str(row.id),
         ),
     )
-    return version.id, True
+    return version.id
 
 
 def visible_context_version_ids(
@@ -205,7 +112,7 @@ def _latest_saved_draft_statement(page_id, workspace_id):
             workspace_id=workspace_id,
             conditions=(
                 version.page_id == page_id,
-                version.version_status.in_(("editing", "draft")),
+                version.version_status == "draft",
             ),
         )
         .with_only_columns(version.id)
@@ -226,31 +133,9 @@ def searchable_context_version_id(
 def editable_head_context_version_id(
     page: ContextPage, actor: ActorContext | None
 ) -> tuple[UUID | None, bool]:
-    """Preserve the writer's latest-slot base, including its own open work."""
+    """The writer's latest-slot base under the ordinary draft-read rule."""
 
-    identity = _actor_identity(actor)
-
-    def eligible(version):
-        return version is not None and (
-            version.version_status not in PRIVATE_VERSION_STATUSES
-            or identity == (version.created_by_actor_kind, version.created_by_actor_id)
-        )
-
-    if actor_can_read_drafts(actor):
-        editable_id = editable_context_version_id(page)
-        if (
-            editable_id is not None
-            and editable_id != page.current_published_version_id
-            and eligible(_editable_context_version(page))
-        ):
-            return editable_id, True
-        if (
-            page.current_version_id is not None
-            and page.current_version_id != page.current_published_version_id
-            and eligible(page.current_version)
-        ):
-            return page.current_version_id, True
-    return page.current_published_version_id, False
+    return visible_context_version_id(page, actor)
 
 
 def visible_search_version_ids(
@@ -258,14 +143,32 @@ def visible_search_version_ids(
 ) -> tuple[UUID, ...]:
     """Return searchable version ids for ``actor``, visible head first."""
 
-    head_id, _is_draft = searchable_context_version_id(page, actor)
-    ordered: list[UUID] = [] if head_id is None else [head_id]
-    if (
-        actor_can_read_drafts(actor)
-        and page.current_published_version_id is not None
-        and page.current_published_version_id != head_id
-    ):
+    ordered = []
+    if page.current_published_version_id is not None:
         ordered.append(page.current_published_version_id)
+    if actor_can_read_drafts(actor):
+        session = object_session(page)
+        drafts = (
+            session.scalars(
+                select_in_workspace(
+                    ContextPageVersion,
+                    workspace_id=page.workspace_id,
+                    conditions=(
+                        ContextPageVersion.page_id == page.id,
+                        ContextPageVersion.version_status == "draft",
+                    ),
+                ).order_by(
+                    ContextPageVersion.last_saved_at.desc(), ContextPageVersion.id
+                )
+            ).all()
+            if session
+            else page.__dict__.get("versions", ())
+        )
+        ordered.extend(
+            version.id
+            for version in drafts
+            if version.version_status == "draft" and version.id not in ordered
+        )
     return tuple(ordered)
 
 
@@ -279,10 +182,18 @@ def visible_context_version_expression(actor: ActorContext | None):
             ContextPage.current_published_version_id.is_not(None),
             ContextPage.current_published_version_id,
         ),
-        else_=_latest_saved_draft_statement(
-            ContextPage.id, ContextPage.workspace_id
-        ).scalar_subquery(),
+        else_=latest_saved_context_draft_version_expression(actor),
     )
+
+
+def latest_saved_context_draft_version_expression(actor: ActorContext | None):
+    """SQL counterpart of latest saved draft discovery for lists and badges."""
+
+    if not actor_can_read_drafts(actor):
+        return null()
+    return _latest_saved_draft_statement(
+        ContextPage.id, ContextPage.workspace_id
+    ).scalar_subquery()
 
 
 def searchable_context_version_expression(actor: ActorContext | None):
@@ -294,31 +205,7 @@ def searchable_context_version_expression(actor: ActorContext | None):
 def editable_head_context_version_expression(actor: ActorContext | None):
     """SQL counterpart of the writer's unchanged latest-slot base."""
 
-    if not actor_can_read_drafts(actor):
-        return ContextPage.current_published_version_id
-    identity = _actor_identity(actor)
-    return case(
-        (
-            ContextPage.latest_draft_version_id.is_not(None)
-            & ~foreign_editing_version_exists(
-                ContextPage.latest_draft_version_id, identity
-            ),
-            ContextPage.latest_draft_version_id,
-        ),
-        (
-            ContextPage.current_version_id.is_not(None)
-            & (
-                ContextPage.current_published_version_id.is_(None)
-                | (
-                    ContextPage.current_version_id
-                    != ContextPage.current_published_version_id
-                )
-            )
-            & ~foreign_editing_version_exists(ContextPage.current_version_id, identity),
-            ContextPage.current_version_id,
-        ),
-        else_=ContextPage.current_published_version_id,
-    )
+    return visible_context_version_expression(actor)
 
 
 def visible_context_page_expression(actor: ActorContext | None):
@@ -336,13 +223,4 @@ def explicit_context_version_visible_expression(version, actor: ActorContext | N
     )
     if not actor_can_read_drafts(actor):
         return published
-    identity = _actor_identity(actor)
-    own = (
-        False
-        if identity is None
-        else and_(
-            version.created_by_actor_kind == identity[0],
-            version.created_by_actor_id == identity[1],
-        )
-    )
-    return published | (version.version_status != "discarded") | own
+    return true()

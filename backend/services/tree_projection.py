@@ -218,9 +218,9 @@ class TreeProjectionService:
 
         visible_pages: set[UUID] = set()
         if page_targets:
-            # The canonical visibility expression checks private editing-row
-            # ownership in SQL. A tree needs identifiers, not version bodies or
-            # one lazy relationship lookup per page.
+            # The canonical visibility expression checks draft access in SQL.
+            # A tree needs identifiers, not version bodies or one lazy
+            # relationship lookup per page.
             visible_pages = set(
                 session.scalars(
                     select(ContextPage.id).where(

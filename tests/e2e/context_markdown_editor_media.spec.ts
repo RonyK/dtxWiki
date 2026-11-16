@@ -8,6 +8,7 @@ import {
   type TestInfo,
 } from "./fixtures";
 import { randomUUID } from "node:crypto";
+import { approveContextDraft, mergeBinding } from "./context_workflow";
 
 import {
   backendBaseUrl,
@@ -241,6 +242,7 @@ test("publishes real GIF and animated WebP uploads through the trusted Context r
       data: {
         title,
         body_md: body,
+        version_id: created.version_id,
         base_version_id: created.version_id,
         base_content_hash: created.content_hash,
         expected_editing_revision: created.editing_revision,
@@ -264,12 +266,10 @@ test("publishes real GIF and animated WebP uploads through the trusted Context r
   const submitted = (await submitResponse.json()).data as PagePayload & {
     review_item_id: string;
   };
-  const decisionResponse = await page.request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/reviews/${submitted.review_item_id}/decision`,
-    { data: { decision_type: "approve" } },
+  await approveContextDraft(
+    page.request, workspace.id, created.id, submitted.version_id, submitted.review_item_id,
   );
-  expect(decisionResponse.ok(), await decisionResponse.text()).toBeTruthy();
-  const published = await publishVersion(page.request, workspace.id, created.id, submitted);
+  const published = await readPage(page.request, workspace.id, created.id);
   expect(published.current_published_version_id).toBe(submitted.version_id);
 
   const contentPaths = uploads.map(
@@ -771,7 +771,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       // in PageEditor.tsx) so every upload above had a real page/editing
       // version to target from its first attempt. By the time "Save draft" is
       // clicked here, `page` state is already populated, so this click is an
-      // ordinary autosave of the caller's own open "editing" row, not a create
+      // ordinary autosave of the selected shared draft, not a create
       // -- and there is no `media_session_id` concept to assert on any more.
       const autosaveRequest = page.waitForRequest(
         (request) =>
@@ -809,7 +809,7 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       assertCanonicalBody(stored.body_md, RETAINED_UPLOAD_NAMES);
       canonicalBody = stored.body_md;
       await expect(page).toHaveURL(
-        new RegExp(`/workspaces/${workspace.id}/context/pages/${created.id}/edit$`),
+        new RegExp(`/workspaces/${workspace.id}/context/pages/${created.id}/edit\\?version_id=${created.version_id}$`),
       );
 
       const publishResponse = page.waitForResponse(
@@ -876,14 +876,16 @@ test("preserves a five-image batch through retry, publication, revocation, and r
         200,
       );
 
+      // Opening the editor reads the published version until the first save.
       await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}/edit`));
+      const previewMediaUrls = exactVersionUrls;
       await expect(page.getByLabel("Title")).toHaveValue(title);
       await page.getByRole("tab", { name: "Reading" }).click();
       const privateGeometry = await expectMediaGeometry(
         page,
         page.locator(".preview-pane .markdown-body"),
         RETAINED_UPLOAD_NAMES,
-        exactVersionUrls,
+        previewMediaUrls,
       );
 
       const versionPage = await page.context().newPage();
@@ -935,15 +937,23 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       );
 
       const nextBody = `# ${title}\n\nThe current published version no longer references media.`;
+      const beginResponse = await page.request.post(
+        `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/begin-edit`,
+        { data: { idempotency_key: randomUUID() } },
+      );
+      expect(beginResponse.ok(), await beginResponse.text()).toBeTruthy();
+      const opened = (await beginResponse.json()).data as PagePayload;
+      expect(opened.version_id).not.toBe(created.version_id);
       const updateResponse = await page.request.post(
         `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/autosave`,
         {
           data: {
             title,
             body_md: nextBody,
-            base_version_id: created.version_id,
-            base_content_hash: created.content_hash,
-            expected_editing_revision: created.editing_revision,
+            version_id: opened.version_id,
+            base_version_id: opened.version_id,
+            base_content_hash: opened.content_hash,
+            expected_editing_revision: opened.editing_revision,
             idempotency_key: randomUUID(),
           },
         },
@@ -1251,6 +1261,8 @@ async function publishVersion(
       data: {
         reason: "E2E retained Context media history",
         publish_despite_findings: false,
+        idempotency_key: randomUUID(),
+        ...await mergeBinding(request, workspaceId, pageId, version.version_id),
         expected_content_hash: version.content_hash,
         expected_references_hash: version.references_hash,
       },

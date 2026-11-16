@@ -79,7 +79,6 @@ AVAILABLE_READ_TOOLS = [
     "write_agent_page_draft",
     "build_agent_input_bundle",
     "list_requested_changes",
-    "submit_revision_for_review",
     "wiki_maintenance",
 ]
 AVAILABLE_PROMPTS = [
@@ -130,8 +129,8 @@ REQUIRED_WORKFLOW = [
         "update_context_edit (whole body) as often as needed, taking the next "
         "editing_revision and block ids from each response's edit_receipt "
         "instead of re-reading; submit_context_edit_for_review once when done. "
-        "To change your pending submission in the same chat, call "
-        "begin_context_edit: it reopens that same version."
+        "Continue editing submitted drafts by version_id. Use begin_context_edit "
+        "with from to join an existing draft or start from a commit."
     ),
     (
         "place a new page: walk get_index(format='nodes') from /context and "
@@ -167,7 +166,7 @@ REQUIRED_WORKFLOW = [
     (
         "for an image: upload_image first; store data.markdown or "
         "data.logical_ref, never data.content_url or an /api/v1 transport URL; "
-        "upload_image always requires an existing page_id and your own open "
+        "upload_image always requires an existing page_id and the shared draft "
         "version_id, so create the page first for a new page, then "
         "upload and call update_context_edit; never fall back to data:"
     ),

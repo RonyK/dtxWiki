@@ -199,10 +199,9 @@ def test_openapi_security_matches_exhaustive_reviewed_route_matrix(openapi_schem
         schema["paths"]["/api/v1/auth/sso/{slug}/callback"]["get"]["security"]
         == LOGIN_TRANSACTION_SECURITY
     )
-    assert (
-        schema["paths"]["/api/v1/auth/sso/{slug}/callback/continue"]["post"]["security"]
-        == [{"LoginTransactionCookie": []}]
-    )
+    assert schema["paths"]["/api/v1/auth/sso/{slug}/callback/continue"]["post"][
+        "security"
+    ] == [{"LoginTransactionCookie": []}]
     assert schema["paths"]["/api/v1/auth/sso/{slug}/callback"]["post"]["security"] == []
     for method, path in (
         ("get", "/api/v1/auth/verification"),
@@ -244,30 +243,6 @@ def test_openapi_export_matches_checked_in_artifact(openapi_schema):
     )
 
     assert generated == checked_in
-
-
-def test_reconciliation_result_uses_required_boolean_literals_without_discriminator(
-    openapi_schema,
-):
-    schemas = openapi_schema["components"]["schemas"]
-    response_data = schemas["ContextReconciliationResultResponse"]["properties"]["data"]
-
-    assert "discriminator" not in response_data
-    assert response_data["anyOf"] == [
-        {"$ref": "#/components/schemas/ContextReconciliationDryRunResult"},
-        {"$ref": "#/components/schemas/ContextReconciliationCommitResult"},
-    ]
-    for schema_name, expected in (
-        ("ContextReconciliationDryRunResult", True),
-        ("ContextReconciliationCommitResult", False),
-    ):
-        result_schema = schemas[schema_name]
-        assert "dry_run" in result_schema["required"]
-        assert result_schema["properties"]["dry_run"]["const"] is expected
-    assert "unresolved_count" in schemas["ContextReconciliationPreview"]["required"]
-    assert {"branch_status", "review_item_id"}.issubset(
-        schemas["ContextReconciliationCommit"]["required"]
-    )
 
 
 def test_pin_http_response_descriptions_normalizes_defaults_and_preserves_authored():
@@ -401,7 +376,8 @@ def test_mcp_schema_export_covers_all_advertised_tools(mcp_schemas):
 
 def test_mcp_schema_export_includes_review_tools(mcp_schemas):
     schemas = mcp_schemas
-    assert {"list_requested_changes", "submit_revision_for_review"}.issubset(schemas)
+    assert "list_requested_changes" in schemas
+    assert "submit_revision_for_review" not in schemas
 
 
 def test_mcp_envelope_actor_is_optional_on_the_wire(mcp_schemas):

@@ -25,10 +25,6 @@ from backend.services.review_service import ReviewService
         (ReviewService.apply_decision, "actor_provenance"),
         (ChangeReviewAuditRecorder.record_context_page_write, "actor_provenance"),
         (
-            ChangeReviewAuditRecorder.record_context_page_alternative,
-            "actor_provenance",
-        ),
-        (
             ChangeReviewAuditRecorder.record_context_page_inline_comment,
             "actor_provenance",
         ),

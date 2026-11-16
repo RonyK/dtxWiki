@@ -18,6 +18,7 @@ const ACTIONS: Record<string, Action> = {
   "page.inline_comment": { label: "comment", headline: "comment", tone: "neutral" },
   "context_page.draft.create": { label: "createDraft", headline: "draft", tone: "neutral" },
   "context_page.draft.update": { label: "save", headline: "draft", tone: "neutral" },
+  "context_page.draft.save": { label: "save", headline: "draft", tone: "neutral" },
   "context_page.draft.diverged": { label: "alternative", headline: "draft", tone: "neutral" },
   "context_page.draft.diverged_discarded": { label: "discard", headline: "draft", tone: "neutral" },
   "context_page.draft.publish": { label: "publish", headline: "publishedVersion", tone: "publish" },
@@ -57,7 +58,7 @@ export function contextActivityPresentation(item: ActivityItem) {
   if (action === "page.begin_context_edit" && details?.base_version) {
     headline = text("headlines.editFrom", { version: `v${details.base_version.number}` });
   }
-  if (action.startsWith("page.autosave.") || action === "page.update" || action === "page.patch_context_edit") {
+  if (action.startsWith("page.autosave.") || ["page.update", "page.patch_context_edit", "context_page.draft.update", "context_page.draft.save"].includes(action)) {
     if (details?.base_version && details.base_version.id !== details.version?.id) notes.push(text("baseVersion", { version: `v${details.base_version.number}` }));
     if (!details?.reason) notes.push(text("summaryMissing"));
   }

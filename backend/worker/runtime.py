@@ -27,10 +27,6 @@ from backend.services.actor_identities import SYSTEM_FEEDBACK_RESOLVER_ACTOR_ID
 from backend.services.bundle_expiration import BundleExpirationService
 from backend.services.context_media_orphan_sweep import ContextMediaOrphanSweepService
 from backend.services.context_media_policy import read_context_media_policy
-from backend.services.context_reconciliation_reminder import (
-    RECONCILIATION_REMINDER_JOB_TYPE,
-    ContextReconciliationReminderService,
-)
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.extraction_service import ExtractionService
 from backend.services.feedback_errors import FeedbackItemNotFoundError
@@ -190,7 +186,6 @@ class OneShotWorker:
         )
         self.feedback_resolver = feedback_resolver or FeedbackResolverService()
         self.email_delivery_service = email_delivery_service
-        self.reconciliation_reminder_service = ContextReconciliationReminderService()
         self.media_install_reconciler = media_install_reconciler
         self.context_media_orphan_sweep_service = context_media_orphan_sweep_service
         self._indexer = indexer
@@ -1305,16 +1300,6 @@ class OneShotWorker:
                             session=work_session,
                             job=claimed_job,
                         )
-                if (
-                    claimed_job.job_type == RECONCILIATION_REMINDER_JOB_TYPE
-                    and detail.get("unresolved") is True
-                ):
-                    detail["email_outbox_count"] = (
-                        self._queue_reconciliation_reminder_email_isolated(
-                            session_factory=control_session_factory,
-                            job=claimed_job,
-                        )
-                    )
         except WorkerShutdownRequested:
             # Not an attempt failure: the job goes back to the queue without
             # consuming retry budget, and the shutdown continues.
@@ -2061,53 +2046,6 @@ class OneShotWorker:
             "repaired_count": result.repaired_count,
         }
 
-    def _business_context_reconciliation_reminder(
-        self, session: Session, job: Job | _ClaimedJob, queue_job: Job | None
-    ) -> dict[str, Any]:
-        del queue_job
-        result = self.reconciliation_reminder_service.execute(
-            session=session,
-            workspace_id=job.workspace_id,
-            page_id=self._uuid_target(job=job, key="page_id"),
-            branch_version_id=self._uuid_target(job=job, key="branch_version_id"),
-            review_item_id=self._uuid_target(job=job, key="review_item_id"),
-            reminder_after_hours=self._int_target(
-                job=job, key="reminder_after_hours", minimum=1
-            ),
-        )
-        return {
-            "outcome": result.outcome,
-            "unresolved": result.unresolved,
-            "activity_created": result.activity_created,
-            "activity_event_id": (
-                str(result.activity_event_id)
-                if result.activity_event_id is not None
-                else None
-            ),
-        }
-
-    def _queue_reconciliation_reminder_email_isolated(
-        self,
-        *,
-        session_factory: sessionmaker,
-        job: Job | _ClaimedJob,
-    ) -> int:
-        # EmailOutbox and the owner roster are identity-plane data. Keep this
-        # phase outside the workspace transaction that emitted Activity so a
-        # split deployment never joins User/WorkspaceMembership on a data DB.
-        if self.email_delivery_service is None and (
-            self._settings is None or not self._settings.mail_configured
-        ):
-            return 0
-        with session_factory.begin() as control_session:
-            delivery_service = self._email_delivery_service()
-            queued = delivery_service.queue_reconciliation_reminder_notifications(
-                session=control_session,
-                workspace_id=job.workspace_id,
-                branch_version_id=self._uuid_target(job=job, key="branch_version_id"),
-            )
-        return len(queued)
-
     def _context_media_orphan_sweep_service(self) -> ContextMediaOrphanSweepService:
         if self.context_media_orphan_sweep_service is not None:
             return self.context_media_orphan_sweep_service
@@ -2376,24 +2314,6 @@ class OneShotWorker:
                 self, session, job, job if handler.completes_in_service else None
             )
             completes_in_service = handler.completes_in_service
-        if (
-            job.job_type == RECONCILIATION_REMINDER_JOB_TYPE
-            and detail.get("unresolved") is True
-        ):
-            if self.email_delivery_service is None and (
-                self._settings is None or not self._settings.mail_configured
-            ):
-                detail["email_outbox_count"] = 0
-            else:
-                detail["email_outbox_count"] = len(
-                    self._email_delivery_service().queue_reconciliation_reminder_notifications(
-                        session=session,
-                        workspace_id=job.workspace_id,
-                        branch_version_id=self._uuid_target(
-                            job=job, key="branch_version_id"
-                        ),
-                    )
-                )
         if not completes_in_service:
             self.job_queue.complete(session=session, job=job)
         return WorkerDispatchResult(
@@ -2413,20 +2333,6 @@ class OneShotWorker:
                 return default
             raise ValueError(f"job target_ref missing {key}")
         return UUID(str(raw_value))
-
-    @staticmethod
-    def _int_target(
-        job: Job | _ClaimedJob,
-        key: str,
-        *,
-        minimum: int | None = None,
-    ) -> int:
-        raw_value = job.target_ref.get(key)
-        if isinstance(raw_value, bool) or not isinstance(raw_value, int):
-            raise ValueError(f"job target_ref {key} must be an integer")
-        if minimum is not None and raw_value < minimum:
-            raise ValueError(f"job target_ref {key} is below its minimum")
-        return raw_value
 
     @staticmethod
     def _datetime_target(job: Job | _ClaimedJob, key: str) -> datetime | None:
@@ -2528,13 +2434,6 @@ register(
     "media_blob_gc",
     JobHandler(
         OneShotWorker._business_media_blob_gc,
-        completes_in_service=False,
-    ),
-)
-register(
-    RECONCILIATION_REMINDER_JOB_TYPE,
-    JobHandler(
-        OneShotWorker._business_context_reconciliation_reminder,
         completes_in_service=False,
     ),
 )

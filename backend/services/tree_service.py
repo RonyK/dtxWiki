@@ -62,9 +62,15 @@ class TreeService:
         self,
         audit_service: AuditService | None = None,
         tree_read_service: TreeReadService | None = None,
+        context_version_writer=None,
+        context_media_repository_factory=None,
+        body_preparer=None,
     ) -> None:
         self.audit_service = audit_service or AuditService()
         self.tree_read_service = tree_read_service or TreeReadService()
+        self.context_version_writer = context_version_writer
+        self.context_media_repository_factory = context_media_repository_factory
+        self.body_preparer = body_preparer
 
     def update_node(
         self,
@@ -114,12 +120,97 @@ class TreeService:
                 resource_id=node.target_id,
             )
             if page is not None:
-                page.title = node.title
-                # A tree rename mutates the canonical page title without a
-                # new version, so the name projection must resync here or the
-                # entity lane keeps resolving the old title (Sprint-2 review
-                # BS-1). version=None leaves PageLink rows untouched.
-                sync_page_projections(session, page=page)
+                from backend.models.context import ContextPageVersion
+                from backend.repositories.context_page_repo import (
+                    get_page_by_id_for_update,
+                )
+                from backend.schemas.context_write import PublishContextPageRequest
+                from backend.services.context_draft_workflow import (
+                    ContextTransactionFactory,
+                    metadata_dict,
+                    metadata_for,
+                    record_draft_save,
+                )
+                from backend.services.context_write_service import ContextWriteService
+                from backend.services.db_write_intent import acquire_write_intent
+                from backend.services.page_service import PageService
+
+                acquire_write_intent(session)
+                service = PageService(
+                    ContextTransactionFactory(session),
+                    actor_context=actor,
+                    context_version_writer=self.context_version_writer,
+                    body_preparer=self.body_preparer,
+                    context_media_repository_factory=self.context_media_repository_factory,
+                )
+                service._lock_context_media_usage_intent(session, workspace_id)
+                page = get_page_by_id_for_update(session, page.id)
+                if page.current_published_version_id:
+                    source = get_in_workspace(
+                        session,
+                        ContextPageVersion,
+                        workspace_id=workspace_id,
+                        resource_id=page.current_published_version_id,
+                    )
+                    version = service._insert_version_copy(
+                        session,
+                        page_id=page.id,
+                        parent_version_id=source.id,
+                        source_version=source,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        version_status="draft",
+                    )
+                    metadata = metadata_dict(metadata_for(page, source))
+                    metadata["title"] = node.title
+                    version.page_metadata = metadata
+                    ContextWriteService(
+                        context_version_writer=self.context_version_writer,
+                        body_preparer=service.body_preparer,
+                        actor_context=actor,
+                        context_media_repository_factory=self.context_media_repository_factory,
+                    ).publish_draft(
+                        session=session,
+                        workspace_id=workspace_id,
+                        page_id=page.id,
+                        request=PublishContextPageRequest(
+                            version_id=version.id, reason="tree.node.rename"
+                        ),
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                    )
+                else:
+                    version = session.scalar(
+                        select_in_workspace(
+                            ContextPageVersion,
+                            workspace_id=workspace_id,
+                            conditions=(
+                                ContextPageVersion.page_id == page.id,
+                                ContextPageVersion.version_status == "draft",
+                            ),
+                        )
+                        .order_by(
+                            ContextPageVersion.last_saved_at.desc(),
+                            ContextPageVersion.id,
+                        )
+                        .limit(1)
+                    )
+                    if version is not None:
+                        metadata = metadata_dict(metadata_for(page, version))
+                        metadata["title"] = node.title
+                        version.page_metadata = metadata
+                        version.editing_revision += 1
+                        version.last_saved_at = utc_now()
+                        record_draft_save(
+                            session,
+                            page,
+                            version,
+                            actor_kind=actor_kind,
+                            actor_id=actor_id,
+                            reason="tree.node.rename",
+                        )
+                    page.title = node.title
+                    sync_page_projections(session, page=page, version=version)
         elif node.target_kind == "agent_page" and node.target_id is not None:
             from backend.models.agent import AgentPage
             from backend.services.indexing.fts5 import sync_agent_page_doc_sources

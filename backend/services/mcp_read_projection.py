@@ -85,7 +85,7 @@ _READ_DEFAULTS = {
 }
 _VERSION_STATUSES = frozenset(
     {
-        "editing",
+        "closed",
         "draft",
         "published_snapshot",
         "superseded_snapshot",
@@ -186,7 +186,7 @@ def record_served_read(
         "version_status": status,
         "content_identity": content_identity,
         "editing_revision": getattr(version, "editing_revision", None)
-        if status == "editing"
+        if status == "draft"
         else None,
     }
     if snapshot not in snapshots:
@@ -230,7 +230,7 @@ def validate_read_projection(value: Any) -> dict[str, Any] | None:
         ):
             return None
     revision = value.get("editing_revision")
-    if value["version_status"] == "editing" and (
+    if value["version_status"] == "draft" and (
         type(revision) is not int or revision < 1
     ):
         return None
@@ -242,7 +242,7 @@ def validate_read_projection(value: Any) -> dict[str, Any] | None:
         "version_status": value["version_status"],
         "content_identity": value["content_identity"],
         "scope_identity": value["scope_identity"],
-        "editing_revision": revision if value["version_status"] == "editing" else None,
+        "editing_revision": revision if value["version_status"] == "draft" else None,
     }
 
 
@@ -489,11 +489,11 @@ def _served_version_visible(
         UUID(read["version_id"]),
         UUID(read["resource_id"]),
     )
-    # A served draft or editing state stays draft-readers-only after the row
-    # is published or activated in place: the recorded state decides, not the
-    # row's current status.
+    # A served draft stays draft-readers-only after the row is published or
+    # activated in place: the recorded state decides, not the row's current
+    # status.
     if (
-        read["version_status"] in {"draft", "editing"}
+        read["version_status"] == "draft"
         and actor is not None
         and not actor_can_read_drafts(actor)
     ):

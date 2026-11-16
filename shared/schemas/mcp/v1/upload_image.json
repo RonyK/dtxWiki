@@ -62,7 +62,7 @@
         "type": "string"
       },
       "version_id": {
-        "description": "The caller's own currently-open editing version for this page. The image is registered against it; uploading requires an open editing session, not merely page access.",
+        "description": "The open draft of this page the image is uploaded into. The image is registered against it; uploading requires an open draft, not merely page access.",
         "format": "uuid",
         "title": "Version Id",
         "type": "string"
@@ -118,7 +118,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",

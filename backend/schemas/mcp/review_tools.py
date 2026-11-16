@@ -1,29 +1,20 @@
-"""MCP review-surface tool schemas (item 11-c / T15b).
+"""MCP review-surface schemas.
 
-Two AI-facing tools:
-- ``list_requested_changes`` (read-only): the change-requests routed to the
+``list_requested_changes`` returns the change requests routed to the
   caller's effective principal P (its conversation owner), with the fix
-  instruction + evidence, projected from ``review_service.list_reviews``.
-- ``submit_revision_for_review`` (write, non-destructive): the AI submits a
-  revised draft for an open request (state-machine transition T6). It returns
-  the item to ``pending`` for a HUMAN to approve — the AI can never approve
-  (Risk-6, enforced structurally: no approve-capable MCP tool exists).
+instruction and evidence, projected from ``review_service.list_reviews``.
+The retained revision result supports historical service projections only.
 """
 
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas.common import MCPResultEnvelope
 from backend.schemas.context_write import (
     ReviewEvidenceOperation,
-    UpdateDraftRequest,
-    WriteDraftRequest,
 )
-from backend.schemas.input_policy import InputRequest
-from backend.schemas.page import CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
 
 CONVERSATION_TOKEN_FIELD = Field(
     default=None,
@@ -101,49 +92,12 @@ class ListRequestedChangesOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class MCPRevisionUpdateRequest(UpdateDraftRequest):
-    # Submit-revision dispatches through the same context write service.
-    on_stale: Literal["conflict"] = "conflict"
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class SubmitRevisionForReviewInput(InputRequest):
-    workspace_id: UUID
-    idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
-    review_item_id: UUID
-    # EXACTLY ONE revision source. `update` revises an existing page version
-    # (preferred: carries base_version_id/base_content_hash stale-write
-    # protection); `create` writes a fresh draft.
-    update: MCPRevisionUpdateRequest | None = None
-    create: WriteDraftRequest | None = None
-    note: str | None = Field(default=None, max_length=2000)
-    conversation_token: str | None = CONVERSATION_TOKEN_FIELD
-
-    model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def _exactly_one_source(self) -> "SubmitRevisionForReviewInput":
-        if (self.update is None) == (self.create is None):
-            raise ValueError("exactly one of 'update' or 'create' is required")
-        return self
-
-
 class SubmitRevisionForReviewResult(BaseModel):
     original_review_item_id: UUID
     new_change_set_id: UUID
     new_review_item_id: UUID
     new_review_status: str
-    # True when an idempotent retry (same principal + same content) returned the
-    # prior result instead of creating a duplicate draft.
     deduplicated: bool = False
     replayed: bool = False
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class SubmitRevisionForReviewOutput(BaseModel):
-    envelope: MCPResultEnvelope
-    data: SubmitRevisionForReviewResult | None = None
 
     model_config = ConfigDict(extra="forbid")

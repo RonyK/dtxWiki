@@ -59,8 +59,6 @@ from backend.schemas.common import EnvelopeWarning, MCPResultEnvelope
 from backend.services.context_write_service import (
     stale_conversation_warning_message,
     stale_pages_for_conversation,
-    unresolved_diverged_branch_warning_message,
-    unresolved_diverged_branches_for_conversation,
 )
 from backend.services.mcp_client_service import (
     MCPClientRuntimeDenied,
@@ -85,7 +83,6 @@ CONVERSATION_TOKEN_NOT_SUPPLIED_MESSAGE = (
     "conversation_token on later calls, including reads, to keep the activity "
     "in one chat."
 )
-UNRESOLVED_DIVERGED_BRANCH_CODE = "unresolved_diverged_branch"
 CONVERSATION_READ_STALE_CODE = "conversation_read_stale"
 CONVERSATION_TOKEN_META_KEY = "com.dtxwiki/conversationToken"
 # The call's request_id in the result's protocol _meta, for hosts and support
@@ -455,8 +452,7 @@ async def call_tool_async(
                 latency_ms=int((time.perf_counter() - started) * 1000),
                 trace_workspace_id=trace_workspace_id,
                 fail_closed=(
-                    status == "succeeded"
-                    and name in _CORRECTNESS_CRITICAL_TRACE_TOOLS
+                    status == "succeeded" and name in _CORRECTNESS_CRITICAL_TRACE_TOOLS
                 ),
             )
         logger.info(
@@ -783,25 +779,6 @@ def _add_conversation_warnings(
         )
     if conversation_token is None or workspace_id is None or session_factory is None:
         return
-    try:
-        with session_factory() as session:
-            branches = unresolved_diverged_branches_for_conversation(
-                session,
-                workspace_id=workspace_id,
-                conversation_token=conversation_token,
-            )
-    except Exception:
-        logger.exception("unresolved diverged branch nag lookup failed")
-    else:
-        if branches:
-            envelope.warnings.append(
-                EnvelopeWarning(
-                    code=UNRESOLVED_DIVERGED_BRANCH_CODE,
-                    message=unresolved_diverged_branch_warning_message(
-                        branches, workspace_id=workspace_id
-                    ),
-                )
-            )
     try:
         with session_factory() as session:
             stale_pages = stale_pages_for_conversation(

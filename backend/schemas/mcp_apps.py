@@ -33,9 +33,7 @@ class McpServerCapabilitiesData(BaseModel):
     # register: the issuer's origin, never the host the browser reached.
     mcp_url: str
     transports: list[Literal["streamable-http", "sse"]]
-    endpoint_reachability: list[
-        Literal["loopback", "private-network", "public-https"]
-    ]
+    endpoint_reachability: list[Literal["loopback", "private-network", "public-https"]]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -97,9 +95,9 @@ class McpSetupPlanRequest(BaseModel):
     platform: Literal["windows", "macos", "linux"] | None = None
     shell: Literal["powershell", "bash", "zsh"] | None = None
     app_version: str | None = Field(default=None, min_length=1, max_length=80)
-    endpoint_reachability: Literal[
-        "loopback", "private-network", "public-https"
-    ] | None = None
+    endpoint_reachability: (
+        Literal["loopback", "private-network", "public-https"] | None
+    ) = None
     locale: Literal["en", "ko"] = "en"
 
     model_config = ConfigDict(extra="forbid")

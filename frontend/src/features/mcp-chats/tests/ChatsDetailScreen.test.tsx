@@ -1946,7 +1946,7 @@ describe("ChatsDetailScreen", () => {
       await findCallCard();
       expect(
         await screen.findByText(
-          "The edit's text is shown only to its author. You can see its sizes and operation kinds.",
+          "The edit's text is hidden from you. You can see its sizes and operation kinds.",
         ),
       ).toBeInTheDocument();
       expect(

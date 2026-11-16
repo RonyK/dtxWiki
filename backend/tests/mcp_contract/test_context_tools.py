@@ -1,36 +1,24 @@
+from uuid import uuid4
+
 import pytest
-from pydantic import ValidationError
 from sqlalchemy import func, select
 
 from backend.mcp.router import dispatch
 from backend.models.audit import AuditEvent
-from backend.models.change import ChangeSet
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPageVersion
 from backend.models.feedback import FeedbackItem
 from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
-from backend.schemas.context_edit import PatchDraftRequest
-from backend.schemas.context_write import (
-    UpdateDraftRequest,
-    WriteDraftRequest,
-)
-from backend.services.context_editing import section_content_hash
+from backend.schemas.context_write import WriteDraftRequest
 from backend.services.context_write_service import ContextWriteService
 from backend.services.read_errors import (
     RejectedByPolicyError,
-    RevisionSubmissionRequiredError,
-    StaleBaseVersionError,
 )
 
-# write_draft/update_draft/patch_draft are no longer callable MCP tools,
-# but ContextWriteService's methods backing them remain fully
-# live internal callers for PageService.reconcile_branch and
-# ReviewService.submit_revision_for_review. Tests whose actual subject is this
-# engine (body validation, CAS conflicts, patch operations, idempotency
-# derivation) call it directly instead of going through MCP dispatch, the
-# same pattern established in test_patch_draft_push_semantics.py and
-# test_partial_edit_token_cost.py. `cite`/`submit_feedback`/`read_context_
-# outline` stay on the live MCP client since those tools are unaffected.
+# write_draft is no longer a callable MCP tool, but ContextWriteService.
+# write_draft still backs internal page creation, so its tests call it
+# directly. Edits of an existing draft go through the live
+# patch_context_edit/update_context_edit tools.
 #
 # Three tests were deleted outright rather than retargeted, each because its
 # exact subject no longer exists and an equivalent already exists elsewhere:
@@ -80,15 +68,6 @@ def _workspace(page_service):
         return session.scalar(select(Workspace).where(Workspace.slug == "default")).id
 
 
-def _patch_write_row_counts(page_service):
-    with page_service.session_factory() as session:
-        return (
-            session.scalar(select(func.count()).select_from(ContextPageVersion)),
-            session.scalar(select(func.count()).select_from(ChangeSet)),
-            session.scalar(select(func.count()).select_from(ReviewItem)),
-        )
-
-
 def _write_draft(page_service, actor, workspace_id, **payload):
     """Engine-level equivalent of ``dispatch("write_draft", {...})``."""
     with page_service.session_factory.begin() as session:
@@ -102,28 +81,38 @@ def _write_draft(page_service, actor, workspace_id, **payload):
         )
 
 
-def _patch_draft(page_service, actor, workspace_id, **payload):
-    """Engine-level equivalent of ``dispatch("patch_draft", {...})``."""
-    with page_service.session_factory.begin() as session:
-        return ContextWriteService().patch_draft(
-            session=session,
-            workspace_id=workspace_id,
-            request=PatchDraftRequest(**payload),
-            actor_kind=actor.actor_kind,
-            actor_id=actor.actor_id,
-        )
+def _create(page_service, actor, workspace_id, title, body_md):
+    created = dispatch(
+        "create_context_page",
+        {
+            "workspace_id": str(workspace_id),
+            "title": title,
+            "body_md": body_md,
+            "idempotency_key": str(uuid4()),
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert created.envelope.result_status == "succeeded", created.envelope
+    return created.data
 
 
-def _update_draft(page_service, actor, workspace_id, **payload):
-    """Engine-level equivalent of ``dispatch("update_draft", {...})``."""
-    with page_service.session_factory.begin() as session:
-        return ContextWriteService().update_draft(
-            session=session,
-            workspace_id=workspace_id,
-            request=UpdateDraftRequest(**payload),
-            actor_kind=actor.actor_kind,
-            actor_id=actor.actor_id,
-        )
+def _patch(page_service, actor, workspace_id, draft, operations):
+    patched = dispatch(
+        "patch_context_edit",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(draft.id),
+            "version_id": str(draft.version_id),
+            "expected_editing_revision": draft.editing_revision,
+            "operations": operations,
+            "idempotency_key": str(uuid4()),
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert patched.envelope.result_status == "succeeded", patched.envelope
+    return patched.data
 
 
 def test_mcp_write_draft_creates_reviewable_context_draft(page_service, actor):
@@ -151,7 +140,6 @@ def test_mcp_write_draft_creates_reviewable_context_draft(page_service, actor):
         page_service, result.draft_version_id
     )
     assert result.version_status == "draft"
-    assert result.latest_draft_version_id == result.draft_version_id
     assert result.current_published_version_id is None
     assert result.review_status == "pending"
 
@@ -186,81 +174,22 @@ def test_mcp_write_draft_refuses_embedded_data_images(
     assert "data:" in str(exc_info.value)
 
 
-def test_mcp_update_draft_returns_conflict_payload(page_service, actor):
+def test_mcp_patch_edits_a_known_section_without_a_pre_read(page_service, actor):
     workspace_id = _workspace(page_service)
-    created = _write_draft(
+    created = _create(
         page_service,
         actor,
         workspace_id,
-        title="MCP Stale Draft",
-        page_type="overview",
-        body_markdown="# MCP Stale Draft\n\nFirst.",
-        reason="create draft",
+        "Patch Without Read",
+        "# Patch Without Read\n\n## Known section\n\nBefore.",
     )
-    base = _read_context_page(page_service, created.page_id)["version_info"]
-    updated = _update_draft(
+
+    result = _patch(
         page_service,
         actor,
         workspace_id,
-        page_id=created.page_id,
-        base_version_id=base["version_id"],
-        base_content_hash=base["content_hash"],
-        update_mode="full_rewrite",
-        body_markdown="# MCP Stale Draft\n\nSecond.",
-        reason="advance draft",
-    )
-
-    with pytest.raises(StaleBaseVersionError) as exc_info:
-        _update_draft(
-            page_service,
-            actor,
-            workspace_id,
-            page_id=created.page_id,
-            base_version_id=base["version_id"],
-            base_content_hash=base["content_hash"],
-            update_mode="full_rewrite",
-            body_markdown="# MCP Stale Draft\n\nStale.",
-            reason="stale draft",
-        )
-
-    assert updated.outcome == "updated_draft"
-    assert updated.body_changed is True
-    assert updated.metadata_changed is False
-    assert updated.persisted_content_hash == _draft_content_hash(
-        page_service, updated.draft_version_id
-    )
-    assert updated.persisted_character_count == _draft_character_count(
-        page_service, updated.draft_version_id
-    )
-    assert updated.version_status == "draft"
-    assert updated.latest_draft_version_id == updated.draft_version_id
-    assert updated.current_published_version_id is None
-    assert updated.review_status == "pending"
-    conflict = exc_info.value
-    assert conflict.error_code == "stale_base_version"
-    assert conflict.latest_version_id == updated.draft_version_id
-    assert conflict.latest_content_hash is not None
-
-
-def test_mcp_patch_draft_edits_a_known_section_without_a_pre_read(page_service, actor):
-    workspace_id = _workspace(page_service)
-    created = _write_draft(
-        page_service,
-        actor,
-        workspace_id,
-        title="Patch Without Read",
-        page_type="overview",
-        body_markdown="# Patch Without Read\n\n## Known section\n\nBefore.",
-        reason="Create a known fixture",
-    )
-
-    result = _patch_draft(
-        page_service,
-        actor,
-        workspace_id,
-        page_id=created.page_id,
-        base=str(created.draft_version_id),
-        operations=[
+        created,
+        [
             {
                 "op": "replace_text",
                 "old_text": "Before.",
@@ -271,93 +200,28 @@ def test_mcp_patch_draft_edits_a_known_section_without_a_pre_read(page_service, 
                 },
             }
         ],
-        reason="Edit the known section directly",
     )
 
-    assert result.draft_version_id is not None
-    receipt = result.model_dump(mode="json")
-    operation = receipt["operation_receipts"][0]
-    assert operation["op"] == "replace_text"
-    assert operation["resolved_heading_path"] == [
-        "Patch Without Read",
-        "Known section",
-    ]
+    operation = result.edit_receipt.operations[0]
+    assert operation.op == "replace_text"
+    assert operation.heading_path == ["Patch Without Read", "Known section"]
     # "Before." itself is on line 5 -- the scope `at` resolved to (lines
     # 3-5, the whole "## Known section" subtree) is not the answer here;
     # "After." is one char shorter.
-    assert operation["resolved_line_range"] == {"start_line": 5, "end_line": 5}
-    assert operation["chars_delta"] == -1
-    # A heading-path-addressed replace_text is not anchor- or section-hash-
-    # gated -- these genuinely do not apply to this operation.
-    assert operation["anchor_status"] is None
-    assert operation["old_section_hash"] is None
-    assert operation["new_section_hash"] is None
-    assert receipt["risk"] in ("low", "medium", "high")
-    assert receipt["outside_target_changed"] is False
-    assert receipt["normalized"] is False
+    assert operation.line_range == (5, 5)
+    assert operation.chars_removed - operation.chars_added == 1
     with page_service.session_factory() as session:
-        version = session.get(ContextPageVersion, result.draft_version_id)
+        version = session.get(ContextPageVersion, created.version_id)
         assert version is not None
         assert "After." in version.body_md
         assert "Before." not in version.body_md
 
 
-def test_mcp_patch_draft_resent_insert_section_does_not_duplicate(page_service, actor):
-    """A-4 regression, engine level: patch_draft derives an idempotency key
-    from the conversation, the request's own byte-identical content, and the
-    effective base (ContextWriteService.patch_draft itself, not the deleted
-    MCP wrapper -- see request_fingerprint()/effective_idempotency_key in
-    context_write_service.py). A naive resend (no explicit idempotency_key)
-    must leave exactly one copy of the inserted heading, replayed from the
-    idempotency ledger before it ever reaches the edit engine again.
-    """
-    workspace_id = _workspace(page_service)
-    created = _write_draft(
-        page_service,
-        actor,
-        workspace_id,
-        title="Resend Target",
-        page_type="overview",
-        body_markdown="# Resend Target\n\nintro text",
-        reason="Create a fixture with nothing after its only heading",
-    )
-
-    payload = dict(
-        page_id=created.page_id,
-        base=str(created.draft_version_id),
-        operations=[
-            {
-                "op": "insert_section",
-                "at": {"by": "heading_path", "heading_path": ["Resend Target"]},
-                "position": "append_child",
-                "title": "Appended",
-                "content": "appended body",
-            }
-        ],
-        reason="append a child section",
-    )
-
-    first = _patch_draft(page_service, actor, workspace_id, **payload)
-    assert first.operation_receipts[0].outcome == "applied"
-
-    # A naive resend: the byte-identical request, no idempotency_key. The
-    # derived key is the same, so the ledger replays the first receipt rather
-    # than re-deriving an edit-engine outcome.
-    second = _patch_draft(page_service, actor, workspace_id, **payload)
-    assert second.push_outcome == "replayed"
-    assert second.model_copy(update={"push_outcome": first.push_outcome}) == first
-
-    with page_service.session_factory() as session:
-        version = session.get(ContextPageVersion, first.draft_version_id)
-        assert version is not None
-        assert version.body_md.count("## Appended") == 1
-
-
-def test_mcp_patch_draft_accepts_the_section_hash_read_context_outline_returned(
+def test_mcp_patch_accepts_the_section_hash_read_context_outline_returned(
     page_service, mcp_default_actor
 ):
     """A-1 regression: read_context_outline's section_hash must be directly
-    usable as patch_draft's expected_section_hash. The two tools must hash in
+    usable as patch_context_edit's expected_section_hash. The two tools must hash in
     the same (normalized) space -- computing the expected value locally, as
     the unit tests for section_content_hash do, cannot catch a drift back to
     raw hashing on one side, so this test takes the hash straight out of a
@@ -365,35 +229,33 @@ def test_mcp_patch_draft_accepts_the_section_hash_read_context_outline_returned(
     """
     actor = mcp_default_actor(scopes=("read", "draft-write"))
     workspace_id = _workspace(page_service)
-    created = _write_draft(
+    created = _create(
         page_service,
         actor,
         workspace_id,
-        title="Outline Hash Round Trip",
-        page_type="overview",
-        body_markdown="# Outline Hash Round Trip\n\nbody\n",
-        reason="create fixture for read-then-edit hash round trip",
+        "Outline Hash Round Trip",
+        "# Outline Hash Round Trip\n\nbody\n",
     )
 
     outline = dispatch(
         "read_context_outline",
         {
             "workspace_id": str(workspace_id),
-            "page_id": str(created.page_id),
+            "page_id": str(created.id),
+            "version_id": str(created.version_id),
         },
         actor=actor,
         page_service=page_service,
     )
-    assert outline.envelope.result_status == "succeeded"
+    assert outline.envelope.result_status == "succeeded", outline.envelope
     (section,) = outline.outline
 
-    result = _patch_draft(
+    _patch(
         page_service,
         actor,
         workspace_id,
-        page_id=created.page_id,
-        base=str(created.draft_version_id),
-        operations=[
+        created,
+        [
             {
                 "op": "replace_section",
                 "at": {"by": "section_id", "section_id": section.section_id},
@@ -401,81 +263,15 @@ def test_mcp_patch_draft_accepts_the_section_hash_read_context_outline_returned(
                 "expected_section_hash": section.section_hash,
             }
         ],
-        reason="replace using the hash read_context_outline returned",
     )
 
     with page_service.session_factory() as session:
-        version = session.get(ContextPageVersion, result.draft_version_id)
+        version = session.get(ContextPageVersion, created.version_id)
         assert version is not None
         assert "replaced" in version.body_md
 
 
-def test_mcp_patch_draft_replace_section_receipt_carries_both_section_hashes(
-    page_service, mcp_default_actor
-):
-    """Operation-receipt regression: old_section_hash/new_section_hash used
-    to always be null (getattr(data, "operation_receipts", None) always
-    missed -- the field did not exist on UpdateDraftResult). replace_section
-    is the operation these two are meant for: old is the precondition the
-    caller already proved, new is the hash of what actually landed.
-    """
-    actor = mcp_default_actor(scopes=("read", "draft-write"))
-    workspace_id = _workspace(page_service)
-    body = "# Section Hash Receipt\n\n## Known section\n\nBefore.\n"
-    created = _write_draft(
-        page_service,
-        actor,
-        workspace_id,
-        title="Section Hash Receipt",
-        page_type="overview",
-        body_markdown=body,
-        reason="create fixture for section-hash receipt",
-    )
-
-    outline = dispatch(
-        "read_context_outline",
-        {
-            "workspace_id": str(workspace_id),
-            "page_id": str(created.page_id),
-        },
-        actor=actor,
-        page_service=page_service,
-    )
-    known_section = next(
-        entry for entry in outline.outline if entry.title == "Known section"
-    )
-    new_content = "## Known section\n\nAfter.\n"
-
-    result = _patch_draft(
-        page_service,
-        actor,
-        workspace_id,
-        page_id=created.page_id,
-        base=str(created.draft_version_id),
-        operations=[
-            {
-                "op": "replace_section",
-                "at": {"by": "section_id", "section_id": known_section.section_id},
-                "content": new_content,
-                "expected_section_hash": known_section.section_hash,
-            }
-        ],
-        reason="replace the known section",
-    )
-
-    receipt = result.model_dump(mode="json")
-    operation = receipt["operation_receipts"][0]
-    assert operation["op"] == "replace_section"
-    assert operation["old_section_hash"] == known_section.section_hash
-    assert operation["new_section_hash"] == section_content_hash(new_content)
-    assert operation["old_section_hash"] != operation["new_section_hash"]
-    assert operation["resolved_heading_path"] == [
-        "Section Hash Receipt",
-        "Known section",
-    ]
-
-
-def test_mcp_patch_draft_unscoped_replace_text_receipt_reports_the_changed_line(
+def test_mcp_patch_unscoped_replace_text_receipt_reports_the_changed_line(
     page_service, actor
 ):
     """resolved_line_range regression, one level over the outside_target_
@@ -486,61 +282,43 @@ def test_mcp_patch_draft_unscoped_replace_text_receipt_reports_the_changed_line(
     """
     workspace_id = _workspace(page_service)
     body = "# Doc\n\n## A\n\noriginal text\n"
-    created = _write_draft(
+    created = _create(
+        page_service, actor, workspace_id, "Unscoped Replace Text Line Range", body
+    )
+
+    result = _patch(
         page_service,
         actor,
         workspace_id,
-        title="Unscoped Replace Text Line Range",
-        page_type="overview",
-        body_markdown=body,
-        reason="create fixture for line-range receipt",
+        created,
+        [{"op": "replace_text", "old_text": "original text", "new_text": "revised"}],
     )
 
-    result = _patch_draft(
-        page_service,
-        actor,
-        workspace_id,
-        page_id=created.page_id,
-        base=str(created.draft_version_id),
-        operations=[
-            {
-                "op": "replace_text",
-                "old_text": "original text",
-                "new_text": "revised",
-            }
-        ],
-        reason="unscoped replace on the last line",
-    )
-
-    operation = result.model_dump(mode="json")["operation_receipts"][0]
+    operation = result.edit_receipt.operations[0]
     # "original text" is on line 5 of the 5-line body -- not "the whole
     # document", which is what char_start:char_end (0..len(body), since `at`
     # was omitted) would report.
-    assert operation["resolved_line_range"] == {"start_line": 5, "end_line": 5}
-    assert operation["chars_delta"] == -6
+    assert operation.line_range == (5, 5)
+    assert operation.chars_removed - operation.chars_added == 6
 
 
-def test_mcp_patch_draft_anchor_address_usage_is_audited_without_authored_text(
+def test_mcp_patch_anchor_address_usage_is_audited_without_authored_text(
     page_service, actor
 ):
     workspace_id = _workspace(page_service)
-    created = _write_draft(
+    created = _create(
         page_service,
         actor,
         workspace_id,
-        title="Anchor deprecation audit",
-        page_type="overview",
-        body_markdown="# Audit\n\nprivate-anchor-text\n",
-        reason="create anchor audit fixture",
+        "Anchor deprecation audit",
+        "# Audit\n\nprivate-anchor-text\n",
     )
-
-    _patch_draft(
+    _patch(
         page_service,
         actor,
         workspace_id,
-        page_id=created.page_id,
-        base=str(created.draft_version_id),
-        operations=[
+        created,
+        [
             {
                 "op": "insert_text",
                 "at": {
@@ -552,7 +330,6 @@ def test_mcp_patch_draft_anchor_address_usage_is_audited_without_authored_text(
                 "side": "after",
             }
         ],
-        reason="exercise deprecated anchor addressing",
     )
 
     with page_service.session_factory() as session:
@@ -561,7 +338,7 @@ def test_mcp_patch_draft_anchor_address_usage_is_audited_without_authored_text(
                 select(AuditEvent).where(
                     AuditEvent.workspace_id == workspace_id,
                     AuditEvent.action == "mcp.patch_draft.anchor_address_used",
-                    AuditEvent.target_id == created.page_id,
+                    AuditEvent.target_id == created.id,
                 )
             )
         )
@@ -570,54 +347,16 @@ def test_mcp_patch_draft_anchor_address_usage_is_audited_without_authored_text(
     assert "private-anchor-text" not in str(events[0].payload)
 
 
-def test_mcp_patch_draft_dry_run_creates_no_version_change_set_or_review(
+def test_mcp_feedback_is_linked_by_the_review_request_that_addresses_it(
     page_service, actor
 ):
     workspace_id = _workspace(page_service)
-    created = _write_draft(
+    created = _create(
         page_service,
         actor,
         workspace_id,
-        title="Patch Dry Run",
-        page_type="overview",
-        body_markdown="# Patch Dry Run\n\nBefore.",
-        reason="Create a dry-run fixture",
-    )
-    before = _patch_write_row_counts(page_service)
-
-    result = _patch_draft(
-        page_service,
-        actor,
-        workspace_id,
-        page_id=created.page_id,
-        base=str(created.draft_version_id),
-        operations=[
-            {
-                "op": "replace_text",
-                "old_text": "Before.",
-                "new_text": "After.",
-            }
-        ],
-        reason="Simulate the edit only",
-        dry_run=True,
-    )
-
-    assert result.draft_version_id is None
-    assert result.change_set_id is None
-    assert result.review_item_id is None
-    assert _patch_write_row_counts(page_service) == before
-
-
-def test_mcp_submit_feedback_creates_feedback(page_service, actor):
-    workspace_id = _workspace(page_service)
-    created = _write_draft(
-        page_service,
-        actor,
-        workspace_id,
-        title="MCP Feedback Target",
-        page_type="guide",
-        body_markdown="# MCP Feedback Target\n\nBody.",
-        reason="create feedback target",
+        "MCP Feedback Target",
+        "# MCP Feedback Target\n\nBody.",
     )
 
     response = dispatch(
@@ -625,100 +364,78 @@ def test_mcp_submit_feedback_creates_feedback(page_service, actor):
         {
             "workspace_id": str(workspace_id),
             "target_type": "context_page",
-            "target_id": f"/p/{workspace_id}/{created.page_id}",
+            "target_id": f"/p/{workspace_id}/{created.id}",
             "body": "Needs better citation.",
             "severity": "major",
         },
         actor=actor,
         page_service=page_service,
     )
+    assert response.envelope.result_status == "succeeded"
+    assert response.data.next_action == "agent_resolution_queued"
+
+    submitted = dispatch(
+        "submit_context_edit_for_review",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(created.id),
+            "version_id": str(created.version_id),
+            "expected_editing_revision": created.editing_revision,
+            "feedback_id": str(response.data.feedback_id),
+            "idempotency_key": str(uuid4()),
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert submitted.envelope.result_status == "succeeded", submitted.envelope
 
     with page_service.session_factory() as session:
         feedback = session.get(FeedbackItem, response.data.feedback_id)
-
-    assert response.envelope.result_status == "succeeded"
-    assert response.data.next_action == "agent_resolution_queued"
-    assert feedback.target_id == created.page_id
-
-
-def _read_context_page(page_service, page_id):
-    with page_service.session_factory() as session:
-        page = session.get(ContextPage, page_id)
-        version = session.get(ContextPageVersion, page.current_version_id)
-        return {
-            "version_info": {
-                "version_id": version.id,
-                "content_hash": version.content_hash,
-            }
-        }
+        review = session.get(ReviewItem, submitted.data.review_item_id)
+    assert feedback.target_id == created.id
+    assert feedback.status == "draft_created"
+    assert feedback.resolved_by_change_set_id == review.change_set_id
 
 
-def test_update_draft_says_why_the_edit_needs_review(page_service, mcp_default_actor):
-    """`write_draft` reports its lint findings; `update_draft` computed the same
-    ones and dropped them, so an agent learned why its first write needed review
+def _update(page_service, actor, workspace_id, draft, **fields):
+    return dispatch(
+        "update_context_edit",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(draft.id),
+            "version_id": str(draft.version_id),
+            "expected_editing_revision": draft.editing_revision,
+            "idempotency_key": str(uuid4()),
+            **fields,
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+
+
+def test_update_says_why_the_edit_needs_review(page_service, mcp_default_actor):
+    """Creation reports its lint findings; a later whole-body update must
+    report the same ones, or an agent learns why its first write needed review
     and never again for any edit after it."""
 
     actor = mcp_default_actor(scopes=("draft-write", "read"))
     workspace_id = _workspace(page_service)
     unclosed_fence = "# Title\n\n```python\nprint('never closed')\n"
-
-    created = _write_draft(
+    created = _create(
         page_service,
         actor,
         workspace_id,
-        title="Update Review Reasons",
-        page_type="concept",
-        body_markdown="# Title\n\nClean body.\n",
-        reason="seed a draft to update",
+        "Update Review Reasons",
+        "# Title\n\nClean body.\n",
     )
 
-    updated = _update_draft(
-        page_service,
-        actor,
-        workspace_id,
-        page_id=created.page_id,
-        base_version_id=created.draft_version_id,
-        base_content_hash=_draft_content_hash(page_service, created.draft_version_id),
-        update_mode="full_rewrite",
-        body_markdown=unclosed_fence,
-        reason="introduce an unclosed fence",
+    updated = _update(
+        page_service, actor, workspace_id, created, body_md=unclosed_fence
     )
 
-    codes = {reason.code for reason in updated.review_reasons}
-    assert "md.code_fence_balance" in codes, updated.review_reasons
-
-
-def test_update_draft_requires_revision_submission_for_active_change_request(
-    page_service, actor
-):
-    workspace_id = _workspace(page_service)
-    created = _write_draft(
-        page_service,
-        actor,
-        workspace_id,
-        title="Revision required",
-        page_type="overview",
-        body_markdown="# Draft\n\nOriginal.",
-        reason="create draft",
-    )
-    with page_service.session_factory.begin() as session:
-        review = session.get(ReviewItem, created.review_item_id)
-        review.status = "changes_requested"
-    base = _read_context_page(page_service, created.page_id)["version_info"]
-
-    with pytest.raises(RevisionSubmissionRequiredError) as exc_info:
-        _update_draft(
-            page_service,
-            actor,
-            workspace_id,
-            page_id=created.page_id,
-            base_version_id=base["version_id"],
-            base_content_hash=base["content_hash"],
-            update_mode="full_rewrite",
-            body_markdown="# Draft\n\nParallel edit.",
-            reason="generic update",
-        )
-    assert exc_info.value.review_item_id == created.review_item_id
+    assert updated.envelope.result_status == "succeeded", updated.envelope
+    codes = {reason.code for reason in updated.data.publish_blocked_reasons}
+    assert "md.code_fence_balance" in codes, updated.data.publish_blocked_reasons
 
 
 @pytest.mark.parametrize(
@@ -733,41 +450,29 @@ def test_mcp_metadata_patch_rejects_invalid_values_without_writing(
     page_service, actor, metadata_patch
 ):
     workspace_id = _workspace(page_service)
-    created = _write_draft(
-        page_service,
-        actor,
-        workspace_id,
-        title="Metadata Validation Target",
-        page_type="overview",
-        body_markdown="# Metadata Validation Target",
-        reason="seed target",
+    body = "# Metadata Validation Target"
+    created = _create(
+        page_service, actor, workspace_id, "Metadata Validation Target", body
     )
-    base = _read_context_page(page_service, created.page_id)["version_info"]
     with page_service.session_factory() as session:
+        before_revision = session.get(
+            ContextPageVersion, created.version_id
+        ).editing_revision
         before_versions = session.scalar(
             select(func.count()).select_from(ContextPageVersion)
         )
         before_reviews = session.scalar(select(func.count()).select_from(ReviewItem))
 
-    # Invalid metadata_patch values fail Pydantic construction of
-    # UpdateDraftRequest itself, before ContextWriteService.update_draft is
-    # ever called -- the same "validation_failed" boundary the deleted MCP
-    # wrapper reported, just one layer lower now that dispatch's own
-    # generic validation-error envelope wrapping is out of the picture.
-    with pytest.raises(ValidationError):
-        _update_draft(
-            page_service,
-            actor,
-            workspace_id,
-            page_id=created.page_id,
-            base_version_id=base["version_id"],
-            base_content_hash=base["content_hash"],
-            update_mode="metadata_update",
-            metadata_patch=metadata_patch,
-            reason="invalid metadata",
-        )
+    refused = _update(
+        page_service, actor, workspace_id, created, body_md=body, **metadata_patch
+    )
 
+    assert refused.envelope.error_code == "validation_failed", refused.envelope
     with page_service.session_factory() as session:
+        assert (
+            session.get(ContextPageVersion, created.version_id).editing_revision
+            == before_revision
+        )
         assert (
             session.scalar(select(func.count()).select_from(ContextPageVersion))
             == before_versions

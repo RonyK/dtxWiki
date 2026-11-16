@@ -61,10 +61,10 @@ test("creates, reads, edits, and shows stale conflict in the browser", async ({
   await page.getByRole("button", { name: "Save draft" }).click();
   const created = await createResponse;
   expect(created.ok()).toBeTruthy();
-  const createdPage = (await created.json()).data as { id: string; slug: string };
+  const createdPage = (await created.json()).data as { id: string; slug: string; version_id: string };
 
   await expect(page).toHaveURL(
-    new RegExp(`/workspaces/${workspace.id}/context/pages/${createdPage.id}/edit$`),
+    new RegExp(`/workspaces/${workspace.id}/context/pages/${createdPage.id}/edit\\?version_id=${createdPage.version_id}$`),
   );
   await expect(page.getByRole("button", { name: "Publish" })).toBeEnabled();
   const publishResponse = page.waitForResponse(
@@ -108,27 +108,46 @@ test("creates, reads, edits, and shows stale conflict in the browser", async ({
   await expect(article.getByText("rendered")).toBeVisible();
   await expect(page).toHaveTitle("Hello PoC - dtxWiki");
 
+  // Opening the editor reads the published version; the first save starts
+  // the shared draft that a second writer can then change underneath it.
   await page.goto(workspaceUrl(workspace.id, `context/pages/${createdPage.id}/edit`));
   await expect(page.getByLabel("Title")).toHaveValue("Hello PoC");
   await expect(page).toHaveTitle("dtxWiki");
+  const firstSave = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/context/pages/${createdPage.id}/autosave`
+      && response.request().method() === "POST",
+  );
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.insertText("# Browser draft");
+  await page.getByRole("button", { name: "Save draft" }).click();
+  const firstSaveResponse = await firstSave;
+  expect(firstSaveResponse.ok(), await firstSaveResponse.text()).toBeTruthy();
+  const editing = (await firstSaveResponse.json()).data;
+  expect(editing.version_status).toBe("draft");
 
   const readResponse = await request.get(
     `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${createdPage.id}`,
   );
   const current = (await readResponse.json()).data;
 
-  await request.patch(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${createdPage.id}`,
+  const remoteSave = await request.post(
+    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${createdPage.id}/autosave`,
     {
       data: {
         title: "Hello PoC",
         body_md: "# Server update",
-        base_version_id: current.version_id,
-        base_content_hash: current.content_hash,
+        version_id: editing.version_id,
+        expected_editing_revision: editing.editing_revision,
+        idempotency_key: `remote-${Date.now()}`,
+        base_version_id: editing.version_id,
+        base_content_hash: editing.content_hash,
       },
     },
   );
 
+  expect(remoteSave.ok(), await remoteSave.text()).toBeTruthy();
+  expect(current.version_id).not.toBe(editing.version_id);
   await page.locator(".cm-content").click();
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.insertText("# Browser stale update");

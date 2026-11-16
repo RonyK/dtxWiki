@@ -80,7 +80,7 @@ def test_block_map_audit_counts_drifted_maps_by_status_and_writes_nothing(
                     page.id,
                     workspace_id,
                     number=2,
-                    status="editing",
+                    status="closed",
                     body=body,
                     block_map=drifted,
                 ),
@@ -100,13 +100,13 @@ def test_block_map_audit_counts_drifted_maps_by_status_and_writes_nothing(
     )
 
     assert result.exit_code == 0, result.output
-    assert "status=editing total=1 drifted=1 missing=0" in result.stdout
+    assert "status=closed total=1 drifted=1 missing=0" in result.stdout
     assert "status=draft total=1 drifted=0 missing=1" in result.stdout
     assert "status=superseded_snapshot total=1 drifted=0 missing=0" in result.stdout
     with session_factory() as session:
         stored = session.scalars(
             select(ContextPageVersion.block_map).where(
-                ContextPageVersion.version_status == "editing"
+                ContextPageVersion.version_status == "closed"
             )
         ).one()
     assert stored == drifted

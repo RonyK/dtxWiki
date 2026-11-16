@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -22,12 +22,12 @@ from backend.schemas.page import (
     PAGE_LIST_CURSOR_PATTERN,
     PAGE_LIST_LIMIT_MAX,
     BeginContextEditCommand,
+    ContextPageCreateRequest,
     DiscardContextEditCommand,
     DiscardContextEditResult,
     DraftReviewReason,
     ListMyContextEditsResult,
     PagePayload,
-    PrivateContextPageCreateRequest,
     SubmitContextEditCommand,
     UpdateContextEditRequest,
 )
@@ -52,8 +52,8 @@ class CiteInput(ReferenceCommand):
 
 
 class CiteResult(ReferenceCommandResult):
-    # Keep the MCP result schema and private-edit behavior unchanged.
-    publication_state: Literal["editing"] = "editing"
+    # References belong to the shared mutable draft.
+    publication_state: Literal["draft"] = "draft"
 
 
 class CiteToolOutput(BaseModel):
@@ -85,19 +85,10 @@ class SubmitFeedbackToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-# P8.6: the Context-editing-state-machine tool surface
-# (create_context_page/begin_context_edit/update_context_edit/
-# submit_context_edit_for_review/discard_context_edit/patch_context_edit/
-# list_my_context_edits), the current target surface alongside
-# submit_revision_for_review (a distinct 8th tool, kept). write_draft/
-# update_draft/patch_draft were deregistered as MCP tools; their backing
-# ContextWriteService methods remain, used internally by branch
-# reconciliation and changes-requested review resubmission. Each wraps the
-# matching PageService P8 command 1:1 with Browser REST
-# (backend/api/context_pages.py).
+# Context draft tools share their commands with browser REST.
 
 
-class CreateContextPageInput(PrivateContextPageCreateRequest):
+class CreateContextPageInput(ContextPageCreateRequest):
     workspace_id: UUID
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
@@ -167,6 +158,11 @@ class BeginContextEditInput(BeginContextEditCommand):
 class BeginContextEditResult(PagePayload):
     """The complete open edit, with the MCP page identity spelling."""
 
+    # The shared REST model keeps these fields until its UI cleanup.
+    # They are absent from the current MCP contract.
+    alternative_draft_id: ClassVar[None] = None
+    preserved_as_alternative: ClassVar[bool] = False
+    superseded_review_count: ClassVar[int] = 0
     id: UUID = Field(alias="page_id")
     replayed: bool = False
 
@@ -257,13 +253,10 @@ class ListMyContextEditsToolOutput(BaseModel):
 # public JSON schema "description", and citing source paths there trips
 # tests/static/test_public_schema_path_leak.py.
 class PatchContextEditInput(BaseModel):
-    """Apply typed block/section edit operations to the caller's own open
-    'editing' row in place.
+    """Apply typed block/section edit operations to the named shared draft.
 
-    `operations` is the same typed union of block/section edit operations
-    minus `resolve_conflict` (reconciliation-only, out of scope here: this
-    tool always targets the row's own current body, never a shared
-    reconciled head).
+    `operations` is the typed union of block/section edit operations; this
+    tool always targets the row's own current body.
     """
 
     workspace_id: UUID
@@ -303,7 +296,7 @@ class PatchContextEditInput(BaseModel):
         ge=1,
         description=(
             "The editing_revision from your last create/begin/update/patch "
-            "response (or read_structure_map with version='my_edit')."
+            "response (or read_structure_map with that version_id)."
         ),
     )
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD

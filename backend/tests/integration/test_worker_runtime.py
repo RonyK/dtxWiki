@@ -123,7 +123,6 @@ def test_worker_registry_roster_is_explicit():
         "credential_replica_reconcile",
         "media_blob_gc",
         "context_repository_maintenance",
-        "context_reconciliation_reminder",
         "email_delivery",
     }
 

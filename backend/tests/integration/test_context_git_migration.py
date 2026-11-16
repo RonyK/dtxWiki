@@ -16,10 +16,9 @@ from sqlalchemy.orm import Session
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
 from backend.context_versions.domain import ContentPayload
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPage
 from backend.models.review import ReviewItem
 from backend.scripts.seed_dev import seed_default_workspace
-from backend.services.context_lifecycle import is_publishable_draft
 from backend.tests.integration.test_context_review_publish import _seed_review
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 from backend.utils.block_identity import (
@@ -268,11 +267,6 @@ def test_context_git_snapshot_migration_traversal(tmp_path, dialect):
                     assert "metadata.json" not in blob
         with Session(engine) as session:
             assert session.get(ReviewItem, pending_id).status == "pending"
-            assert is_publishable_draft(
-                session,
-                session.get(ContextPage, page_id),
-                session.get(ContextPageVersion, editing_id),
-            )
 
         runtime = GitSnapshotStore(tmp_path / "runtime-repositories")
         runtime_historical = runtime.commit(

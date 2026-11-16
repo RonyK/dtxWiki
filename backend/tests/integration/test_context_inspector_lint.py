@@ -1,8 +1,8 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from backend.models.base import Base
-from backend.models.context import ContextPageVersion
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.scripts.seed_dev import seed_default_workspace
@@ -48,6 +48,34 @@ def _write(session_factory, *, slug, body):
     )
 
 
+def _inspector(
+    read_service,
+    *,
+    session,
+    workspace_id,
+    page_id,
+    actor,
+    version_id=None,
+    include_warnings=True,
+):
+    page = session.get(ContextPage, page_id)
+    version = session.get(
+        ContextPageVersion, version_id or page.current_published_version_id
+    )
+    if version is None:
+        version = session.scalar(
+            select(ContextPageVersion).where(ContextPageVersion.page_id == page_id)
+        )
+    return read_service.context_page_inspector(
+        session,
+        workspace_id,
+        page,
+        version,
+        actor,
+        section="summary" if include_warnings else "backlinks",
+    )
+
+
 def test_context_detail_surfaces_format_lint_warnings(tmp_path):
     # E-T3: a format issue (unclosed code fence) shows up as a non-blocking
     # warning on the page detail, which the Context inspector renders.
@@ -58,14 +86,15 @@ def test_context_detail_surfaces_format_lint_warnings(tmp_path):
     page = _write(session_factory, slug="bad-fence", body=UNCLOSED_FENCE_BODY)
     with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
-        detail = read_service.read_context_page(
+        detail = _inspector(
+            read_service,
             session=session,
             workspace_id=workspace.id,
             page_id=page.id,
             actor=_editor(workspace.id),
         )
-        assert detail.warnings
-        assert any("fence" in w.lower() for w in detail.warnings)
+        assert detail["warnings"]
+        assert any("fence" in w.lower() for w in detail["warnings"])
 
 
 def test_inspector_warnings_are_version_aware_and_skippable(tmp_path):
@@ -92,23 +121,24 @@ def test_inspector_warnings_are_version_aware_and_skippable(tmp_path):
             f"/context/pages/{page.id})\n\n" + UNCLOSED_FENCE_BODY
         )
         stored.content_hash = content_hash(stored.body_md)
-        explicit = read_service.read_context_page(
+        explicit = _inspector(
+            read_service,
             session=session,
             workspace_id=workspace.id,
             page_id=page.id,
             version_id=page.version_id,
             actor=_editor(workspace.id),
         )
-        assert any("fence" in w.lower() for w in explicit.warnings)
-        assert "Use the permanent document link." in explicit.warnings
-        skipped = read_service.read_context_page(
+        assert any("fence" in w.lower() for w in explicit["warnings"])
+        skipped = _inspector(
+            read_service,
             session=session,
             workspace_id=workspace.id,
             page_id=page.id,
             include_warnings=False,
             actor=_editor(workspace.id),
         )
-        assert skipped.warnings == []
+        assert skipped["warnings"] == []
 
 
 def test_clean_context_detail_has_no_format_warnings(tmp_path):
@@ -119,13 +149,14 @@ def test_clean_context_detail_has_no_format_warnings(tmp_path):
     page = _write(session_factory, slug="clean", body=CLEAN_BODY)
     with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
-        detail = read_service.read_context_page(
+        detail = _inspector(
+            read_service,
             session=session,
             workspace_id=workspace.id,
             page_id=page.id,
             actor=_editor(workspace.id),
         )
-        assert detail.warnings == []
+        assert detail["warnings"] == []
 
 
 def test_disabling_a_format_rule_suppresses_its_inspector_warning(tmp_path):
@@ -138,7 +169,8 @@ def test_disabling_a_format_rule_suppresses_its_inspector_warning(tmp_path):
         workspace = session.get(Workspace, workspace_id)
         workspace.lint_policy = {"md.code_fence_balance": False}
     with session_factory.begin() as session:
-        detail = read_service.read_context_page(
+        detail = _inspector(
+            read_service,
             session=session,
             workspace_id=workspace_id,
             page_id=page.id,
@@ -147,4 +179,4 @@ def test_disabling_a_format_rule_suppresses_its_inspector_warning(tmp_path):
         # The fence rule is a required publishing safeguard and refuses to be
         # switched off: hiding the finding while saves are still held by the same
         # check would read as a bug, not a policy.
-        assert any("fence" in w.lower() for w in detail.warnings)
+        assert any("fence" in w.lower() for w in detail["warnings"])

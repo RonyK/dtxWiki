@@ -43,8 +43,8 @@ CONTEXT_PAGE_TYPES = (
 CONTEXT_PAGE_LIFECYCLE_STATUSES = ("draft", "published", "archived")
 CONTEXT_PAGE_PUBLIC_EXPOSURE_SCOPES = ("indexed_web", "unlisted_web")
 CONTEXT_PAGE_VERSION_STATUSES = (
-    "editing",
     "draft",
+    "closed",
     "published_snapshot",
     "superseded_snapshot",
     "discarded",
@@ -219,19 +219,6 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
             sqlite_where=text("version_status = 'published_snapshot'"),
             postgresql_where=text("version_status = 'published_snapshot'"),
         ),
-        # P2.2: at most one open (unsubmitted) editing session per
-        # page+author. `draft` (submitted, hash-locked, under review) and
-        # `published_snapshot` have no such limit -- several authors may each
-        # have a draft under review against the same published head at once.
-        Index(
-            "uq_cpv_current_editing_per_author",
-            "page_id",
-            "created_by_actor_kind",
-            "created_by_actor_id",
-            unique=True,
-            sqlite_where=text("version_status = 'editing'"),
-            postgresql_where=text("version_status = 'editing'"),
-        ),
         # Epic-3 D-3 final schema: workspace-scoped, not just page-scoped.
         ForeignKeyConstraint(
             ["workspace_id", "page_id"],
@@ -272,6 +259,9 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     parent_version_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
     )
+    page_metadata: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     version_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     _body_md: Mapped[str | None] = mapped_column("body_md", Text, nullable=True)
     commit_oid: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -304,13 +294,9 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         nullable=False,
         default="draft",
     )
-    # P2.4: bumped on every autosave while version_status == "editing", never
-    # reset, never itself creating a new version row. Covers body + title +
-    # slug + tags + aliases + private metadata + usage as one monotonic
-    # counter -- content_hash alone only covers the markdown body, so it
-    # cannot catch a stale client overwriting a metadata-only change with an
-    # otherwise-unchanged body (see docstring on the conflict check in
-    # backend/repositories/context_visibility.py).
+    # Every shared-draft save advances this counter without creating a row.
+    # It covers body, version metadata, parents and media usage; content_hash
+    # alone cannot detect a concurrent metadata-only change.
     editing_revision: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
     )
@@ -456,6 +442,46 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     @body_markdown.setter
     def body_markdown(self, value: str) -> None:
         self.body_md = value
+
+
+class ContextVersionParent(Base):
+    """Ordered additional parents; the first remains on the version row."""
+
+    __tablename__ = "context_version_parent"
+    __table_args__ = (
+        CheckConstraint("ordinal >= 1", name="context_version_parent_ordinal_check"),
+        CheckConstraint(
+            "version_id != parent_version_id", name="context_version_parent_self_check"
+        ),
+        UniqueConstraint(
+            "version_id", "parent_version_id", name="uq_context_version_parent_identity"
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "page_id", "version_id"],
+            [
+                "context_page_version.workspace_id",
+                "context_page_version.page_id",
+                "context_page_version.id",
+            ],
+            name="fk_context_version_parent_version_owner",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "page_id", "parent_version_id"],
+            [
+                "context_page_version.workspace_id",
+                "context_page_version.page_id",
+                "context_page_version.id",
+            ],
+            name="fk_context_version_parent_parent_owner",
+        ),
+    )
+
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    page_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    version_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
+    parent_version_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
 
 
 def _legacy_page_link_locator_key(context) -> str:

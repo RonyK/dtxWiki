@@ -253,9 +253,7 @@ export function AttachmentsSection({
       )
         return;
       // The usage_token this row was listed with. A 412 means somebody
-      // referenced or edited the asset in between; a 409 means it is still in
-      // use -- reachable even from a row that said can_delete, because that
-      // flag derives from viewer-MASKED usage.
+      // referenced or edited the asset in between; a 409 means it is in use.
       await (
         serverScope ? deleteAdminContextMediaAttachment : deletePageContextMedia
       )(
@@ -520,7 +518,7 @@ export function AttachmentsSection({
         <p className="field-hint">
           {t("attachments.allScopeNotice", {
             defaultValue:
-              "Attachments on pages you can read, excluding private uploads in someone else's unsaved draft.",
+              "Attachments on pages you can read, including uploads not inserted into the body.",
           })}
         </p>
       ) : null}
@@ -965,20 +963,14 @@ export function AttachmentsSection({
 
 type Translate = ReturnType<typeof useTranslation>["t"];
 
-// An unused upload's BYTES stay private to whoever uploaded it: it was
-// never published as content, so the content route answers 404 to everyone
-// else even while the row itself is listed (ResolveContent.version says so
-// in as many words). Asking anyway paints the browser's broken-image glyph,
-// which reads as "this file is corrupt" rather than "this preview is not
-// yours". A non-image has no still to show either. The onError set is the
-// backstop for every other reason a fetch can fail.
+// The API supplies a content URL only for a readable version.
 function previewable(
   item: ContextMediaAttachment,
   unpreviewable: ReadonlySet<string>,
 ): boolean {
   if (item.kind !== "image") return false;
   if (!item.content_url || unpreviewable.has(attachmentKey(item))) return false;
-  return !item.is_orphan || item.is_mine;
+  return true;
 }
 
 function placeholderGlyph(item: ContextMediaAttachment): string {
@@ -991,7 +983,7 @@ function previewPlaceholderHint(item: ContextMediaAttachment, t: Translate) {
   if (item.kind === "image") {
     return t("attachments.previewPrivate", {
       defaultValue:
-        "No preview: an unused upload stays readable only by the person who uploaded it.",
+        "Preview unavailable for this version.",
     });
   }
   return t("attachments.previewNotAnImage", {

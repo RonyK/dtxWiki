@@ -253,7 +253,7 @@ def derive_artifact_links(
                 )
             )
     elif tool_name == "begin_context_edit":
-        # Opens or resumes the caller's own editing session -- no content
+        # Joins or starts a draft -- no content
         # changes yet, so this is closer to a read-like touch than a write.
         page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
         if page_id is not None:

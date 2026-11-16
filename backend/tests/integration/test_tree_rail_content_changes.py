@@ -51,7 +51,18 @@ def test_tree_visibility_does_not_load_context_bodies(
         actor_id=ACTOR_ID,
         actor_provenance="browser_session",
     )
+    editing = page_service.begin_context_edit(
+        page_id=published.id,
+        workspace_id=published.workspace_id,
+        actor_kind="human",
+        actor_id=ACTOR_ID,
+        actor_provenance="browser_session",
+        from_version_id=published.version_id,
+        idempotency_key="fixture-begin:test_tree_rail_content_changes.py:54",
+    )
     page_service.autosave_page(
+        version_id=editing.version_id,
+        expected_editing_revision=editing.editing_revision,
         page_id=published.id,
         workspace_id=published.workspace_id,
         title=published.title,
@@ -59,9 +70,9 @@ def test_tree_visibility_does_not_load_context_bodies(
         actor_kind="human",
         actor_id=ACTOR_ID,
         actor_provenance="browser_session",
-        base_version_id=published.version_id,
-        base_content_hash=published.content_hash,
-        session_version_id=published.version_id,
+        base_version_id=editing.version_id,
+        base_content_hash=editing.content_hash,
+        session_version_id=editing.version_id,
         idempotency_key="tree-body-budget",
     )
     statements = []
@@ -144,7 +155,18 @@ def test_context_publication_tracks_content_but_not_rename_or_autosave(
     published_time = clock["now"]
 
     clock["now"] += timedelta(days=1)
+    editing = page_service.begin_context_edit(
+        page_id=changed.id,
+        workspace_id=changed.workspace_id,
+        actor_kind="human",
+        actor_id=ACTOR_ID,
+        actor_provenance="browser_session",
+        from_version_id=changed.version_id,
+        idempotency_key="fixture-begin:test_tree_rail_content_changes.py:147",
+    )
     page_service.autosave_page(
+        version_id=editing.version_id,
+        expected_editing_revision=editing.editing_revision,
         page_id=original.id,
         workspace_id=original.workspace_id,
         title=changed.title,
@@ -152,9 +174,9 @@ def test_context_publication_tracks_content_but_not_rename_or_autosave(
         actor_kind="human",
         actor_id=ACTOR_ID,
         actor_provenance="browser_session",
-        base_version_id=changed.version_id,
-        base_content_hash=changed.content_hash,
-        session_version_id=changed.version_id,
+        base_version_id=editing.version_id,
+        base_content_hash=editing.content_hash,
+        session_version_id=editing.version_id,
         idempotency_key="content-event-autosave",
     )
     assert _content_time(session_factory, ContextPage, original.id) == published_time

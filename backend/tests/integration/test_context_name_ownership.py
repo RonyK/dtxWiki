@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from backend.api.deps import read_service_error_response
 from backend.models.context import (
     ContextPage,
+    ContextPageVersion,
     PageNameIndex,
 )
 from backend.models.tree import WorkspaceTreeNode
@@ -18,11 +19,33 @@ from backend.services.page_name_lookup import (
     PageNameAmbiguityError,
     unique_visible_page_name_match,
 )
-from backend.services.page_service import PageService, sync_page_projections
+from backend.services.page_service import PageService
+from backend.services.page_service import (
+    sync_page_projections as _sync_page_projections,
+)
 from backend.services.read_errors import PageNameOccupiedError
 from backend.spi.types import ActorContext
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
+
+
+def sync_page_projections(session, *, page):
+    # These tests edit the source fixture directly; update the selected
+    # version's metadata too, as the real writer does before projection.
+    version = (
+        session.get(ContextPageVersion, page.current_published_version_id)
+        if page.current_published_version_id
+        else None
+    )
+    if version is not None:
+        version.page_metadata = {
+            **(version.page_metadata or {}),
+            "title": page.title,
+            "page_type": page.page_type,
+            "tags": list(page.tags or []),
+            "aliases": list(page.aliases or []),
+        }
+    _sync_page_projections(session, page=page)
 
 
 def _workspace_id(session) -> UUID:
@@ -226,9 +249,7 @@ def test_ambiguous_lookup_raises_named_error(session_factory):
 
 def test_duplicate_normalized_titles_are_reachable_by_id_and_slug(session_factory):
     page_service = PageService(session_factory)
-    first = _write_page(
-        page_service, slug="budget-plan", title="Budget Plan"
-    )
+    first = _write_page(page_service, slug="budget-plan", title="Budget Plan")
     second = _write_page(
         page_service, slug="budget-plan-2", title="Ｂｕｄｇｅｔ　Ｐｌａｎ"
     )
@@ -319,7 +340,11 @@ def test_mcp_write_by_old_title_creates_a_new_page(session_factory):
         workspace_id = _workspace_id(session)
         before = session.scalar(select(func.count()).select_from(ContextPage))
         result = ContextWriteService().write_draft(
-            session, workspace_id, _draft_request("Old Title"), "mcp", ACTOR_ID,
+            session,
+            workspace_id,
+            _draft_request("Old Title"),
+            "mcp",
+            ACTOR_ID,
             actor_role="owner",
         )
         after = session.scalar(select(func.count()).select_from(ContextPage))
@@ -337,17 +362,26 @@ def test_mcp_write_by_alias_updates_page_and_unknown_name_creates(session_factor
         workspace_id = _workspace_id(session)
         before = session.scalar(select(func.count()).select_from(ContextPage))
         matched = ContextWriteService().write_draft(
-            session, workspace_id, _draft_request("New Title"), "mcp", ACTOR_ID,
+            session,
+            workspace_id,
+            _draft_request("New Title"),
+            "mcp",
+            ACTOR_ID,
             actor_role="owner",
         )
         created_new = ContextWriteService().write_draft(
-            session, workspace_id, _draft_request("Unknown Title"), "mcp", ACTOR_ID,
+            session,
+            workspace_id,
+            _draft_request("Unknown Title"),
+            "mcp",
+            ACTOR_ID,
             actor_role="owner",
         )
         after = session.scalar(select(func.count()).select_from(ContextPage))
     assert matched.page_id == created.id
     assert created_new.page_id != created.id
     assert after == before + 1
+
 
 def test_write_draft_refuses_name_occupied_by_unreadable_draft(session_factory):
     service = ContextWriteService()

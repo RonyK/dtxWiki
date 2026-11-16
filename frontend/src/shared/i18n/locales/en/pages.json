@@ -67,10 +67,6 @@
         "label": "State review required",
         "description": "Operator repair is required"
       },
-      "current_editing": {
-        "label": "Currently editing",
-        "description": "A private, unsubmitted edit in progress. Visible only to its author until submitted for review."
-      },
       "current_draft": {
         "label": "Current draft",
         "description": "The current edit is not published yet. Readers still see the published version."
@@ -94,6 +90,10 @@
       "superseded_draft": {
         "label": "Superseded draft",
         "description": "Replaced by a newer version."
+      },
+      "closed": {
+        "label": "Closed",
+        "description": "This draft ended and is preserved as a commit."
       }
     }
   },
@@ -432,7 +432,11 @@
     "relatedLinkCopyAria": "Copy the link text",
     "relatedLinkSelected": "The text is selected. Press Ctrl+C to copy it.",
     "relatedLinkCopyUnavailable": "Copying isn't available here. Select the text and copy it.",
-    "relatedLinkDismiss": "Dismiss"
+    "relatedLinkDismiss": "Dismiss",
+    "mergePreviewTitle": "Review merged page",
+    "mergePreviewDescription": "The published page changed. Review the combined result before publishing.",
+    "mergePreviewPublish": "Publish merged page",
+    "mergeDestinationUnavailable": "Destination unavailable"
   },
   "blocks": {
     "groups": {

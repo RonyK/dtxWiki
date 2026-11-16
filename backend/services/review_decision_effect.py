@@ -63,7 +63,7 @@ _TRACKED: dict[type, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     ),
     ContextPageVersion: (
         "context_page_version",
-        ("version_status", "graph_status", "commit_oid", "content_byte_size"),
+        ("version_status",),
         (),
     ),
     ReviewItem: ("review_item", ("status", "claimed_by", "claimed_at"), ()),
@@ -93,7 +93,10 @@ _UUID_COLUMNS = {
     "claimed_by",
 }
 _DATETIME_COLUMNS = {
-    "content_changed_at", "resolved_at", "lease_expires_at", "claimed_at",
+    "content_changed_at",
+    "resolved_at",
+    "lease_expires_at",
+    "claimed_at",
 }
 
 
@@ -149,8 +152,7 @@ class DecisionEffectRecorder:
             if self._in_scope(obj):
                 table = _TRACKED[type(obj)][0]
                 self._created.setdefault(table, set()).add(obj.id)
-                if isinstance(obj, ChangeOperation):
-                    self._objects[(type(obj), obj.id)] = obj
+                self._objects[(type(obj), obj.id)] = obj
         for obj in session.dirty:
             model = type(obj)
             if not self._in_scope(obj) or obj.id in self._created.get(
@@ -175,9 +177,17 @@ class DecisionEffectRecorder:
     def effect(self, **extra: object) -> dict | None:
         """The changed columns as ``{table: {id: {column: [before, after]}}}``."""
 
-        if not self.complete or self._created.get("context_page_version"):
+        if not self.complete:
             return None
         rows: dict[str, dict[str, dict[str, list[object]]]] = {}
+        # A newly materialized merge commit remains immutable after undo.
+        # Record only its publication status so the ref can move away from it.
+        for row_id in self._created.get("context_page_version", ()):
+            version = self._objects[(ContextPageVersion, row_id)]
+            if version.version_status == "published_snapshot":
+                rows.setdefault("context_page_version", {})[str(row_id)] = {
+                    "version_status": ["superseded_snapshot", "published_snapshot"]
+                }
         for row_id in self._created.get("change_operation", ()):
             patch = self._objects[(ChangeOperation, row_id)]
             rows.setdefault("change_operation", {})[str(row_id)] = {
@@ -187,7 +197,15 @@ class DecisionEffectRecorder:
         for (model, row_id), before in self._before.items():
             obj = self._objects[(model, row_id)]
             changed = {
-                column: [_encode(value), _encode(getattr(obj, column))]
+                column: [
+                    "closed"
+                    if isinstance(obj, ContextPageVersion)
+                    and column == "version_status"
+                    and value == "draft"
+                    and obj.commit_oid
+                    else _encode(value),
+                    _encode(getattr(obj, column)),
+                ]
                 for column, value in before.items()
                 if _encode(value) != _encode(getattr(obj, column))
             }
@@ -205,8 +223,11 @@ class DecisionEffectRecorder:
             "created": {
                 table: sorted(str(row_id) for row_id in ids)
                 for table, ids in self._created.items()
-                if table in {
-                    "review_item", "lint_finding", "client_delegated_task",
+                if table
+                in {
+                    "review_item",
+                    "lint_finding",
+                    "client_delegated_task",
                     "change_operation",
                 }
             },
@@ -254,7 +275,7 @@ def effect_still_current(
     """Whether every column the decision changed still holds what it left.
 
     A newer version of the page means someone wrote on top of the result,
-    even where no tracked column moved (a fresh draft, a private edit).
+    even where no tracked column moved (a fresh draft).
     """
 
     loaded = _load_rows(session, workspace_id, effect)
@@ -332,18 +353,38 @@ def restore_effect(
                 session.delete(obj)
                 continue
             for column, (before, after) in effect["rows"][table][row_id].items():
+                if isinstance(obj, ContextPageVersion) and column in {
+                    "commit_oid",
+                    "content_byte_size",
+                    "graph_status",
+                }:
+                    continue
                 moved = _encode(getattr(obj, column)) != after
                 if column in _ADVISORY[table] and moved:
                     continue
                 setattr(obj, column, _decode(column, before))
                 restored.setdefault(table, set()).add(column)
-            if isinstance(obj, ContextPageVersion) and obj.version_status not in {
-                "published_snapshot", "superseded_snapshot"
-            }:
-                # Older decision effects did not record these fields. A
-                # restored working version never retains a snapshot mapping.
-                obj.commit_oid = None
-                obj.content_byte_size = None
+            if isinstance(obj, ContextPageVersion) and obj.commit_oid:
+                # Old effect payloads may include snapshot fields; immutable
+                # Git mappings are never removed by a decision undo. Effects
+                # recorded before the draft conversion may still name the
+                # retired "editing" status.
+                if obj.version_status in {"draft", "editing"}:
+                    obj.version_status = "closed"
+                if obj.version_status == "closed":
+                    from backend.services.context_version_storage import (
+                        freeze_context_version,
+                    )
+
+                    page = get_in_workspace(
+                        session,
+                        ContextPage,
+                        workspace_id=workspace_id,
+                        resource_id=obj.page_id,
+                    )
+                    if page is None:
+                        raise ValueError("decision effect version has no page")
+                    freeze_context_version(session, page, obj)
         session.flush()
     # Maintenance the publication queued for the decided page answers a
     # publication that no longer stands.

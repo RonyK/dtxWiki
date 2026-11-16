@@ -954,13 +954,15 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
             actor_type="agent",
             created_by_actor_kind="agent",
             created_by_actor_id="chat-writer",
-            version_status="draft",
-            graph_status="discarded",
+            version_status="closed",
             change_set_id=rejected_change_set.id,
             created_at=t0 + timedelta(minutes=1, seconds=30),
         )
         session.add(rejected)
         session.flush()
+        from backend.services.context_version_storage import freeze_context_version
+
+        freeze_context_version(session, seed, rejected)
         chats = {}
         for name, client_type in (("Claude Code", "claude-code"), ("Codex", "codex")):
             client = MCPClient(
@@ -1191,7 +1193,7 @@ def test_each_chat_is_one_node_with_one_relation_per_document(session_factory):
     }
     assert (version_status[draft_id], version_status[rejected_id]) == (
         "current_draft",
-        "discarded_draft",
+        "closed",
     )
     # Where each review stands rides beside the lifecycle state.
     review_status = {

@@ -30,7 +30,6 @@ EXPECTED_TOOLS = {
     "read_structure_map",
     "search",
     "submit_feedback",
-    "submit_revision_for_review",
     "upload_image",
     "wiki_maintenance",
     "write_agent_page_draft",

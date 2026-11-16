@@ -37,6 +37,7 @@ class ContentChunk(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
             "document_kind",
             "document_id",
             "content_scope",
+            "source_version_id",
             "ordinal",
             name="content_chunk_document_scope_ordinal_uq",
         ),

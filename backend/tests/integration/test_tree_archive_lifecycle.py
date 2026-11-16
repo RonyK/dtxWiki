@@ -1,5 +1,7 @@
 """B-8: revive-upsert + archive lifecycle cascade (Sprint-3 C1-T4, fixes A-3)."""
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import select
 
@@ -10,14 +12,13 @@ from backend.models.audit import AuditEvent
 from backend.models.base import Base
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.chunk import ContentChunk
-from backend.models.context import ContextPage, ContextPageVersion, PageNameIndex
+from backend.models.context import ContextPage, PageNameIndex
 from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.context_write import (
     ReviewDecisionRequest,
-    UpdateDraftRequest,
     WriteDraftRequest,
 )
 from backend.schemas.tree import TreeFolderCreateRequest
@@ -79,6 +80,38 @@ def _write(page_service: PageService, slug: str, title: str, base=None):
         actor_id="tester",
         **kwargs,
         actor_provenance="browser_session",
+    )
+
+
+def _submitted_draft(page_service, workspace_id, page_id, body, reason):
+    """Open a draft from the published version, save it and request review."""
+    draft = page_service.begin_context_edit(
+        page_id, workspace_id, "human", REVIEWER_ID, "browser_session", str(uuid4())
+    )
+    saved = page_service.autosave_page(
+        page_id=page_id,
+        workspace_id=workspace_id,
+        title=None,
+        body_md=body,
+        actor_kind="human",
+        actor_id=REVIEWER_ID,
+        base_version_id=draft.version_id,
+        base_content_hash=draft.content_hash,
+        actor_provenance="browser_session",
+        idempotency_key=str(uuid4()),
+        expected_editing_revision=draft.editing_revision,
+        version_id=draft.version_id,
+    )
+    return page_service.submit_context_edit_for_review(
+        page_id=page_id,
+        version_id=saved.version_id,
+        workspace_id=workspace_id,
+        actor_kind="human",
+        actor_id=REVIEWER_ID,
+        actor_provenance="browser_session",
+        expected_editing_revision=saved.editing_revision,
+        idempotency_key=str(uuid4()),
+        reason=reason,
     )
 
 
@@ -344,7 +377,6 @@ def test_archive_keeps_pending_context_review_readable_and_actionable(
         assert session.get(ChangeSet, original_change_set_id).status == "applied"
         assert page.lifecycle_status == "published"
         assert page.current_published_version_id == draft_version_id
-        assert page.latest_draft_version_id is None
         assert node.visibility_status == "visible"
 
 
@@ -381,21 +413,15 @@ def test_rejecting_archived_page_draft_keeps_page_archived_and_unindexed(
             actor_provenance="browser_session",
         )
         page = session.get(ContextPage, created.page_id)
-        published_version = session.get(ContextPageVersion, page.current_version_id)
-        draft = write.update_draft(
-            session=session,
-            workspace_id=workspace_id,
-            request=UpdateDraftRequest(
-                page_id=created.page_id,
-                base_version_id=published_version.id,
-                base_content_hash=published_version.content_hash,
-                update_mode="full_rewrite",
-                body_markdown="# Candidate\n\nDraft body.",
-                reason="candidate before archive",
-            ),
-            actor_kind="human",
-            actor_id=REVIEWER_ID,
-        )
+        published_version_id = page.current_version_id
+    draft = _submitted_draft(
+        PageService(session_factory),
+        workspace_id,
+        created.page_id,
+        "# Candidate\n\nDraft body.",
+        "candidate before archive",
+    )
+    with session_factory.begin() as session:
         DbNativeIndexer(
             embedder=DeterministicEmbedding(dim=128),
             vector_store=BruteForceVectorStore(),
@@ -412,7 +438,6 @@ def test_rejecting_archived_page_draft_keeps_page_archived_and_unindexed(
             actor_id=REVIEWER_ID,
         )
         page_id = created.page_id
-        published_version_id = published_version.id
         review_id = draft.review_item_id
 
     with session_factory.begin() as session:
@@ -432,7 +457,6 @@ def test_rejecting_archived_page_draft_keeps_page_archived_and_unindexed(
         assert page.lifecycle_status == "archived"
         assert page.current_version_id == published_version_id
         assert page.current_published_version_id == published_version_id
-        assert page.latest_draft_version_id is None
         assert node.visibility_status == "archived"
         assert (
             session.scalars(
@@ -486,27 +510,15 @@ def test_review_approval_refreshes_page_archived_after_stale_identity_load(tmp_p
                 actor_role="owner",
                 actor_provenance="browser_session",
             )
-            page = session.get(ContextPage, created.page_id)
-            published_version = session.get(
-                ContextPageVersion,
-                page.current_version_id,
-            )
-            draft = write.update_draft(
-                session=session,
-                workspace_id=workspace_id,
-                request=UpdateDraftRequest(
-                    page_id=page.id,
-                    base_version_id=published_version.id,
-                    base_content_hash=published_version.content_hash,
-                    update_mode="full_rewrite",
-                    body_markdown="# Candidate\n\nPublish after archive.",
-                    reason="candidate",
-                ),
-                actor_kind="human",
-                actor_id=REVIEWER_ID,
-            )
-            page_id = page.id
-            review_id = draft.review_item_id
+            page_id = created.page_id
+        draft = _submitted_draft(
+            PageService(session_factory),
+            workspace_id,
+            page_id,
+            "# Candidate\n\nPublish after archive.",
+            "candidate",
+        )
+        review_id = draft.review_item_id
 
         with session_factory() as stale_session:
             stale_page = stale_session.get(ContextPage, page_id)
@@ -539,7 +551,7 @@ def test_review_approval_refreshes_page_archived_after_stale_identity_load(tmp_p
             page = session.get(ContextPage, page_id)
             node = _primary_node(session, page_id)
             assert page.lifecycle_status == "published"
-            assert page.current_published_version_id == draft.draft_version_id
+            assert page.current_published_version_id == draft.version_id
             assert node.visibility_status == "visible"
     finally:
         engine.dispose()

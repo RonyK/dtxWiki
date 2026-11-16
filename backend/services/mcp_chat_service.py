@@ -119,8 +119,8 @@ ERROR_STATUSES = {"failed", "rejected_by_policy", "conflict"}
 PRESENTATION_ELIGIBLE_STATUSES = frozenset(
     {"accepted", "succeeded", "partial", "needs_review"}
 )
-# The P8.6 Context editing commands. Each one creates, changes, submits or
-# closes the caller's own editing session, so each counts as a write.
+# The Context editing commands. Each one creates, changes, submits or closes
+# a draft, so each counts as a write.
 CONTEXT_EDIT_TOOLS = frozenset(
     {
         "create_context_page",
@@ -1358,6 +1358,34 @@ class McpChatService:
             session, workspace_id=chat.workspace_id, chat_session_id=chat.id
         )
         gate = _ReaderGate(self, session, chat.workspace_id, actor)
+        # A trace names the exact versions it read or edited. Closed commits
+        # remain readable even without a current draft or published head. Prove
+        # each version's access before resolving its page-only artifact.
+        from backend.services.mcp_read_projection import validate_read_projection
+
+        version_ids: set[UUID] = set()
+        for row in rows:
+            if (version_id := _edited_version_id(row)) is not None:
+                version_ids.add(version_id)
+            version_ids.update(
+                target_id
+                for kind, target_id in _input_target_refs(
+                    row.tool_name, row.input_summary
+                )
+                if kind == "context_version"
+            )
+            detail = row.result_detail if isinstance(row.result_detail, dict) else {}
+            read = validate_read_projection(detail.get("read_projection"))
+            if read is not None and read["resource_kind"] == "context_page":
+                version_ids.add(UUID(read["version_id"]))
+        gate.prime_context(
+            (
+                resource_id
+                for _, _, resource_kind, resource_id in link_rows
+                if resource_kind == McpChatArtifactKind.CONTEXT_PAGE.value
+            ),
+            version_ids,
+        )
         verbs_by_tool_call: dict[UUID, set[str]] = {}
         artifacts_by_tool_call: dict[UUID, list[McpChatTimelineArtifact]] = {}
         headline_artifact: dict[UUID, tuple[str, str | None, str]] = {}
@@ -1894,8 +1922,8 @@ class _ReaderGate:
         """The Context version, if the reader may read both it and its page.
 
         A page can be public while one of its versions is not readable by this
-        actor (an unpublished draft for a viewer, or another author's discarded
-        work), so a page-level answer is not enough for anything a call wrote
+        actor (an unpublished draft for a viewer), so a page-level answer is
+        not enough for anything a call wrote
         into a specific version.
         """
 
@@ -1912,14 +1940,23 @@ class _ReaderGate:
         return self._versions[version_id]
 
     def _version_visible(self, version: ContextPageVersion | None) -> bool:
-        return (
-            version is not None
-            and (self.actor is None or context_version_is_visible(version, self.actor))
-            and self.title_and_path(
-                McpChatArtifactKind.CONTEXT_PAGE.value, version.page_id
-            )[0]
-            is not None
-        )
+        if version is None or (
+            self.actor is not None
+            and not context_version_is_visible(version, self.actor)
+        ):
+            return False
+        key = (McpChatArtifactKind.CONTEXT_PAGE.value, version.page_id)
+        if self.title_and_path(*key)[0] is None:
+            page = get_in_workspace(
+                self.session,
+                ContextPage,
+                workspace_id=self.workspace_id,
+                resource_id=version.page_id,
+            )
+            self._titles[key] = _context_page_title_and_path(
+                page, self.actor, self.workspace_id, version=version
+            )
+        return self._titles[key][0] is not None
 
     def prime_context(
         self, page_ids: Iterable[UUID], version_ids: Iterable[UUID]
@@ -1950,6 +1987,10 @@ class _ReaderGate:
                     )
                 )
             )
+        readable_versions_by_page: dict[UUID, ContextPageVersion] = {}
+        for version in versions.values():
+            if self.actor is None or context_version_is_visible(version, self.actor):
+                readable_versions_by_page.setdefault(version.page_id, version)
         wanted_pages = [
             page_id
             for page_id in dict.fromkeys(
@@ -1976,7 +2017,10 @@ class _ReaderGate:
             }
             for page_id in chunk:
                 self._titles[(page_kind, page_id)] = _context_page_title_and_path(
-                    pages.get(page_id), self.actor, self.workspace_id
+                    pages.get(page_id),
+                    self.actor,
+                    self.workspace_id,
+                    version=readable_versions_by_page.get(page_id),
                 )
         for version_id in wanted_versions:
             version = versions.get(version_id)
@@ -2062,8 +2106,9 @@ class _ReaderGate:
     def call_content_visible(self, row: MCPToolCall, chat: McpChatSession) -> bool:
         """Whether the reader may see what a context-edit call wrote.
 
-        A page can be visible while the edit went into its author's private
-        editing row, so this is decided by the version the call wrote into.
+        A page can be visible while the edit went into a version this reader
+        cannot see (a draft without draft access), so this is decided by the
+        version the call wrote into.
         When capture did not record that version (older calls, and a failed
         whole-body update, which names none), only the caller -- the chat's
         owner -- may see the content.
@@ -2215,7 +2260,7 @@ class _ReaderGate:
         self, version_id: UUID, *, open_only: bool
     ) -> McpChatSessionDiff | None:
         version = self.visible_version(version_id)
-        if version is None or (open_only and version.version_status != "editing"):
+        if version is None or (open_only and version.version_status != "draft"):
             return None
         if version.parent_version_id is None:
             return McpChatSessionDiff(
@@ -2239,6 +2284,7 @@ def _context_page_title_and_path(
     workspace_id: UUID,
     *,
     shared_only: bool = False,
+    version: ContextPageVersion | None = None,
 ) -> tuple[str | None, str | None]:
     """A Context page's label and route, if ``actor`` may see the page.
 
@@ -2251,7 +2297,17 @@ def _context_page_title_and_path(
     if actor is not None and not context_page_visible(
         page, actor, workspace_id=workspace_id
     ):
-        return None, None
+        # Exact history access does not depend on a current head. A plain
+        # page reference still uses the ordinary default visibility above.
+        if (
+            page.workspace_id != workspace_id
+            or page.lifecycle_status == "archived"
+            or version is None
+            or version.workspace_id != workspace_id
+            or version.page_id != page.id
+            or not context_version_is_visible(version, actor)
+        ):
+            return None, None
     if shared_only and _discarded_only_page(page):
         return None, None
     return page.title, context_page_url(workspace_id, page.id)
@@ -2512,7 +2568,7 @@ def _visible_call_item(
         input_summary = _version_hidden_input(row.input_summary)
         receipt = _version_hidden_receipt(_stored_receipt(row))
         # Success messages are generic today; anything else could quote the
-        # private edit, so only a bare status echo survives.
+        # hidden version, so only a bare status echo survives.
         result_summary = (
             row.result_summary
             if isinstance(row.result_summary, str)

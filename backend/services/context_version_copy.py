@@ -12,6 +12,7 @@ from backend.models.context import (
     ContextCitation,
     ContextClaim,
     ContextPageVersion,
+    PageLink,
 )
 from backend.repositories.workspace_scoped import select_in_workspace
 
@@ -80,6 +81,33 @@ def copy_context_version_references(
         return inspect_context_version_references(
             session, version=target, body_unchanged=True
         )
+    # A fresh draft inherits the named source's locator pins. The same
+    # spelling on another draft is independent and cannot retarget this copy.
+    existing_keys = set(
+        session.scalars(
+            select_in_workspace(
+                PageLink,
+                workspace_id=target.workspace_id,
+                conditions=(PageLink.source_version_id == target.id,),
+            ).with_only_columns(PageLink.locator_key)
+        )
+    )
+    for link in session.scalars(
+        select_in_workspace(
+            PageLink,
+            workspace_id=source.workspace_id,
+            conditions=(PageLink.source_version_id == source.id,),
+        )
+    ):
+        if link.locator_key in existing_keys:
+            continue
+        values = {
+            column.name: deepcopy(getattr(link, column.name))
+            for column in PageLink.__table__.columns
+            if column.name not in {"id", "source_version_id", "created_at"}
+        }
+        session.add(PageLink(source_version_id=target.id, **values))
+    session.flush()
     claims = list(
         session.scalars(
             select_in_workspace(

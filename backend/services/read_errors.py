@@ -143,18 +143,6 @@ class ReviewDecisionImpactChangedError(ReadServiceError):
         )
 
 
-class ReviewRejectBlockedError(ReadServiceError):
-    """A private edit sits on the drafts a rejection would retire."""
-
-    error_code = "review_reject_blocked_by_private_edit"
-
-    def __init__(self) -> None:
-        super().__init__(
-            "a private edit is in progress on this draft; it must be submitted "
-            "or discarded before the review can be rejected"
-        )
-
-
 class ReviewDecisionUndoUnavailableError(ReadServiceError):
     """The named decision cannot be undone (any longer)."""
 

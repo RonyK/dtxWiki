@@ -410,8 +410,7 @@
       "not_requested_changes": "The review is not in the changes-requested state.",
       "unsupported_revision": "This revision does not support that decision.",
       "superseded_by_rejected_ancestor": "Settled because an earlier version it builds on was rejected.",
-      "review_decision_impact_changed": "The rejection's impact changed while you were confirming. Check the updated impact and reject again.",
-      "review_reject_blocked_by_private_edit": "This draft has another author’s private edit in progress and cannot be rejected. Try again after the edit is submitted or cancelled."
+      "review_decision_impact_changed": "The rejection's impact changed while you were confirming. Check the updated impact and reject again."
     },
     "savedDecision": "{{version}} · {{decision}} saved",
     "queueComplete": "No reviews remain under these filters.",
@@ -452,7 +451,12 @@
       "superseded_by_rejected_candidate": "Settled when the same version was rejected",
       "superseded_by_newer_draft": "Replaced by a newer draft",
       "superseded_by_decision_undo": "Closed by an undone decision"
-    }
+    },
+    "mergeConflict": "These changes conflict. Read the current draft before approving.",
+    "mergePreviewTitle": "Review merged page",
+    "mergePreviewDescription": "The published page changed. Review the combined result before approving.",
+    "mergePreviewApprove": "Approve merged page",
+    "mergePreviewCancel": "Cancel"
   },
   "document": {
     "targets": "Review targets",

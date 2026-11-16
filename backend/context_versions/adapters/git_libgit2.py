@@ -202,6 +202,14 @@ class GitSnapshotStore:
             version_id=version_id,
         )
 
+    def read_parents(
+        self, *, workspace_id: UUID, page_id: UUID, commit_oid: str
+    ) -> tuple[str, ...]:
+        with self._repository(workspace_id) as repository:
+            commit = _commit(repository, commit_oid)
+            _page_blob(repository, commit, page_id)
+            return tuple(str(oid) for oid in commit.parent_ids)
+
     def read_block_map(
         self,
         *,

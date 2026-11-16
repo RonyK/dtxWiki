@@ -10,7 +10,7 @@ from backend.context_versions.domain import (
     ContextVersionStorageError,
     SnapshotRecord,
 )
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPage, ContextPageVersion, ContextVersionParent
 from backend.models.workspace import Workspace
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
@@ -46,6 +46,70 @@ def descriptor_for(version: ContextPageVersion) -> ContentDescriptor:
     )
 
 
+def ordered_parent_version_ids(session: Session, version: ContextPageVersion) -> tuple:
+    additional = session.scalars(
+        select_in_workspace(
+            ContextVersionParent,
+            workspace_id=version.workspace_id,
+            conditions=(
+                ContextVersionParent.page_id == version.page_id,
+                ContextVersionParent.version_id == version.id,
+            ),
+        )
+        .with_only_columns(ContextVersionParent.parent_version_id)
+        .order_by(ContextVersionParent.ordinal)
+    ).all()
+    values = ([version.parent_version_id] if version.parent_version_id else []) + list(
+        additional
+    )
+    if version.id in values or len(set(values)) != len(values):
+        raise ContextStorageServiceError("context_snapshot_invalid")
+    return tuple(values)
+
+
+def ordered_parent_oids(
+    session: Session, version: ContextPageVersion
+) -> tuple[str, ...]:
+    result = []
+    for parent_id in ordered_parent_version_ids(session, version):
+        parent = get_in_workspace(
+            session,
+            ContextPageVersion,
+            workspace_id=version.workspace_id,
+            resource_id=parent_id,
+        )
+        if parent is None or parent.page_id != version.page_id or not parent.commit_oid:
+            raise ContextStorageServiceError("context_snapshot_invalid")
+        result.append(parent.commit_oid)
+    return tuple(result)
+
+
+def freeze_context_version(
+    session: Session, page: ContextPage, version: ContextPageVersion, writer=None
+) -> SnapshotRecord:
+    """Finish a draft without changing the published ref."""
+    prepared = prepare_publication(session, page, version, writer)
+    version.commit_oid = prepared.commit_oid
+    version.content_byte_size = prepared.content_byte_size
+    version.version_status = "closed"
+    version.body_md = None
+    # New commits archive the map; older content-only commits retain their map.
+    resolved = resolve_writer(session, writer)
+    if (
+        resolved.reader.read_block_map(
+            workspace_id=page.workspace_id,
+            page_id=page.id,
+            commit_oid=prepared.commit_oid,
+            descriptor=descriptor_for(version),
+        )
+        is not None
+    ):
+        version.block_map = None
+    session.add(version)
+    session.flush()
+    return prepared
+
+
 def prepare_publication(
     session: Session,
     page: ContextPage,
@@ -54,20 +118,7 @@ def prepare_publication(
 ) -> SnapshotRecord:
     """Prepare immutable bytes before changing SQL snapshot states."""
     writer = resolve_writer(session, writer)
-    previous = (
-        get_in_workspace(
-            session,
-            ContextPageVersion,
-            workspace_id=page.workspace_id,
-            resource_id=page.current_published_version_id,
-        )
-        if page.current_published_version_id
-        else None
-    )
-    if previous is not None and (
-        previous.page_id != page.id or not previous.commit_oid
-    ):
-        raise ContextStorageServiceError("context_snapshot_invalid")
+    parents = ordered_parent_oids(session, version)
     try:
         if not writer.repository_exists(page.workspace_id):
             has_objects = session.scalar(
@@ -90,9 +141,7 @@ def prepare_publication(
                 descriptor=descriptor_for(version),
                 block_map=version.block_map,
             ),
-            parents=[previous.commit_oid]
-            if previous is not None and previous.id != version.id
-            else [],
+            parents=parents,
             existing_oid=version.commit_oid,
         )
     except ContextVersionStorageError as exc:
@@ -163,7 +212,9 @@ def _align_database_bodies(session, page, commit_oid, reader) -> None:
             workspace_id=page.workspace_id,
             conditions=(
                 ContextPageVersion.page_id == page.id,
-                ContextPageVersion.version_status == "superseded_snapshot",
+                ContextPageVersion.version_status.in_(
+                    ("closed", "superseded_snapshot")
+                ),
                 ContextPageVersion.body_md.is_not(None),
             ),
         )
@@ -220,11 +271,12 @@ def _verify_workspace(session: Session, store, workspace_id) -> int:
         snapshot = version.version_status in {
             "published_snapshot",
             "superseded_snapshot",
+            "closed",
         }
         if snapshot != (version.commit_oid is not None):
             raise ContextStorageServiceError("context_snapshot_invalid")
         if (version._body_md is None) != (
-            version.version_status == "superseded_snapshot"
+            version.version_status in {"closed", "superseded_snapshot"}
         ):
             raise ContextStorageServiceError("context_snapshot_invalid")
         if not snapshot:
@@ -257,6 +309,12 @@ def _verify_workspace(session: Session, store, workspace_id) -> int:
         ):
             raise ContextStorageServiceError("context_snapshot_invalid")
         if len(data) != version.content_byte_size:
+            raise ContextStorageServiceError("context_snapshot_invalid")
+        if store.read_parents(
+            workspace_id=workspace_id,
+            page_id=version.page_id,
+            commit_oid=version.commit_oid,
+        ) != ordered_parent_oids(session, version):
             raise ContextStorageServiceError("context_snapshot_invalid")
         if version._body_md is not None:
             valid = data == version._body_md.encode("utf-8")

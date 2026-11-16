@@ -184,6 +184,14 @@
             "title": "Last Saved At",
             "type": "string"
           },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
           "review": {
             "anyOf": [
               {
@@ -257,6 +265,14 @@
             "title": "Last Saved At",
             "type": "string"
           },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
           "review": {
             "anyOf": [
               {
@@ -282,10 +298,7 @@
             "type": "string"
           },
           "version_status": {
-            "enum": [
-              "editing",
-              "draft"
-            ],
+            "const": "draft",
             "title": "Version Status",
             "type": "string"
           }
@@ -323,7 +336,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",
@@ -853,15 +865,6 @@
     },
     "additionalProperties": false,
     "properties": {
-      "alternative_drafts": {
-        "description": "Active alternatives ordered by version_no descending (newest first).",
-        "items": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "title": "Alternative Drafts",
-        "type": "array"
-      },
       "as_of": {
         "anyOf": [
           {

@@ -17,7 +17,6 @@ from backend.context_media.domain import (
     AssociationState,
     ContextMediaAssetRecord,
     ContextMediaAttachmentSnapshot,
-    ContextMediaOwnershipError,
     MediaInUseError,
     RegisterContextMediaAsset,
     StaleUsageTokenError,
@@ -86,9 +85,7 @@ class FakeRepository:
         has_more = len(fetched) > limit
         page = fetched[:limit]
         next_after = (
-            (page[-1].created_at, page[-1].usage.asset.asset_id)
-            if has_more
-            else None
+            (page[-1].created_at, page[-1].usage.asset.asset_id) if has_more else None
         )
         return WorkspaceUsagePage(
             snapshots=tuple(page), has_more=has_more, next_after=next_after
@@ -190,7 +187,6 @@ def _attachment(
         latest_draft_reference_count=0,
         current_published_reference_count=1 if used else 0,
         historical_reference_count=0,
-        created_for_version_is_editing=False,
     )
     return ContextMediaAttachmentSnapshot(
         usage=usage,
@@ -388,7 +384,7 @@ def test_delete_requires_current_unused_projection_token() -> None:
     workspace_id = uuid4()
     actor = ActorIdentity("human", str(uuid4()))
     asset = _asset(workspace_id=workspace_id, created_by=actor)
-    repository.snapshot = AssetUsageSnapshot(asset, uuid4(), uuid4(), 0, 0, 0, False)
+    repository.snapshot = AssetUsageSnapshot(asset, uuid4(), uuid4(), 0, 0, 0)
 
     with pytest.raises(StaleUsageTokenError):
         DeleteUnusedMedia().execute(
@@ -400,7 +396,7 @@ def test_delete_requires_current_unused_projection_token() -> None:
             actor=actor,
         )
 
-    active = AssetUsageSnapshot(asset, uuid4(), uuid4(), 1, 0, 0, False)
+    active = AssetUsageSnapshot(asset, uuid4(), uuid4(), 1, 0, 0)
     repository.snapshot = active
     with pytest.raises(MediaInUseError):
         DeleteUnusedMedia().execute(
@@ -412,7 +408,7 @@ def test_delete_requires_current_unused_projection_token() -> None:
             actor=actor,
         )
 
-    repository.snapshot = AssetUsageSnapshot(asset, uuid4(), uuid4(), 0, 0, 0, False)
+    repository.snapshot = AssetUsageSnapshot(asset, uuid4(), uuid4(), 0, 0, 0)
     DeleteUnusedMedia().execute(
         repository,
         workspace_id=workspace_id,
@@ -424,31 +420,13 @@ def test_delete_requires_current_unused_projection_token() -> None:
     assert repository.tombstoned == [asset.asset_id]
 
 
-def test_delete_of_a_still_editing_upload_is_restricted_to_its_own_author() -> None:
-    """P3.4: while created_for_version_id names a still-open editing row,
-    DeleteUnusedMedia -- unlike the reference-count-only state check above --
-    also enforces that only the asset's own uploader may remove it. The
-    orphan sweep never reaches this branch for a real orphan (its own query
-    excludes protected assets before ever calling DeleteUnusedMedia); this
-    is specifically about the explicit per-asset delete command."""
-
+def test_unused_upload_can_be_deleted_by_another_editor() -> None:
     repository = FakeRepository()
     workspace_id = uuid4()
     owner = ActorIdentity("human", str(uuid4()))
     stranger = ActorIdentity("human", str(uuid4()))
     asset = _asset(workspace_id=workspace_id, created_by=owner)
-    repository.snapshot = AssetUsageSnapshot(asset, None, None, 0, 0, 0, True)
-
-    with pytest.raises(ContextMediaOwnershipError):
-        DeleteUnusedMedia().execute(
-            repository,
-            workspace_id=workspace_id,
-            page_id=asset.page_id,
-            asset_id=asset.asset_id,
-            usage_token=repository.snapshot.usage_token,
-            actor=stranger,
-        )
-    assert repository.tombstoned == []
+    repository.snapshot = AssetUsageSnapshot(asset, None, None, 0, 0, 0)
 
     DeleteUnusedMedia().execute(
         repository,
@@ -456,6 +434,6 @@ def test_delete_of_a_still_editing_upload_is_restricted_to_its_own_author() -> N
         page_id=asset.page_id,
         asset_id=asset.asset_id,
         usage_token=repository.snapshot.usage_token,
-        actor=owner,
+        actor=stranger,
     )
     assert repository.tombstoned == [asset.asset_id]

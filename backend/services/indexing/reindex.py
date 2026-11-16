@@ -11,7 +11,7 @@ from backend.app.container import DatabaseProvider
 from backend.models.chunk import ContentChunk
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.library import LibraryItem
-from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
+from backend.repositories.workspace_scoped import select_in_workspace
 from backend.services.context_links import configured_self_origins
 from backend.services.delegated_tasks import produce_folder_summary_tasks
 from backend.services.indexing.edge_registry import rebuild_edge_projection
@@ -101,39 +101,19 @@ def _live_context_versions(
     session: Session,
     page: ContextPage,
 ) -> list[ContextPageVersion]:
-    version_ids = []
-    for version_id in (
-        page.current_published_version_id,
-        page.latest_draft_version_id,
-        page.current_version_id,
-    ):
-        if version_id is not None and version_id not in version_ids:
-            version_ids.append(version_id)
-    version_ids.extend(
-        version_id
-        for version_id in session.scalars(
+    return list(
+        session.scalars(
             select_in_workspace(
                 ContextPageVersion,
                 workspace_id=page.workspace_id,
                 conditions=(
                     ContextPageVersion.page_id == page.id,
-                    ContextPageVersion.version_status == "editing",
+                    (ContextPageVersion.version_status == "draft")
+                    | (ContextPageVersion.id == page.current_published_version_id),
                 ),
-            ).with_only_columns(ContextPageVersion.id)
+            )
         )
-        if version_id not in version_ids
     )
-    versions = []
-    for version_id in version_ids:
-        version = get_in_workspace(
-            session,
-            ContextPageVersion,
-            workspace_id=page.workspace_id,
-            resource_id=version_id,
-        )
-        if version is not None:
-            versions.append(version)
-    return versions
 
 
 def prune_orphan_chunks(session: Session, workspace_id: UUID) -> int:
@@ -167,3 +147,44 @@ def prune_orphan_chunks(session: Session, workspace_id: UUID) -> int:
             removed += 1
     session.flush()
     return removed
+
+
+def rebuild_local_projections(session, *, self_origins=frozenset()):
+    """Refresh local search/link rows after an upgrade, without embedding I/O."""
+    from backend.models.agent import AgentPage
+    from backend.models.workspace import Workspace
+    from backend.services.indexing.fts5 import (
+        sync_agent_page_doc_sources,
+        sync_library_doc_sources,
+    )
+
+    for workspace_id in session.scalars(select(Workspace.id)):
+        for page in session.scalars(
+            select_in_workspace(
+                ContextPage,
+                workspace_id=workspace_id,
+            )
+        ):
+            live = _live_context_versions(session, page)
+            for version in live or [None]:
+                sync_page_projections(
+                    session,
+                    page=page,
+                    version=version,
+                    record_graph_observations=False,
+                    self_origins=self_origins,
+                )
+        for item in session.scalars(
+            select_in_workspace(
+                LibraryItem,
+                workspace_id=workspace_id,
+            )
+        ):
+            sync_library_doc_sources(session, item)
+        for page in session.scalars(
+            select_in_workspace(
+                AgentPage,
+                workspace_id=workspace_id,
+            )
+        ):
+            sync_agent_page_doc_sources(session, page)

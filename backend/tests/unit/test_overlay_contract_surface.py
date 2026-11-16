@@ -217,7 +217,6 @@ def test_review_service_role_defaults_are_fail_closed():
         "get_review": "actor_role",
         "claim_review": "actor_role",
         "list_requested_changes_for_principal": "principal_role",
-        "submit_revision_for_review": "principal_role",
         "can_decide_review": "actor_role",
         "list_recent_decisions": "actor_role",
         "apply_decision": "actor_role",

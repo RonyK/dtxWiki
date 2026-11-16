@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from backend.context_media.domain import (
     ActorIdentity,
@@ -28,7 +28,6 @@ from backend.context_media.domain import (
 )
 from backend.context_media.ports import ContextLogicalQuotaExceededError
 from backend.media.domain import BlobEpoch, BlobReference, BlobState
-from backend.models.change import ChangeOperation
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.context_media import (
     ContextMediaAsset,
@@ -44,15 +43,13 @@ from backend.models.media import (
     StoredBlobInspectionRow,
     WorkspaceMediaWriteIntent,
 )
-from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
+from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories.context_media_orphans import (
     context_media_orphan_clause,
 )
 from backend.repositories.context_visibility import (
-    explicit_context_version_visible_expression,
-    foreign_discarded_version_exists,
     visible_context_page_expression,
 )
 from backend.repositories.media_blob_reference import (
@@ -61,7 +58,6 @@ from backend.repositories.media_blob_reference import (
 )
 from backend.repositories.workspace_scoped import (
     select_in_workspace,
-    select_projection_in_workspace,
 )
 from backend.services.actor_visible_read import context_version_is_visible
 from backend.services.db_write_intent import acquire_write_intent
@@ -221,9 +217,7 @@ class SqlAlchemyContextMediaRepository:
             self._session.info[_USAGE_LOCK_STATE_KEY] = lock_state
         lock_state[2].add(workspace_id)
 
-    def add_asset(
-        self, asset: ContextMediaAssetRecord, *, allow_shared_draft: bool = False
-    ) -> ContextMediaAssetRecord:
+    def add_asset(self, asset: ContextMediaAssetRecord) -> ContextMediaAssetRecord:
         _lock_context_workspace(self._session, asset.workspace_id)
         self._logical_quota.lock_workspace(asset.workspace_id)
         if asset.legacy_upload_asset_id is not None:
@@ -247,63 +241,18 @@ class SqlAlchemyContextMediaRepository:
             or page.lifecycle_status == "archived"
         ):
             raise ContextMediaNotFoundError("Context Page was not found")
-        # P3.2: every upload must name the uploader's OWN currently-open
-        # "editing" row -- not merely an existing version of the right page.
-        # Locked (not just read) because two concurrent uploads racing the
-        # same version's status must not both observe "editing".
-        #
-        # Same opacity rule P2 established for editing rows generally: a
-        # different author's version -- editing or not -- is indistinguishable from a
-        # nonexistent one, because even a distinguishable "belongs to
-        # another actor" response would itself confirm this exact version
-        # id currently exists in someone's private editing session to a
-        # caller who merely names it. The version's OWN author gets a clear,
-        # non-opaque signal instead when it simply isn't "editing" any more
-        # (already submitted/published/discarded) -- that's ordinary
-        # same-author feedback, not a disclosure to someone else.
+        # Uploads attach to a workspace-authorized mutable draft.
+        # Lock the row so publication cannot race asset registration.
         editing_version = _lock_context_page_version(
             self._session,
             workspace_id=asset.workspace_id,
             page_id=asset.page_id,
             version_id=asset.created_for_version_id,
         )
-        if editing_version is None or (
-            editing_version.created_by_actor_kind != asset.created_by.kind
-            or editing_version.created_by_actor_id != asset.created_by.id
-        ):
-            raise ContextMediaNotFoundError("Context Page version was not found")
-        shared_draft = (
-            allow_shared_draft
-            and editing_version.version_status == "draft"
-            and editing_version.graph_status == "linear"
-            and page.latest_draft_version_id == editing_version.id
-            and self._session.scalar(
-                select_projection_in_workspace(
-                    ReviewItem,
-                    workspace_id=asset.workspace_id,
-                    columns=(ReviewItem.id,),
-                    predicates=(
-                        ReviewItem.review_type == "context_update",
-                        ReviewItem.change_set_id.in_(
-                            select_projection_in_workspace(
-                                ChangeOperation,
-                                workspace_id=asset.workspace_id,
-                                columns=(ChangeOperation.change_set_id,),
-                                predicates=(
-                                    ChangeOperation.target_type == "context_page",
-                                    ChangeOperation.target_id == page.id,
-                                    ChangeOperation.diff_ref
-                                    == f"context_page_version:{editing_version.id}",
-                                ),
-                            )
-                        ),
-                    ),
-                ).limit(1)
-            )
-            is None
-        )
-        if editing_version.version_status != "editing" and not shared_draft:
-            raise ContextMediaEditingNotOpenError("editing version is not open")
+        if editing_version is None:
+            raise ContextMediaNotFoundError("editing version not found")
+        if editing_version.version_status != "draft":
+            raise ContextMediaEditingNotOpenError("draft is not open")
         self._logical_quota.reserve(
             asset.workspace_id,
             asset_id=asset.asset_id,
@@ -441,67 +390,6 @@ class SqlAlchemyContextMediaRepository:
                 raise ContextMediaUnavailableError(
                     "logical reference is pending, blocked, or quarantined"
                 )
-            # P8.5: reject a "late association" race, without breaking the
-            # ordinary, expected reuse of an asset that was uploaded but left
-            # unused during ITS OWN session and only gets a body reference
-            # later, in a different (e.g. post-publish) revision -- that
-            # reuse is exactly what
-            # `test_context_media_in_place_autosave_replaces_exact_version_
-            # usage` exercises, and publishing an editing row is a normal,
-            # deliberate close, not a race. The one case this closes: the
-            # creating editing row was DISCARDED (its content and any of its
-            # never-used uploads were deliberately thrown away) and this is
-            # that asset's first-ever reference, arriving in some other
-            # version afterward -- a stale client racing (or simply
-            # forgetting about) the discard, not a legitimate editorial
-            # choice. An asset already used anywhere (even in a now-
-            # discarded version) is ordinary reuse and stays allowed
-            # regardless of status, so this checks first-use provenance of a
-            # DISCARDED origin specifically, not `version_status` in general
-            # -- it cannot be "fixed" by widening a draft/published gate.
-            first_use_candidates = [
-                asset
-                for asset in owned_assets
-                if asset.created_for_version_id != page_version_id
-            ]
-            if first_use_candidates:
-                already_used_ids = set(
-                    self._session.scalars(
-                        select(ContextMediaUsage.asset_id)
-                        .where(
-                            ContextMediaUsage.workspace_id == workspace_id,
-                            ContextMediaUsage.asset_id.in_(
-                                asset.id for asset in first_use_candidates
-                            ),
-                        )
-                        .distinct()
-                    ).all()
-                )
-                never_used = [
-                    asset
-                    for asset in first_use_candidates
-                    if asset.id not in already_used_ids
-                ]
-                if never_used:
-                    discarded_origin_ids = set(
-                        self._session.scalars(
-                            select(ContextPageVersion.id).where(
-                                ContextPageVersion.workspace_id == workspace_id,
-                                ContextPageVersion.id.in_(
-                                    asset.created_for_version_id for asset in never_used
-                                ),
-                                ContextPageVersion.version_status == "discarded",
-                            )
-                        ).all()
-                    )
-                    if any(
-                        asset.created_for_version_id in discarded_origin_ids
-                        for asset in never_used
-                    ):
-                        raise ContextMediaEditingNotOpenError(
-                            "logical reference was never associated before "
-                            "its creating editing session was discarded"
-                        )
         self._session.execute(
             delete(ContextMediaUsage).where(
                 ContextMediaUsage.workspace_id == workspace_id,
@@ -534,15 +422,7 @@ class SqlAlchemyContextMediaRepository:
                 select_in_workspace(
                     ContextMediaAsset,
                     workspace_id=workspace_id,
-                    conditions=(
-                        ContextMediaAsset.page_id == page_id,
-                        # Editing uploads share draft visibility; discarded work
-                        # remains hidden from other editors.
-                        ~foreign_discarded_version_exists(
-                            ContextMediaAsset.created_for_version_id,
-                            None if viewer is None else (viewer.kind, viewer.id),
-                        ),
-                    ),
+                    conditions=(ContextMediaAsset.page_id == page_id,),
                 ).order_by(ContextMediaAsset.created_at, ContextMediaAsset.id)
             ).all()
         )
@@ -601,36 +481,13 @@ class SqlAlchemyContextMediaRepository:
             if viewer is not None
             else None
         )
-        referenced_version = aliased(ContextPageVersion)
-        readable_reference = (
-            select(ContextMediaUsage.asset_id)
-            .join(
-                referenced_version,
-                referenced_version.id == ContextMediaUsage.page_version_id,
-            )
-            .where(
-                ContextMediaUsage.workspace_id == workspace_id,
-                ContextMediaUsage.page_id == ContextMediaAsset.page_id,
-                ContextMediaUsage.asset_id == ContextMediaAsset.id,
-                referenced_version.workspace_id == workspace_id,
-                referenced_version.page_id == ContextMediaAsset.page_id,
-                explicit_context_version_visible_expression(referenced_version, actor),
-            )
-            .exists()
-        )
         conditions = [
             ContextPage.workspace_id == workspace_id,
-            visible_context_page_expression(actor),
+            (ContextPage.lifecycle_status != "archived")
+            if actor_can_read_drafts(actor)
+            else visible_context_page_expression(actor),
             ContextMediaAsset.workspace_id == workspace_id,
             ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
-            # Match the visibility of the creating version or a readable use.
-            or_(
-                ~foreign_discarded_version_exists(
-                    ContextMediaAsset.created_for_version_id,
-                    None if viewer is None else (viewer.kind, viewer.id),
-                ),
-                readable_reference,
-            ),
         ]
         if created_by is not None:
             conditions.append(
@@ -766,15 +623,9 @@ class SqlAlchemyContextMediaRepository:
                 # `has_more`/`next_after`, which were already fixed above from
                 # the raw SQL fetch (`WorkspaceUsagePage`'s docstring).
                 continue
-            # A reference in a readable version permits preview even when
-            # the upload originated in another author's private edit. An
-            # uninserted upload permits preview only to its own uploader.
+            # Preview uses a readable reference or the exact creating version.
             candidates = [u.page_version_id for u in grouped.get(asset.id, ())]
-            if (asset.created_by_actor_kind, asset.created_by_actor_id) == (
-                None if viewer is None else viewer.kind,
-                None if viewer is None else str(viewer.id),
-            ):
-                candidates.append(asset.created_for_version_id)
+            candidates.append(asset.created_for_version_id)
             preview_version_id = next(
                 (
                     version_id
@@ -1010,8 +861,7 @@ class SqlAlchemyContextMediaRepository:
         )
         if usage is not None:
             # Real content: this exact version's Markdown references the
-            # asset. The caller's own outer version-visibility check (role
-            # for draft/published, author-only for a private editing head)
+            # asset. The caller's outer version-visibility check
             # already decided whether this actor may see page_version_id at
             # all -- authorized uniformly like every other version's usage.
             #
@@ -1024,18 +874,9 @@ class SqlAlchemyContextMediaRepository:
             # asset on the page, published or not. Do not "simplify" a public
             # or version-scoped read to call it instead.
             return self._content_capability(asset)
-        # P3.2/P3.3: no usage row means this asset has never been inserted
-        # into ANY version's body -- an uninserted upload preview, allowed
-        # only for the asset's own uploader, and only against the exact
-        # version it was created for. This is narrower than "may this actor
-        # see page_version_id": an uninserted image was never actually
-        # published as content, so it does not become role-visible just
-        # because the surrounding version (e.g. a submitted draft) is.
-        if (
-            asset.created_for_version_id != page_version_id
-            or asset.created_by_actor_kind != actor.kind
-            or asset.created_by_actor_id != actor.id
-        ):
+        # Uninserted uploads remain bound to the exact creating version.
+        # The caller has already checked that version's read permission.
+        if asset.created_for_version_id != page_version_id:
             return None
         return self._content_capability(asset)
 
@@ -1054,8 +895,8 @@ class SqlAlchemyContextMediaRepository:
         # referenced by any version's usage. NEVER call this from a REST/MCP
         # read path or anything else deciding what a caller may see: it
         # returns content for any ACTIVE asset on the page regardless of
-        # whether it was ever published, inserted, or is still someone's
-        # private uninserted upload. Use resolve_version_content (above) for
+        # whether it was ever published or inserted. Use
+        # resolve_version_content (above) for
         # every visibility-scoped read.
         asset = self._session.get(
             ContextMediaAsset,
@@ -1213,65 +1054,30 @@ def _usage_snapshot(
     latest_count = 0
     published_count = 0
     historical_count = 0
-    active_ids = {
-        version_id
-        for version_id in (
-            page.latest_draft_version_id,
-            page.current_published_version_id,
+    draft_ids = set(
+        session.scalars(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.version_status == "draft",
+                ),
+            ).with_only_columns(ContextPageVersion.id)
         )
-        if version_id is not None
-    }
+    )
+    active_ids = draft_ids | (
+        {page.current_published_version_id}
+        if page.current_published_version_id
+        else set()
+    )
     for usage in usages:
-        if usage.page_version_id == page.latest_draft_version_id:
+        if usage.page_version_id in draft_ids:
             latest_count += usage.reference_count
         if usage.page_version_id == page.current_published_version_id:
             published_count += usage.reference_count
         if usage.page_version_id not in active_ids:
             historical_count += usage.reference_count
-    # Canonical counts continue to drive deletion CAS. Only discarded work
-    # is masked in the editor-facing projection; editing usage is readable.
-    viewer_latest_count = latest_count
-    viewer_published_count = published_count
-    viewer_historical_count = historical_count
-    if viewer is not None:
-        distinct_version_ids = {usage.page_version_id for usage in usages}
-        foreign_discarded_ids = (
-            {
-                version_id
-                for version_id, status, actor_kind, actor_id in session.execute(
-                    select(
-                        ContextPageVersion.id,
-                        ContextPageVersion.version_status,
-                        ContextPageVersion.created_by_actor_kind,
-                        ContextPageVersion.created_by_actor_id,
-                    ).where(ContextPageVersion.id.in_(distinct_version_ids))
-                ).all()
-                if status == "discarded"
-                and (actor_kind, actor_id) != (viewer.kind, viewer.id)
-            }
-            if distinct_version_ids
-            else set()
-        )
-        if foreign_discarded_ids:
-            viewer_latest_count = 0
-            viewer_published_count = 0
-            viewer_historical_count = 0
-            for usage in usages:
-                if usage.page_version_id in foreign_discarded_ids:
-                    continue
-                if usage.page_version_id == page.latest_draft_version_id:
-                    viewer_latest_count += usage.reference_count
-                if usage.page_version_id == page.current_published_version_id:
-                    viewer_published_count += usage.reference_count
-                if usage.page_version_id not in active_ids:
-                    viewer_historical_count += usage.reference_count
-    # P3.4: identity-map lookup -- cheap when the same version was already
-    # loaded earlier in this transaction (e.g. via _lock_context_page_version
-    # during the upload that created this asset), a single trivial PK read
-    # otherwise. Not a hot path (page-level media listing/delete), so this is
-    # not batched across the whole page the way list_page_usage's own asset
-    # query is.
-    created_for_version = session.get(ContextPageVersion, asset.created_for_version_id)
     return AssetUsageSnapshot(
         asset=_asset_record(asset),
         latest_draft_version_id=page.latest_draft_version_id,
@@ -1279,13 +1085,6 @@ def _usage_snapshot(
         latest_draft_reference_count=latest_count,
         current_published_reference_count=published_count,
         historical_reference_count=historical_count,
-        created_for_version_is_editing=(
-            created_for_version is not None
-            and created_for_version.version_status == "editing"
-        ),
-        viewer_visible_latest_draft_reference_count=viewer_latest_count,
-        viewer_visible_current_published_reference_count=viewer_published_count,
-        viewer_visible_historical_reference_count=viewer_historical_count,
     )
 
 

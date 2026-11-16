@@ -73,7 +73,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",
@@ -482,7 +481,7 @@
       },
       "MyContextEditSummary": {
         "additionalProperties": false,
-        "description": "One row of `list_my_context_edits` (P8.3/P8.6): the caller's own open\n\"editing\" version on some page in the workspace. Deliberately omits an\nuninserted-media count and a conflict/reconciliation status -- there is no\nexisting cheap per-version media-count helper (P4's artifact model has no\nsuch index) and no cheap per-version conflict signal today; adding either\nwould be new machinery beyond this tool's read, not a cost this list\nshould carry silently.",
+        "description": "A shared draft the caller created or contributed to, without its body.",
         "properties": {
           "base_version_id": {
             "anyOf": [

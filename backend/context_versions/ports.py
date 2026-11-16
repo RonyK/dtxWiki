@@ -38,6 +38,10 @@ class SnapshotReader(Protocol):
         descriptor: ContentDescriptor,
     ) -> list[dict] | None: ...
 
+    def read_parents(
+        self, *, workspace_id: UUID, page_id: UUID, commit_oid: str
+    ) -> tuple[str, ...]: ...
+
 
 class SnapshotWriter(Protocol):
     def commit(

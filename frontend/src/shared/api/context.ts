@@ -214,7 +214,7 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
       // (listContextChanges) still carries version_no per entry.
       version_no: 0,
       version_status: raw.version_status ?? "",
-      history_status: raw.history_status ?? "current_editing",
+      history_status: raw.history_status ?? "current_draft",
       graph_status: raw.graph_status ?? null,
       is_visible_head: raw.is_visible_head,
       is_published_head: raw.is_published_head,

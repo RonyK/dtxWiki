@@ -51,12 +51,6 @@ from backend.schemas.common import (
     RESTErrorBody,
     RESTResultEnvelope,
 )
-from backend.schemas.context_reconciliation import (
-    ContextReconciliationDetailResponse,
-    ContextReconciliationDiscardRequest,
-    ContextReconciliationRequest,
-    ContextReconciliationResultResponse,
-)
 from backend.schemas.context_write import (
     CiteRequest,
     CiteResponse,
@@ -68,7 +62,9 @@ from backend.schemas.page import (
     PAGE_LIST_LIMIT_MAX,
     PAGE_SLUG_PATTERN,
     BeginContextEditRequest,
+    BringInContextVersionRequest,
     ContextDraftListResponse,
+    ContextMergePreviewRequest,
     ContextPageCreateRequest,
     ContextPageDetail,
     ContextPageDetailResponse,
@@ -86,7 +82,6 @@ from backend.schemas.page import (
     PageUpdateRequest,
     PageVersionDiffResponse,
     PageVersionListResponse,
-    PageVersionResponse,
     PublishPageRequest,
     PublishPageVersionRequest,
     SubmitContextEditRequest,
@@ -281,7 +276,6 @@ def create_context_page(
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
             placement_parent_node_id=request_body.placement_parent_node_id,
-            share_draft=request_body.share_draft,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -497,89 +491,6 @@ def list_page_versions(
     return {"data": result.versions, "next_cursor": result.next_cursor}
 
 
-@router.get(
-    "/{page_id}/versions/{branch_id}/reconciliation",
-    response_model=ContextReconciliationDetailResponse,
-    responses=REST_WRITE_ERROR_RESPONSES,
-)
-def get_page_reconciliation(
-    request: Request,
-    workspace_id: UUID,
-    page_id: UUID,
-    branch_id: UUID,
-    actor: RestActorDep,
-):
-    try:
-        actor, page_service = _workspace_page_service(
-            request, actor, workspace_id, required_role="editor"
-        )
-        detail = page_service.get_reconciliation(
-            page_id=page_id, branch_id=branch_id, actor=actor
-        )
-    except PageServiceError as exc:
-        return service_error_response(exc)
-    except ReadServiceError as exc:
-        return read_service_error_response(exc)
-    return {"data": detail}
-
-
-@router.post(
-    "/{page_id}/versions/{branch_id}/reconciliation",
-    response_model=ContextReconciliationResultResponse,
-    responses=REST_WRITE_ERROR_RESPONSES,
-)
-def reconcile_page_branch(
-    request: Request,
-    workspace_id: UUID,
-    page_id: UUID,
-    branch_id: UUID,
-    request_body: ContextReconciliationRequest,
-    actor: RestActorDep,
-):
-    try:
-        actor, page_service = _workspace_page_service(
-            request, actor, workspace_id, required_role="editor"
-        )
-        result = page_service.reconcile_branch(
-            page_id=page_id, branch_id=branch_id, request=request_body, actor=actor
-        )
-    except PageServiceError as exc:
-        return service_error_response(exc)
-    except ReadServiceError as exc:
-        return read_service_error_response(exc)
-    return {"data": result}
-
-
-@router.post(
-    "/{page_id}/versions/{version_id}/discard",
-    response_model=PageVersionResponse,
-    responses=REST_WRITE_ERROR_RESPONSES,
-)
-def discard_alternative_draft(
-    request: Request,
-    workspace_id: UUID,
-    page_id: UUID,
-    version_id: UUID,
-    request_body: ContextReconciliationDiscardRequest,
-    actor: RestActorDep,
-):
-    try:
-        actor, page_service = _workspace_page_service(
-            request, actor, workspace_id, required_role="editor"
-        )
-        version = page_service.discard_alternative(
-            page_id=page_id,
-            version_id=version_id,
-            reason=request_body.reason,
-            actor=actor,
-        )
-    except PageServiceError as exc:
-        return service_error_response(exc)
-    except ReadServiceError as exc:
-        return read_service_error_response(exc)
-    return {"data": version}
-
-
 @router.post(
     "/{page_id}/versions/{version_id}/publish",
     response_model=ContextPageWriteResponse,
@@ -598,6 +509,7 @@ def publish_page_version(
             request, actor, workspace_id, required_role="editor"
         )
         result = page_service.publish_draft(
+            workspace_id=workspace_id,
             page_id=page_id,
             version_id=version_id,
             reason=request_body.reason,
@@ -607,6 +519,19 @@ def publish_page_version(
             actor_provenance=actor.provenance,
             expected_content_hash=request_body.expected_content_hash,
             expected_references_hash=request_body.expected_references_hash,
+            expected_editing_revision=request_body.expected_editing_revision,
+            expected_published_version_id=request_body.expected_published_version_id,
+            result_hash=request_body.result_hash,
+            result_body_md=request_body.result_body_md,
+            result_page_metadata=(
+                request_body.result_page_metadata.model_dump(
+                    mode="json", exclude_unset=True
+                )
+                if request_body.result_page_metadata is not None
+                else None
+            ),
+            on_conflict=request_body.on_conflict,
+            idempotency_key=request_body.idempotency_key,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -715,7 +640,7 @@ def begin_context_edit(
     request_body: BeginContextEditRequest,
     actor: RestActorDep,
 ):
-    """P8.3: idempotently resume or open the caller's own editing session."""
+    """Idempotently join a named draft or start a draft from commits."""
 
     try:
         actor, page_service = _workspace_page_service(
@@ -728,6 +653,8 @@ def begin_context_edit(
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
             idempotency_key=request_body.idempotency_key,
+            from_version_id=request_body.from_version_id,
+            on_conflict=request_body.on_conflict,
             base_version_id=request_body.base_version_id,
             base_content_hash=request_body.base_content_hash,
             retry_only=request_body.retry_only,
@@ -753,7 +680,7 @@ def submit_context_edit_for_review(
     request_body: SubmitContextEditRequest,
     actor: RestActorDep,
 ):
-    """P8.1: "Save draft" -- lock the caller's own editing row and submit it."""
+    """Submit a draft for review."""
 
     try:
         actor, page_service = _workspace_page_service(
@@ -770,6 +697,7 @@ def submit_context_edit_for_review(
             idempotency_key=request_body.idempotency_key,
             reason=request_body.reason,
             retry_only=request_body.retry_only,
+            feedback_id=request_body.feedback_id,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -792,7 +720,7 @@ def discard_context_edit(
     request_body: DiscardContextEditRequest,
     actor: RestActorDep,
 ):
-    """P8.3: discard the caller's own open editing row (terminal, not a hard-delete)."""
+    """Discard an open draft (terminal, not a hard-delete)."""
 
     try:
         actor, page_service = _workspace_page_service(
@@ -830,10 +758,10 @@ def restore_page_version(
         actor, page_service = _workspace_page_service(
             request, actor, workspace_id, required_role="editor"
         )
-        # P2.2/P2.6: restoring FROM a version this actor cannot otherwise see
-        # (another author's private `editing` row) must not be a back door to
-        # it -- reuse read_page's own explicit-version visibility gate rather
-        # than letting restore_version's bare page-scoped id lookup skip it.
+        # Restoring FROM a version this actor cannot otherwise see (a draft
+        # without draft access) must not be a back door to it -- reuse
+        # read_page's own explicit-version visibility gate rather than letting
+        # restore_version's bare page-scoped id lookup skip it.
         page_service.read_page(
             page_id=page_id, version_id=request_body.version_id, actor=actor
         )
@@ -945,6 +873,11 @@ def autosave_page(
         )
         page = page_service.autosave_page(
             page_id=page_id,
+            version_id=request_body.version_id,
+            base_snapshot=request_body.base_snapshot.model_dump()
+            if request_body.base_snapshot
+            else None,
+            on_conflict=request_body.on_conflict,
             workspace_id=workspace_id,
             title=request_body.title,
             body_md=request_body.body_md,
@@ -962,7 +895,6 @@ def autosave_page(
             on_stale=request_body.on_stale,
             destination_node_id=request_body.destination_node_id,
             retry_only=request_body.retry_only,
-            share_draft=request_body.share_draft,
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -1207,3 +1139,71 @@ def status_code_for_error(exc: PageServiceError) -> int:
     if isinstance(exc, PageValidationError):
         return 422
     return 500
+
+
+@router.post("/{page_id}/merge-preview", responses=REST_WRITE_ERROR_RESPONSES)
+def preview_context_merge(
+    request: Request,
+    workspace_id: UUID,
+    page_id: UUID,
+    request_body: ContextMergePreviewRequest,
+    actor: RestActorDep,
+):
+    try:
+        actor, service = _workspace_page_service(
+            request, actor, workspace_id, required_role="editor"
+        )
+        return {
+            "data": service.preview_context_merge(
+                page_id=page_id,
+                version_id=request_body.version_id,
+                workspace_id=workspace_id,
+                on_conflict=request_body.on_conflict,
+                body_md=request_body.body_md,
+                page_metadata=request_body.page_metadata,
+                actor_kind=actor.actor_kind,
+                actor_id=actor.actor_id,
+                actor_provenance=actor.provenance,
+            )
+        }
+    except PageServiceError as exc:
+        return service_error_response(exc)
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
+
+
+@router.post(
+    "/{page_id}/bring-in",
+    response_model=ContextPageWriteResponse,
+    responses=REST_WRITE_ERROR_RESPONSES,
+)
+def bring_in_context_version(
+    request: Request,
+    workspace_id: UUID,
+    page_id: UUID,
+    request_body: BringInContextVersionRequest,
+    actor: RestActorDep,
+):
+    try:
+        actor, service = _workspace_page_service(
+            request, actor, workspace_id, required_role="editor"
+        )
+        page = service.bring_in_context_version(
+            page_id=page_id,
+            version_id=request_body.version_id,
+            workspace_id=workspace_id,
+            commit_version_id=request_body.commit_version_id,
+            expected_editing_revision=request_body.expected_editing_revision,
+            idempotency_key=request_body.idempotency_key,
+            on_conflict=request_body.on_conflict,
+            actor_kind=actor.actor_kind,
+            actor_id=actor.actor_id,
+            actor_provenance=actor.provenance,
+        )
+        return page_write_response(
+            _to_detail(page), lint_registry=service.lint_registry
+        )
+    except PageServiceError as exc:
+        return service_error_response(exc)
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)

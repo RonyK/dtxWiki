@@ -58,7 +58,6 @@ def _snapshot(**overrides) -> AssetUsageSnapshot:
         latest_draft_reference_count=0,
         current_published_reference_count=0,
         historical_reference_count=0,
-        created_for_version_is_editing=False,
     )
     defaults.update(overrides)
     return AssetUsageSnapshot(**defaults)

@@ -117,7 +117,7 @@ describe("AttachmentsSection", () => {
     expect(screen.getByRole("radio", { name: "Mine" })).toBeInTheDocument();
   });
 
-  it("lets an owner ask for the whole workspace and says what that excludes", async () => {
+  it("lets an owner list readable uploads across the workspace", async () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([ATTACHMENT, OTHERS_ATTACHMENT]) as never,
     );
@@ -135,8 +135,7 @@ describe("AttachmentsSection", () => {
         expect.objectContaining({ scope: "workspace" }),
       ),
     );
-    // The P8.4 mask hides assets staged in another author's open draft even
-    // from an owner. An "All" that silently is not all has to say so.
+    // The notice includes uploads that have not been inserted into the body.
     expect(screen.getByText(/pages you can read/)).toBeInTheDocument();
   });
 
@@ -232,12 +231,7 @@ describe("AttachmentsSection", () => {
     );
   });
 
-  it("does not request a preview whose bytes the caller cannot read", async () => {
-    // An unused upload was never published as content, so its content route
-    // answers 404 to everyone but its uploader. Requesting it anyway paints
-    // the browser's broken-image glyph, which reads as a corrupt file rather
-    // than a private one. Only measured by rendering: nothing in the payload
-    // says "this preview will 404".
+  it("previews another uploader's unused image", async () => {
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([
         { ...ATTACHMENT, is_orphan: true, is_mine: false },
@@ -253,13 +247,8 @@ describe("AttachmentsSection", () => {
     );
     await screen.findByText("diagram.png");
 
-    // One row is in use and previewable; the other is someone else's orphan.
-    expect(document.querySelectorAll("img.attachments-preview")).toHaveLength(
-      1,
-    );
-    expect(
-      document.querySelectorAll("span.attachments-preview-kind"),
-    ).toHaveLength(1);
+    expect(document.querySelectorAll("img.attachments-preview")).toHaveLength(2);
+    expect(document.querySelectorAll("span.attachments-preview-kind")).toHaveLength(0);
   });
 
   it("reports a small asset in bytes rather than rounding it up to a kilobyte", async () => {
@@ -357,9 +346,7 @@ describe("AttachmentsSection", () => {
   });
 
   it("explains a 409 as someone else using the file, not as a generic failure", async () => {
-    // can_delete derives from viewer-MASKED usage, so a row referenced only by
-    // another author's open draft looks free and answers 409. Unmasking it
-    // would disclose that someone is editing; explaining it does not.
+    // A reference added after listing can make deletion fail with 409.
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([ATTACHMENT]) as never,
     );
@@ -547,7 +534,7 @@ describe("AttachmentsSection", () => {
     // dialog would be worse than no control.
     vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(
       page([
-        { ...ATTACHMENT, is_orphan: true, is_mine: false },
+        { ...ATTACHMENT, is_orphan: true, is_mine: false, content_url: null },
         { ...OTHERS_ATTACHMENT, is_orphan: false },
       ]) as never,
     );
@@ -562,7 +549,7 @@ describe("AttachmentsSection", () => {
 
     // Both directions in one case: asserting only the absence would pass
     // even if the feature had never been built. The readable row must offer the
-    // enlargement, and the private one must not.
+    // enlargement, and the row without a content URL must not.
     expect(
       document.querySelectorAll("span.attachments-preview-kind"),
     ).toHaveLength(1);

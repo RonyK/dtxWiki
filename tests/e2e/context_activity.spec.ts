@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import { workspaceUrl } from "./auth";
+import { approveContextDraft } from "./context_workflow";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 test("Context activity shows changes, decisions and exact links", async ({ page, browser, browserName }, testInfo) => {
@@ -42,12 +43,11 @@ test("Context activity shows changes, decisions and exact links", async ({ page,
     return current;
   }
   async function publish(reason: string) {
-    reviewDecisions.push(await api('post', `${root}/reviews/${current.review_item_id}/decision`, {
-      decision_type:'approve', decision_reason:reason,
-    }));
-    current = await api('post', `${pageRoot}/versions/${current.version_id}/publish`, {
-      reason, expected_content_hash: current.content_hash, publish_despite_findings: true,
-    });
+    reviewDecisions.push(await approveContextDraft(
+      page.request, wid, pid, current.version_id, current.review_item_id,
+      { decision_reason: reason },
+    ));
+    current = await api('get', `${pageRoot}?view=published`);
     return current;
   }
   const firstSubmitted = await submit('운영 가이드 초안 작성');
@@ -56,6 +56,7 @@ test("Context activity shows changes, decisions and exact links", async ({ page,
   current = await api('post', `${pageRoot}/autosave`, {
     title: '운영 가이드',
     body_md: '# 운영 가이드\n\n## 배포 전 점검\n\n현재 버전과 서비스 상태를 확인합니다.\n\n## 장애 복구\n\n백업을 확인한 뒤 이전 버전으로 복구하고 상태를 재점검합니다.\n',
+    version_id: current.version_id,
     base_version_id: current.version_id, base_content_hash: current.content_hash,
     expected_editing_revision: current.editing_revision,
     session_version_id: current.version_id,
@@ -89,8 +90,10 @@ test("Context activity shows changes, decisions and exact links", async ({ page,
   },null,2));
 
   const panel=page.locator('#context-reader-panel-activity');
-  await expect(panel.locator('.context-event-card')).toHaveCount(11);
-  await expect(panel.locator('.context-event-chip')).toHaveCount(11);
+  // Renaming a published page also publishes its version-owned metadata.
+  await expect(panel.locator('.context-event-card')).toHaveCount(12);
+  await expect(panel.locator('.context-event-chip')).toHaveCount(12);
+  await expect(panel.locator('[data-action="context_page.draft.publish"]')).toHaveCount(3);
   const moved=panel.locator('[data-action="tree.node.move"]');
   await expect(moved.locator('.context-event-before')).toHaveText('Inbox');
   await expect(moved.locator('.context-event-change strong')).toHaveText('서비스 운영');
@@ -100,11 +103,18 @@ test("Context activity shows changes, decisions and exact links", async ({ page,
   await expect(renamed.locator('.context-event-change strong')).toHaveText('운영 절차 가이드');
   await expect(panel.locator('[data-action="review.decision"]')).toHaveCount(2);
   await expect(panel.locator('[data-action="review.decision"] .context-event-chip').first()).toHaveText('승인');
-  await expect(panel.locator('[data-action="page.autosave.draft"]')).toContainText('기준 v1');
-  expect(actualFeed.items.find((i: any)=>i.body==='page.autosave.draft').details.editing_revision).toBe(secondSaved.editing_revision);
-  await expect(panel.locator('[data-action="page.autosave.draft"] a')).toHaveCount(0);
+  await expect(panel.locator('[data-action="context_page.draft.save"]')).toContainText('기준 v1');
+  expect(actualFeed.items.find((i: any)=>i.body==='context_page.draft.save').details.editing_revision).toBe(secondSaved.editing_revision);
+  await expect(panel.locator('[data-action="context_page.draft.save"] a')).toHaveCount(0);
   const submitRows=panel.locator('[data-action="page.submit_context_edit_for_review"]');
-  await expect(submitRows.first().getByRole('link',{name:'해당 리뷰 보기'})).toHaveAttribute('href',workspaceUrl(wid, `review/${secondSubmitted.review_item_id}`));
+  const secondSubmission=actualFeed.items.find((item: any)=>item.body==='page.submit_context_edit_for_review' && item.details?.version?.id===secondSubmitted.version_id);
+  expect(secondSubmission.review_item_id).toBe(secondSubmitted.review_item_id);
+  expect(secondSubmission.details.version.number).toBe(2);
+  // Recorded wall time can move backward; identify the event by its version.
+  const secondSubmitRow=submitRows.filter({has:page.getByText('v2 초안',{exact:true})});
+  await expect(submitRows).toHaveCount(2);
+  await expect(secondSubmitRow).toHaveCount(1);
+  await expect(secondSubmitRow.getByRole('link',{name:'해당 리뷰 보기'})).toHaveAttribute('href',workspaceUrl(wid, `review/${secondSubmitted.review_item_id}`));
   await page.setViewportSize({width:1440,height:1900});
   await page.locator('.context-reader').screenshot({path:`${out}/implemented-desktop.png`});
   for(const width of [390,320]){
@@ -140,12 +150,12 @@ test("Context activity shows changes, decisions and exact links", async ({ page,
     await touchContext.close();
   }
   await page.setViewportSize({width:1440,height:1100});
-  const comparison=panel.locator('[data-action="context_page.draft.publish"]').first().getByRole('link',{name:'변경 내용 비교'});
+  const comparison=panel.locator(`[data-action="context_page.draft.publish"] a[href*="compareTo=${secondPublished.version_id}"]`);
   await comparison.click();
   await expect(page).toHaveURL(new RegExp(`compareFrom=${firstPublished.version_id}&compareTo=${secondPublished.version_id}`));
   await expect(page.locator('.diff-viewer').first()).toBeVisible();
   await page.goto(`${workspaceUrl(wid, `context/pages/${pid}`)}?tab=activity`);
-  await page.locator('[data-action="page.submit_context_edit_for_review"]').first().getByRole('link',{name:'해당 리뷰 보기'}).click();
+  await secondSubmitRow.getByRole('link',{name:'해당 리뷰 보기'}).click();
   await expect(page).toHaveURL(workspaceUrl(wid, `review/${secondSubmitted.review_item_id}`));
   await expect(page.getByRole('heading',{name:'운영 절차 가이드',exact:true}).first()).toBeVisible();
   expect(errors).toEqual([]);

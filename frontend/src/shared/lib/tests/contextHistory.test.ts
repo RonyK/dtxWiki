@@ -13,8 +13,8 @@ import {
 describe("Context history presentation", () => {
   it("maps every lifecycle state to one exact non-heuristic tone", () => {
     expect(CONTEXT_HISTORY_STATUSES).toEqual([
+      "closed",
       "state_inconsistent",
-      "current_editing",
       "current_draft",
       "published_snapshot",
       "alternative_draft",
@@ -30,8 +30,8 @@ describe("Context history presentation", () => {
         ]),
       ),
     ).toEqual({
+      closed: "neutral",
       state_inconsistent: "danger",
-      current_editing: "info",
       current_draft: "warn",
       published_snapshot: "ok",
       alternative_draft: "info",
@@ -44,14 +44,10 @@ describe("Context history presentation", () => {
 
   it("keeps the authoritative English and Korean labels and descriptions in both readers", () => {
     const expectedEnglish = {
+      closed: { label: "Closed", description: "This draft ended and is preserved as a commit." },
       state_inconsistent: {
         label: "State review required",
         description: "Operator repair is required",
-      },
-      current_editing: {
-        label: "Currently editing",
-        description:
-          "A private, unsubmitted edit in progress. Visible only to its author until submitted for review.",
       },
       current_draft: {
         label: "Current draft",
@@ -80,11 +76,8 @@ describe("Context history presentation", () => {
       },
     };
     const expectedKorean = {
+      closed: { label: "끝남", description: "종료된 초안이며 커밋으로 보존됩니다." },
       state_inconsistent: { label: "상태 확인 필요", description: "운영 점검 필요" },
-      current_editing: {
-        label: "편집 중",
-        description: "아직 제출되지 않은 비공개 편집본. 제출 전까지 작성자 본인에게만 보임",
-      },
       current_draft: {
         label: "현재 초안",
         description: "아직 게시되지 않은 현재 편집본. 독자는 현재 게시본을 봄",

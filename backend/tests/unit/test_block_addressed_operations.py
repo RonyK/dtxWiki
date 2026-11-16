@@ -4,8 +4,9 @@ from time import perf_counter
 import pytest
 
 import backend.services.context_editing as context_editing_module
-import backend.services.context_write_service as context_write_service_module
+import backend.services.page_service as page_service_module
 import backend.utils.block_identity as block_identity_module
+from backend.models.context import ContextPageVersion
 from backend.schemas.context_edit import (
     DeleteBlockOperation,
     InsertAfterOperation,
@@ -14,6 +15,7 @@ from backend.schemas.context_edit import (
     ReplaceTextOperation,
 )
 from backend.schemas.page import BODY_MD_MAX_LENGTH
+from backend.scripts.seed_dev import DEFAULT_WORKSPACE_SLUG
 from backend.services.context_editing import (
     ContextEditError,
     EditResolutionContext,
@@ -22,7 +24,6 @@ from backend.services.context_editing import (
     block_map_edit_plan,
     block_operation_provenance,
 )
-from backend.services.context_write_service import ContextWriteService
 from backend.utils.block_identity import (
     BlockOperationProvenance,
     compute_block_map_with_ids,
@@ -32,6 +33,8 @@ from backend.utils.block_map import compute_blocks
 from backend.utils.markdown_outline import parse_outline
 
 pytestmark = pytest.mark.unit
+
+_ACTOR_ID = "00000000-0000-0000-0000-00000000b10c"
 
 
 def _seed(body: str) -> list[dict]:
@@ -67,9 +70,19 @@ def test_gap_hash_fast_path_reconstructs_parser_coordinates_without_parsing(body
     assert context._blocks_cache is None
 
 
-def test_write_service_does_not_build_outline_for_block_only_batch(monkeypatch):
-    body = "# Title\n\nfirst\n\nsecond\n"
-    block_map = _seed(body)
+def test_patch_context_edit_does_not_build_outline_for_block_only_batch(
+    page_service, monkeypatch
+):
+    created = page_service.create_page_first(
+        workspace_slug=DEFAULT_WORKSPACE_SLUG,
+        actor_kind="human",
+        actor_id=_ACTOR_ID,
+        actor_provenance="browser_session",
+        title="Title",
+        body_md="# Title\n\nfirst\n\nsecond\n",
+    )
+    with page_service.session_factory() as session:
+        block_map = session.get(ContextPageVersion, created.version_id).block_map
     target = _block(block_map, "p", index=0)
     operation = ReplaceBlockOperation(
         op="replace_block",
@@ -81,24 +94,21 @@ def test_write_service_does_not_build_outline_for_block_only_batch(monkeypatch):
     def unexpected_outline(_body: str):
         raise AssertionError("block-only writes must not parse a base outline")
 
-    monkeypatch.setattr(
-        context_write_service_module,
-        "parse_outline",
-        unexpected_outline,
+    monkeypatch.setattr(page_service_module, "parse_outline", unexpected_outline)
+
+    patched = page_service.patch_context_edit(
+        page_id=created.id,
+        version_id=created.version_id,
+        workspace_id=created.workspace_id,
+        operations=[operation],
+        actor_kind="human",
+        actor_id=_ACTOR_ID,
+        actor_provenance="browser_session",
+        expected_editing_revision=created.editing_revision,
+        idempotency_key="block-only-outline",
     )
 
-    result, edits, predicted_block_map = (
-        ContextWriteService._apply_operations_with_restorations(
-            body=body,
-            block_map=block_map,
-            operations=[operation],
-            restorations=[],
-        )
-    )
-
-    assert result == "# Title\n\nedited\n\nsecond\n"
-    assert len(edits) == 1
-    assert predicted_block_map is not None
+    assert patched.body_md == "# Title\n\nedited\n\nsecond\n"
 
 
 def test_replace_block_swaps_content_and_keeps_the_rest_untouched():

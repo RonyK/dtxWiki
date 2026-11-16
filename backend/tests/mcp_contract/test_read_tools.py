@@ -347,7 +347,6 @@ def test_read_context_outline_duplicate_sections_and_selected_hash(page_service,
             "workspace_id": str(workspace_id),
             "page_id": f"/p/{page.id}",
             "version_id": str(page.version_id),
-            "version": "published",
             "select": {
                 "by": "section_id",
                 "section_id": repeats[1].section_id,
@@ -927,8 +926,7 @@ def test_mcp_read_agent_page_requires_id_or_slug(page_service, actor):
 def test_read_concept_resolves_library_paths(
     page_service, actor, media_installer_factory
 ):
-    """A-8: every /library/<id>.md path the index advertises must resolve via
-    read_concept (previously a hard not_found dead-end)."""
+    """Library canonical URLs resolve to the same document the index advertises."""
 
     workspace_id = _workspace_id(page_service)
     with page_service.session_factory.begin() as session:

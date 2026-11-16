@@ -243,11 +243,9 @@ def test_input_version_number_hides_draft_versions_from_viewers(
 ):
     with session_factory.begin() as session:
         workspace, client, owner = _setup(session)
-        page, _ = _published_page(
-            session, workspace.id, "draft-version-input", "Guide"
-        )
+        page, _ = _published_page(session, workspace.id, "draft-version-input", "Guide")
         editing = _version(
-            session, page, status="editing", author=str(uuid4()), number=37
+            session, page, status="draft", author=str(uuid4()), number=37
         )
         chat = _Chat(session, workspace, client, owner)
         call = chat.call(
@@ -723,7 +721,7 @@ def test_previews_follow_the_visibility_of_the_edited_version(session_factory):
         editing = _version(
             session,
             page,
-            status="editing",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
@@ -798,7 +796,7 @@ def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
         editing = _version(
             session,
             page,
-            status="editing",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
@@ -869,11 +867,8 @@ def test_context_edit_inputs_never_feed_chat_labels():
     assert module.CONTEXT_EDIT_TOOLS.isdisjoint(label_tools)
 
 
-def test_a_discarded_editing_row_stays_its_authors_alone(session_factory):
-    """Discarding closes an editing row as "discarded", which the generic
-    draft rule would show to every editor. The text written into it was
-    private while it was open and was then thrown away, so Chats keeps it
-    with its author."""
+def test_a_discarded_draft_reads_like_any_draft(session_factory):
+    """A discarded draft follows the ordinary draft-read rule in Chats."""
 
     with session_factory.begin() as session:
         workspace, client, owner = _setup(session)
@@ -897,11 +892,10 @@ def test_a_discarded_editing_row_stays_its_authors_alone(session_factory):
         owner_view = _item(chat.read(_human(owner.id, workspace.id)), call)
         other_view = _item(chat.read(_human(uuid4(), workspace.id)), call)
 
-    assert owner_view.edit_summary.previews_withheld is False
-    assert "THROWN-AWAY-TEXT" in owner_view.model_dump_json()
-    assert other_view.redaction_reason is None
-    assert other_view.edit_summary.previews_withheld is True
-    assert "THROWN-AWAY-TEXT" not in other_view.model_dump_json()
+    for view in (owner_view, other_view):
+        assert view.redaction_reason is None
+        assert view.edit_summary.previews_withheld is False
+        assert "THROWN-AWAY-TEXT" in view.model_dump_json()
 
 
 def test_edit_summary_estimates_legacy_calls_from_their_digests(session_factory):
@@ -1068,7 +1062,7 @@ def test_detail_and_export_project_every_call_identically(session_factory):
         editing = _version(
             session,
             page,
-            status="editing",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
@@ -1131,7 +1125,7 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
         editing = _version(
             session,
             page,
-            status="editing",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
@@ -1151,7 +1145,7 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
             session, workspace.id, "diff-new", "Diff New", lifecycle_status="draft"
         )
         new_editing = _version(
-            session, new_page, status="editing", author=owner.id, number=1
+            session, new_page, status="draft", author=owner.id, number=1
         )
         new_page.current_version_id = new_editing.id
         session.flush()

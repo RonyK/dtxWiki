@@ -483,8 +483,8 @@ def test_workspace_read_service_lists_details_and_guide_payload():
     assert "once per task" in write_flow and "as often as needed" in write_flow
     assert "edit_receipt instead of re-reading" in write_flow
     assert "submit_context_edit_for_review once when done" in write_flow
-    assert "pending submission in the same chat" in write_flow
-    assert "reopens that same version" in write_flow
+    assert "submitted drafts by version_id" in write_flow
+    assert "join an existing draft" in write_flow
     assert (
         normal.required_workflow
         == detailed.required_workflow
@@ -2330,6 +2330,35 @@ def test_list_context_pages_filters_unpublished_heads_and_hides_archived_by_defa
             published=True,
             latest_draft=True,
         )
+        # New writes do not update the retired draft slot. A stale closed
+        # pointer cannot create a draft, and a real draft needs no pointer.
+        closed = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=published_only.id,
+            version_no=2,
+            body_md="closed",
+            content_hash="closed",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="filter-test",
+            version_status="closed",
+        )
+        session.add(closed)
+        session.flush()
+        published_only.latest_draft_version_id = closed.id
+        published_with_draft.latest_draft_version_id = None
+        published_with_draft.current_version_id = (
+            published_with_draft.current_published_version_id
+        )
+        legacy_draft_head.current_version_id = None
+        active = session.scalar(
+            select(ContextPageVersion).where(
+                ContextPageVersion.page_id == legacy_draft_head.id,
+                ContextPageVersion.version_status == "draft",
+            )
+        )
+        saved_at = datetime(2001, 2, 3, tzinfo=UTC)
+        active.last_saved_at = saved_at
         workspace_id = workspace.id
 
     actor = _system_actor(workspace_id)
@@ -2374,8 +2403,15 @@ def test_list_context_pages_filters_unpublished_heads_and_hides_archived_by_defa
         legacy_draft_head.id,
     }
     assert with_drafts.total == len(with_drafts.items) == 2
+    selected = next(
+        item for item in with_drafts.items if item.id == legacy_draft_head.id
+    )
+    assert selected.updated_at == saved_at
+    assert selected.latest_draft_version_id == active.id
+    assert all(item.latest_draft_version_id is not None for item in with_drafts.items)
     assert {item.id for item in without_drafts.items} == {published_only.id}
     assert without_drafts.total == len(without_drafts.items) == 1
+    assert without_drafts.items[0].latest_draft_version_id is None
     assert {item.id for item in archived.items} == {archived_with_draft.id}
     assert archived.total == len(archived.items) == 1
 

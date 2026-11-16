@@ -14,6 +14,10 @@ from backend.services.context_write_service import ContextWriteService
 from backend.services.domain_read import DomainReadService
 from backend.services.tree_read import TreeReadService
 from backend.tests.conftest import authenticate_test_client
+from backend.tests.utils.context_git import (
+    merge_preview_binding,
+    review_preview_binding,
+)
 
 
 def make_client(page_service) -> TestClient:
@@ -58,6 +62,7 @@ def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypat
     updated = client.post(
         f"{pages_url}/{draft['id']}/autosave",
         json={
+            "version_id": draft["version_id"],
             "idempotency_key": "context-api-append",
             "title": "API Context Draft",
             "page_type": "overview",
@@ -77,6 +82,7 @@ def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypat
     stale = client.post(
         f"{pages_url}/{draft['id']}/autosave",
         json={
+            "version_id": draft["version_id"],
             "idempotency_key": "context-api-stale",
             "title": "API Context Draft",
             "body_md": "# Stale",
@@ -86,7 +92,7 @@ def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypat
         },
     )
     assert stale.status_code == 409
-    assert stale.json()["error_code"] == "stale_base_version"
+    assert stale.json()["error_code"] == "editing_revision_conflict"
 
     # App assembly already bound its writer. Transport services must retain
     # that explicit dependency even without the legacy session.info bridge.
@@ -96,6 +102,9 @@ def test_context_api_creates_updates_and_publishes_draft(page_service, monkeypat
     published = client.post(
         f"{pages_url}/{draft['id']}/versions/{updated_id}/publish",
         json={
+            **merge_preview_binding(
+                client, f"{pages_url}/{draft['id']}/versions/{updated_id}/publish"
+            ),
             "reason": "publish browser-authored context draft",
             "expected_content_hash": updated_hash,
             "expected_references_hash": updated_data["references_hash"],
@@ -124,6 +133,10 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
     published_response = owner.post(
         f"{pages_url}/{created['id']}/versions/{created['version_id']}/publish",
         json={
+            **merge_preview_binding(
+                owner,
+                f"{pages_url}/{created['id']}/versions/{created['version_id']}/publish",
+            ),
             "reason": "publish inspector baseline",
             "expected_content_hash": created["content_hash"],
             "expected_references_hash": created["references_hash"],
@@ -131,14 +144,21 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
     )
     assert published_response.status_code == 200, published_response.text
     published = published_response.json()["data"]
+    begun = owner.post(
+        f"{pages_url}/{created['id']}/begin-edit",
+        json={"from": published["version_id"], "idempotency_key": "inspector-begin"},
+    )
+    assert begun.status_code == 200, begun.text
+    editing = begun.json()["data"]
     saved = owner.post(
         f"{pages_url}/{created['id']}/autosave",
         json={
+            "version_id": editing["version_id"],
             "idempotency_key": "lazy-inspector-save",
             "body_md": "# Title\n\n### Draft heading skips a level\n\nDraft body.",
-            "base_version_id": published["version_id"],
-            "base_content_hash": published["content_hash"],
-            "expected_editing_revision": published["editing_revision"],
+            "base_version_id": editing["version_id"],
+            "base_content_hash": editing["content_hash"],
+            "expected_editing_revision": editing["editing_revision"],
         },
     ).json()["data"]
     submitted_response = owner.post(
@@ -181,9 +201,9 @@ def test_context_inspector_defers_work_and_checks_the_displayed_version(
     )
     assert detail_response.status_code == 200, detail_response.text
     detail = detail_response.json()["data"]
-    assert detail["warnings"] == detail["pending_draft_warnings"] == []
-    assert detail["pending_review"]["review_item_id"] == submitted["review_item_id"]
-    assert detail["pending_draft_version_id"] == submitted["version_id"]
+    assert detail_response.json()["envelope"]["warnings"] == []
+    assert detail["pending_review"] is None
+    assert detail["pending_draft_version_id"] is None
     assert detail["backlink_count"] is detail["children_count"] is None
     assert counts == linted_versions == []
 
@@ -278,12 +298,24 @@ def test_workspace_publish_route_requires_expected_content_hash(page_service):
         client.post(
             f"/api/v1/workspaces/{workspace_id}/reviews/{submitted['review_item_id']}"
             "/decision",
-            json={"decision_type": "approve"},
+            json={
+                "decision_type": "approve",
+                **review_preview_binding(
+                    client,
+                    f"{pages_url}/{created['id']}/versions/{created['version_id']}/publish",
+                ),
+            },
         )
 
     omitted = client.post(
         f"{pages_url}/{created['id']}/versions/{created['version_id']}/publish",
-        json={"reason": "publish without a hash"},
+        json={
+            **merge_preview_binding(
+                client,
+                f"{pages_url}/{created['id']}/versions/{created['version_id']}/publish",
+            ),
+            "reason": "publish without a hash",
+        },
     )
     assert omitted.status_code == 422, omitted.text
     assert "expected_content_hash" in omitted.text
@@ -312,6 +344,7 @@ def test_workspace_publish_route_rejects_a_stale_hash_and_reports_the_current_on
     revised = client.post(
         f"{pages_url}/{created['id']}/autosave",
         json={
+            "version_id": created["version_id"],
             "idempotency_key": "stale-hash-revise",
             "title": "Stale Hash Reports Current",
             "body_md": "# Stale Hash Reports Current\n\nRevised body.",
@@ -335,12 +368,22 @@ def test_workspace_publish_route_rejects_a_stale_hash_and_reports_the_current_on
         client.post(
             f"/api/v1/workspaces/{workspace_id}/reviews/{submitted['review_item_id']}"
             "/decision",
-            json={"decision_type": "approve"},
+            json={
+                "decision_type": "approve",
+                **review_preview_binding(
+                    client,
+                    f"{pages_url}/{created['id']}/versions/{revised['version_id']}/publish",
+                ),
+            },
         )
 
     stale = client.post(
         f"{pages_url}/{created['id']}/versions/{revised['version_id']}/publish",
         json={
+            **merge_preview_binding(
+                client,
+                f"{pages_url}/{created['id']}/versions/{revised['version_id']}/publish",
+            ),
             "reason": "publish with a stale hash",
             "expected_content_hash": original_hash,
         },

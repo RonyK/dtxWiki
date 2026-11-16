@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../client";
 import {
   PAGE_AUTOSAVE_BEACON_LIMIT_BYTES,
-  PageEditingUnavailableError,
   autosavePage,
   createPage,
   createPageComment,
@@ -49,7 +48,7 @@ function pageDetail(overrides: Record<string, unknown> = {}) {
     content_hash: "a".repeat(64),
     body_md: "# Hello",
     version_id: "v1",
-    version_status: "editing",
+    version_status: "draft",
     parent_version_id: null,
     created_at: "2026-05-08T00:00:00Z",
     editing_revision: 1,
@@ -75,14 +74,40 @@ describe("pages api", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not adopt a readable foreign editing body when no editable head exists", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
-      JSON.stringify({ data: pageDetail({ current_version_id: null }) }),
+  it("joins existing work on a never-published page without an edit-head pointer", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ data: pageDetail({
+        current_version_id: null,
+        current_published_version_id: null,
+        body_md: "# Hello\n\nExisting shared work.",
+      }) }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     ));
+    const draft = await readEditablePage(WORKSPACE_ID, "p1");
+    expect(draft.version_id).toBe("v1");
+    expect(draft.body_md).toContain("Existing shared work.");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/p1/begin-edit");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      idempotency_key: expect.any(String), from: "v1",
+    });
+  });
 
-    await expect(readEditablePage(WORKSPACE_ID, "p1")).rejects.toBeInstanceOf(PageEditingUnavailableError);
+  it("reads a published commit on entry and URL re-entry without creating a draft", async () => {
+    const published = pageDetail({ version_status: "published", current_published_version_id: "v1" });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ data: published }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+    const selected = await readEditablePage(WORKSPACE_ID, "p1");
+    expect(selected).toEqual(published);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method ?? "GET").toBe("GET");
+    // The editor puts the selected commit in the URL; re-entry still only reads it.
+    await expect(readEditablePage(WORKSPACE_ID, "p1", selected.version_id)).resolves.toEqual(published);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/p1?version_id=v1");
+    expect(fetchMock.mock.calls[1][1]?.method ?? "GET").toBe("GET");
   });
 
   it("sends cookie credentials and create payload", async () => {
@@ -109,7 +134,6 @@ describe("pages api", () => {
           body_md: "# Hello",
           page_type: "decision",
           tags: ["release"],
-          share_draft: true,
         }),
       }),
     );
@@ -165,7 +189,7 @@ describe("pages api", () => {
       body_md: "# Hello",
       base_version_id: "v2",
       base_content_hash: "b".repeat(64),
-      session_version_id: "v2",
+      version_id: "v2",
       expected_editing_revision: 1,
       on_stale: "conflict",
       retry_only: false,
@@ -182,49 +206,36 @@ describe("pages api", () => {
           body_md: "# Hello",
           base_version_id: "v2",
           base_content_hash: "b".repeat(64),
-          session_version_id: "v2",
+          version_id: "v2",
           expected_editing_revision: 1,
           on_stale: "conflict",
           retry_only: false,
-          share_draft: true,
         }),
       }),
     );
   });
 
-  it("publishes a staged page version with the generated request contract", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: pageDetail({
-            version_id: "v2",
-            parent_version_id: "v1",
-          }),
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-
+  it("publishes the previewed result with revision, head and hash checks", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(
+      JSON.stringify({ data: String(input).endsWith("/merge-preview") ? {
+        version_id: "v2", editing_revision: 4, published_version_id: "v1", parent_version_ids: ["v1"],
+        kind: "fast_forward", result: { body_md: "# Hello", page_metadata: {}, block_map: [], result_hash: "c".repeat(64) },
+      } : pageDetail({ version_id: "v2", parent_version_id: "v1" }) }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
     const result = await publishPageVersion(WORKSPACE_ID, "p1", "v2", {
-      reason: "Publish from test.",
-      publish_despite_findings: false,
-      expected_content_hash: "a".repeat(64),
-      expected_references_hash: "b".repeat(64),
+      reason: "Publish from test.", publish_despite_findings: false,
+      expected_content_hash: "a".repeat(64), expected_references_hash: "b".repeat(64),
     });
-
     expect(result.page.version_id).toBe("v2");
-    expect(fetchMock).toHaveBeenCalledWith(
-      `http://127.0.0.1:21080/api/v1/workspaces/${WORKSPACE_ID}/context/pages/p1/versions/v2/publish`,
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          reason: "Publish from test.",
-          publish_despite_findings: false,
-          expected_content_hash: "a".repeat(64),
-          expected_references_hash: "b".repeat(64),
-        }),
-      }),
-    );
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/p1/merge-preview");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/p1/versions/v2/publish");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      reason: "Publish from test.", publish_despite_findings: false,
+      expected_content_hash: "a".repeat(64), expected_references_hash: "b".repeat(64),
+      expected_editing_revision: 4, expected_published_version_id: "v1", result_hash: "c".repeat(64),
+      idempotency_key: expect.any(String),
+    });
   });
 
   it("lists pages for a workspace", async () => {
@@ -495,6 +506,7 @@ describe("pages api", () => {
       tags: [],
       base_version_id: "v1",
       base_content_hash: "a".repeat(64),
+      version_id: "v1",
       expected_editing_revision: 1,
       on_stale: "conflict",
       retry_only: false,
@@ -524,6 +536,7 @@ describe("pages api", () => {
       tags: [],
       base_version_id: "v1",
       base_content_hash: "a".repeat(64),
+      version_id: "v1",
       expected_editing_revision: 1,
       on_stale: "conflict",
       retry_only: false,
@@ -566,6 +579,7 @@ describe("pages api", () => {
       tags: [],
       base_version_id: "v1",
       base_content_hash: "a".repeat(64),
+      version_id: "v1",
       expected_editing_revision: 1,
       on_stale: "conflict",
       retry_only: false,
@@ -599,6 +613,7 @@ describe("pages api", () => {
       tags: [],
       base_version_id: "v1",
       base_content_hash: "a".repeat(64),
+      version_id: "v1",
       expected_editing_revision: 1,
       on_stale: "conflict",
       retry_only: false,
@@ -629,7 +644,8 @@ describe("pages api", () => {
         tags: [],
         base_version_id: "v1",
         base_content_hash: "a".repeat(64),
-        expected_editing_revision: 1,
+        version_id: "v1",
+      expected_editing_revision: 1,
         on_stale: "conflict",
         retry_only: false,
       });

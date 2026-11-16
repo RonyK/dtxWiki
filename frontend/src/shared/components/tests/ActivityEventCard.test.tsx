@@ -47,6 +47,14 @@ describe("ActivityEventCard", () => {
     rerender(<MemoryRouter><ActivityEventCard item={{ ...data, event_key: "page.autosave.draft", body: "page.autosave.draft" }} workspaceId="00000000-0000-4000-8000-000000000001" /></MemoryRouter>);
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.getByText("Change summary not recorded")).toBeInTheDocument();
+    rerender(<MemoryRouter><ActivityEventCard item={{
+      ...data, event_key: "context_page.draft.save", body: "context_page.draft.save",
+      details: { ...data.details!, base_version: { id: "before", number: 3, immutable: true } },
+    }} workspaceId="00000000-0000-4000-8000-000000000001" /></MemoryRouter>);
+    expect(screen.getByText("Saved")).toHaveClass("context-event-chip");
+    expect(screen.getByText("v8 draft")).toBeInTheDocument();
+    expect(screen.getByText("Based on v3 · Change summary not recorded")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).toBeNull();
     rerender(<MemoryRouter><ActivityEventCard item={{ ...data, event_key: "page.submit_context_edit_for_review", body: "page.submit_context_edit_for_review", review_item_id: "review-1" }} workspaceId="00000000-0000-4000-8000-000000000001" /></MemoryRouter>);
     expect(screen.getByRole("link", { name: "View review" })).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
   });

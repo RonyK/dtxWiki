@@ -197,9 +197,9 @@ def resolve_document_targets(session, workspace_id, refs, actor, *, public=False
                 conditions=(model.id.in_(ids[start : start + 400]),),
             )
             if model is ContextPage:
-                # The shared visibility predicate inspects private draft
-                # ownership. Load just those attributes in bounded batches,
-                # never one full draft body per referenced page.
+                # The shared visibility predicate inspects draft access. Load
+                # just those attributes in bounded batches, never one full
+                # draft body per page.
                 columns = (
                     ContextPageVersion.id,
                     ContextPageVersion.workspace_id,
@@ -491,7 +491,7 @@ def replace_authored_document_references(
     from another version in this workspace. Inline and legacy evidence retain
     their separate ownership; unchanged live registration IDs remain stable.
     """
-    if version.version_status not in {"editing", "draft"}:
+    if version.version_status != "draft":
         raise ValueError("Published bibliography metadata is immutable")
     desired = {}
     for value in rows:
@@ -1202,7 +1202,7 @@ def read_document_references(
     known = {entry["ref"].key: entry for entry in entries}
     for key, (_stone, value) in deleted.items():
         if (
-            version.version_status in {"editing", "draft"}
+            version.version_status == "draft"
             and not value.get("metadata_present", False)
             and key not in known
         ):

@@ -29,11 +29,40 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.models.app_metadata import AppMetadata
 from backend.models.user import User
 from backend.models.workspace import MCPClient
 from backend.utils.uuid import parse_uuid_or_none
 
 HUMAN_ACTOR_FALLBACK_LABEL = "Human editor"
+# A deleted account's name, kept on the identity plane for the content it wrote.
+_DEPARTED_AUTHOR_NAME_PREFIX = "departed_author_name:"
+
+
+def keep_departed_author_name(session: Session, user: User) -> None:
+    """Keep ``user``'s name for its retained content before the row is deleted."""
+
+    name = user.display_name.strip()
+    if name:
+        session.merge(
+            AppMetadata(key=f"{_DEPARTED_AUTHOR_NAME_PREFIX}{user.id}", value=name)
+        )
+
+
+def _departed_author_names(session: Session, user_ids: set[UUID]) -> dict[UUID, str]:
+    if not user_ids:
+        return {}
+    rows = session.scalars(
+        select(AppMetadata).where(
+            AppMetadata.key.in_(
+                [f"{_DEPARTED_AUTHOR_NAME_PREFIX}{user_id}" for user_id in user_ids]
+            )
+        )
+    )
+    return {
+        UUID(row.key.removeprefix(_DEPARTED_AUTHOR_NAME_PREFIX)): row.value
+        for row in rows
+    }
 
 
 def _constant_label(actor_kind: str) -> str:
@@ -67,9 +96,7 @@ def _label_for(
     """
 
     if actor_kind == "human" and actor_id is not None:
-        return users.get(
-            parse_uuid_or_none(str(actor_id)), HUMAN_ACTOR_FALLBACK_LABEL
-        )
+        return users.get(parse_uuid_or_none(str(actor_id)), HUMAN_ACTOR_FALLBACK_LABEL)
     return _constant_label(actor_kind)
 
 
@@ -91,6 +118,10 @@ def resolve_actor_display_name(
             user = session.get(User, user_id)
             if user is not None and user.display_name.strip():
                 return user.display_name.strip()
+            if user is None:
+                departed = _departed_author_names(session, {user_id})
+                if user_id in departed:
+                    return departed[user_id]
         return HUMAN_ACTOR_FALLBACK_LABEL
     return _constant_label(actor_kind)
 
@@ -115,15 +146,14 @@ def resolve_actor_display_names(
         and actor_id is not None
         and (user_id := parse_uuid_or_none(str(actor_id))) is not None
     }
-    users = (
-        {
-            user.id: user.display_name.strip()
-            for user in session.scalars(select(User).where(User.id.in_(human_ids)))
-            if user.display_name.strip()
-        }
-        if human_ids
-        else {}
-    )
+    users: dict[UUID | None, str] = {}
+    present: set[UUID] = set()
+    if human_ids:
+        for user in session.scalars(select(User).where(User.id.in_(human_ids))):
+            present.add(user.id)
+            if user.display_name.strip():
+                users[user.id] = user.display_name.strip()
+        users.update(_departed_author_names(session, human_ids - present))
     return {
         (actor_kind, actor_id): _label_for(actor_kind, actor_id, users)
         for actor_kind, actor_id in actors
@@ -177,9 +207,8 @@ class DeferredIdentityLabels:
     def apply(self, identity_session: Session) -> int:
         """Resolve every recorded id on ``identity_session``; return labels written.
 
-        A user id with no row resolves to ``HUMAN_ACTOR_FALLBACK_LABEL``, which
-        is the same value the deferring read already wrote -- a deleted user
-        stays "Human editor" rather than becoming blank.
+        A deleted user resolves to the name kept when the account was deleted;
+        an id with neither falls back to ``HUMAN_ACTOR_FALLBACK_LABEL``.
         """
 
         if not self._requests:

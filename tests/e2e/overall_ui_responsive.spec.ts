@@ -8,6 +8,7 @@ import {
   type TestInfo,
 } from "./fixtures";
 import { randomUUID } from "node:crypto";
+import { approveContextDraft } from "./context_workflow";
 
 import {
   authenticatePage,
@@ -1941,35 +1942,30 @@ async function seedResponsiveFixture(
     ),
     "submit responsive Context page for review",
   );
-  await responseData(
+  await approveContextDraft(request, workspaceId, initialVersion.id, submittedVersion.version_id, submittedVersion.review_item_id);
+  const editingVersion = await responseData<SeededPage>(
     await request.post(
-      `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/reviews/${submittedVersion.review_item_id}/decision`,
-      { data: { decision_type: "approve" } },
-    ),
-    "approve responsive Context page review",
-  );
-  const publishedVersion = await responseData<SeededPage>(
-    await request.post(
-      `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/context/pages/${initialVersion.id}/versions/${submittedVersion.version_id}/publish`,
+      `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/context/pages/${initialVersion.id}/begin-edit`,
       {
         data: {
-          reason: "e2e: publish responsive history fixture root",
-          expected_content_hash: submittedVersion.content_hash,
+          from: submittedVersion.version_id,
+          idempotency_key: randomUUID(),
         },
       },
     ),
-    "publish responsive Context page",
+    "begin responsive Context successor draft",
   );
   const currentVersion = await responseData<SeededPage>(
     await request.post(
       `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/context/pages/${initialVersion.id}/autosave`,
       {
         data: {
-          base_content_hash: publishedVersion.content_hash,
-          base_version_id: publishedVersion.version_id,
+          version_id: editingVersion.version_id,
+          base_content_hash: editingVersion.content_hash,
+          base_version_id: editingVersion.version_id,
           body_md:
             "# Responsive history\n\nInitial published body.\n\nSecond version for predecessor comparison.",
-          expected_editing_revision: publishedVersion.editing_revision,
+          expected_editing_revision: editingVersion.editing_revision,
           idempotency_key: randomUUID(),
         },
       },

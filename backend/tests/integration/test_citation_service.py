@@ -88,7 +88,7 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(
         )
         session.add_all([source, target])
         session.flush()
-        edit = version(source, 1, "editing")
+        edit = version(source, 1, "draft")
         published = version(target, 1, "published_snapshot")
         session.add_all([edit, published])
         session.flush()
@@ -331,7 +331,7 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(
         assert all(row.target_id is None and row.metadata_present for row in refs)
         public = read_document_references(session, version=old, actor=None, public=True)
         assert all(row.metadata_id is None for row in public)
-        next_edit = version(source, 2, "editing", parent=old)
+        next_edit = version(source, 2, "draft", parent=old)
         sibling = version(source, 3, "draft", parent=old)
         sibling.graph_status = "branched"
         session.add_all([next_edit, sibling])
@@ -390,3 +390,119 @@ def test_reference_command_keeps_metadata_cas_receipt_and_trace_atomic(
         assert not legacy_document_references(
             session, session.get(ContextPageVersion, next_id)
         )
+
+    # Budget exception: body-merge units cannot detect lost SQL registrations
+    # or a wrong second-parent bibliography base. This persisted-reference
+    # traversal checks that independent failure path using the same case.
+    # A bibliography follows the same real Git DAG as the body. Preserve
+    # published-only registrations when another shared draft is published,
+    # then use the merge commit's second parent as the next merge base.
+    from backend.services.page_service import PageService
+
+    with session_factory.begin() as session:
+        session.get(Workspace, ws_id).citation_policy = {
+            "accepted_document_kinds": ["context_page", "library_item"]
+        }
+    pages = PageService(session_factory)
+
+    def published(slug):
+        return pages.write_page(
+            workspace_slug="default",
+            slug=slug,
+            title=slug,
+            body_md=f"# {slug}\n",
+            actor_kind="human",
+            actor_id=ACTOR.actor_id,
+            actor_provenance="browser_session",
+        )
+
+    owner = published("reference-merge-owner")
+    target_a, target_b = published("reference-merge-a"), published("reference-merge-b")
+
+    def begin(source=None):
+        return pages.begin_context_edit(
+            owner.id,
+            ws_id,
+            "human",
+            ACTOR.actor_id,
+            "browser_session",
+            str(uuid4()),
+            from_version_id=source,
+        )
+
+    def cite(draft, target, note=None):
+        with session_factory.begin() as session:
+            result = service.cite(
+                session,
+                ws_id,
+                CiteRequest(
+                    page_id=owner.id,
+                    version_id=draft.version_id,
+                    expected_editing_revision=draft.editing_revision,
+                    idempotency_key=str(uuid4()),
+                    add=[
+                        {
+                            "target_kind": "context_page",
+                            "target_id": target.id,
+                            "note": note,
+                        }
+                    ],
+                ),
+                actor=ACTOR,
+            )
+        return draft.model_copy(update={"editing_revision": result.editing_revision})
+
+    def publish(draft):
+        seen = pages.preview_context_merge(owner.id, draft.version_id, ws_id)
+        return pages.publish_draft(
+            page_id=owner.id,
+            version_id=draft.version_id,
+            reason="merge references",
+            publish_despite_findings=False,
+            actor_kind="human",
+            actor_id=ACTOR.actor_id,
+            actor_provenance="browser_session",
+            expected_editing_revision=seen["editing_revision"],
+            expected_published_version_id=seen["published_version_id"],
+            result_hash=seen["result"]["result_hash"],
+        ).page
+
+    left, right = begin(), begin()
+    left, right = cite(left, target_a), cite(right, target_b)
+    publish(left)
+    merged = publish(right)
+    with session_factory() as session:
+        rows = read_document_references(
+            session,
+            version=session.get(ContextPageVersion, merged.version_id),
+            actor=ACTOR,
+        )
+        assert {row.target_id for row in rows} == {target_a.id, target_b.id}
+    continued = cite(begin(right.version_id), target_b, "note from the second parent")
+    brought = pages.bring_in_context_version(
+        owner.id,
+        continued.version_id,
+        ws_id,
+        continued.editing_revision,
+        str(uuid4()),
+        "human",
+        ACTOR.actor_id,
+        "browser_session",
+    )
+    multi = begin([right.version_id, merged.version_id])
+    with session_factory() as session:
+        rows = read_document_references(
+            session,
+            version=session.get(ContextPageVersion, brought.version_id),
+            actor=ACTOR,
+        )
+        assert {row.target_id for row in rows} == {target_a.id, target_b.id}
+        assert next(row.note for row in rows if row.target_id == target_b.id) == (
+            "note from the second parent"
+        )
+        rows = read_document_references(
+            session,
+            version=session.get(ContextPageVersion, multi.version_id),
+            actor=ACTOR,
+        )
+        assert {row.target_id for row in rows} == {target_a.id, target_b.id}

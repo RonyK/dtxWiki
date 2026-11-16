@@ -101,6 +101,7 @@ class ChangeReviewAuditRecorder:
         payload: dict[str, Any] | None = None,
         body: str | None = None,
         needs_review: bool = False,
+        force_pending_review: bool = False,
         risk_signals: dict[str, bool] | None = None,
         origin_chat_session_id: UUID | None = None,
     ) -> ChangeReviewAuditResult:
@@ -128,7 +129,7 @@ class ChangeReviewAuditRecorder:
             },
             actor_provenance=actor_provenance,
         )
-        review_required = risk_resolution.review_required
+        review_required = force_pending_review or risk_resolution.review_required
         change_set = ChangeSet(
             workspace_id=workspace_id,
             reason=action,
@@ -185,84 +186,6 @@ class ChangeReviewAuditRecorder:
                 "review_item_id": str(review.id),
             },
             event_summary=action,
-            retention_class="standard",
-        )
-        return ChangeReviewAuditResult(
-            change_set_id=change_set.id,
-            change_operation_id=operation.id,
-            review_item_id=review.id,
-            audit_event_id=audit_event.id,
-        )
-
-    def record_context_page_alternative(
-        self,
-        session: Session,
-        workspace_id: UUID,
-        actor_kind: str,
-        actor_id: str,
-        page_id: UUID,
-        version_id: UUID,
-        actor_provenance: str,
-        payload: dict[str, Any] | None = None,
-    ) -> ChangeReviewAuditResult:
-        risk_resolution = self._resolve_risk(
-            session=session,
-            workspace_id=workspace_id,
-            event="stale_alternative",
-            signals={
-                "ai_authored": actor_provenance in AI_PROVENANCES,
-                "review_required": True,
-            },
-            actor_provenance=actor_provenance,
-        )
-        review_required = risk_resolution.review_required
-        change_set = ChangeSet(
-            workspace_id=workspace_id,
-            reason="page.preserve_alternative",
-            trigger_type="manual_stale_recovery",
-            actor_type=actor_kind,
-            actor_id=parse_uuid_or_none(actor_id),
-            status="pending_review" if review_required else "applied",
-            risk_level=risk_resolution.risk_level,
-        )
-        session.add(change_set)
-        session.flush()
-
-        operation = ChangeOperation(
-            workspace_id=change_set.workspace_id,
-            change_set_id=change_set.id,
-            target_type="context_page",
-            target_id=page_id,
-            operation="preserve_alternative",
-            diff_summary="stale edit preserved as alternative draft",
-            diff_ref=f"context_page_version:{version_id}",
-        )
-        review = ReviewItem(
-            workspace_id=workspace_id,
-            change_set_id=change_set.id,
-            review_type="context_update",
-            status="pending" if review_required else "approved",
-            risk_level=risk_resolution.risk_level,
-            **review_risk_snapshot(risk_resolution),
-            decision_summary=_STALE_ALTERNATIVE_SUMMARY[0],
-            decision_summary_code=_STALE_ALTERNATIVE_SUMMARY[1],
-        )
-        session.add_all([operation, review])
-        session.flush()
-        if not review_required:
-            session.add(_bypass_decision(review, change_set))
-            session.flush()
-
-        audit_event = self.audit_service.emit(
-            session=session,
-            workspace_id=workspace_id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            action="page.preserve_alternative",
-            target_kind="context_page",
-            target_id=page_id,
-            payload=payload,
-            event_summary="page.preserve_alternative",
             retention_class="standard",
         )
         return ChangeReviewAuditResult(

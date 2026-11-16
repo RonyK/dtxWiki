@@ -277,7 +277,7 @@ def test_what_changed_follows_the_published_version(session_factory, page_servic
             )
             for body in ("Two", "Three")
         ]
-        # Approving the newer draft skips the never-published one below it.
+        # Independent drafts share a commit parent; the other stays open.
         ReviewService().apply_decision(
             session=session,
             workspace_id=workspace_id,
@@ -289,8 +289,10 @@ def test_what_changed_follows_the_published_version(session_factory, page_servic
             actor_provenance="browser_session",
         )
         v3 = drafts[1].draft_version_id
-        assert session.get(ContextPageVersion, v3).parent_version_id == (
-            drafts[0].draft_version_id
+        assert session.get(ContextPageVersion, v3).parent_version_id == v1
+        assert (
+            session.get(ContextPageVersion, drafts[0].draft_version_id).version_status
+            == "draft"
         )
         TreeService().archive_node(
             session=session,
@@ -306,7 +308,7 @@ def test_what_changed_follows_the_published_version(session_factory, page_servic
         )
     # Restoring an older version revives the page; its published version
     # is live again while the restored copy waits as a draft.
-    page_service.restore_version(
+    restored = page_service.restore_version(
         page_id=page_id,
         version_id=v1,
         actor_kind="human",
@@ -317,13 +319,13 @@ def test_what_changed_follows_the_published_version(session_factory, page_servic
     with session_factory() as session:
         entries, _ = what_changed(session, workspace_id, since=since, actor=None)
         page = session.get(ContextPage, page_id)
-        assert resolve_version_as_of(session, page, _now()).id == v3
+        assert resolve_version_as_of(session, page, _now()).id == restored.version_id
     assert [
         (e.change_kind, e.version_id, e.previous_version_id, e.reason) for e in entries
     ] == [
         ("updated", v3, v1, "approved through Context review"),
         ("archived", v3, v3, "delete tree node Head Moves"),
-        ("created", v3, None, "page restored from archive"),
+        ("created", restored.version_id, None, "Restored previous Context content"),
     ]
 
 

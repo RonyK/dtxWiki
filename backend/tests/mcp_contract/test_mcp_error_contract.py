@@ -160,7 +160,8 @@ def test_stale_base_version_is_not_retryable_but_says_how_to_recover():
     # the same person in the browser -- and resending with the new revision
     # swapped in overwrote exactly that work (B-5).
     assert "Re-read before retrying" in summary
-    assert "version='my_edit'" in summary
+    assert "version_id" in summary
+    assert "my_edit" not in summary
     assert "do not resend the same content" in summary
     assert "resend with it" not in summary
 

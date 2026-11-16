@@ -225,8 +225,8 @@ class McpChatEditSummary(BaseModel):
     preview_budget_exhausted: int = 0
     # At least one preview of this call was deleted.
     previews_purged: bool = False
-    # The call wrote into a version this reader cannot see (another author's
-    # private editing session), so its previews are not shown to them.
+    # The call wrote into a version this reader cannot see (a draft without
+    # draft access), so its previews are not shown to them.
     previews_withheld: bool = False
 
     model_config = ConfigDict(extra="forbid")

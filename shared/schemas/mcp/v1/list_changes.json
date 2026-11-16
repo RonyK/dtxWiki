@@ -147,7 +147,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",
@@ -739,8 +738,8 @@
             "anyOf": [
               {
                 "enum": [
+                  "closed",
                   "state_inconsistent",
-                  "current_editing",
                   "current_draft",
                   "published_snapshot",
                   "alternative_draft",
@@ -846,6 +845,14 @@
             ],
             "default": null,
             "title": "Parent Version Id"
+          },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
           },
           "prior_relation": {
             "default": "root",

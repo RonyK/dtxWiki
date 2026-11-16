@@ -55,7 +55,6 @@
       "failed": "Failed",
       "deleted": "Deleted",
       "state_inconsistent": "State review required",
-      "current_editing": "Currently editing",
       "current_draft": "Current draft",
       "published_snapshot": "Current published snapshot",
       "alternative_draft": "Alternative draft",

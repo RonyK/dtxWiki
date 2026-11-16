@@ -226,6 +226,7 @@ class VersionInfo(BaseModel):
     history_status: ContextHistoryStatus | None = None
     graph_status: str | None = None
     parent_version_id: UUID | None = None
+    parent_version_ids: list[UUID] = Field(default_factory=list)
     content_hash: str | None = None
     created_at: datetime | None = None
     is_visible_head: bool = False
@@ -452,6 +453,7 @@ class ContextPageDetail(ContextPageSummary):
     # F1: a draft awaiting review + the open review item, so the Context surface
     # can show "pending draft" + an inline approve/request-changes affordance.
     pending_draft_version_id: UUID | None = None
+
     pending_draft_warnings: list[str] = Field(
         default_factory=list,
         deprecated=True,
@@ -505,6 +507,7 @@ class VersionEntry(BaseModel):
     actor_display_name: str | None = None
     created_at: datetime | None = None
     parent_version_id: UUID | None = None
+    parent_version_ids: list[UUID] = Field(default_factory=list)
     prior_version_id: UUID | None = None
     prior_relation: Literal["root", "visible", "hidden", "missing"] = "root"
     # The reconcile merge edge (design doc section 7.1): set only on a

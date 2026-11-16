@@ -188,6 +188,7 @@ def _seed_library_artifact(session, workspace_id, *, trust_level="normal"):
 def _cite_artifact(session, page, artifact):
     assert page.current_published_version_id is not None
     from backend.models.document_reference import ContextCitationPublication
+
     # These legacy-evidence regressions model a pre-migration published head.
     # A v1 publication would register its complete immutable citation set.
     marker = session.get(ContextCitationPublication, page.current_published_version_id)
@@ -288,26 +289,6 @@ def _pin_archive_time(session_factory, page_id, archived_at):
         ).one()
         change_set.created_at = archived_at
         operation.created_at = archived_at
-
-
-def _pin_update_time(session_factory, page_id, version_id, updated_at):
-    # A metadata-only save records its update op against the already-published
-    # head, so it shares that version reference with the original publication.
-    # Select the update op by kind (exactly one) and pin it alone: the
-    # version-wide helper above would also move the publication.
-    with session_factory.begin() as session:
-        operation, change_set = session.execute(
-            select(ChangeOperation, ChangeSet)
-            .join(ChangeSet, ChangeOperation.change_set_id == ChangeSet.id)
-            .where(
-                ChangeOperation.target_type == "context_page",
-                ChangeOperation.target_id == page_id,
-                ChangeOperation.diff_ref == f"context_page_version:{version_id}",
-                ChangeOperation.operation == "update",
-            )
-        ).one()
-        change_set.created_at = updated_at
-        operation.created_at = updated_at
 
 
 # --- CRITICAL-1: duplicate citations must aggregate, not 500 the write path --
@@ -493,19 +474,21 @@ def test_restore_version_does_not_poison_the_publish_timeline(
     _pin_version_times(session_factory, restored.id, restored.version_id, _at(40))
     with session_factory() as session:
         page = session.get(ContextPage, v2.id)
-        # after the restore, as_of still resolves the published head — the
-        # restore draft event must not shadow it into not_found
+        # Restoring creates a new published commit from the selected snapshot.
         resolved = resolve_version_as_of(session, page, _at(50))
         assert resolved is not None
         assert resolved.id == page.current_published_version_id
-        # and the restore is not a published change for re-syncing agents
         entries, _ = what_changed(session, page.workspace_id, since=since, actor=None)
-        assert not any(entry.page_id == page.id for entry in entries)
+        assert any(entry.page_id == page.id for entry in entries)
         # the timeline itself carries only real publish instants
         timeline = publish_timeline(session, page.id)
         operations = [e.operation for e in timeline]
-        assert len(operations) == 2  # create + update, no restore event
-        assert [e.version_id for e in timeline] == [v1.version_id, v2.version_id]
+        assert len(operations) == 3
+        assert [e.version_id for e in timeline] == [
+            v1.version_id,
+            v2.version_id,
+            restored.version_id,
+        ]
 
 
 # --- MAJOR-2: what_changed never names pages the actor could not read --------
@@ -1306,9 +1289,7 @@ def test_ask_section_nodes_do_not_project_tree_edges(session_factory):
             actor_kind="human",
             actor_id="tester",
         )
-        rebuild_edge_projection(
-            session, workspace_id, usage_signals_enabled=True
-        )
+        rebuild_edge_projection(session, workspace_id, usage_signals_enabled=True)
         ask_edges = session.scalars(
             select(EdgeProjection).where(
                 EdgeProjection.edge_kind == "tree",
@@ -1433,8 +1414,7 @@ def test_index_preview_renders_agent_section_folder(page_service, session_factor
     with session_factory.begin() as session:
         session.get(Workspace, workspace_id).labs_policy = {"agent_enabled": True}
     response = client.get(
-        f"/api/v1/workspaces/{workspace_id}/tree/nodes/{guide_folder_id}"
-        "/index-preview"
+        f"/api/v1/workspaces/{workspace_id}/tree/nodes/{guide_folder_id}/index-preview"
     )
     assert response.status_code == 200, response.text
     # before the section fix the (context, library) projection 404'd here
@@ -1688,11 +1668,10 @@ def test_publish_draft_revives_archived_page_tree_node(session_factory, page_ser
         assert _primary_node(session, page_id).visibility_status == "visible"
 
 
-def test_metadata_only_update_is_not_a_fresh_publish_event(
+def test_metadata_only_update_records_a_new_publish_commit(
     session_factory, page_service
 ):
-    """#13: a metadata-only save (body unchanged) of a published page must not
-    surface as a fresh publish delta with a misleading previous version."""
+    """User metadata is part of the committed snapshot, including title-only edits."""
     published = page_service.write_page(
         workspace_slug="default",
         slug="meta-only",
@@ -1706,9 +1685,8 @@ def test_metadata_only_update_is_not_a_fresh_publish_event(
     # The publication precedes `since`; the update is pinned after it.
     _pin_version_times(session_factory, published.id, published.version_id, _at(10))
     since = _at(20)
-    # a body-unchanged update (title differs, body identical) records a
-    # page.update op referencing the already-published head
-    page_service.update_page(
+    # Title metadata changes belong to a new commit even when body prose is stable.
+    updated = page_service.update_page(
         page_id=published.id,
         title="Meta Only Renamed",
         body_md="# MO\n\nStable body.",
@@ -1718,14 +1696,14 @@ def test_metadata_only_update_is_not_a_fresh_publish_event(
         base_content_hash=published.content_hash,
         actor_provenance="browser_session",
     )
-    # the update falls inside the window, so only its suppression can keep
-    # the page out of the delta
-    _pin_update_time(session_factory, published.id, published.version_id, _at(30))
+    # The metadata commit falls inside the requested publication window.
+    _pin_version_times(session_factory, updated.id, updated.version_id, _at(30))
     with session_factory() as session:
         workspace_id = _workspace_id(session)
         entries, _ = what_changed(session, workspace_id, since=since, actor=None)
-    # the already-published head version must not re-surface as a publish event
-    assert all(entry.page_id != published.id for entry in entries)
+    # The delta points at the new publication, with its own version identity.
+    assert updated.version_id != published.version_id
+    assert any(entry.page_id == published.id for entry in entries)
 
 
 def test_reindex_tolerates_duplicate_placement_edges(session_factory, page_service):

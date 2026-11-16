@@ -11,13 +11,14 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from itertools import count
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import anyio
 from sqlalchemy import select
 
 from backend.mcp.protocol import runner as runner_module
 from backend.mcp.protocol.runner import call_tool_async
+from backend.models.context import ContextPageVersion
 from backend.models.mcp_chat import McpChatSession
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
@@ -257,11 +258,10 @@ def test_traced_edit_calls_carry_previews_receipts_and_the_session_diff(
     assert other_view.timeline[-1].result_summary is None
 
 
-def test_discarding_an_edit_deletes_the_previews_its_calls_kept(
+def test_ending_a_draft_retains_its_history_and_authorized_trace(
     page_service, mcp_default_actor
 ):
-    """The author threw the text away, so the excerpts of it that Chats kept
-    beside each call go with it -- sizes and digests stay as the record."""
+    """Closing preserves authorized trace excerpts and immutable Git history."""
 
     from backend.models.mcp_trace import MCPToolCall
 
@@ -347,34 +347,22 @@ def test_discarding_an_edit_deletes_the_previews_its_calls_kept(
         )
 
     assert len(calls) == 2
-    for secret in ("DISCARD-BODY-TEXT", "DISCARD-NEW-TEXT"):
-        assert secret not in stored
-    assert '"old_text_digest"' in stored
-    # The page was never published, so it is archived and hidden -- but it is
-    # the reader's own, in their own chat: each of its rows keeps its shape
-    # and a discarded-edit marker, and nothing of the page it threw away.
+    assert "DISCARD-BODY-TEXT" in stored
+    assert "DISCARD-NEW-TEXT" in stored
     edit_rows = [
         row
         for row in owner_view.timeline
         if row.tool_name in {"create_context_page", "patch_context_edit"}
     ]
     assert len(edit_rows) == 2
-    for row in edit_rows:
-        assert row.redaction_reason is None
-        assert [item.key for item in row.result_display_items] == ["discarded_edit"]
-        assert row.linked_artifacts == []
-    # The timeline is ordered by call start time, a wall-clock reading, so a
-    # row's place in it says nothing about which call it is. Find the patch by
-    # what it is.
-    assert {row.tool_name for row in edit_rows} == {
-        "create_context_page",
-        "patch_context_edit",
-    }
+    assert all(row.redaction_reason is None for row in edit_rows)
     patch_row = next(row for row in edit_rows if row.tool_name == "patch_context_edit")
     assert patch_row.edit_summary.operation_counts == {"replace_text": 1}
-    serialized = owner_view.model_dump_json()
-    for secret in ("Discarded Chats Page", "Discarded", page["page_id"]):
-        assert secret not in serialized
+    with page_service.session_factory() as session:
+        closed = session.get(ContextPageVersion, UUID(page["version_id"]))
+        assert closed.version_status == "closed"
+        assert closed.commit_oid
+        assert "DISCARD-NEW-TEXT" in closed.body_md
 
 
 PRIVATE_STRINGS = (

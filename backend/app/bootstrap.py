@@ -194,12 +194,42 @@ def ensure_app_version_synced(settings: Settings, app=None) -> None:
         try:
             factory = make_session_factory(engine)
             with factory.begin() as session:
+                if _context_projection_cutover_in_upgrade(db_revision, alembic_head):
+                    from backend.app.context_version_storage import (
+                        build_context_storage,
+                    )
+                    from backend.services.context_links import configured_self_origins
+                    from backend.services.indexing.reindex import (
+                        rebuild_local_projections,
+                    )
+
+                    store, writer = build_context_storage()
+                    session.info.update(
+                        context_snapshot_store=store, context_version_writer=writer
+                    )
+                    rebuild_local_projections(
+                        session, self_origins=configured_self_origins(settings)
+                    )
                 session.merge(AppMetadata(key="dtxwiki_version", value=code_version))
         finally:
             engine.dispose()
 
     if app is not None:
         app.state.app_version_synced = True
+
+
+def _context_projection_cutover_in_upgrade(before, after):
+    """Run the local rebuild only when this upgrade crosses the draft cutover."""
+    if before == after:
+        return False
+    config = Config(str(resolve_alembic_ini()))
+    config.set_main_option("script_location", str(resolve_migrations_dir()))
+    return any(
+        revision.revision == "c3d2e4f601ab"
+        for revision in ScriptDirectory.from_config(config).iterate_revisions(
+            after, before
+        )
+    )
 
 
 def verify_database_current(

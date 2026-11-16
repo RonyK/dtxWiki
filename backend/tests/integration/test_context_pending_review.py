@@ -5,10 +5,12 @@ from backend.models.base import Base
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.review import ReviewItem
 from backend.policy.auth import ActorContext
-from backend.schemas.context_write import UpdateDraftRequest, WriteDraftRequest
+from backend.schemas.context_write import WriteDraftRequest
 from backend.scripts.seed_dev import seed_default_workspace
+from backend.services.context_draft_workflow import ContextTransactionFactory
 from backend.services.context_write_service import ContextWriteService
 from backend.services.domain_read import DomainReadService
+from backend.services.page_service import PageService
 
 ACTOR = "00000000-0000-0000-0000-000000000010"
 
@@ -124,9 +126,9 @@ def test_pending_review_metadata_does_not_lint_the_draft_again(monkeypatch):
         assert detail.pending_review is not None
         assert detail.pending_review.review_item_id == result.review_item_id
         assert detail.pending_draft_version_id == result.draft_version_id
-        assert detail.model_dump()["pending_draft_warnings"] == []
-        assert any("heading" in warning.lower() for warning in detail.warnings)
-        assert linted_bodies == [detail.body_markdown]
+        assert detail.pending_draft_warnings == []
+        assert detail.warnings == []
+        assert linted_bodies == []
 
 
 def _write_unformatted(session, write_service, workspace_id):
@@ -207,218 +209,35 @@ def _seed_noncanonical(session, write_service, workspace_id, title):
     )
 
 
-def test_format_only_auto_approve_genuine_and_gate_guards():
-    # F3/DEC-8 + I3 + I13: a GENUINE pure-formatting edit on a non-canonical base
-    # is auto-approved; a true no-op short-circuits; a caller-requested review is
-    # NOT force-approved; and a real content change still requires review.
+def test_format_only_save_keeps_the_same_draft_and_pending_request():
     session_factory = make_session_factory()
     write_service = ContextWriteService()
     with session_factory.begin() as session:
         workspace = seed_default_workspace(session)
-        p1 = _seed_noncanonical(session, write_service, workspace.id, "P1")
-        p2 = _seed_noncanonical(session, write_service, workspace.id, "P2")
-        p1_hash = session.get(ContextPageVersion, p1.draft_version_id).content_hash
-        p2_hash = session.get(ContextPageVersion, p2.draft_version_id).content_hash
-    with session_factory.begin() as session:
-        seed_default_workspace(session).auto_fix_enabled = True
-
-    with session_factory.begin() as session:
-        workspace = seed_default_workspace(session)
-
-        # 1) genuine format-only: resubmit the raw "*" body -> normalized "-".
-        fmt = write_service.update_draft(
-            session=session,
+        initial = _seed_noncanonical(session, write_service, workspace.id, "Formatting")
+        workspace.auto_fix_enabled = True
+        version = session.get(ContextPageVersion, initial.draft_version_id)
+        saved = PageService(ContextTransactionFactory(session)).autosave_page(
+            page_id=initial.page_id,
             workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=p1.page_id,
-                base_version_id=p1.draft_version_id,
-                base_content_hash=p1_hash,
-                update_mode="full_rewrite",
-                body_markdown="# Title\n\n* item\n\nBody.\n",
-                citations=[],
-                reason="reformat",
-            ),
+            title=None,
+            body_md=version.body_md,
             actor_kind="human",
             actor_id=ACTOR,
+            base_version_id=version.id,
+            base_content_hash=version.content_hash,
+            actor_provenance="browser_session",
+            idempotency_key="format-the-draft",
+            expected_editing_revision=version.editing_revision,
+            version_id=version.id,
         )
-        assert fmt.review_item_id is not None
-        assert fmt.draft_version_id != p1.draft_version_id  # a new version
-        fmt_version = session.get(ContextPageVersion, fmt.draft_version_id)
-        assert fmt.persisted_content_hash == fmt_version.content_hash
-        assert fmt.persisted_character_count == len(fmt_version.body_md)
-        assert fmt.outcome == "updated_draft"
-        assert fmt.body_changed is True
-        assert fmt.metadata_changed is False
-        assert fmt.version_status == "draft"
-        assert fmt.latest_draft_version_id == fmt.draft_version_id
-        assert fmt.current_published_version_id is None
-        assert fmt.review_status == "approved"
-        assert "- item" in fmt_version.body_md
-        assert "* item" not in fmt_version.body_md
-        assert session.get(ReviewItem, fmt.review_item_id).status == "approved"
-        assert session.get(ContextPage, p1.page_id).current_published_version_id is None
-
-        # 2) a true no-op (canonical body byte-identical) short-circuits under
-        #    Auto-fix: no new version, no change_set, no review (avoids spurious
-        #    auto-approved churn). submit_revision_for_review handles the null
-        #    ids explicitly (re-review r2 findings 2-7).
-        noop = write_service.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=p1.page_id,
-                base_version_id=fmt.draft_version_id,
-                base_content_hash=fmt_version.content_hash,
-                update_mode="full_rewrite",
-                body_markdown=fmt_version.body_md,
-                citations=[],
-                reason="no-op",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR,
+        assert saved.version_id == initial.draft_version_id
+        assert "- item" in version.body_md
+        assert session.get(ReviewItem, initial.review_item_id).status == "pending"
+        assert (
+            session.get(ContextPage, initial.page_id).current_published_version_id
+            is None
         )
-        assert noop.review_item_id is None
-        assert noop.change_set_id is None
-        assert noop.draft_version_id == fmt.draft_version_id
-        assert noop.persisted_content_hash == fmt_version.content_hash
-        assert noop.persisted_character_count == len(fmt_version.body_md)
-        assert noop.outcome == "no_change"
-        assert noop.body_changed is False
-        assert noop.metadata_changed is False
-        assert noop.version_status == "draft"
-        assert noop.latest_draft_version_id == fmt.draft_version_id
-        assert noop.current_published_version_id is None
-        assert noop.review_status is None
-
-        # 3) content change: NOT auto-approved.
-        changed = write_service.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=p1.page_id,
-                base_version_id=fmt.draft_version_id,
-                base_content_hash=fmt_version.content_hash,
-                update_mode="full_rewrite",
-                body_markdown="# Title\n\n- item\n\nDifferent body now.\n",
-                citations=[],
-                reason="content change",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR,
-        )
-        assert session.get(ReviewItem, changed.review_item_id).status == "pending"
-
-        # 4) I3: format-only-eligible BUT the caller asked for review (a gate
-        #    force signal) -> must NOT be auto-approved.
-        guarded = write_service.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=p2.page_id,
-                base_version_id=p2.draft_version_id,
-                base_content_hash=p2_hash,
-                update_mode="full_rewrite",
-                body_markdown="# Title\n\n* item\n\nBody.\n",
-                citations=[],
-                reason="reformat but please review",
-                needs_review=True,
-            ),
-            actor_kind="human",
-            actor_id=ACTOR,
-        )
-        assert session.get(ReviewItem, guarded.review_item_id).status == "pending"
-
-
-def test_noop_with_needs_review_creates_a_pending_review():
-    # re-review r3 #334: a no-op save (canonical body unchanged) that explicitly
-    # sets needs_review=True must NOT be silently short-circuited — it creates a
-    # pending review so the explicit request is honored.
-    session_factory = make_session_factory()
-    write_service = ContextWriteService()
-    with session_factory.begin() as session:
-        ws = seed_default_workspace(session)
-        ws.auto_fix_enabled = True
-    with session_factory.begin() as session:
-        workspace = seed_default_workspace(session)
-        created = write_service.write_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=WriteDraftRequest(
-                title="NeedsReview Noop",
-                page_type="overview",
-                body_markdown="# Title\n\n- item\n\nBody.\n",
-                citations=[],
-                reason="v1",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR,
-            actor_role="owner",
-        )
-        base = session.get(ContextPageVersion, created.draft_version_id)
-        res = write_service.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=created.page_id,
-                base_version_id=created.draft_version_id,
-                base_content_hash=base.content_hash,
-                update_mode="full_rewrite",
-                body_markdown="# Title\n\n- item\n\nBody.\n",  # identical, canonical
-                citations=[],
-                reason="please review",
-                needs_review=True,
-            ),
-            actor_kind="human",
-            actor_id=ACTOR,
-        )
-        assert res.review_item_id is not None
-        assert res.draft_version_id == created.draft_version_id
-        assert res.persisted_content_hash == base.content_hash
-        assert res.persisted_character_count == len(base.body_md)
-        assert res.outcome == "review_only"
-        assert res.body_changed is False
-        assert res.metadata_changed is False
-        assert res.version_status == "draft"
-        assert res.latest_draft_version_id == created.draft_version_id
-        assert res.current_published_version_id is None
-        assert res.review_status == "pending"
-        assert session.get(ReviewItem, res.review_item_id).status == "pending"
-
-
-def test_format_only_not_auto_approved_under_conservative_preset():
-    # Re-review finding 1: a strict workspace (conservative preset, review_from
-    # "low") reviews EVERYTHING — a format-only change must NOT be force-approved
-    # there, even though it is auto-approved under the balanced default.
-    from backend.services.review_risk_policy import _preset_policy
-
-    session_factory = make_session_factory()
-    write_service = ContextWriteService()
-    with session_factory.begin() as session:
-        workspace = seed_default_workspace(session)
-        page = _seed_noncanonical(session, write_service, workspace.id, "Strict")
-        base_hash = session.get(ContextPageVersion, page.draft_version_id).content_hash
-    with session_factory.begin() as session:
-        ws = seed_default_workspace(session)
-        ws.auto_fix_enabled = True
-        ws.review_policy = _preset_policy("conservative")
-    with session_factory.begin() as session:
-        workspace = seed_default_workspace(session)
-        fmt = write_service.update_draft(
-            session=session,
-            workspace_id=workspace.id,
-            request=UpdateDraftRequest(
-                page_id=page.page_id,
-                base_version_id=page.draft_version_id,
-                base_content_hash=base_hash,
-                update_mode="full_rewrite",
-                body_markdown="# Title\n\n* item\n\nBody.\n",
-                citations=[],
-                reason="reformat under conservative",
-            ),
-            actor_kind="human",
-            actor_id=ACTOR,
-        )
-        assert session.get(ReviewItem, fmt.review_item_id).status == "pending"
 
 
 def test_published_draft_does_not_surface_stale_pending_review():
@@ -444,7 +263,7 @@ def test_published_draft_does_not_surface_stale_pending_review():
             page_id=result.page_id,
             actor=_editor_actor(workspace.id),
         )
-        assert detail.pending_review is None
-        assert detail.pending_draft_version_id is None
-        # The gate hides it; the review row itself is untouched (still pending).
+        assert detail.pending_review.review_item_id == result.review_item_id
+        assert detail.pending_draft_version_id == result.draft_version_id
+        # The retired pointer cannot hide the pending request.
         assert session.get(ReviewItem, result.review_item_id).status == "pending"

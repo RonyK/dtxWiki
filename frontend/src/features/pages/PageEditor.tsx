@@ -1,3 +1,4 @@
+import { ContextMergeResultPreview } from "./ContextMergeResultPreview";
 import { inputTextError, markdownInputError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { autocompletion, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -93,11 +94,11 @@ import { useTranslation } from "react-i18next";
 import { ApiError, apiErrorMessage } from "../../shared/api/client";
 import { useAuth } from "../../shared/auth/AuthContext";
 import {
-  decideReview,
   formatMarkdown as normalizeMarkdownApi,
 } from "../../shared/api/operations";
 import {
   autosavePage,
+  beginPageEdit,
   createPage,
   createPageComment,
   diffPageVersions,
@@ -105,6 +106,7 @@ import {
   listPages,
   newIdempotencyKey,
   PageEditingUnavailableError,
+  executePreparedPagePublication,
   publishPageVersion,
   readEditablePage,
   readPage,
@@ -112,7 +114,7 @@ import {
   submitPageForReview,
   updatePage,
 } from "../../shared/api/pages";
-import type { PagePayload, PageSummary, PageVersionDiff } from "../../shared/api/pages";
+import type { ContextMergePreview, PagePayload, PageSummary, PageVersionDiff, PreparedPagePublication, PageWriteOptions, PublishPageVersionInput } from "../../shared/api/pages";
 import { listLibraryItems } from "../../shared/api/library";
 import type { LibraryItemSummary } from "../../shared/api/library";
 import {
@@ -135,6 +137,7 @@ import { Breadcrumbs, type BreadcrumbItem } from "../../shared/components/Breadc
 import { ChipInput } from "../../shared/components/ChipInput";
 import { DiffViewer } from "../../shared/components/DiffViewer";
 import { Dialog } from "../../shared/components/Dialog";
+import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
 import { EmojiPicker } from "../../shared/components/EmojiPicker";
 import { FormField, joinIds } from "../../shared/components/FormField";
 import { KeyboardShortcutsModal } from "../../shared/components/KeyboardShortcutsModal";
@@ -472,7 +475,9 @@ function sourceLineToOffset(
 export function RoutedPageEditor(props: PageEditorProps) {
   const route = useWorkspaceRoute();
   const pageId = route?.targetKind === "page" ? route.targetId ?? "" : "";
-  return <PageEditor key={`${route?.workspaceId ?? ""}:${props.mode}:${pageId}`} {...props} />;
+  const [params] = useSearchParams();
+  const versionId = params.get("version_id") ?? "";
+  return <PageEditor key={`${route?.workspaceId ?? ""}:${props.mode}:${pageId}:${versionId}`} {...props} />;
 }
 
 export function PageEditor({
@@ -708,6 +713,9 @@ export function PageEditor({
   // dismissal followed by more edits still flushes.
   const dismissalAutosaveFingerprintRef = useRef<string | null>(null);
   const sessionVersionIdRef = useRef<string | null>(null);
+  const editablePageRef = useRef<PagePayload | null>(null);
+  const editableDraftPromiseRef = useRef<Promise<PagePayload> | null>(null);
+  const autosavePromiseRef = useRef<Promise<PagePayload> | null>(null);
   const commandRef = useRef<(
     commandId: EditorCommandId,
     view?: EditorViewType | null,
@@ -744,6 +752,59 @@ export function PageEditor({
   const latestDraftRef = useRef<DraftSnapshot>(emptyDraft(mode, slug));
   const lastSavedRef = useRef<DraftSnapshot>(emptyDraft(mode, slug));
   const lastSavedFingerprintRef = useRef<string | null>(null);
+  const [draftContainsChanges, setDraftContainsChanges] = useState(false);
+  const draftBaseSnapshotRef = useRef<{ body_md: string; page_metadata: Record<string, unknown> } | null>(null);
+  const [mergePublishPrompt, setMergePublishPrompt] = useState<{ preview: ContextMergePreview; resolve: (accepted: boolean) => void } | null>(null);
+  const mergePublishResolveRef = useRef<((accepted: boolean) => void) | null>(null);
+  const preparedPublicationRef = useRef<{ key: string; command: PreparedPagePublication } | null>(null);
+  const publicationKey = useCallback((workspace: string, page: string) => {
+    return reviewDraftKey(actorIdRef.current ?? "", workspace, `context-page:${page}`) + ".publication";
+  }, []);
+  const pendingPublication = useCallback((key: string): PreparedPagePublication | undefined => {
+    if (preparedPublicationRef.current?.key === key) return preparedPublicationRef.current.command;
+    try {
+      const value = JSON.parse(readReviewDraft(key) || "null") as PreparedPagePublication | null;
+      return value && typeof value.versionId === "string" && typeof value.request?.idempotency_key === "string" &&
+        typeof value.request.result_hash === "string" ? value : undefined;
+    } catch { return undefined; }
+  }, []);
+  const clearPendingPublication = useCallback((key: string) => {
+    writeReviewDraft(key, "");
+    if (preparedPublicationRef.current?.key === key) preparedPublicationRef.current = null;
+  }, []);
+  async function publishEditorPage(workspace: string, id: string, versionId: string,
+    intent: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash">,
+    options: PageWriteOptions = {}) {
+    const key = publicationKey(workspace, id);
+    try {
+      const result = await publishPageVersion(workspace, id, versionId, intent, { ...options,
+        preparedPublication: pendingPublication(key),
+        onPublicationPrepared(command) {
+          preparedPublicationRef.current = { key, command };
+          writeReviewDraft(key, JSON.stringify(command));
+        },
+      });
+      clearPendingPublication(key);
+      return result;
+    } catch (error) {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500) clearPendingPublication(key);
+      throw error;
+    }
+  }
+
+  useEffect(() => () => { mergePublishResolveRef.current?.(false); }, []);
+  function confirmAutomaticMerge(preview: ContextMergePreview): Promise<boolean> {
+    return new Promise((resolve) => {
+      mergePublishResolveRef.current = resolve;
+      setMergePublishPrompt({ preview, resolve });
+    });
+  }
+  function settleAutomaticMerge(accepted: boolean) {
+    mergePublishPrompt?.resolve(accepted);
+    mergePublishResolveRef.current = null;
+    setMergePublishPrompt(null);
+  }
+
   const propertiesPopoverId = useId();
   const propertiesPopoverTitleId = useId();
 
@@ -782,6 +843,7 @@ export function PageEditor({
   const suggestLinkPageId =
     suggestLinkParam && isContextId(suggestLinkParam) ? suggestLinkParam : null;
   const createInitialTitle = mode === "create" ? normalizeInitialTitle(searchParams.get("title")) : "";
+  const selectedEditVersionId = searchParams.get("version_id") ?? undefined;
   const isLinkDialogOpen = Boolean(linkDialog);
   const isCommentPreviewOpen = Boolean(commentPreview);
   const isCurrentUploadTarget = useCallback((snapshot: UploadTargetSnapshot) => {
@@ -793,6 +855,53 @@ export function PageEditor({
       snapshot.editingVersionId === baseVersionIdRef.current
     );
   }, []);
+  // Adopt server concurrency metadata immediately, including before React renders.
+  const adoptEditablePage = useCallback((updated: PagePayload) => {
+    editablePageRef.current = updated;
+    pageIdRef.current = updated.id;
+    baseVersionIdRef.current = updated.version_id;
+    sessionVersionIdRef.current = updated.version_id;
+    draftBaseSnapshotRef.current = { body_md: updated.body_md, page_metadata: updated.page_metadata ?? {} };
+    setPage(updated);
+    if (mode === "edit") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("version_id", updated.version_id);
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, [mode]);
+  const ensureEditableDraft = useCallback(async (selected: PagePayload): Promise<PagePayload> => {
+    if (editableDraftPromiseRef.current) return editableDraftPromiseRef.current;
+    const workspace = workspaceIdRef.current;
+    const generation = editorGenerationRef.current;
+    if (!workspace) throw new Error(PAGE_EDITOR_LOCAL_ERROR.workspaceUnavailable);
+    if (autosavePromiseRef.current) await autosavePromiseRef.current;
+    if (!isEditorMountedRef.current || workspaceIdRef.current !== workspace ||
+        editorGenerationRef.current !== generation || pageIdRef.current !== selected.id) {
+      throw new DOMException("Editor is no longer current.", "AbortError");
+    }
+    if (editableDraftPromiseRef.current) return editableDraftPromiseRef.current;
+    const current = editablePageRef.current?.id === selected.id ? editablePageRef.current : selected;
+    if (current.version_status === "draft") return current;
+    const promise = beginPageEdit(workspace, current, current.version_id).then((draft) => {
+      if (!isEditorMountedRef.current || workspaceIdRef.current !== workspace ||
+          editorGenerationRef.current !== generation || pageIdRef.current !== current.id) {
+        throw new DOMException("Editor is no longer current.", "AbortError");
+      }
+      if (draft.version_status !== "draft") throw new Error("Expected an editable draft.");
+      // This deliberate transition must not invalidate the upload preparing it.
+      uploadAuthorityKeyRef.current = JSON.stringify([
+        actorIdRef.current, mode, slug, workspace, draft.id, draft.version_id,
+      ]);
+      adoptEditablePage(draft);
+      setPublicationState(draft.current_published_version_id ? "staged" : "never-published");
+      return draft;
+    });
+    const tracked = promise.finally(() => {
+      if (editableDraftPromiseRef.current === tracked) editableDraftPromiseRef.current = null;
+    });
+    editableDraftPromiseRef.current = tracked;
+    return tracked;
+  }, [adoptEditablePage, mode, slug]);
   const closeContextRail = useCallback(() => setContextRailOpen(false), []);
   const imageUploadOptions = useMemo<EditorPasteOptions>(() => ({
     getWorkspaceId: () => workspaceIdRef.current,
@@ -822,6 +931,13 @@ export function PageEditor({
       }
       let pageId = pageIdRef.current;
       let editingVersionId = baseVersionIdRef.current;
+      if (pageId && editablePageRef.current?.version_status !== "draft") {
+        const selected = editablePageRef.current;
+        if (!selected) throw new Error(PAGE_EDITOR_LOCAL_ERROR.pageCreationNotStarted);
+        const draft = await waitForPromiseOrAbort(ensureEditableDraft(selected), signal);
+        pageId = draft.id;
+        editingVersionId = draft.version_id;
+      }
       if (!pageId || !editingVersionId) {
         if (!pageCreationPromiseRef.current) {
           // No page exists yet for this brand-new draft. Page-first creation
@@ -864,7 +980,7 @@ export function PageEditor({
             // set, and canSave requires a non-empty slug. Seed it from the
             // server placeholder unless the author already typed one.
             setPageSlug((current) => (current.trim() ? current : created.slug));
-            setPage(created);
+            adoptEditablePage(created);
             setPublicationState("never-published");
             return created;
           });
@@ -884,7 +1000,7 @@ export function PageEditor({
         editingVersionId = created.version_id;
       }
       throwIfAborted(signal);
-      if (!pageId || !editingVersionId) {
+      if (!pageId || !editingVersionId || editablePageRef.current?.version_status !== "draft") {
         throw new Error(PAGE_EDITOR_LOCAL_ERROR.pageCreationNotStarted);
       }
       const snapshot = buildUploadTargetSnapshot({
@@ -1028,7 +1144,7 @@ export function PageEditor({
       }
       return result;
     },
-  }), [isCurrentUploadTarget, mode, slug]);
+  }), [adoptEditablePage, ensureEditableDraft, isCurrentUploadTarget, mode, slug]);
   const bodyAriaLabel = t("editor.bodyAria", { defaultValue: "Markdown body" });
   const resolveContextMediaAsset = useMemo<ContextMediaAssetUrlResolver>(
     () => (assetId: string) => {
@@ -1260,7 +1376,7 @@ export function PageEditor({
           ? "dirty"
           : "clean";
   const hasUnpublishedChanges =
-    hasUnsavedChanges || (Boolean(page) && publicationState !== "published");
+    hasUnsavedChanges || (Boolean(page) && publicationState !== "published" && draftContainsChanges);
   const hasDismissalRisk = hasUnpublishedChanges || hasPendingImageUpload;
   const dismissalRiskMessage = hasPendingImageUpload
     ? discardPendingUploadsMessage
@@ -1315,15 +1431,16 @@ export function PageEditor({
                 defaultValue: "Choose a destination before saving.",
               })
             : null;
+  const hasPreparedPublication = Boolean(workspaceId && page && pendingPublication(publicationKey(workspaceId, page.id)));
   const canPublishFromEditor =
     canSave &&
     stalePublishState === "idle" &&
-    (saveState === "dirty" ||
+    (saveState === "dirty" || (saveState === "error" && hasPreparedPublication) ||
       (saveState === "clean" && publicationState !== "published"));
-  // The server decides authorship and review state: another Editor's shared
-  // draft is readable here, but only its author can submit it.
+  // Existing drafts use server eligibility; a commit first starts a draft on request.
   const canRequestReview = canSave && saveState === "clean" && !conflict &&
-    Boolean(page?.can_submit_for_review);
+    Boolean(page && (page.version_status === "draft" ? page.can_submit_for_review :
+      workspaceRole === "owner" || workspaceRole === "editor"));
   const activeEditorMode =
     singlePaneViewport && editorMode === "split" ? "source" : editorMode;
   const showSourcePane = activeEditorMode !== "reading";
@@ -1453,6 +1570,7 @@ export function PageEditor({
     );
     acknowledgedRevisionRef.current = nextAcknowledgedRevision;
     setAcknowledgedRevision(nextAcknowledgedRevision);
+    if (revision > 0) setDraftContainsChanges(true);
   }
 
   function acknowledgeCurrentEditorRevision() {
@@ -1546,6 +1664,8 @@ export function PageEditor({
       actorIdRef.current = actorId;
     }
     editorGenerationRef.current += 1;
+    editableDraftPromiseRef.current = null;
+    autosavePromiseRef.current = null;
     uploadAuthorityKeyRef.current = nextAuthorityKey;
     pageCreationPromiseRef.current = null;
     invalidateAllImageUploads(imageUploadOptions);
@@ -1681,7 +1801,8 @@ export function PageEditor({
     sourceSuggestionsRef.current = sourceSuggestions;
   }, [sourceSuggestions]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    editablePageRef.current = page;
     pageIdRef.current = page?.id ?? null;
     baseVersionIdRef.current = page?.version_id ?? null;
   }, [page]);
@@ -1746,6 +1867,7 @@ export function PageEditor({
       setAcknowledgedRevision(editorRevisionRef.current);
       setTitleValidationRequested(false);
       setPage(null);
+      setDraftContainsChanges(false);
       pageIdRef.current = null;
       pageCreationPromiseRef.current = null;
       contextMediaCapabilitiesRef.current = PENDING_CONTEXT_MEDIA_CAPABILITIES;
@@ -1868,8 +1990,26 @@ export function PageEditor({
         };
       }
       if (mode === "edit") {
+        if (selectedWorkspaceId) {
+          const pendingKey = publicationKey(selectedWorkspaceId, pageId);
+          const command = pendingPublication(pendingKey);
+          if (command) {
+            try {
+              const recovered = await executePreparedPagePublication(selectedWorkspaceId, pageId, command);
+              clearPendingPublication(pendingKey);
+              if (cancelled) return;
+              navigationConfirmedRef.current = true;
+              navigate(contextPageHref(selectedWorkspaceId, recovered.page.id), { replace: true,
+                state: { contextPublishNotice: { kind: recovered.warnings.some((warning) => warning.code === "published_with_findings") ? "published_with_findings" : "published" } } });
+              return;
+            } catch (error) {
+              if (error instanceof ApiError && error.status >= 400 && error.status < 500) clearPendingPublication(pendingKey);
+              else throw error;
+            }
+          }
+        }
         const loaded = selectedWorkspaceId
-          ? await readEditablePage(selectedWorkspaceId, pageId)
+          ? await readEditablePage(selectedWorkspaceId, pageId, selectedEditVersionId)
           : null;
         if (cancelled) return;
         if (!loaded) {
@@ -1901,6 +2041,13 @@ export function PageEditor({
         setPublicationState(restoredPublication.state);
         pageIdRef.current = loaded.id;
         setPage(loaded);
+        setDraftContainsChanges(Boolean(selectedEditVersionId));
+        draftBaseSnapshotRef.current = { body_md: loaded.body_md, page_metadata: loaded.page_metadata ?? {} };
+        if (!selectedEditVersionId) {
+          const url = new URL(window.location.href);
+          url.searchParams.set("version_id", loaded.version_id);
+          window.history.replaceState(window.history.state, "", url);
+        }
         setTitle(loaded.title);
         setPageSlug(loaded.slug);
         bodyRef.current = parsed.body;
@@ -1952,7 +2099,7 @@ export function PageEditor({
     return () => {
       cancelled = true;
     };
-  }, [createInitialTitle, createParentNodeId, mode, pageId, routeWorkspaceId, slug]);
+  }, [createInitialTitle, createParentNodeId, mode, pageId, routeWorkspaceId, slug, selectedEditVersionId, publicationKey, pendingPublication, clearPendingPublication, navigate]);
 
   useEffect(() => {
     if (mode === "create") {
@@ -2891,50 +3038,11 @@ export function PageEditor({
     };
   }, []);
 
-  async function completeReviewEditIfNeeded(
-    source: SaveOptions["source"],
-    requestId: number,
-  ): Promise<ContextPublishNotice | null> {
-    if (
-      source === "auto" ||
-      !fromReview ||
-      !workspaceId ||
-      !reviewItemId ||
-      reviewEditCompletedRef.current
-    ) {
-      return null;
-    }
-    try {
-      await decideReview(
-        workspaceId,
-        reviewItemId,
-        "approve",
-        "Edited directly in Page editor.",
-      );
-      if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return null;
-      if (!isEditorMountedRef.current) return null;
-      reviewEditCompletedRef.current = true;
-      setStatus(
-        t("editor.publishedReviewCompleted", {
-          defaultValue: "Published and completed the review request.",
-        }),
-      );
-      return { kind: "review_completed" };
-    } catch (exc) {
-      if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return null;
-      if (!isEditorMountedRef.current) return null;
-      const error = apiErrorMessage(
-        exc,
-        t("editor.unknownError", { defaultValue: "unknown error" }),
-      );
-      setStatus(
-        t("editor.publishedReviewFailed", {
-          defaultValue: "Published, but review completion failed: {{error}}",
-          error,
-        }),
-      );
-      return { kind: "review_failed", error };
-    }
+  function completeReviewEditIfNeeded(source: SaveOptions["source"]): ContextPublishNotice | null {
+    if (source === "auto" || !fromReview || !reviewItemId || reviewEditCompletedRef.current) return null;
+    // Publishing approves reviews for this exact draft in the same transaction.
+    reviewEditCompletedRef.current = true;
+    return { kind: "review_completed" };
   }
 
   function publishNotice(
@@ -3095,8 +3203,7 @@ export function PageEditor({
         });
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
-        pageIdRef.current = created.id;
-        setPage(created);
+        adoptEditablePage(created);
         setPublicationState("never-published");
         sessionVersionIdRef.current = created.version_id;
         acknowledgeEditorRevision(dispatchedRevision);
@@ -3135,7 +3242,8 @@ export function PageEditor({
             base_version_id: created.version_id,
             base_content_hash: created.content_hash,
             expected_editing_revision: created.editing_revision,
-            session_version_id: created.version_id,
+            version_id: created.version_id,
+            base_snapshot: { body_md: created.body_md, page_metadata: created.page_metadata ?? {} },
             destination_node_id: followUpDraft.destinationNodeId || null,
             idempotency_key: newIdempotencyKey(),
             on_stale: "conflict",
@@ -3146,9 +3254,7 @@ export function PageEditor({
           savedDraft = followUpDraft;
           acknowledgeEditorRevision(followUpRevision);
         }
-        sessionVersionIdRef.current = savedPage.version_id;
-        pageIdRef.current = savedPage.id;
-        setPage(savedPage);
+        adoptEditablePage(savedPage);
         setSaveRelativeNow(Date.now());
         lastSavedRef.current = {
           ...savedDraft,
@@ -3168,11 +3274,11 @@ export function PageEditor({
         }
         if (!options.publish) {
           navigationConfirmedRef.current = true;
-          navigate(contextEditHref(workspaceId, savedPage.id), { replace: true });
+          navigate(`${contextEditHref(workspaceId, savedPage.id)}?version_id=${encodeURIComponent(savedPage.version_id)}`, { replace: true });
           return;
         }
         publishRequestStarted = true;
-        const publishedResult = await publishPageVersion(
+        const publishedResult = await publishEditorPage(
           workspaceId,
           savedPage.id,
           savedPage.version_id,
@@ -3182,7 +3288,7 @@ export function PageEditor({
             expected_content_hash: savedPage.content_hash,
             expected_references_hash: savedPage.references_hash,
           },
-          { signal: controller.signal },
+          { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
         );
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
@@ -3192,7 +3298,7 @@ export function PageEditor({
         setPublicationState("published");
         setStalePublishState("idle");
         setPublishedWarningStatus(publishedResult.warnings);
-        const reviewNotice = await completeReviewEditIfNeeded(source, requestId);
+        const reviewNotice = completeReviewEditIfNeeded(source);
         navigateToPublishedContext(
           publishedResult.page.id,
           publishNotice(publishedResult.warnings, reviewNotice),
@@ -3207,77 +3313,8 @@ export function PageEditor({
         if (!options.publish) {
           return;
         }
-        if (
-          source !== "auto" &&
-          fromReview &&
-          workspaceId &&
-          reviewItemId &&
-          !reviewEditCompletedRef.current
-        ) {
-          // Approving a context_update review publishes it directly
-          // (ReviewService.apply_decision -> ContextWriteService.publish_draft),
-          // and that approval's own pointer check requires
-          // latest_draft_version_id to still name this version. Calling
-          // publishPageVersion first would clear that pointer and fail the
-          // approval, so approve once instead of publishing separately.
-          try {
-            await decideReview(
-              workspaceId,
-              reviewItemId,
-              "approve",
-              "Edited directly in Page editor.",
-            );
-            if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
-            if (!isEditorMountedRef.current) return;
-            reviewEditCompletedRef.current = true;
-            let reloaded: Awaited<ReturnType<typeof readPage>> | null = null;
-            try {
-              reloaded = await readPage(workspaceId, page.id);
-            } catch {
-              // Approval is committed; a follow-up read failure must not make
-              // the UI report the review decision itself as failed.
-            }
-            if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
-            if (!isEditorMountedRef.current) return;
-            if (reloaded) {
-              const restoredPublication = readPagePublicationState(reloaded);
-              sessionVersionIdRef.current = restoredPublication.sessionVersionId;
-              pageIdRef.current = reloaded.id;
-              setPage(reloaded);
-              setPublicationState(restoredPublication.state);
-            }
-            setStatus(
-              reloaded
-                ? t("editor.publishedReviewCompleted", {
-                    defaultValue: "Published and completed the review request.",
-                  })
-                : t("editor.publishedReviewCompletedReloadFailed", {
-                    defaultValue:
-                      "Review approved, but the published page could not be reloaded.",
-                  }),
-            );
-            navigateToPublishedContext(
-              page.id,
-              { kind: "review_completed" },
-              requestId,
-            );
-          } catch (exc) {
-            if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
-            if (!isEditorMountedRef.current) return;
-            setStatus(
-              t("editor.reviewApprovalFailed", {
-                defaultValue: "Could not approve the review: {{error}}",
-                error: apiErrorMessage(
-                  exc,
-                  t("editor.unknownError", { defaultValue: "unknown error" }),
-                ),
-              }),
-            );
-          }
-          return;
-        }
         publishRequestStarted = true;
-        const publishedResult = await publishPageVersion(
+        const publishedResult = await publishEditorPage(
           workspaceId,
           page.id,
           page.version_id,
@@ -3287,7 +3324,7 @@ export function PageEditor({
             expected_content_hash: page.content_hash,
             expected_references_hash: page.references_hash,
           },
-          { signal: controller.signal },
+          { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
         );
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
@@ -3297,7 +3334,7 @@ export function PageEditor({
         setPublicationState("published");
         setStalePublishState("idle");
         setPublishedWarningStatus(publishedResult.warnings);
-        const reviewNotice = await completeReviewEditIfNeeded(source, requestId);
+        const reviewNotice = completeReviewEditIfNeeded(source);
         navigateToPublishedContext(
           publishedResult.page.id,
           publishNotice(publishedResult.warnings, reviewNotice),
@@ -3311,6 +3348,9 @@ export function PageEditor({
         slug: pageSlug,
         title: title.trim(),
       };
+      if (editableDraftPromiseRef.current) await editableDraftPromiseRef.current;
+      if (!isCurrentSaveRequest(requestId, saveRequestIdRef) || !isEditorMountedRef.current) return;
+      const saveBase = editablePageRef.current ?? page;
       const requestedSessionVersionId = sessionVersionIdRef.current;
       const payload = {
         title: submittedDraft.title,
@@ -3318,27 +3358,27 @@ export function PageEditor({
         page_type: submittedDraft.pageType,
         tags: submittedDraft.tags,
         aliases: submittedDraft.aliases,
-        base_version_id: page.version_id,
-        base_content_hash: page.content_hash,
-        expected_editing_revision: page.editing_revision,
-        session_version_id: requestedSessionVersionId,
+        base_version_id: saveBase.version_id,
+        base_content_hash: saveBase.content_hash,
+        expected_editing_revision: saveBase.editing_revision,
+        version_id: requestedSessionVersionId ?? saveBase.version_id,
+        base_snapshot: draftBaseSnapshotRef.current ?? { body_md: saveBase.body_md, page_metadata: saveBase.page_metadata ?? {} },
         destination_node_id: submittedDraft.destinationNodeId || null,
         idempotency_key: newIdempotencyKey(),
         on_stale: "conflict" as const,
         retry_only: false,
       };
-      const updated = await autosavePage(workspaceId, page.id, payload, {
+      const autosave = autosavePage(workspaceId, page.id, payload, {
         signal: controller.signal,
       });
+      autosavePromiseRef.current = autosave;
+      let updated: PagePayload;
+      try { updated = await autosave; }
+      finally { if (autosavePromiseRef.current === autosave) autosavePromiseRef.current = null; }
       if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
       if (!isEditorMountedRef.current) return;
-      rememberSessionVersion(updated.version_id, requestedSessionVersionId);
-      // Body content changed, so the autosave above forked the draft and
-      // (page_service._supersede_content_replaced_reviews) already closed
-      // any review targeting the replaced version as "superseded". A later
-      // decideReview("approve") on that same review can then only fail as
-      // "already resolved" (review_service.py:984), so detect the
-      // supersession here and skip the approval call entirely below.
+      adoptEditablePage(updated);
+      // Preserve the withdrawal notice if another operation superseded the review.
       const supersededReviewByEdit =
         fromReview &&
         Boolean(reviewItemId) &&
@@ -3348,8 +3388,6 @@ export function PageEditor({
         reviewEditCompletedRef.current = true;
       }
       acknowledgeEditorRevision(dispatchedRevision);
-      pageIdRef.current = updated.id;
-      setPage(updated);
       if (!fromReview && (updated.superseded_review_count ?? 0) > 0) {
         setStatus(t("editor.reviewRequestWithdrawn"));
       }
@@ -3365,13 +3403,39 @@ export function PageEditor({
       // text (a consistent, non-dirty baseline) and reflects the normalized
       // body on the next load; the explicit "Format now" button is how an
       // author pulls normalization into the live buffer.
-      lastSavedRef.current = {
-        ...submittedDraft,
-        title: updated.title,
-        slug: updated.slug,
-        destinationNodeId: submittedDraft.destinationNodeId,
-      };
-      lastSavedFingerprintRef.current = dispatchedFingerprint;
+      const hasLaterInput = editorRevisionRef.current > dispatchedRevision;
+      draftBaseSnapshotRef.current = updated.autosave_merged && hasLaterInput
+        ? { body_md: payload.body_md, page_metadata: {
+          title: submittedDraft.title, page_type: submittedDraft.pageType,
+          tags: submittedDraft.tags, aliases: submittedDraft.aliases,
+          placement_parent_node_id: submittedDraft.destinationNodeId || null,
+        } }
+        : { body_md: updated.body_md, page_metadata: updated.page_metadata ?? {} };
+      if (updated.autosave_merged && !hasLaterInput) {
+        const parsedMerged = parsePageDocument(updated.body_md, {
+          aliases: updated.aliases, tags: updated.tags, type: updated.page_type as PageType,
+        });
+        const mergedMetadata = metadataFromPagePayload(parsedMerged.metadata, updated);
+        applyParsedMetadata(mergedMetadata);
+        setTitle(updated.title);
+        bodyRef.current = parsedMerged.body;
+        setBody(parsedMerged.body);
+        const mergedDestination = typeof updated.page_metadata?.placement_parent_node_id === "string"
+          ? updated.page_metadata.placement_parent_node_id : submittedDraft.destinationNodeId;
+        setDestinationNodeId(mergedDestination);
+        lastSavedRef.current = {
+          ...submittedDraft, body: parsedMerged.body, title: updated.title, slug: updated.slug,
+          tags: mergedMetadata.tags, aliases: mergedMetadata.aliases,
+          pageType: updated.page_type as PageType, destinationNodeId: mergedDestination,
+        };
+        lastSavedFingerprintRef.current = draftSaveFingerprint(lastSavedRef.current, frontmatterExtraLinesRef.current);
+      } else {
+        lastSavedRef.current = {
+          ...submittedDraft, title: updated.title, slug: updated.slug,
+          destinationNodeId: submittedDraft.destinationNodeId,
+        };
+        lastSavedFingerprintRef.current = dispatchedFingerprint;
+      }
       if (editorRevisionRef.current > acknowledgedRevisionRef.current) {
         return;
       }
@@ -3386,12 +3450,12 @@ export function PageEditor({
         // edit URL just as the ordinary create path above does.
         if (mode === "create") {
           navigationConfirmedRef.current = true;
-          navigate(contextEditHref(workspaceId, updated.id), { replace: true });
+          navigate(`${contextEditHref(workspaceId, updated.id)}?version_id=${encodeURIComponent(updated.version_id)}`, { replace: true });
         }
         return;
       }
       publishRequestStarted = true;
-      const publishedResult = await publishPageVersion(
+      const publishedResult = await publishEditorPage(
         workspaceId,
         updated.id,
         updated.version_id,
@@ -3401,7 +3465,7 @@ export function PageEditor({
           expected_content_hash: updated.content_hash,
           expected_references_hash: updated.references_hash,
         },
-        { signal: controller.signal },
+        { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
       );
       if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
       if (!isEditorMountedRef.current) return;
@@ -3420,7 +3484,7 @@ export function PageEditor({
         );
       } else {
         setPublishedWarningStatus(publishedResult.warnings);
-        reviewNotice = await completeReviewEditIfNeeded(source, requestId);
+        reviewNotice = completeReviewEditIfNeeded(source);
       }
       navigateToPublishedContext(
         publishedResult.page.id,
@@ -3631,16 +3695,18 @@ export function PageEditor({
       ) {
         return false;
       }
-      return sendPageAutosave(workspaceId, page.id, {
+      const saveBase = editablePageRef.current ?? page;
+      return sendPageAutosave(workspaceId, saveBase.id, {
         title: draft.title.trim(),
         body_md: serializedBody,
         page_type: draft.pageType,
         tags: draft.tags,
         aliases: draft.aliases,
-        base_version_id: page.version_id,
-        base_content_hash: page.content_hash,
-        expected_editing_revision: page.editing_revision,
-        session_version_id: sessionVersionIdRef.current,
+        base_version_id: saveBase.version_id,
+        base_content_hash: saveBase.content_hash,
+        expected_editing_revision: saveBase.editing_revision,
+        version_id: sessionVersionIdRef.current ?? saveBase.version_id,
+        base_snapshot: draftBaseSnapshotRef.current ?? { body_md: saveBase.body_md, page_metadata: saveBase.page_metadata ?? {} },
         destination_node_id: draft.destinationNodeId || null,
         idempotency_key: newIdempotencyKey(),
         on_stale: "conflict",
@@ -3648,17 +3714,6 @@ export function PageEditor({
       });
     };
   });
-
-  function rememberSessionVersion(
-    savedVersionId: string,
-    requestedSessionVersionId: string | null,
-  ) {
-    if (requestedSessionVersionId && savedVersionId !== requestedSessionVersionId) {
-      sessionVersionIdRef.current = null;
-      return;
-    }
-    sessionVersionIdRef.current = savedVersionId;
-  }
 
   async function viewConflictChanges() {
     if (!page || !conflict || conflictDiffLoading || !workspaceId) {
@@ -3725,7 +3780,7 @@ export function PageEditor({
       pageIdRef.current === requestPageId &&
       editorGenerationRef.current === requestEditorGeneration;
     try {
-      const latest = await readEditablePage(requestWorkspaceId, requestPageId);
+      const latest = await readPage(requestWorkspaceId, requestPageId, page?.version_id);
       if (!isCurrentReload()) return false;
       if (!latest) return false;
       const restoredPublication = readPagePublicationState(latest);
@@ -3739,10 +3794,9 @@ export function PageEditor({
         contextTree.find((node) => node.target_id === latest.id)?.parent_id ??
         chooseDefaultDestination(contextTree);
       applyParsedMetadata(metadata);
+      adoptEditablePage(latest);
       sessionVersionIdRef.current = restoredPublication.sessionVersionId;
       setPublicationState(restoredPublication.state);
-      pageIdRef.current = latest.id;
-      setPage(latest);
       setTitle(latest.title);
       setPageSlug(latest.slug);
       bodyRef.current = parsed.body;
@@ -4257,10 +4311,6 @@ export function PageEditor({
   async function requestReview() {
     if (!workspaceId || !page || !canRequestReview || savingRef.current) return;
     const editorScope = referenceCommandScopeRef.current;
-    const scope = JSON.stringify([editorScope, page.version_id, page.editing_revision]);
-    if (reviewSubmissionRef.current?.scope !== scope) {
-      reviewSubmissionRef.current = { scope, key: newIdempotencyKey() };
-    }
     const owner = { scope: editorScope };
     referenceCommandOwnerRef.current = owner;
     savingRef.current = true;
@@ -4268,16 +4318,22 @@ export function PageEditor({
     setStatus(null);
     const isCurrent = () => isEditorMountedRef.current && referenceCommandOwnerRef.current === owner && referenceCommandScopeRef.current === editorScope;
     try {
-      const submitted = await submitPageForReview(workspaceId, page.id, {
-        version_id: page.version_id,
-        expected_editing_revision: page.editing_revision ?? 1,
+      const draft = await ensureEditableDraft(page);
+      if (!isCurrent()) return;
+      const scope = JSON.stringify([editorScope, draft.version_id, draft.editing_revision]);
+      if (reviewSubmissionRef.current?.scope !== scope) {
+        reviewSubmissionRef.current = { scope, key: newIdempotencyKey() };
+      }
+      const submitted = await submitPageForReview(workspaceId, draft.id, {
+        version_id: draft.version_id,
+        expected_editing_revision: draft.editing_revision ?? 1,
         idempotency_key: reviewSubmissionRef.current.key,
         reason: "Requested review from Page editor.",
         retry_only: false,
       });
       if (!isCurrent()) return;
       reviewSubmissionRef.current = null;
-      setPage(submitted);
+      adoptEditablePage(submitted);
       setStatus(t("editor.reviewRequested"));
     } catch (cause) {
       if (isCurrent()) setStatus(apiErrorMessage(cause, t("editor.reviewRequestFailed")));
@@ -4319,12 +4375,15 @@ export function PageEditor({
           try { savedPage = await creation; }
           finally { if (pageCreationPromiseRef.current === creation) pageCreationPromiseRef.current = null; }
         } else {
+          savedPage = await ensureEditableDraft(savedPage);
+          if (!isCurrent()) return;
           savedPage = await autosavePage(workspaceId, savedPage.id, {
             title: snapshot.title.trim() || savedPage.title,
             body_md: serializeDraftBody(snapshot, frontmatterExtraLinesRef.current),
             page_type: snapshot.pageType, tags: snapshot.tags, aliases: snapshot.aliases,
             base_version_id: savedPage.version_id, base_content_hash: savedPage.content_hash,
-            expected_editing_revision: savedPage.editing_revision, session_version_id: savedPage.version_id,
+            expected_editing_revision: savedPage.editing_revision, version_id: savedPage.version_id,
+            base_snapshot: { body_md: savedPage.body_md, page_metadata: savedPage.page_metadata ?? {} },
             destination_node_id: snapshot.destinationNodeId || null,
             idempotency_key: newIdempotencyKey(), on_stale: "conflict", retry_only: false,
           });
@@ -4333,10 +4392,7 @@ export function PageEditor({
         if (fromReview && (savedPage.superseded_review_count ?? 0) > 0) {
           reviewEditCompletedRef.current = true;
         }
-        pageIdRef.current = savedPage.id;
-        baseVersionIdRef.current = savedPage.version_id;
-        sessionVersionIdRef.current = savedPage.version_id;
-        setPage(savedPage);
+        adoptEditablePage(savedPage);
         setPageSlug(savedPage.slug);
         acknowledgeEditorRevision(dispatchedRevision);
         lastSavedRef.current = { ...snapshot, title: savedPage.title, slug: savedPage.slug };
@@ -4355,7 +4411,7 @@ export function PageEditor({
       if (!isCurrent()) return;
       pendingReferenceCommandRef.current = null;
       setReferenceRetryAvailable(false);
-      setPage({ ...savedPage, version_status: changed.publication_state, editing_revision: changed.editing_revision, references_hash: changed.references_hash });
+      adoptEditablePage({ ...savedPage, version_status: changed.publication_state, editing_revision: changed.editing_revision, references_hash: changed.references_hash });
       setReferencePickerMode(null);
       const referenceStatus = t(operation === "add" ? "references.added" : "references.removed");
       // Staging forks a reviewed draft and withdraws its pending review.
@@ -4364,7 +4420,7 @@ export function PageEditor({
         : referenceStatus);
       try {
         const refreshed = await readPage(workspaceId, savedPage.id, savedPage.version_id);
-        if (isCurrent()) setPage(refreshed);
+        if (isCurrent()) adoptEditablePage(refreshed);
       } catch {
         if (isCurrent()) setStatus(t("references.savedReloadFailed"));
       }
@@ -4401,7 +4457,7 @@ export function PageEditor({
       if (!isCurrent()) return;
       // Reconcile concurrency metadata only. Writing done after the failed
       // request remains in CodeMirror and retains its unacknowledged revision.
-      setPage(refreshed);
+      adoptEditablePage(refreshed);
       pendingReferenceCommandRef.current = null;
       setReferenceRetryAvailable(false);
       setStatus(t("references.reconciled"));
@@ -5246,7 +5302,7 @@ export function PageEditor({
       hasPersistedPage={Boolean(page)}
       lastSavedAt={lastSavedAt}
       now={saveRelativeNow}
-      onRetry={() => void save({ publish: false })}
+      onRetry={() => void save({ publish: hasPreparedPublication })}
       blockedReason={saveBlockedReason}
       compact={compact}
     />
@@ -5956,6 +6012,19 @@ export function PageEditor({
             pageId={page.id}
             workspaceId={page.workspace_id}
           />
+        ) : null}
+        {mergePublishPrompt?.preview.result ? (
+          <Dialog labelledBy="merge-publish-dialog-title" onClose={() => settleAutomaticMerge(false)}
+            title={t("editor.mergePreviewTitle")}>
+            <section className="dialog-form">
+              <p>{t("editor.mergePreviewDescription")}</p>
+              <ContextMergeResultPreview candidate={mergePublishPrompt.preview.result} workspaceId={workspaceId} />
+              <div className="dialog-actions">
+                <button type="button" className="icon-button text-button" onClick={() => settleAutomaticMerge(false)}>{t("editor.fencePublishCancel")}</button>
+                <button type="button" className="icon-button primary" onClick={() => settleAutomaticMerge(true)}>{t("editor.mergePreviewPublish")}</button>
+              </div>
+            </section>
+          </Dialog>
         ) : null}
         {fencePublishPrompt ? (
           <Dialog
@@ -7375,10 +7444,8 @@ function readPagePublicationState(page: PagePayload): {
   // The payload states this outright, so the editor asks the page rather than
   // paging through version history: a page with enough newer drafts pushes its
   // published version off the end of that list and looks never-published.
-  // An unsubmitted working version is "editing", not "draft" --
-  // both are equally unpublished until a `current_published_version_id`
-  // exists, so both take this branch (see CONTEXT_PAGE_VERSION_STATUSES).
-  if (page.version_status === "draft" || page.version_status === "editing") {
+  // Shared drafts remain unpublished until publication completes.
+  if (page.version_status === "draft") {
     return {
       sessionVersionId: page.version_id,
       state: page.current_published_version_id ? "staged" : "never-published",

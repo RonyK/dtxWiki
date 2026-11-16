@@ -58,51 +58,6 @@ def _page_links(candidates):
     ]
 
 
-def test_submit_revision_create_links_new_page(page_service):
-    with page_service.session_factory.begin() as session:
-        ws = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        change_set, page = _seed_change_set_with_page(session, ws.id)
-        candidates = derive_artifact_links(
-            session=session,
-            tool_name="submit_revision_for_review",
-            arguments={
-                "create": {
-                    "title": "Revised Page",
-                    "page_type": "overview",
-                    "body_markdown": "revised body",
-                    "reason": "revision via create",
-                }
-            },
-            payload={"data": {"new_change_set_id": str(change_set.id)}},
-        )
-    links = _page_links(candidates)
-    assert len(links) == 1
-    assert links[0].resource_id == page.id
-    assert links[0].verb == McpChatArtifactVerb.CREATED
-
-
-def test_submit_revision_update_links_page(page_service):
-    with page_service.session_factory.begin() as session:
-        ws = session.scalar(select(Workspace).where(Workspace.slug == "default"))
-        change_set, page = _seed_change_set_with_page(session, ws.id)
-        candidates = derive_artifact_links(
-            session=session,
-            tool_name="submit_revision_for_review",
-            arguments={
-                "update": {
-                    "page_id": str(page.id),
-                    "body_markdown": "revised body",
-                    "reason": "revision via update",
-                }
-            },
-            payload={"data": {"new_change_set_id": str(change_set.id)}},
-        )
-    links = _page_links(candidates)
-    assert len(links) == 1
-    assert links[0].resource_id == page.id
-    assert links[0].verb == McpChatArtifactVerb.EDITED
-
-
 def test_read_concept_links_viewed_page(page_service):
     with page_service.session_factory.begin() as session:
         ws = session.scalar(select(Workspace).where(Workspace.slug == "default"))

@@ -165,10 +165,10 @@ EXPECTED_ALL_NULLABLE_EDGES: frozenset[str] = frozenset(
 
 
 def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
-    """Pin the census edge-by-edge: 62 edges, 59 of 93 tables blocked.
+    """Pin the census edge-by-edge: 62 edges, 59 of 94 tables blocked.
 
     Measured here, not copied: ``workspace`` 59 edges / 59 blocked tables,
-    ``users`` 3 edges / 2 blocked tables, 34 of the 93 shard-resident tables
+    ``users`` 3 edges / 2 blocked tables, 35 of the 94 shard-resident tables
     insertable, 4 edges all-nullable. Adding, removing or re-pointing any
     cross-plane FK changes ``labels`` and fails this test, which is the point
     -- the inventory is not allowed to move without a reviewer seeing it.
@@ -212,6 +212,8 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     changing table or cross-plane FK counts.
     The locator rollback journal adds one workspace-owned table with a
     cascading workspace FK: 93 resident, 62 edges and 59 blocked tables.
+    Context commit parents add one workspace-only table with composite FKs:
+    94 resident and 35 insertable; cross-plane edges stay unchanged.
     """
 
     edges = workspace_to_control_fk_edges()
@@ -228,7 +230,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 93
+    assert len(resident) == 94
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
@@ -246,7 +248,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
     assert len(blocked) == 59
-    assert len(resident) - len(blocked) == 34
+    assert len(resident) - len(blocked) == 35
 
     assert (
         frozenset(edge.label for edge in edges if edge.all_columns_nullable)

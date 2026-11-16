@@ -178,7 +178,7 @@ describe("operations api", () => {
       jsonResponse({ data: reviewItem("approved") }),
     );
 
-    await decideReview(WORKSPACE_ID, "review-1", "approve", "looks good");
+    await decideReview(WORKSPACE_ID, "review-1", "approve", "looks good", { merge_binding: null });
 
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1/decision`,

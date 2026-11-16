@@ -15,7 +15,6 @@ from backend.context_media.domain import (
     ContextMediaAssetRecord,
     ContextMediaAttachmentProjection,
     ContextMediaNotFoundError,
-    ContextMediaOwnershipError,
     ContextMediaUnavailableError,
     MediaInUseError,
     MediaUsedInHistoryError,
@@ -37,9 +36,8 @@ class RegisterMediaAsset:
         candidate: RegisterContextMediaAsset,
         *,
         now: datetime,
-        allow_shared_draft: bool = False,
     ) -> ContextMediaAssetRecord:
-        # P3.1/P3.2: the caller's own open "editing" row is the asset's
+        # The open draft the asset is uploaded into is its
         # owning context now, not a ContextMediaSession -- validated by
         # `repository.add_asset` (it already locks and checks `page_id`
         # against `ContextPage` the same way; `created_for_version_id`
@@ -62,8 +60,6 @@ class RegisterMediaAsset:
             association_state=AssociationState.ACTIVE,
             revision=1,
         )
-        if allow_shared_draft:
-            return repository.add_asset(record, allow_shared_draft=True)
         return repository.add_asset(record)
 
 
@@ -120,11 +116,8 @@ class ListPageMedia:
 class ListWorkspaceMedia:
     """One page of a workspace's attachments.
 
-    The ``usage`` filter runs AFTER the repository's viewer masking, on the
-    projection's recomputed ``usage_state``. That ordering is the point: a
-    ``used`` request must never surface an asset whose only reference lives in
-    somebody else's discarded work, and ``ContextMediaAssetProjection.
-    from_snapshot`` is what turns the masked counts into the state we filter on.
+    The ``usage`` filter uses the canonical reference counts, including
+    discarded versions. Pagination metadata comes from the SQL asset window.
 
     260912 review: that same ordering used to break pagination. ``has_more``
     and ``next_cursor`` were computed by the ROUTE from ``len(projections)``
@@ -211,18 +204,6 @@ class DeleteUnusedMedia:
             or snapshot.asset.association_state is AssociationState.TOMBSTONED
         ):
             raise ContextMediaNotFoundError("Context media asset was not found")
-        # P3.4: while the asset's creating editing session is still open, it
-        # is that author's unshared upload -- only they may explicitly
-        # delete it (the sweep never reaches here for one: the orphan query
-        # excludes it first). Once no longer "editing", ordinary editor-wide
-        # deletion applies, same as any other zero-usage page asset.
-        if (
-            snapshot.created_for_version_is_editing
-            and snapshot.asset.created_by != actor
-        ):
-            raise ContextMediaOwnershipError(
-                "media belongs to another actor's open editing session"
-            )
         if usage_token != snapshot.usage_token:
             raise StaleUsageTokenError("usage token is stale")
         if snapshot.state is UsageState.ACTIVE:
@@ -243,19 +224,8 @@ class ResolveContent:
         asset_id: UUID,
         actor: ActorIdentity,
     ) -> ContentCapability:
-        # P3.3: the version-scoped route is now the only private content
-        # read -- it covers both an exact-version usage read (draft/
-        # published/history, unconditional once the caller's outer
-        # version-visibility check already passed) and, when no usage row
-        # exists yet, an uninserted upload's preview via
-        # `created_for_version_id`. The fallback is narrower than "may this
-        # actor see this version" -- an uninserted image was never actually
-        # published as content, so it stays private to its own uploader
-        # specifically even if the surrounding version is itself a
-        # role-visible submitted draft; `actor` is what lets
-        # resolve_version_content enforce that. The versionless page
-        # preview this used to sit beside is gone; there is no
-        # owner-independent asset read left.
+        # The caller checks version visibility. Content must be referenced
+        # by that version or be an upload created for that exact version.
         capability = repository.resolve_version_content(
             workspace_id=workspace_id,
             page_id=page_id,

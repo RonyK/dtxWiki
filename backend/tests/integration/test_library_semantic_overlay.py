@@ -693,7 +693,7 @@ def test_library_delete_breaks_overlay_pointer_and_removes_owned_row(
             actor_type="human",
             created_by_actor_kind="human",
             created_by_actor_id="reader",
-            version_status="editing",
+            version_status="draft",
         )
         session.add(editing)
         session.flush()

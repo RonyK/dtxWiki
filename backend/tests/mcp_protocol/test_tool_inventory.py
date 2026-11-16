@@ -57,7 +57,6 @@ TOOL_LIST_SNAPSHOTS = {
         "cite",
         "submit_feedback",
         "list_requested_changes",
-        "submit_revision_for_review",
         "wiki_maintenance",
         "read_context_outline",
         "read_structure_map",
@@ -83,9 +82,7 @@ def _assert_consistent_tool_inventory(
             if tool_name not in tools
         ]
         if missing_from:
-            problems.append(
-                f"{tool_name}: missing from {', '.join(missing_from)}"
-            )
+            problems.append(f"{tool_name}: missing from {', '.join(missing_from)}")
     for tool_name in sorted(content_tools - all_tools):
         problems.append(f"{tool_name}: CONTENT_TOOLS has no registered tool")
     assert not problems, "MCP tool inventory drift:\n" + "\n".join(problems)
@@ -97,9 +94,7 @@ def _current_tool_registries() -> dict[str, set[str]]:
         "TOOL_REQUIRED_SCOPES": set(TOOL_REQUIRED_SCOPES),
         "TOOL_HANDLERS": set(TOOL_HANDLERS),
         "tool descriptors": {tool.name for tool in list_dtxwiki_tools()},
-        "shared/schemas/mcp/v1": {
-            path.stem for path in schema_dir.glob("*.json")
-        },
+        "shared/schemas/mcp/v1": {path.stem for path in schema_dir.glob("*.json")},
         "TOOL_REQUIRED_ROLES": set(TOOL_REQUIRED_ROLES),
     }
 
@@ -165,7 +160,9 @@ def test_patch_context_edit_permission_and_conversation_contract():
     assert TOOL_REQUIRED_ROLES["patch_context_edit"] == "editor"
     assert "patch_context_edit" in CONTENT_TOOLS
     assert TOOL_REQUIRED_SCOPES["get_operation_status"] == (
-        "draft-write", "agent-page-draft", "review-write"
+        "draft-write",
+        "agent-page-draft",
+        "review-write",
     )
     assert TOOL_REQUIRED_ROLES["get_operation_status"] == "editor"
     assert "get_operation_status" not in CONTENT_TOOLS
@@ -184,8 +181,7 @@ def test_tools_list_snapshot_for_scope(scope, expected_names):
     )
 
     actual_names = tuple(
-        tool.name
-        for tool in list_dtxwiki_tools(visible_tool_names(actor))
+        tool.name for tool in list_dtxwiki_tools(visible_tool_names(actor))
     )
 
     assert actual_names == expected_names

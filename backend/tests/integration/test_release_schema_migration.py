@@ -20,7 +20,7 @@ from backend.app.bootstrap import (
     resolve_alembic_ini,
     resolve_migrations_dir,
 )
-from backend.models import Base, ContextPage, ContextPageVersion, PageLink
+from backend.models import Base, ContextPage, PageLink
 from backend.models.graph import GraphHistoryCoverage, GraphObservation
 from backend.models.search_index import include_non_fts5_object
 from backend.scripts.seed_dev import seed_default_workspace
@@ -48,13 +48,13 @@ def _config(database_url: str) -> Config:
     return config
 
 
-def _head_copy(templates, tmp_path, filename: str):
+def _head_copy(templates, tmp_path, filename: str, *, template="head"):
     """A private copy of the ``alembic upgrade head`` template.
 
     For tests whose stimulus starts at head (a downgrade, triggers, purge
     order); they need the migrated schema, not another run of the chain.
     """
-    config = _config(templates.clone("head", tmp_path / filename))
+    config = _config(templates.clone(template, tmp_path / filename))
     return config, create_engine(config.get_main_option("sqlalchemy.url"))
 
 
@@ -784,8 +784,14 @@ def test_page_link_syntax_downgrade_preserves_wikilink_projection(
     tmp_path, sqlite_templates
 ):
     config, engine = _head_copy(
-        sqlite_templates, tmp_path, "page-link-syntax-downgrade.db"
+        sqlite_templates,
+        tmp_path,
+        "page-link-syntax-downgrade.db",
+        template="rev_872d9c3e104b",
     )
+    from backend.tests.utils.context_git import historical_context_version_model
+
+    ContextPageVersion = historical_context_version_model(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     configure_test_context_storage(
         session_factory, config.attributes["context_repositories_root"]

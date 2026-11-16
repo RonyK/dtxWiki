@@ -2,6 +2,7 @@ import { expect, test, type Page, type TestInfo } from "./fixtures";
 import { mkdir, writeFile } from "node:fs/promises";
 import { authenticatePage, saveLabsSettings, workspaceUrl } from "./auth";
 import { evidenceScreenshot } from "./evidence";
+import { approveContextDraft } from "./context_workflow";
 
 async function checkBoxes(page: Page, testInfo: TestInfo, surface: string) {
   const geometry = await page
@@ -580,27 +581,10 @@ for (const [language, width] of LAYOUTS) {
     await reviewCheckbox.focus();
     await page.keyboard.press("Space");
     await expect(reviewCheckbox).not.toBeChecked();
-    expect(
-      (
-        await page.request.post(
-          `${prefix}/reviews/${submitted.review_item_id}/decision`,
-          { data: { decision_type: "approve" } },
-        )
-      ).ok(),
-    ).toBeTruthy();
-    expect(
-      (
-        await page.request.post(
-          `${prefix}/context/pages/${created.id}/versions/${submitted.version_id}/publish`,
-          {
-            data: {
-              reason: "Browser checkbox verification",
-              expected_content_hash: submitted.content_hash,
-            },
-          },
-        )
-      ).ok(),
-    ).toBeTruthy();
+    await approveContextDraft(
+      page.request, workspace.id, created.id, submitted.version_id, submitted.review_item_id,
+      { decision_reason: "Browser checkbox verification" },
+    );
     await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}`));
     await expect(page.locator(".markdown-task-state")).toHaveCount(2);
     await checkBoxes(page, testInfo, "markdown-tasks");

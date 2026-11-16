@@ -60,9 +60,7 @@ def _authed_client(page_service) -> TestClient:
     authenticate_test_client(client)
     with page_service.session_factory.begin() as session:
         user = session.scalar(select(User).where(User.email == "test@example.com"))
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         assert user is not None and workspace is not None
         workspace.visibility = "public"
         session.add(
@@ -104,9 +102,7 @@ def _make_page(page_service, slug: str, *, published: bool, public: bool):
         page = session.get(ContextPage, created.id)
         # write_page (legacy) auto-publishes via set_current_version; force the
         # draft-only state by clearing the published head when published=False.
-        page.current_published_version_id = (
-            created.version_id if published else None
-        )
+        page.current_published_version_id = created.version_id if published else None
         workspace = session.get(Workspace, page.workspace_id)
         if public and published:
             workspace.visibility = "public"
@@ -170,9 +166,7 @@ def test_public_read_returns_published_head_without_auth(page_service):
         )
         folder_ref = format_index_ref("folder", folder_id)
         stored = session.get(ContextPageVersion, created.version_id)
-        stored.body_md += (
-            f"\n[Public ref]({public_ref}) [Folder ref]({folder_ref})\n"
-        )
+        stored.body_md += f"\n[Public ref]({public_ref}) [Folder ref]({folder_ref})\n"
         original_body, original_hash = stored.body_md, stored.content_hash
         # Reuse the same public/private targets for citation projection. The
         # public target's mutable row can track an unshared draft rename;
@@ -381,19 +375,14 @@ def test_publish_requires_editor_role(page_service):
     )
     authenticate_test_client(viewer, email="viewer@example.com")
     with page_service.session_factory.begin() as session:
-        user = session.scalar(
-            select(User).where(User.email == "viewer@example.com")
-        )
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
+        user = session.scalar(select(User).where(User.email == "viewer@example.com"))
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         grant_workspace_membership(
             session, user_id=user.id, workspace_id=workspace.id, role="viewer"
         )
 
     denied = viewer.post(
-        f"/api/v1/workspaces/{created.workspace_id}/context/pages"
-        f"/{created.id}/publish",
+        f"/api/v1/workspaces/{created.workspace_id}/context/pages/{created.id}/publish",
         json={"is_public": True},
     )
     assert denied.status_code == 403
@@ -404,9 +393,7 @@ def test_publish_requires_editor_role(page_service):
         editor_user = session.scalar(
             select(User).where(User.email == "editor@example.com")
         )
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         grant_workspace_membership(
             session,
             user_id=editor_user.id,
@@ -415,8 +402,7 @@ def test_publish_requires_editor_role(page_service):
         )
 
     allowed = editor.post(
-        f"/api/v1/workspaces/{created.workspace_id}/context/pages"
-        f"/{created.id}/publish",
+        f"/api/v1/workspaces/{created.workspace_id}/context/pages/{created.id}/publish",
         json={"is_public": True},
     )
     assert allowed.status_code == 200
@@ -430,8 +416,7 @@ def test_publish_without_published_head_returns_version_validation(page_service)
     created = _make_page(page_service, "no-head-page", published=False, public=False)
 
     resp = client.post(
-        f"/api/v1/workspaces/{created.workspace_id}/context/pages"
-        f"/{created.id}/publish",
+        f"/api/v1/workspaces/{created.workspace_id}/context/pages/{created.id}/publish",
         json={"is_public": True},
     )
     assert resp.status_code == 422
@@ -497,8 +482,7 @@ def test_private_workspace_share_requires_acknowledgement_bound_to_version(
     )
     assert missing_ack.status_code == 422
     assert (
-        missing_ack.json()["error_code"]
-        == "public_exposure_acknowledgement_required"
+        missing_ack.json()["error_code"] == "public_exposure_acknowledgement_required"
     )
 
     stale = client.post(
@@ -539,9 +523,7 @@ def test_private_workspace_share_requires_acknowledgement_bound_to_version(
         assert page.public_exposed_version_id == published_version_id
 
     anonymous = _anon_client(page_service)
-    public_read = anonymous.get(
-        "/api/v1/public/w/default/pages/private-unlisted-page"
-    )
+    public_read = anonymous.get("/api/v1/public/w/default/pages/private-unlisted-page")
     assert public_read.status_code == 200
     assert public_read.json()["data"]["exposure_scope"] == "unlisted_web"
     assert public_read.headers["X-Robots-Tag"] == "noindex, nofollow"
@@ -583,8 +565,7 @@ def test_unpublish_revokes_public_access(page_service):
     assert anon.get("/api/v1/public/w/default/pages/revoke-page").status_code == 200
 
     unpublish = client.post(
-        f"/api/v1/workspaces/{created.workspace_id}/context/pages"
-        f"/{created.id}/publish",
+        f"/api/v1/workspaces/{created.workspace_id}/context/pages/{created.id}/publish",
         json={"is_public": False},
     )
     assert unpublish.status_code == 200
@@ -648,6 +629,15 @@ def test_unlisted_grant_advances_only_when_a_new_version_is_published(page_servi
     path = "/api/v1/public/w/default/pages/unlisted-pinned"
     assert anonymous.get(path).status_code == 200
 
+    edit = page_service.begin_context_edit(
+        page_id=created.id,
+        workspace_id=created.workspace_id,
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+        from_version_id=created.version_id,
+        idempotency_key="unlisted-begin",
+    )
     saved = page_service.autosave_page(
         page_id=created.id,
         workspace_id=created.workspace_id,
@@ -656,12 +646,11 @@ def test_unlisted_grant_advances_only_when_a_new_version_is_published(page_servi
         actor_kind="human",
         actor_id="dev-local-user",
         actor_provenance="browser_session",
-        base_version_id=created.version_id,
-        base_content_hash=created.content_hash,
-        session_version_id=created.version_id,
-        expected_editing_revision=created.editing_revision,
+        base_version_id=edit.version_id,
+        base_content_hash=edit.content_hash,
+        session_version_id=edit.version_id,
+        expected_editing_revision=edit.editing_revision,
         idempotency_key="unlisted-save",
-        share_draft=True,
     )
     # A draft version must neither revoke the link nor expose the draft body.
     before_publish = anonymous.get(path)
@@ -698,9 +687,7 @@ def test_unlisted_grant_advances_only_when_a_new_version_is_published(page_servi
 
 
 def test_public_read_fails_closed_for_visibility_or_version_mismatch(page_service):
-    created = _make_page(
-        page_service, "grant-mismatch", published=True, public=True
-    )
+    created = _make_page(page_service, "grant-mismatch", published=True, public=True)
     other = _make_page(
         page_service, "grant-mismatch-other", published=True, public=False
     )
@@ -852,14 +839,20 @@ def test_public_read_title_from_published_body_not_draft_page_row(page_service):
         idempotency_key="reference-title-save",
     )
     with page_service.session_factory() as session:
-        assert resolve_document_targets(
-            session, created.workspace_id, [reference], viewer
-        )[reference.key].title == visible_title
-        assert resolve_document_targets(
-            session, created.workspace_id, [reference], author
-        )[reference.key].title == visible_title
+        assert (
+            resolve_document_targets(
+                session, created.workspace_id, [reference], viewer
+            )[reference.key].title
+            == visible_title
+        )
+        assert (
+            resolve_document_targets(
+                session, created.workspace_id, [reference], author
+            )[reference.key].title
+            == visible_title
+        )
         private = session.get(ContextPageVersion, opened.version_id)
-        assert private.version_status == "editing"
+        assert private.version_status == "draft"
 
     anon = _anon_client(page_service)
     resp = anon.get("/api/v1/public/w/default/pages/title-page")

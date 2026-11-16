@@ -21,6 +21,7 @@ from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.models.context import (
     ContextPage,
     ContextPageVersion,
+    ContextVersionParent,
     EdgeProjection,
     PageLink,
     PageProvenance,
@@ -28,6 +29,7 @@ from backend.models.context import (
 from backend.models.library import LibraryItem, LibraryItemVersion
 from backend.models.tree import WorkspaceTreeNode
 from backend.repositories.page_links import active_page_link_condition
+from backend.repositories.workspace_scoped import select_in_workspace
 from backend.services.entity_ref import EntityKind
 from backend.services.graph_cache import (
     bump_edge_version,
@@ -445,32 +447,41 @@ def _version_parent_rows(
 def _version_merge_rows(
     session: Session, workspace_id: UUID
 ) -> list[dict[str, object]]:
-    """Derived reconcile-merge edges: a diverged branch folded cleanly into a
-    linear version -- the git-merge "second parent", distinct from
-    version_parent's "branched from" edge above so a graph query can tell
-    lineage from reconciliation."""
-    rows = session.execute(
-        select(
-            ContextPageVersion.id,
-            ContextPageVersion.merged_into_version_id,
-            ContextPageVersion.created_at,
+    """Additional committed parents point toward the merge result."""
+    committed_at = (
+        select_in_workspace(
+            ContextPageVersion,
+            workspace_id=workspace_id,
+            criteria=(
+                ContextPageVersion.page_id == ContextVersionParent.page_id,
+                ContextPageVersion.id == ContextVersionParent.version_id,
+            ),
         )
-        .join(ContextPage, ContextPageVersion.page_id == ContextPage.id)
-        .where(ContextPage.workspace_id == workspace_id)
-        .where(ContextPageVersion.merged_into_version_id.is_not(None))
-    ).all()
+        .with_only_columns(ContextPageVersion.created_at)
+        .scalar_subquery()
+    )
+    statement = select_in_workspace(
+        ContextVersionParent,
+        workspace_id=workspace_id,
+        criteria=(ContextVersionParent.ordinal > 0,),
+    ).with_only_columns(
+        ContextVersionParent.version_id,
+        ContextVersionParent.parent_version_id,
+        committed_at,
+    )
+    rows = session.execute(statement).all()
     return [
         _edge(
             workspace_id=workspace_id,
             source_kind=EntityKind.CONTEXT_PAGE_VERSION,
-            source_id=version_id,
+            source_id=parent_id,
             target_kind=EntityKind.CONTEXT_PAGE_VERSION,
-            target_id=merged_into_id,
+            target_id=version_id,
             edge_kind="version_merge",
-            source_table="context_page_version",
+            source_table="context_version_parent",
             occurred_at=created_at,
         )
-        for version_id, merged_into_id, created_at in rows
+        for version_id, parent_id, created_at in rows
     ]
 
 
@@ -557,7 +568,7 @@ EDGE_BEARING_RELATIONS: dict[str, tuple[str, ...]] = {
         "library_item_version.previous_version_id->library_item_version.id",
     ),
     "version_merge": (
-        "context_page_version.merged_into_version_id->context_page_version.id",
+        "context_version_parent.parent_version_id->context_page_version.id",
     ),
     "version_membership": (
         "agent_page_version.agent_page_id->agent_page.id",

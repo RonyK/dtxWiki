@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from backend.context_media.domain import ActorIdentity, ContextMediaAttachmentProjection
+from backend.context_media.domain import ContextMediaAttachmentProjection
 
 _CURSOR_PREFIX = "attach1:"
 
@@ -116,10 +116,7 @@ def attachment_read_projection(
             record.created_by.kind == viewer_actor_kind
             and str(record.created_by.id) == viewer_actor_id
         ),
-        "can_delete": asset.can_delete_by(
-            ActorIdentity(viewer_actor_kind, viewer_actor_id)
-        )
-        and caller_may_delete,
+        "can_delete": asset.can_delete and caller_may_delete,
         "usage_token": asset.usage_token,
         "content_url": attachment_content_url(
             workspace_id=workspace_id,

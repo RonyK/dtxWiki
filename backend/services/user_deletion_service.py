@@ -6,7 +6,7 @@ members while the account is retained, then deleted with it unless an active
 admin is appointed first. A durable blob-purge manifest survives the database
 cleanup so failed physical deletion can be retried before the user identity is
 finally removed. Other workspaces keep their shared content and append-only
-audit history; the account's unsubmitted private edits there are deleted.
+audit history, including the account's drafts and its author name.
 
 Only the workspaces that hold the user's footprint are locked; the footprint
 comes from the single attribution registry in ``backend.models.user_attribution``.
@@ -27,16 +27,9 @@ from backend.models import (
     ApiToken,
     ApiTokenWorkspace,
     AppMetadata,
-    ChangeOperation,
-    ChunkEmbedding,
-    ContentChunk,
-    ContextMediaUsage,
-    ContextPage,
-    ContextPageVersion,
     EmailOutbox,
     MCPClient,
     OAuthConsent,
-    PageLink,
     PasswordResetToken,
     ServerAdmin,
     User,
@@ -44,22 +37,14 @@ from backend.models import (
     WorkspaceCredentialGrant,
     WorkspaceMembership,
     WorkspacePurgeGrant,
-    WorkspaceTreeNode,
 )
 from backend.models.base import utc_now
-from backend.models.document_reference import (
-    ContextDocumentReference,
-    ContextPublishedCitation,
-)
-from backend.models.library import LibraryItemTombstone
 from backend.models.user_attribution import (
     USER_ATTRIBUTIONS,
     UserAttribution,
 )
-from backend.repositories.context_visibility import PRIVATE_VERSION_STATUSES
 from backend.repositories.workspace_scoped import (
     delete_in_workspace,
-    select_in_workspace,
     update_in_workspace,
 )
 from backend.services.audit_service import AuditService
@@ -70,7 +55,7 @@ from backend.services.oauth_service import revoke_live_token_grant_families
 from backend.services.workspace_content_storage import WorkspaceContentStorage
 from backend.services.workspace_membership_service import WorkspaceMembershipService
 from backend.services.workspace_write import WorkspaceWriteService
-from backend.utils.content_hash import content_hash
+from backend.utils.actor_display import keep_departed_author_name
 
 logger = logging.getLogger(__name__)
 
@@ -219,25 +204,6 @@ def _user_footprint(session: Session, user: User) -> set[UUID]:
             )
         )
     return workspace_ids
-
-
-def _private_draft_page_ids(
-    session: Session, user_id: UUID, workspace_id: UUID
-) -> set[UUID]:
-    # The pages whose unsubmitted private edits cleanup deletes.
-    return set(
-        session.scalars(
-            select_in_workspace(
-                ContextPageVersion,
-                workspace_id=workspace_id,
-                conditions=(
-                    ContextPageVersion.created_by_actor_kind == "human",
-                    ContextPageVersion.created_by_actor_id == str(user_id),
-                    ContextPageVersion.version_status.in_(PRIVATE_VERSION_STATUSES),
-                ),
-            ).with_only_columns(ContextPageVersion.page_id)
-        )
-    )
 
 
 def _owned_workspace_ids(session: Session, user_id: UUID) -> set[UUID]:
@@ -791,51 +757,21 @@ class UserDeletionService:
 
     @staticmethod
     def _lock_for_purge(session: Session, user_id: UUID) -> tuple[User, set[UUID]]:
-        # Media intent, then workspace, then the pages whose private drafts
-        # cleanup deletes (in global id order, as history repair locks them)
-        # -- the order workspace deletion and Context writers use -- but only
-        # where the user has a footprint, so unrelated workspaces keep
-        # writing. The user row comes last. Restore and other account
-        # lifecycle changes are serialized by the lifecycle lock.
+        # Workspaces first, in global id order -- the order workspace deletion
+        # and Context writers use -- but only where the user has a footprint,
+        # so unrelated workspaces keep writing. The user row comes last.
+        # Restore and other account lifecycle changes are serialized by the
+        # lifecycle lock.
         user = session.get(User, user_id)
         footprint = _user_footprint(session, user)
-        drafts = {
-            workspace_id: _private_draft_page_ids(session, user_id, workspace_id)
-            for workspace_id in footprint
-        }
-        ordered = sorted(footprint, key=lambda value: value.int)
-        for workspace_id in ordered:
-            if drafts[workspace_id]:
-                WorkspaceWriteService._lock_media_delete_intent(
-                    session=session, workspace_id=workspace_id
-                )
-        for workspace_id in ordered:
+        for workspace_id in sorted(footprint, key=lambda value: value.int):
             session.scalar(
                 select(Workspace.id)
                 .where(Workspace.id == workspace_id)
                 .with_for_update(key_share=True)
             )
-        pages = {
-            (page_id, workspace_id)
-            for workspace_id, page_ids in drafts.items()
-            for page_id in page_ids
-        }
-        for page_id, workspace_id in sorted(pages, key=lambda pair: pair[0].int):
-            session.scalar(
-                select_in_workspace(
-                    ContextPage,
-                    workspace_id=workspace_id,
-                    conditions=(ContextPage.id == page_id,),
-                )
-                .with_only_columns(ContextPage.id)
-                .with_for_update()
-            )
         session.refresh(user, with_for_update=True)
-        if not _user_footprint(session, user) <= footprint or any(
-            (page_id, workspace_id) not in pages
-            for workspace_id in footprint
-            for page_id in _private_draft_page_ids(session, user_id, workspace_id)
-        ):
+        if not _user_footprint(session, user) <= footprint:
             raise _FootprintChanged(str(user_id))
         return user, footprint
 
@@ -1075,6 +1011,7 @@ class UserDeletionService:
                 target_id=user_id,
                 retention_class="sensitive",
             )
+            keep_departed_author_name(session, user)
             session.execute(delete(User).where(User.id == user_id))
             session.delete(intent)
         return True
@@ -1098,9 +1035,9 @@ class UserDeletionService:
     def _cleanup_user_resources(
         self, session: Session, user_id: UUID, workspace_ids: set[UUID]
     ) -> None:
-        # Shared documents, submitted drafts, media and conversation history
-        # stay. Unsubmitted private edits, credentials and preferences go, and
-        # nullable account links are detached.
+        # Shared documents, drafts, author names, media and conversation
+        # history stay. Credentials and preferences go, and nullable account
+        # links are detached.
         for workspace_id in sorted(workspace_ids, key=lambda value: value.int):
             self._cleanup_workspace_user_resources(
                 session, user_id=user_id, workspace_id=workspace_id
@@ -1162,19 +1099,6 @@ class UserDeletionService:
             retire_workspace_recipient(
                 session, workspace_id=workspace_id, user_id=user_id
             )
-        elif entry.cleanup == "private_versions":
-            self._scrub_private_context_versions(
-                session, user_id=user_id, workspace_id=workspace_id
-            )
-        elif entry.cleanup == "author_name":
-            session.execute(
-                update_in_workspace(
-                    model,
-                    workspace_id=workspace_id,
-                    conditions=entry.pending(user_id),
-                    values={"actor_display_name": None},
-                )
-            )
         elif entry.cleanup == "delete":
             session.execute(
                 delete_in_workspace(
@@ -1196,192 +1120,3 @@ class UserDeletionService:
                 )
         else:
             raise ValueError(f"unknown workspace cleanup {entry.cleanup!r}")
-
-    def _scrub_private_context_versions(
-        self, session: Session, *, user_id: UUID, workspace_id: UUID
-    ) -> None:
-        from backend.services.mcp_chat_service import purge_previews_for_page
-        from backend.services.page_service import PageService, sync_page_projections
-
-        private_versions = session.scalars(
-            select_in_workspace(
-                ContextPageVersion,
-                workspace_id=workspace_id,
-                conditions=(
-                    ContextPageVersion.created_by_actor_kind == "human",
-                    ContextPageVersion.created_by_actor_id == str(user_id),
-                    ContextPageVersion.version_status.in_(PRIVATE_VERSION_STATUSES),
-                ),
-            )
-        ).all()
-        private_ids = {version.id for version in private_versions}
-        page_ids = {version.page_id for version in private_versions}
-        pages = (
-            session.scalars(
-                select_in_workspace(
-                    ContextPage,
-                    workspace_id=workspace_id,
-                    conditions=(ContextPage.id.in_(page_ids),),
-                ).with_for_update()
-            ).all()
-            if page_ids
-            else []
-        )
-        if any(
-            page.current_published_version_id in private_ids
-            or page.public_exposed_version_id in private_ids
-            for page in pages
-        ):
-            raise UserDeletionError(
-                "a private draft is published or publicly exposed",
-                error_code="user_deletion_private_version_exposed",
-                status_code=409,
-            )
-        for version in private_versions:
-            version.version_status = "discarded"
-            version.body_md = ""
-            version.content_hash = content_hash("")
-            version.nav_description = None
-            version.block_map = None
-            version.reconcile_manifest = None
-            version.actor_display_name = None
-            version.editing_revision += 1
-            purge_previews_for_page(
-                session, workspace_id, version.page_id, version_id=version.id
-            )
-        if private_ids:
-            for model, owner in (
-                (ContextDocumentReference, ContextDocumentReference.owner_version_id),
-                (ContextPublishedCitation, ContextPublishedCitation.source_version_id),
-            ):
-                session.execute(
-                    delete_in_workspace(
-                        model,
-                        workspace_id=workspace_id,
-                        conditions=(owner.in_(private_ids),),
-                    )
-                )
-            private_owner_ids = {str(version_id) for version_id in private_ids}
-            for tombstone in session.scalars(
-                select_in_workspace(LibraryItemTombstone, workspace_id=workspace_id)
-            ):
-                retained = [
-                    entry
-                    for entry in tombstone.citations or []
-                    if not (
-                        entry.get("citation_type") == "document_reference"
-                        and entry.get("target_id") in private_owner_ids
-                    )
-                ]
-                if retained != (tombstone.citations or []):
-                    tombstone.citations = retained
-            session.execute(
-                delete_in_workspace(
-                    ContextMediaUsage,
-                    workspace_id=workspace_id,
-                    conditions=(ContextMediaUsage.page_version_id.in_(private_ids),),
-                )
-            )
-            session.execute(
-                update_in_workspace(
-                    ChangeOperation,
-                    workspace_id=workspace_id,
-                    conditions=(
-                        ChangeOperation.diff_ref.in_(
-                            [
-                                f"context_page_version:{version_id}"
-                                for version_id in private_ids
-                            ]
-                        ),
-                    ),
-                    values={"diff_summary": None},
-                )
-            )
-            chunks = select_in_workspace(
-                ContentChunk,
-                workspace_id=workspace_id,
-                conditions=(
-                    ContentChunk.document_kind == "context_page",
-                    ContentChunk.source_version_id.in_(private_ids),
-                ),
-            ).with_only_columns(ContentChunk.id)
-            session.execute(
-                delete_in_workspace(
-                    ChunkEmbedding,
-                    workspace_id=workspace_id,
-                    conditions=(ChunkEmbedding.chunk_id.in_(chunks),),
-                )
-            )
-            session.execute(
-                delete_in_workspace(
-                    ContentChunk,
-                    workspace_id=workspace_id,
-                    conditions=(
-                        ContentChunk.document_kind == "context_page",
-                        ContentChunk.source_version_id.in_(private_ids),
-                    ),
-                )
-            )
-            session.execute(
-                delete_in_workspace(
-                    PageLink,
-                    workspace_id=workspace_id,
-                    conditions=(PageLink.source_version_id.in_(private_ids),),
-                )
-            )
-        page_service = PageService(self.session_factory)
-        for page in pages:
-            versions = session.scalars(
-                select_in_workspace(
-                    ContextPageVersion,
-                    workspace_id=workspace_id,
-                    conditions=(ContextPageVersion.page_id == page.id,),
-                ).order_by(ContextPageVersion.version_no.desc())
-            ).all()
-            if page.latest_draft_version_id in private_ids:
-                page.latest_draft_version_id = next(
-                    (
-                        version.id
-                        for version in versions
-                        if version.version_status == "draft"
-                        and version.graph_status == "linear"
-                        and page_service.draft_still_open(session, page, version)
-                    ),
-                    None,
-                )
-            if page.current_version_id in private_ids:
-                page.current_version_id = (
-                    page.latest_draft_version_id or page.current_published_version_id
-                )
-            has_shared_history = any(
-                version.version_status not in PRIVATE_VERSION_STATUSES
-                for version in versions
-            )
-            if not has_shared_history and not any(
-                version.version_status == "editing" for version in versions
-            ):
-                page.lifecycle_status = "archived"
-                page.current_version_id = None
-                page.title = "Deleted draft"
-                page.slug = f"deleted-draft-{page.id.hex}"
-                page.tags = []
-                page.aliases = []
-                page.placement_reason = None
-                session.execute(
-                    update_in_workspace(
-                        WorkspaceTreeNode,
-                        workspace_id=workspace_id,
-                        conditions=(
-                            WorkspaceTreeNode.target_kind == "context_page",
-                            WorkspaceTreeNode.target_id == page.id,
-                        ),
-                        values={"title": page.title, "slug": page.slug},
-                    )
-                )
-            elif page.lifecycle_status != "archived":
-                page.lifecycle_status = (
-                    "published" if page.current_published_version_id else "draft"
-                )
-            session.flush()
-            sync_page_projections(session, page=page)
-        session.flush()

@@ -341,28 +341,8 @@ class ReadConceptOutput(BaseModel):
     neighbors: ConceptNeighbors | None = None
     as_of: datetime | None = None
     mermaid: str | None = None
-    alternative_drafts: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description=(
-            "Active alternatives ordered by version_no descending (newest first)."
-        ),
-    )
 
     model_config = ConfigDict(extra="forbid")
-
-
-# Which stored version a context read resolves to. "my_edit" is the caller's
-# own open editing row -- the body patch_context_edit applies to -- read with no
-# side effects (no row is opened when there is none).
-ContextReadVersion = Literal["visible", "draft", "published", "my_edit"]
-_CONTEXT_READ_VERSION_DESCRIPTION = (
-    "Which version to read: 'visible' (default; published, or latest saved "
-    "draft when never published), "
-    "'draft', 'published', or 'my_edit' -- your own open editing row, the "
-    "exact body patch_context_edit edits (no_open_edit when this page is "
-    "visible but you have none; it never opens one). An explicit version_id "
-    "overrides this."
-)
 
 
 class ContextPartialReadInput(MCPConversationInput):
@@ -371,12 +351,9 @@ class ContextPartialReadInput(MCPConversationInput):
     version_id: UUID | None = Field(
         default=None,
         description=(
-            "Read this exact version of page_id, overriding version. A version "
+            "Read this exact version of page_id. A version "
             "belonging to a different page returns not_found."
         ),
-    )
-    version: ContextReadVersion = Field(
-        default="visible", description=_CONTEXT_READ_VERSION_DESCRIPTION
     )
 
     model_config = ConfigDict(extra="forbid")
@@ -603,16 +580,14 @@ class StructureMapDocument(BaseModel):
     editing_revision: int | None = Field(
         default=None,
         description=(
-            "For an 'editing' row: the revision to send as "
+            "For a shared draft: the revision to send as "
             "patch_context_edit.expected_editing_revision. null otherwise."
         ),
     )
-    resolved_version_source: Literal[
-        "visible", "draft", "published", "my_edit", "exact_version"
-    ] = Field(
+    resolved_version_source: Literal["visible", "exact_version"] = Field(
         default="visible",
         description=(
-            "How version_id was chosen: the requested `version` mode, or "
+            "How version_id was chosen: the visible version by default, or "
             "exact_version when version_id was given."
         ),
     )

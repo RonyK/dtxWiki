@@ -50,25 +50,12 @@ def _no_conditions() -> tuple:
     return ()
 
 
-def _private_version_outstanding() -> tuple:
-    from backend.repositories.context_visibility import PRIVATE_VERSION_STATUSES
-
-    return (
-        ContextPageVersion.version_status.in_(PRIVATE_VERSION_STATUSES),
-        or_(
-            ContextPageVersion.version_status == "editing",
-            ContextPageVersion.body_md != "",
-            ContextPageVersion.actor_display_name.is_not(None),
-        ),
-    )
-
-
 @dataclass(frozen=True)
 class UserAttribution:
     """One way a row names a user, and what account cleanup does with it."""
 
     columns: tuple[InstrumentedAttribute, ...]
-    # delete | clear | private_versions | author_name | api_tokens |
+    # delete | clear | api_tokens |
     # owner_projection | preserve | retire_inbox_recipient
     cleanup: str
     workspace_scoped: bool
@@ -98,15 +85,14 @@ class UserAttribution:
 
 
 USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
-    # Workspace plane, in cleanup order. Unsubmitted private edits go first:
-    # nobody else can open them, so they are deleted rather than kept.
+    # Workspace plane, in cleanup order. Context content and its authorship,
+    # author names included, stay with the workspace.
     UserAttribution(
         (ContextPageVersion.created_by_actor_id,),
-        "private_versions",
+        "preserve",
         workspace_scoped=True,
         actor_kind=("created_by_actor_kind", "human"),
         as_text=True,
-        outstanding=_private_version_outstanding,
     ),
     # Submitted shared changes retain their author UUID. They can produce a
     # later review result even after every other user footprint is gone.
@@ -118,17 +104,15 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
     ),
     UserAttribution(
         (ContextPageVersion.actor_id,),
-        "author_name",
+        "preserve",
         workspace_scoped=True,
         actor_kind=("actor_type", "human"),
-        outstanding=lambda: (ContextPageVersion.actor_display_name.is_not(None),),
     ),
     UserAttribution(
         (AgentPageVersion.actor_id,),
-        "author_name",
+        "preserve",
         workspace_scoped=True,
         actor_kind=("actor_type", "human"),
-        outstanding=lambda: (AgentPageVersion.actor_display_name.is_not(None),),
     ),
     UserAttribution(
         (McpChatSession.owner_user_id,),

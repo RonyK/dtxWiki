@@ -431,7 +431,12 @@ class ServiceRegistry:
     def tree(self):
         from backend.services.tree_service import TreeService
 
-        return TreeService(tree_read_service=self.tree_read)
+        return TreeService(
+            tree_read_service=self.tree_read,
+            context_version_writer=self.context_storage[1],
+            context_media_repository_factory=self.context_media_repository_factory,
+            body_preparer=self.body_preparer,
+        )
 
     @cached_property
     def workspace_read(self):

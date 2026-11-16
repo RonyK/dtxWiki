@@ -11,7 +11,11 @@ from backend.models.favorite import UserFavorite
 from backend.models.library import LibraryItem
 from backend.models.review import ReviewItem
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    join_in_workspace,
+    select_in_workspace,
+)
 from backend.schemas.read import (
     TreeListData,
     TreeNodePayload,
@@ -530,7 +534,7 @@ class TreeReadService:
                     "content_changed_at": target.content_changed_at
                 }
                 if (
-                    kind != "library_item"
+                    kind == "agent_page"
                     and target.latest_draft_version_id is not None
                 ):
                     current_drafts[(kind, target.id)] = target.latest_draft_version_id
@@ -547,49 +551,72 @@ class TreeReadService:
                 if state is not None:
                     state["is_favorite"] = True
 
-        if not current_drafts or not actor_can_read_drafts(actor):
+        if not actor_can_read_drafts(actor):
             return states
-        valid_refs: dict[tuple[str, UUID], str] = {}
+        valid_refs: dict[tuple[str, UUID], set[str]] = {}
         for kind, model, owner_column in (
             ("context_page", ContextPageVersion, ContextPageVersion.page_id),
             ("agent_page", AgentPageVersion, AgentPageVersion.agent_page_id),
         ):
-            ids = {
-                version_id
-                for (target_kind, _), version_id in current_drafts.items()
-                if target_kind == kind
-            }
+            # Context pages can have several independent shared drafts; no
+            # retired latest-draft slot identifies their live review set.
+            ids = (
+                {target_id for target_kind, target_id in states if target_kind == kind}
+                if kind == "context_page"
+                else {
+                    version_id
+                    for (target_kind, _), version_id in current_drafts.items()
+                    if target_kind == kind
+                }
+            )
             if not ids:
                 continue
-            statement = select(model.id, owner_column).where(
-                model.workspace_id == workspace_id,
-                model.id.in_(ids),
-                model.version_status == "draft",
-            )
-            if kind == "context_page":
-                statement = statement.where(ContextPageVersion.graph_status == "linear")
+            statement = select_in_workspace(
+                model,
+                workspace_id=workspace_id,
+                conditions=(
+                    (owner_column if kind == "context_page" else model.id).in_(ids),
+                    model.version_status == "draft",
+                ),
+            ).with_only_columns(model.id, owner_column)
             for version_id, owner_id in session.execute(statement):
-                if current_drafts.get((kind, owner_id)) == version_id:
-                    valid_refs[(kind, owner_id)] = f"{kind}_version:{version_id}"
+                if (
+                    kind == "context_page"
+                    or current_drafts.get((kind, owner_id)) == version_id
+                ):
+                    valid_refs.setdefault((kind, owner_id), set()).add(
+                        f"{kind}_version:{version_id}"
+                    )
         if not valid_refs:
             return states
-        statement = (
-            select(ReviewItem, ChangeOperation)
-            .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-            .join(ChangeOperation, ChangeOperation.change_set_id == ChangeSet.id)
-            .where(
-                ReviewItem.workspace_id == workspace_id,
-                ChangeSet.workspace_id == workspace_id,
-                ChangeOperation.workspace_id == workspace_id,
+        statement = select_in_workspace(
+            ReviewItem,
+            workspace_id=workspace_id,
+            conditions=(
                 ReviewItem.status.in_(("pending", "changes_requested")),
                 ReviewItem.review_type.in_(("context_update", "agent_page_activation")),
                 ChangeOperation.target_id.in_(
                     {target_id for _, target_id in valid_refs}
                 ),
-                ChangeOperation.diff_ref.in_(set(valid_refs.values())),
-            )
-            .order_by(ReviewItem.created_at.desc(), ReviewItem.id.desc())
+                ChangeOperation.diff_ref.in_(
+                    {ref for refs in valid_refs.values() for ref in refs}
+                ),
+            ),
+        ).add_columns(ChangeOperation)
+        statement = join_in_workspace(
+            statement,
+            ReviewItem,
+            ChangeSet,
+            workspace_id=workspace_id,
+            on=ChangeSet.id == ReviewItem.change_set_id,
         )
+        statement = join_in_workspace(
+            statement,
+            ReviewItem,
+            ChangeOperation,
+            workspace_id=workspace_id,
+            on=ChangeOperation.change_set_id == ChangeSet.id,
+        ).order_by(ReviewItem.created_at.desc(), ReviewItem.id.desc())
         statement, _ = ReviewService().apply_list_visibility(
             session=session,
             statement=statement,
@@ -605,7 +632,7 @@ class TreeReadService:
                 "agent_page": "agent_page_activation",
             }.get(operation.target_type)
             if (
-                valid_refs.get(key) != operation.diff_ref
+                operation.diff_ref not in valid_refs.get(key, set())
                 or review.review_type != expected_type
                 or "review_status" in states[key]
             ):

@@ -1370,7 +1370,7 @@
     "serverAdminFallbackNotice": "Join this workspace to view its attachments.",
     "editorOnlyNotice": "Attachments are available to members of this workspace.",
     "retentionNotice": "Unused uploads are reclaimed automatically once they pass the server's retention window. Deleting one here only brings that forward.",
-    "allScopeNotice": "Attachments on pages you can read, excluding private uploads in someone else's unsaved draft.",
+    "allScopeNotice": "Attachments on pages you can read, including uploads not inserted into the body.",
     "mineScopeNotice": "Your uploads on pages you can read. Workspace owners can see other members' uploads on pages they can read.",
     "fileMeta": "{{mediaType}} · {{size}}",
     "mineBadge": "You",
@@ -1386,7 +1386,7 @@
       "staging": "Uploaded into an edit nobody has saved yet, so it is held.",
       "unused": "No version of its page references it; the retention sweep will reclaim it."
     },
-    "previewPrivate": "No preview: an unused upload stays readable only by the person who uploaded it.",
+    "previewPrivate": "Preview unavailable for this version.",
     "previewNotAnImage": "No preview for this file type.",
     "filters": {
       "label": "Which attachments",
@@ -2127,7 +2127,7 @@
     "confirmDescription": "Access for {{account}} ends immediately after confirmation, including all sessions, API keys and OAuth access.",
     "retention_one": "Account data and the workspaces held with it are retained for {{count}} day, then deleted by the server worker. With 0 days they are eligible for the next cleanup.",
     "retention_other": "Account data and the workspaces held with it are retained for {{count}} days, then deleted by the server worker. With 0 days they are eligible for the next cleanup.",
-    "sharedContent": "Documents, submitted drafts and review history in other workspaces remain; the author name is no longer shown after cleanup, and unsubmitted private edits are deleted. Until cleanup, the account can be restored from this list.",
+    "sharedContent": "Documents, drafts and review history in other workspaces remain with their author names. Until cleanup, the account can be restored from this list.",
     "confirmEmail": "Type {{email}} to confirm",
     "currentPassword": "Your current password",
     "cancel": "Cancel",

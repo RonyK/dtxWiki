@@ -1,22 +1,20 @@
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import select
 
 import backend.repositories.context_page_repo as context_page_repo_module
 import backend.services.context_editing as context_editing_module
-import backend.services.context_write_service as context_write_service_module
+import backend.services.page_service as page_service_module
 import backend.utils.block_identity as block_identity_module
 from backend.mcp.router import dispatch
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPageVersion
 from backend.models.workspace import Workspace
-from backend.schemas.context_edit import PatchDraftRequest
 from backend.schemas.page import BODY_MD_MAX_LENGTH
-from backend.services.context_write_service import ContextWriteService
-from backend.services.read_errors import ReadValidationError
 from backend.utils.block_map import compute_blocks, serialize_blocks
 
-# P8.6: patch_draft is no longer a callable MCP tool -- these tests call the
-# still-fully-live ContextWriteService.patch_draft engine directly. See
-# test_patch_draft_push_semantics.py for the same pattern.
+# Block-addressed operations through patch_context_edit on a shared draft:
+# identity, hash validation and bounded-parser invariants.
 
 
 @pytest.fixture
@@ -42,21 +40,39 @@ def _structure_map(workspace_id, page_id, actor, page_service, **overrides):
     )
 
 
-def _patch_draft(page_service, actor, workspace_id, **payload):
-    """Engine-level equivalent of ``dispatch("patch_draft", {...})``."""
-    with page_service.session_factory.begin() as session:
-        return ContextWriteService().patch_draft(
-            session=session,
-            workspace_id=workspace_id,
-            request=PatchDraftRequest(**payload),
-            actor_kind=actor.actor_kind,
-            actor_id=actor.actor_id,
-        )
+def _begin(page_service, actor, workspace_id, page_id):
+    """Start a shared draft from the published version."""
+    begun = dispatch(
+        "begin_context_edit",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(page_id),
+            "idempotency_key": str(uuid4()),
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+    assert begun.envelope.result_status == "succeeded", begun.envelope
+    return begun.data
 
 
-def test_replace_block_via_patch_draft_lands_and_updates_the_structure_map(
-    page_service, actor
-):
+def _patch(page_service, actor, workspace_id, draft, operations):
+    return dispatch(
+        "patch_context_edit",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": str(draft.page_id),
+            "version_id": str(draft.version_id),
+            "expected_editing_revision": draft.editing_revision,
+            "operations": operations,
+            "idempotency_key": str(uuid4()),
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+
+
+def test_replace_block_lands_and_updates_the_structure_map(page_service, actor):
     workspace_id = _workspace_id(page_service)
     body = "# Title\n\nfirst\n\nsecond\n"
     page = page_service.write_page(
@@ -71,14 +87,13 @@ def test_replace_block_via_patch_draft_lands_and_updates_the_structure_map(
     before_map = _structure_map(workspace_id, page.id, actor, page_service)
     first_paragraph = next(b for b in before_map.blocks if b.preview == "first")
 
-    result = _patch_draft(
+    draft = _begin(page_service, actor, workspace_id, page.id)
+    result = _patch(
         page_service,
         actor,
         workspace_id,
-        page_id=page.id,
-        base=str(before_map.document.version_id),
-        reason="block-addressed replace",
-        operations=[
+        draft,
+        [
             {
                 "op": "replace_block",
                 "block": first_paragraph.id,
@@ -88,14 +103,17 @@ def test_replace_block_via_patch_draft_lands_and_updates_the_structure_map(
         ],
     )
 
-    assert result.block_map_delta is not None
-    assert len(result.block_map_delta) == 1
-    replacement = result.block_map_delta[0]
-    assert replacement.change == "replaced"
-    assert replacement.old.id == replacement.new.id == first_paragraph.id
-    assert replacement.old.hash == first_paragraph.hash
+    assert result.envelope.result_status == "succeeded", result.envelope
+    receipt = result.data.edit_receipt
+    assert receipt.operations[0].affected_block_ids == [first_paragraph.id]
+    assert [block.id for block in receipt.changed_blocks] == [first_paragraph.id]
+    assert receipt.changed_blocks[0].hash != first_paragraph.hash
     after_map = _structure_map(
-        workspace_id, page.id, actor, page_service, version="draft"
+        workspace_id,
+        page.id,
+        actor,
+        page_service,
+        version_id=str(draft.version_id),
     )
     after_paragraph = next(b for b in after_map.blocks if b.id == first_paragraph.id)
     assert after_paragraph.preview.startswith("first, edited")
@@ -124,76 +142,26 @@ def test_replace_block_rejects_a_stale_hash_with_a_recoverable_error(
     structure_map = _structure_map(workspace_id, page.id, actor, page_service)
     paragraph = next(b for b in structure_map.blocks if b.kind == "p")
 
-    with pytest.raises(ReadValidationError) as exc_info:
-        _patch_draft(
-            page_service,
-            actor,
-            workspace_id,
-            page_id=page.id,
-            base=str(structure_map.document.version_id),
-            reason="stale replace",
-            operations=[
-                {
-                    "op": "replace_block",
-                    "block": paragraph.id,
-                    "expected": "0" * 64,
-                    "content": "edited",
-                }
-            ],
-        )
-
-    assert exc_info.value.error_code == "block_hash_mismatch"
-
-
-def test_patch_draft_dry_run_predicts_the_block_map_without_persisting(
-    page_service, actor
-):
-    workspace_id = _workspace_id(page_service)
-    page = page_service.write_page(
-        workspace_slug="default",
-        slug="patch-block-dry-run",
-        title="Patch Block Dry Run",
-        body_md="# Title\n\nfirst\n",
-        actor_kind="human",
-        actor_id="00000000-0000-0000-0000-000000000010",
-        actor_provenance="browser_session",
-    )
-    structure_map = _structure_map(workspace_id, page.id, actor, page_service)
-    paragraph = next(b for b in structure_map.blocks if b.kind == "p")
-
-    result = _patch_draft(
+    draft = _begin(page_service, actor, workspace_id, page.id)
+    refused = _patch(
         page_service,
         actor,
         workspace_id,
-        page_id=page.id,
-        base=str(structure_map.document.version_id),
-        reason="dry run predicted map",
-        dry_run=True,
-        operations=[
+        draft,
+        [
             {
                 "op": "replace_block",
                 "block": paragraph.id,
-                "expected": paragraph.hash,
-                "content": "predicted",
+                "expected": "0" * 64,
+                "content": "edited",
             }
         ],
     )
 
-    assert result.block_map_delta is not None
-    assert len(result.block_map_delta) == 1
-    assert result.block_map_delta[0].change == "replaced"
-    predicted = result.predicted_block_map
-    assert predicted is not None
-    predicted_paragraph = next(entry for entry in predicted if entry["kind"] == "p")
-    assert predicted_paragraph["id"] == paragraph.id
-    assert predicted_paragraph["hash"] != paragraph.hash
-
-    after_map = _structure_map(workspace_id, page.id, actor, page_service)
-    unchanged_paragraph = next(b for b in after_map.blocks if b.kind == "p")
-    assert unchanged_paragraph.hash == paragraph.hash
+    assert refused.envelope.error_code == "block_hash_mismatch", refused.envelope
 
 
-def test_insert_row_via_patch_draft_lands_a_new_table_row(page_service, actor):
+def test_insert_row_lands_a_new_table_row(page_service, actor):
     workspace_id = _workspace_id(page_service)
     body = "| a | b |\n|---|---|\n| 1 | 2 |\n"
     page = page_service.write_page(
@@ -209,14 +177,13 @@ def test_insert_row_via_patch_draft_lands_a_new_table_row(page_service, actor):
     table = next(b for b in structure_map.blocks if b.kind == "table")
     row = table.rows[0]
 
-    _patch_draft(
+    draft = _begin(page_service, actor, workspace_id, page.id)
+    result = _patch(
         page_service,
         actor,
         workspace_id,
-        page_id=page.id,
-        base=str(structure_map.document.version_id),
-        reason="insert row",
-        operations=[
+        draft,
+        [
             {
                 "op": "insert_row",
                 "row": row.id,
@@ -226,8 +193,13 @@ def test_insert_row_via_patch_draft_lands_a_new_table_row(page_service, actor):
         ],
     )
 
+    assert result.envelope.result_status == "succeeded", result.envelope
     after_map = _structure_map(
-        workspace_id, page.id, actor, page_service, version="draft"
+        workspace_id,
+        page.id,
+        actor,
+        page_service,
+        version_id=str(draft.version_id),
     )
     after_table = next(b for b in after_map.blocks if b.kind == "table")
     assert len(after_table.rows) == 2
@@ -261,11 +233,9 @@ def test_one_megabyte_twenty_op_commit_uses_only_bounded_map_parses(
     # Take the base version and its block map from the same persisted row:
     # paging read_structure_map re-parses the whole body per page, and the
     # ids/hashes it returns are exactly this stored map.
+    draft = _begin(page_service, actor, workspace_id, page.id)
     with page_service.session_factory() as session:
-        page_row = session.get(ContextPage, page.id)
-        base_version = session.get(ContextPageVersion, page_row.current_version_id)
-        base_version_id = base_version.id
-        entries = list(base_version.block_map)
+        entries = list(session.get(ContextPageVersion, draft.version_id).block_map)
     assert len(entries) == 5_000
     targets = [entries[index] for index in range(100, 4_100, 200)]
     assert all(entry["kind"] != "table" for entry in targets)
@@ -312,7 +282,7 @@ def test_one_megabyte_twenty_op_commit_uses_only_bounded_map_parses(
             unexpected_second_map_analysis,
         )
         patch.setattr(
-            context_write_service_module,
+            page_service_module,
             "compute_block_map_with_ids",
             unexpected_full_map,
         )
@@ -321,14 +291,12 @@ def test_one_megabyte_twenty_op_commit_uses_only_bounded_map_parses(
             "compute_block_map_with_ids",
             unexpected_full_map,
         )
-        result = _patch_draft(
+        result = _patch(
             page_service,
             actor,
             workspace_id,
-            page_id=page.id,
-            base=str(base_version_id),
-            reason="bounded one-megabyte batch",
-            operations=[
+            draft,
+            [
                 {
                     "op": "insert_after",
                     "block": target["id"],
@@ -338,6 +306,7 @@ def test_one_megabyte_twenty_op_commit_uses_only_bounded_map_parses(
                 for index, target in enumerate(targets)
             ],
         )
+    assert result.envelope.result_status == "succeeded", result.envelope
 
     assert map_analysis_inputs == [len(body)]
     # The batch shares the one map produced during edit validation with the
@@ -351,7 +320,7 @@ def test_one_megabyte_twenty_op_commit_uses_only_bounded_map_parses(
     # count and input-size bounds above are the deterministic performance gate.
 
     with page_service.session_factory() as session:
-        persisted = session.get(ContextPageVersion, result.draft_version_id)
+        persisted = session.get(ContextPageVersion, draft.version_id)
         assert persisted is not None
         fresh = serialize_blocks(compute_blocks(persisted.body_md))
         stored_content = [

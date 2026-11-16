@@ -437,7 +437,7 @@
       "firstChange": "First change · line {{line}}",
       "bodyPreview": "Start of the body",
       "budgetExhausted": "{{count}} more not shown",
-      "previewsWithheld": "The edit's text is shown only to its author. You can see its sizes and operation kinds.",
+      "previewsWithheld": "The edit's text is hidden from you. You can see its sizes and operation kinds.",
       "previewsPurged": "The edit previews for this call were deleted.",
       "sessionDiff": "View cumulative changes",
       "sessionDiffTitle": "Cumulative changes in this edit session",

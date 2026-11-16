@@ -15,7 +15,6 @@ from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models import (
     ClientDelegatedTask,
     ContextPage,
-    ContextPageVersion,
     LibraryItem,
     LintFinding,
     LintRun,
@@ -78,17 +77,39 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                 )
             )
             session.flush()
-            session.add(
-                ContextPageVersion(
-                    id=version_id,
-                    workspace_id=workspace_id,
-                    page_id=page_id,
+            # This traversal stops at the locator revision, before mutable
+            # drafts add page_metadata. Seed its frozen schema rather than
+            # letting the current version mapper write later columns.
+            versions = sa.Table(
+                "context_page_version",
+                sa.MetaData(),
+                autoload_with=session.connection(),
+            )
+
+            def key(value):
+                return value.hex if dialect == "sqlite" else value
+
+            session.execute(
+                versions.insert().values(
+                    id=key(version_id),
+                    workspace_id=key(workspace_id),
+                    page_id=key(page_id),
+                    version_no=1,
                     body_md="# Editing\n",
                     content_hash=content_hash("# Editing\n"),
                     version_status="editing",
+                    graph_status="linear",
                     actor_type="human",
                     created_by_actor_kind="human",
                     created_by_actor_id="kept-author",
+                    editing_revision=1,
+                    content_format="markdown",
+                    format_version=1,
+                    media_type="text/markdown",
+                    encoding="utf-8",
+                    rendering_profile="gfm_mermaid",
+                    created_at=now,
+                    last_saved_at=now,
                 )
             )
             session.flush()
@@ -439,7 +460,12 @@ def test_document_identity_conversion_traversal(tmp_path, dialect):
                 "body_md": "PRIVATE RECEIPT BODY",
             }
             assert (
-                session.get(ContextPageVersion, version_id).version_status == "editing"
+                session.scalar(
+                    sa.select(versions.c.version_status).where(
+                        versions.c.id == key(version_id)
+                    )
+                )
+                == "editing"
             )
             assert session.get(ContextPage, page_id).current_version_id == version_id
         with engine.connect() as connection:

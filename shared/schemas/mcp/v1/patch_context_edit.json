@@ -516,7 +516,7 @@
               }
             ],
             "default": null,
-            "description": "Where to look. Best: {by:'block', block, expected} from read_structure_map (version='my_edit'); or a section. Omit to search the whole document (exact and whitespace/Unicode-insensitive matching only)."
+            "description": "Where to look. Best: {by:'block', block, expected} from read_structure_map (with the same version_id); or a section. Omit to search the whole document (exact and whitespace/Unicode-insensitive matching only)."
           },
           "expected_occurrences": {
             "default": 1,
@@ -626,7 +626,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "Apply typed block/section edit operations to the caller's own open\n'editing' row in place.\n\n`operations` is the same typed union of block/section edit operations\nminus `resolve_conflict` (reconciliation-only, out of scope here: this\ntool always targets the row's own current body, never a shared\nreconciled head).",
+    "description": "Apply typed block/section edit operations to the named shared draft.\n\n`operations` is the typed union of block/section edit operations; this\ntool always targets the row's own current body.",
     "properties": {
       "conversation_token": {
         "anyOf": [
@@ -644,7 +644,7 @@
         "title": "Conversation Token"
       },
       "expected_editing_revision": {
-        "description": "The editing_revision from your last create/begin/update/patch response (or read_structure_map with version='my_edit').",
+        "description": "The editing_revision from your last create/begin/update/patch response (or read_structure_map with that version_id).",
         "minimum": 1,
         "title": "Expected Editing Revision",
         "type": "integer"
@@ -1196,7 +1196,6 @@
               "unsupported_retrieval_mode_fallback",
               "deprecated_tool",
               "conversation_token_not_supplied",
-              "unresolved_diverged_branch",
               "conversation_read_stale",
               "lint_publish_blocked",
               "published_with_findings",

@@ -1,20 +1,20 @@
 """Derived orphan discovery and reclamation for Context-owned media.
 
-Every asset is page-owned from the moment it is registered, via the caller's
-own open "editing" row (``created_for_version_id``). There is exactly one
+Every asset is page-owned from the moment it is registered, via the open
+draft it was uploaded into (``created_for_version_id``). There is exactly one
 orphan shape now: a
 page-owned asset with zero surviving ``ContextMediaUsage`` rows, i.e. an
 upload never (or no longer) written into any version's Markdown.
 
 That shape alone is not enough to call it abandoned, though. An asset just
-uploaded into a still-open "editing" session also has zero usage rows --
+uploaded into a still-open shared draft also has zero usage rows --
 that is what "not yet inserted into the body" looks like for content that
 is actively being worked on, not orphaned. ``_page_orphan_statement``
 therefore excludes any asset whose ``created_for_version_id`` is currently
-status ``"editing"`` outright, not merely with a longer grace window:
+status ``"draft"`` outright, not merely with a longer grace window:
 disconnects, MCP session teardown, and elapsed wall-clock time are not
-disposal signals for an open editing session. Once that version is submitted
-(draft), published, or discarded, the protection lifts and the asset becomes
+disposal signals for an open shared draft. Once that version is published or
+discarded, the protection lifts and the asset becomes
 an ordinary orphan candidate, subject to the same retention-hours grace period
 as before.
 
@@ -26,7 +26,7 @@ CASCADE-delete a ``ContextPageVersion`` (``ContextMediaUsage`` FKs to
 ``context_page_version`` with ``ondelete="CASCADE"``) -- but read the
 retention-hours setting's comment and ``OrphanCandidate.orphaned_since``'s
 docstring before tuning this shape's window, because right now it is
-entirely an editing grace period, not a cleanup delay.
+entirely a draft grace period, not a cleanup delay.
 
 Orphan state is not stored as a column; a derived query is the single source
 of truth. This module is that derived query, plus the sweep that reclaims orphans
@@ -65,12 +65,16 @@ from backend.models.context_media import (
 from backend.repositories.context_media_orphans import (
     context_media_orphan_clause,
 )
+from backend.repositories.workspace_scoped import (
+    join_correlated_workspace_projection,
+    select_in_workspace,
+)
 
 _SWEEP_ACTOR = ActorIdentity("system", "context_media_orphan_sweep")
 """The sweep is a system process, not a specific user's action. It only
 ever reaches DeleteUnusedMedia's author-restriction check
 (context_media/application/use_cases.py) for an asset _page_orphan_statement
-has already proven is NOT protected by an open editing session, so that
+has already proven is NOT protected by an open shared draft, so that
 check can never actually fire against this identity -- it exists to satisfy
 the required `actor` parameter, not to claim the sweep IS the uploader."""
 
@@ -105,8 +109,8 @@ class OrphanCandidate:
     """When this asset first became structurally unreachable. Currently
     always the asset's own ``created_at`` -- a page-bound asset has no other
     "became orphaned" event, since it can gain a usage edge at any time
-    until it is tombstoned, and an asset still protected by an open editing
-    session never appears here at all (see module docstring).
+    until it is tombstoned, and an asset still protected by an open shared
+    draft never appears here at all (see module docstring).
 
     Caveat for a future history-pruning feature (none exists today): if a
     ``ContextPageVersion`` is ever CASCADE-deleted, an asset created a year
@@ -126,19 +130,23 @@ class OrphanSweepResult:
     run_at: datetime
 
 
-def _page_orphan_statement(workspace_id: UUID):
+def _page_orphan_statement(workspace_id: UUID, *, conditions=()):
     """Page-bound orphans: owned by a Page, never referenced by any of its
     versions' Markdown (draft, published, or historical), AND not currently
-    protected by an open "editing" session (see module docstring).
+    protected by an open shared draft (see module docstring).
 
     The predicate itself lives in ``backend/repositories/context_media_orphans``
     so the workspace attachment listing can filter on exactly the definition
     this sweep reclaims by, instead of a second copy that would drift."""
 
-    return select(ContextMediaAsset).where(
-        ContextMediaAsset.workspace_id == workspace_id,
-        ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
-        context_media_orphan_clause(),
+    return select_in_workspace(
+        ContextMediaAsset,
+        workspace_id=workspace_id,
+        conditions=(
+            ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
+            context_media_orphan_clause(),
+            *conditions,
+        ),
     )
 
 
@@ -162,22 +170,23 @@ def list_orphans(
     """
 
     del now
+    from backend.policy.trust_boundaries import actor_can_read_drafts
     from backend.repositories.context_visibility import (
-        foreign_editing_version_exists,
         visible_context_page_expression,
     )
 
-    statement = (
-        _page_orphan_statement(workspace_id)
-        .join(ContextPage, ContextPage.id == ContextMediaAsset.page_id)
-        .where(
-            ContextPage.workspace_id == workspace_id,
-            visible_context_page_expression(actor),
-            ~foreign_editing_version_exists(
-                ContextMediaAsset.created_for_version_id,
-                None if actor is None else (actor.actor_kind, actor.actor_id),
+    statement = join_correlated_workspace_projection(
+        _page_orphan_statement(
+            workspace_id,
+            conditions=(
+                (ContextPage.lifecycle_status != "archived")
+                if actor_can_read_drafts(actor)
+                else visible_context_page_expression(actor),
             ),
-        )
+        ),
+        ContextMediaAsset.workspace_id,
+        ContextPage,
+        on=ContextPage.id == ContextMediaAsset.page_id,
     )
     page_assets = tuple(session.scalars(statement))
     page_titles = _page_titles(

@@ -552,9 +552,16 @@ def test_mismatch_runs_alembic_and_updates_row(sqlite_settings, sqlite_templates
 
     _clone(sqlite_templates, sqlite_settings, "head")
 
-    with mock.patch("backend.app.bootstrap.run_alembic_upgrade") as mock_alembic:
+    with (
+        mock.patch("backend.app.bootstrap.run_alembic_upgrade") as mock_alembic,
+        mock.patch(
+            "backend.services.indexing.reindex.rebuild_local_projections"
+        ) as rebuild,
+    ):
         ensure_app_version_synced(sqlite_settings)
     mock_alembic.assert_called_once()
+    # A version-marker change at the current revision is not the cutover.
+    rebuild.assert_not_called()
 
     # Row should be inserted
     factory = make_session_factory_from_settings(sqlite_settings)

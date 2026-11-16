@@ -257,7 +257,7 @@ def test_usage_projection_classifies_retained_history_and_token_inputs() -> None
     asset = _asset()
     draft_id = uuid4()
     published_id = uuid4()
-    unused = AssetUsageSnapshot(asset, draft_id, published_id, 0, 0, 0, False)
+    unused = AssetUsageSnapshot(asset, draft_id, published_id, 0, 0, 0)
     history = replace(unused, historical_reference_count=2)
     active = replace(history, latest_draft_reference_count=1)
 
@@ -271,19 +271,3 @@ def test_usage_projection_classifies_retained_history_and_token_inputs() -> None
     assert replace(unused, asset=replace(asset, revision=2)).usage_token != (
         unused.usage_token
     )
-
-
-def test_usage_snapshot_requires_a_real_bool_for_created_for_version_is_editing() -> (
-    None
-):
-    # P3.4: this flag (not reference counts) is what
-    # DeleteUnusedMedia/orphan-sweep use to keep an unshared, uninserted
-    # upload exempt from reclamation and author-restricted delete while its
-    # creating editing session is still open.
-    asset = _asset()
-    with pytest.raises(ValueError, match="must be a bool"):
-        AssetUsageSnapshot(asset, None, None, 0, 0, 0, created_for_version_is_editing=1)
-    protected = AssetUsageSnapshot(
-        asset, None, None, 0, 0, 0, created_for_version_is_editing=True
-    )
-    assert protected.created_for_version_is_editing is True

@@ -46,7 +46,7 @@ def _targets(session):
     return workspace, page, version
 
 
-@pytest.mark.parametrize("kind", ["alternative", "comment", "source_notice"])
+@pytest.mark.parametrize("kind", ["comment", "source_notice"])
 @pytest.mark.parametrize(
     ("provenance", "expected_status"),
     [("browser_session", "approved"), ("mcp_client", "pending")],
@@ -64,11 +64,7 @@ def test_audit_only_items_gate_ai_but_not_human(
             actor_id=ACTOR_ID,
             actor_provenance=provenance,
         )
-        if kind == "alternative":
-            result = recorder.record_context_page_alternative(
-                **common, page_id=page.id, version_id=version.id
-            )
-        elif kind == "comment":
+        if kind == "comment":
             result = recorder.record_context_page_inline_comment(
                 **common,
                 page_id=page.id,

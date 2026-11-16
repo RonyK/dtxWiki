@@ -902,10 +902,10 @@ def insert_context_version(
     actor_id: str,
     context_media_repository: ContextMediaRepository | None = None,
 ) -> ContextPageVersion:
-    return insert_version(
+    version = insert_version(
         session,
         page_id=page.id,
-        parent_version_id=page.latest_draft_version_id or page.current_version_id,
+        parent_version_id=page.current_published_version_id,
         body=body,
         actor_kind=actor_kind,
         actor_id=actor_id,
@@ -913,6 +913,10 @@ def insert_context_version(
         change_set_id=change_set_id,
         context_media_repository=context_media_repository,
     )
+    from backend.services.context_draft_workflow import metadata_dict, metadata_for
+
+    version.page_metadata = metadata_dict(metadata_for(page))
+    return version
 
 
 def latest_context_version(
@@ -920,7 +924,7 @@ def latest_context_version(
     workspace_id: UUID,
     page: ContextPage,
 ) -> ContextPageVersion | None:
-    version_id = page.latest_draft_version_id or page.current_version_id
+    version_id = page.current_published_version_id
     if version_id is None:
         return None
     return get_in_workspace(

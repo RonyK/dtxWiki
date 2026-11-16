@@ -104,10 +104,6 @@ from backend.schemas.context_media import (
     ContextMediaAttachmentListResponse,
     ContextMediaOrphanListResponse,
 )
-from backend.schemas.context_reconciliation import (
-    ContextReconciliationBulkDiscardRequest,
-    ContextReconciliationBulkDiscardResponse,
-)
 from backend.schemas.context_write import (
     FeedbackListResponse,
     ReviewAutoApprovalSweepResponse,
@@ -230,6 +226,7 @@ from backend.services.library_ingest import (
 from backend.services.read_errors import (
     ReadNotFoundError,
     ReadServiceError,
+    ReadValidationError,
     RejectedByPolicyError,
 )
 from backend.services.restricted_library_policy import is_restricted_library_target
@@ -3430,35 +3427,6 @@ def count_reviews(
         return read_service_error_response(exc)
 
 
-@router.post(
-    "/{workspace_id}/reviews/reconciliations/discard-bulk",
-    response_model=ContextReconciliationBulkDiscardResponse,
-    responses=REST_ERROR_RESPONSES,
-)
-def discard_reconciliations_bulk(
-    svc: ServicesDep,
-    workspace_id: UUID,
-    request_body: ContextReconciliationBulkDiscardRequest,
-    actor: RestActorDep,
-    access: WorkspaceEditorAccessDep,
-    session_factory: WorkspaceSessionFactoryDep,
-):
-    del access
-    try:
-        with session_factory.begin() as session:
-            result = svc.review.discard_reconciliations_bulk(
-                session=session,
-                workspace_id=workspace_id,
-                review_item_ids=request_body.review_item_ids,
-                reason=request_body.reason,
-                actor_kind=actor.actor_kind,
-                actor_id=actor.actor_id,
-            )
-        return {"data": result}
-    except ReadServiceError as exc:
-        return read_service_error_response(exc)
-
-
 def _review_selection_error_response(exc: ReviewSelectionError) -> JSONResponse:
     response = build_rest_error_response(
         error_code=exc.error_code,
@@ -3596,6 +3564,15 @@ def decide_reviews_bulk(
         return _review_selection_error_response(exc)
     except ReadServiceError as exc:
         return read_service_error_response(exc)
+
+    if not request_body.dry_run:
+        with session_factory() as session:
+            if svc.review.has_context_update_reviews(session, workspace_id, target_ids):
+                return read_service_error_response(
+                    ReadValidationError(
+                        "Context bulk approval requires its reviewed selection token"
+                    )
+                )
 
     approved: list[UUID] = []
     skipped: list[dict[str, object]] = []
@@ -3861,6 +3838,22 @@ def decide_review(
 ):
     try:
         with session_factory.begin() as session:
+            if (
+                request_body.decision_type == "approve"
+                and (
+                    request_body.expected_editing_revision is None
+                    or request_body.result_hash is None
+                    or "expected_published_version_id"
+                    not in request_body.model_fields_set
+                )
+                and svc.review.has_context_update_reviews(
+                    session, workspace_id, [review_item_id]
+                )
+            ):
+                raise ReadValidationError(
+                    "Context approval requires the draft revision, published version "
+                    "and result hash from its merge preview"
+                )
             scoped_actor = replace(
                 actor,
                 workspace_id=workspace_id,
@@ -4304,10 +4297,8 @@ def list_workspace_context_media_attachments(
     # other people's files and uploaders, so it carries the same owner gate
     # the orphan listing established.
     #
-    # An owner's "every attachment" is every attachment NOT privately staged
-    # by another author right now. An open ``editing`` row is private by
-    # identity rather than by role, so the P8.4 mask applies to owners too --
-    # see ``list_workspace_usage``.
+    # An owner's "every attachment" is every attachment on a page they can
+    # read -- see ``list_workspace_usage``.
     #
     # ``orphan_only`` is not ``usage=unused``: unused still contains assets an
     # open editing version protects, while orphan_only applies the sweep's own

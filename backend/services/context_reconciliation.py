@@ -47,13 +47,11 @@ from backend.services.context_push import (
     target_ids_for_operations,
     text_by_id,
 )
-from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.context_visibility import editable_context_version_id
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.lint.autofix import safe_normalize_markdown_legacy_v1
 from backend.services.read_errors import (
     ReadNotFoundError,
-    ReadServiceError,
     ReadValidationError,
 )
 from backend.utils.block_identity import (
@@ -110,7 +108,10 @@ def build_reconciliation_normalization_proof(
 
 def _replay_body_transform(body: str, proof: object) -> str:
     if not isinstance(proof, dict) or set(proof) != {
-        "schema", "start", "end", "replacement"
+        "schema",
+        "start",
+        "end",
+        "replacement",
     }:
         raise ValueError("invalid body transformation proof")
     start, end, replacement = proof["start"], proof["end"], proof["replacement"]
@@ -180,64 +181,6 @@ def reconciliation_branch_is_available(version: ContextPageVersion) -> bool:
         and isinstance(manifest, dict)
         and manifest.get("schema") == _DIVERGED_MANIFEST_SCHEMA
         and manifest.get("branch_version_id") == str(version.id)
-    )
-
-
-def available_reconciliation_snapshot(
-    session: Session,
-    *,
-    page: ContextPage,
-    version: ContextPageVersion,
-    actor_kind: str | None = None,
-    actor_id: str | None = None,
-):
-    """The branch snapshot, or None when a surface must show it unavailable.
-
-    Pass ``actor_kind``/``actor_id`` (the viewing actor) so an "available"
-    badge cannot promise a detail view that would then refuse to disclose a
-    different author's private editing head -- see
-    ``load_reconciliation_snapshot``'s docstring.
-    """
-
-    if not reconciliation_branch_is_available(version):
-        return None
-    try:
-        return load_reconciliation_snapshot(
-            session,
-            page=page,
-            branch_id=version.id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-        )
-    except ContextStorageServiceError as exc:
-        logger.exception(
-            "Context storage failed during reconciliation availability check: %s",
-            exc.error_code,
-        )
-        return None
-    except ReadServiceError:
-        return None
-
-
-def verified_reconciliation_branch_is_available(
-    session: Session,
-    *,
-    page: ContextPage,
-    version: ContextPageVersion,
-    actor_kind: str | None = None,
-    actor_id: str | None = None,
-) -> bool:
-    """Fail-closed availability for list/history surfaces."""
-
-    return (
-        available_reconciliation_snapshot(
-            session,
-            page=page,
-            version=version,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-        )
-        is not None
     )
 
 
@@ -374,9 +317,7 @@ def load_verified_reconciliation_manifest(
         )
     try:
         if "transform" in normalization:
-            original_final = _replay_normalization_proof(
-                original_replay, normalization
-            )
+            original_final = _replay_normalization_proof(original_replay, normalization)
             # Normalization-only operations are intentionally omitted from
             # the active partition. Its distinct source must independently
             # prove the same persisted result, without rerunning today's fixes.
@@ -512,28 +453,12 @@ def load_reconciliation_snapshot(
     *,
     page: ContextPage,
     branch_id: UUID,
-    actor_kind: str | None = None,
-    actor_id: str | None = None,
 ) -> ReconciliationSnapshot:
     """Load and verify every server-owned input to the workbench.
 
     The branch manifest is correctness provenance, not presentation metadata.
     Any malformed/cross-page identity fails closed without returning a partial
     map or allowing the client to infer one from Markdown.
-
-    ``head`` is resolved from ``editable_context_version_id(page)``, the same
-    page-global pointer that -- since P8.1 -- can durably name a DIFFERENT
-    author's private "editing" row (see ``page_service._editable_version_id_
-    for_actor``'s docstring for the general shape of this problem). Every
-    other reconciliation-detail field is safe to disclose regardless of actor
-    (``branch`` is required to be a submitted, shared "draft" row -- see the
-    availability check above -- never someone's private editing row), but
-    ``head``'s body/block-map feed directly into the returned conflict/diff
-    projection. When ``actor_kind``/``actor_id`` are given and the resolved
-    head is a different author's "editing" row, treat it exactly like "no
-    reconcilable head" (fail closed) rather than disclosing it. Callers that
-    only need a boolean/summary signal (list-surface availability checks) may
-    omit the actor and accept the unmasked page-global head.
     """
 
     branch = session.scalar(
@@ -572,26 +497,11 @@ def load_reconciliation_snapshot(
         if head_id is not None
         else None
     )
-    # Only masked when an actor is actually supplied -- a caller that omits
-    # both (list/summary availability checks with no per-finding disclosure)
-    # keeps seeing the unmasked page-global head, matching their existing
-    # behavior; a caller that DOES supply an actor (the detail projection)
-    # must never resolve `head` to a different author's private row.
-    head_is_foreign_private_edit = (
-        head is not None
-        and head.version_status == "editing"
-        and (actor_kind is not None or actor_id is not None)
-        and (
-            head.created_by_actor_kind != actor_kind
-            or head.created_by_actor_id != actor_id
-        )
-    )
     if (
         head is None
         or head.workspace_id != page.workspace_id
         or head.page_id != page.id
         or head.graph_status != "linear"
-        or head_is_foreign_private_edit
     ):
         raise ReadValidationError(
             "page has no reconcilable linear head",

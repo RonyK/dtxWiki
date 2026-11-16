@@ -480,7 +480,7 @@ def _redact_patch_context_edit(arguments: dict[str, Any]) -> dict[str, Any]:
     # written for the now-deregistered patch_draft MCP tool) is shared
     # verbatim; only the
     # top-level field allowlist differs (no reason/base/dry_run/needs_review/
-    # reconciles -- this tool always targets the caller's own editing row).
+    # reconciles -- this tool always targets the draft named in its input).
     summary = _RedactedToolArguments()
     unknown_fields: list[dict[str, Any]] = []
     for field, value in arguments.items():

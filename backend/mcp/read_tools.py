@@ -203,7 +203,7 @@ def _outline_request_fingerprint(request: ReadContextOutlineInput, actor) -> str
         "actor_policy_revision": _outline_actor_policy_revision(actor),
         "page_id": str(request.page_id),
         "version_id": str(request.version_id) if request.version_id else None,
-        "version": request.version,
+        "version": "visible",
         "scope": (
             request.select.model_dump(mode="json")
             if request.select is not None
@@ -228,7 +228,7 @@ def _structure_map_request_fingerprint(request, actor, *, content_hash: str) -> 
         "actor_policy_revision": _outline_actor_policy_revision(actor),
         "page_id": str(request.page_id),
         "version_id": str(request.version_id) if request.version_id else None,
-        "version": request.version,
+        "version": "visible",
         "max_blocks": request.max_blocks,
         "max_rows_per_block": request.max_rows_per_block,
         "projection_revision": _STRUCTURE_MAP_PROJECTION_REVISION,
@@ -1079,37 +1079,6 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
             if request.include_neighbors and request.as_of is None
             else None
         )
-        alternatives = ctx.services.domain_read.list_alternative_drafts(
-            session, page.id, actor=actor, limit=20
-        )
-        alternative_drafts = [
-            {
-                "version_id": str(item.id),
-                "version_no": item.version_no,
-                "created_at": item.created_at.isoformat(),
-                "read": {
-                    "tool": "read",
-                    "target_type": "context_page_version",
-                    "target_id": str(item.id),
-                },
-                "promote": {
-                    "method": "POST",
-                    "path": (
-                        f"/api/v1/workspaces/{ctx.workspace_id}/context/pages/"
-                        f"{page.id}/restore"
-                    ),
-                    "body": {"version_id": str(item.id)},
-                },
-                "discard": {
-                    "method": "POST",
-                    "path": (
-                        f"/api/v1/workspaces/{ctx.workspace_id}/context/pages/"
-                        f"{page.id}/versions/{item.id}/discard"
-                    ),
-                },
-            }
-            for item in alternatives
-        ]
         mermaid = None
         if request.format == "mermaid" and request.as_of is None:
             mermaid = ctx.services.graph_service.context_page_neighbors_panel(
@@ -1139,7 +1108,6 @@ def read_concept(payload: dict, ctx: ToolCallContext) -> ReadConceptOutput:
         neighbors=neighbors,
         as_of=request.as_of,
         mermaid=mermaid,
-        alternative_drafts=alternative_drafts,
     )
 
 
@@ -1165,7 +1133,7 @@ def _resolve_outline_version(
         workspace_id=ctx.workspace_id,
         page_id=page_id,
         version_id=request.version_id,
-        version_preference=request.version,
+        version_preference="visible",
         actor=actor,
     )
 
@@ -1546,12 +1514,10 @@ def read_structure_map(payload: dict, ctx: ToolCallContext) -> ReadStructureMapO
             # that is the deliberate contract change, pinned by a test.
             block_count=block_total,
             editing_revision=(
-                version.editing_revision
-                if version.version_status == "editing"
-                else None
+                version.editing_revision if version.version_status == "draft" else None
             ),
             resolved_version_source=(
-                "exact_version" if request.version_id is not None else request.version
+                "exact_version" if request.version_id is not None else "visible"
             ),
             map_repaired=map_repaired,
         )

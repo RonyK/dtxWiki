@@ -11,13 +11,12 @@ from backend.domain.input_policy import (
     validate_title,
 )
 from backend.domain.prepared_body import PreparedBody
-from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.context import ContextPageVersion
 from backend.schemas.agent import AgentPageDraftRequest, BuildBundleRequest
 from backend.schemas.ask import AskTurnCreate
 from backend.schemas.context_ingress import ContextIngressAcceptRequest
 from backend.schemas.context_write import SubmitFeedbackRequest
 from backend.schemas.library_semantic import LibrarySemanticMarkdownUpdateRequest
-from backend.schemas.mcp.review_tools import SubmitRevisionForReviewInput
 from backend.schemas.page import ContextPageCreateRequest
 from backend.schemas.tree import TreeFolderCreateRequest, TreeNodeUpdate
 from backend.services import context_ingress_service
@@ -29,12 +28,10 @@ from backend.services.body_preparer import (
     WriteContext,
 )
 from backend.services.bundle_service import AgentInputBundleService
-from backend.services.context_write_service import ContextWriteService
 from backend.services.library_semantic_overlay_service import (
     LibrarySemanticOverlayService,
 )
 from backend.services.page_service import PageService
-from backend.services.review_service import ReviewService
 from backend.services.tree_service import TreeService
 from backend.utils.page_frontmatter import (
     parse_page_frontmatter,
@@ -267,7 +264,7 @@ def test_ask_schema_and_service_count_the_same_stripped_message():
         _validate_user_message(empty_request.user_message)
 
 
-def test_context_edit_invalid_metadata_does_not_mutate_body_or_staged_title():
+def test_context_edit_invalid_metadata_does_not_mutate_body():
     version = ContextPageVersion(
         id=uuid4(), body_md="# Original", content_hash="original", block_map=[]
     )
@@ -281,39 +278,6 @@ def test_context_edit_invalid_metadata_does_not_mutate_body_or_staged_title():
             "original",
             [],
         )
-    page = ContextPage(title="Original", tags=[])
-    with pytest.raises(InputPolicyError):
-        ContextWriteService._apply_metadata_patch(
-            page, {"title": "x" * 257, "tags": ["changed"]}
-        )
-    assert page.title == "Original" and page.tags == []
-
-
-def test_revision_notes_reject_invalid_unicode_before_review_lookup():
-    for note in ("a\x00b", "a" * 2001):
-        with pytest.raises(ValidationError):
-            SubmitRevisionForReviewInput(
-                workspace_id=uuid4(),
-                review_item_id=uuid4(),
-                note=note,
-                create={
-                    "title": "Title",
-                    "page_type": "overview",
-                    "body_markdown": "Body",
-                    "reason": "Revise",
-                },
-            )
-        with pytest.raises(InputPolicyError):
-            ReviewService().submit_revision_for_review(
-                session=None,
-                workspace_id=uuid4(),
-                review_item_id=uuid4(),
-                principal=None,
-                actor_kind="human",
-                actor_id=str(uuid4()),
-                context_write_service=None,
-                note=note,
-            )
 
 
 def test_feedback_only_rejects_oversized_selected_body_before_any_changes(monkeypatch):

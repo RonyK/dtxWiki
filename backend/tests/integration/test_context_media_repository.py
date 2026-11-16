@@ -73,7 +73,7 @@ def _seed_page(session, workspace_id: UUID, actor: ActorIdentity | None = None):
         content_hash="0" * 64,
         actor_type="human",
         actor_id=None,
-        version_status="editing",
+        version_status="draft",
         created_by_actor_kind=actor.kind,
         created_by_actor_id=actor.id,
     )
@@ -635,10 +635,11 @@ def test_sqlite_tombstone_fences_later_version_usage(session_factory) -> None:
 
 
 @pytest.mark.parametrize(
-    "closed_status", ["draft", "published_snapshot", "superseded_snapshot"]
+    "closed_status", ["closed", "published_snapshot", "superseded_snapshot"]
 )
 def test_sqlite_closed_editing_version_fences_late_asset_association(
-    session_factory, closed_status,
+    session_factory,
+    closed_status,
 ) -> None:
     # Closing an editing version replaces claim as the ownership transition
     # that must fence an already prepared registration in a later transaction.
@@ -651,14 +652,19 @@ def test_sqlite_closed_editing_version_fences_late_asset_association(
             workspace_id, page.id, version.id, blob, inspection_id, actor
         )
         late_record = ContextMediaAssetRecord(
-            workspace_id=workspace_id, asset_id=candidate.asset_id,
-            page_id=page.id, created_for_version_id=version.id,
-            blob=blob, inspection_id=inspection_id,
+            workspace_id=workspace_id,
+            asset_id=candidate.asset_id,
+            page_id=page.id,
+            created_for_version_id=version.id,
+            blob=blob,
+            inspection_id=inspection_id,
             original_filename=candidate.original_filename,
             canonical_media_type=candidate.canonical_media_type,
             logical_bytes=candidate.logical_bytes,
             policy_revision=candidate.policy_revision,
-            created_by=actor, association_state=AssociationState.ACTIVE, revision=1,
+            created_by=actor,
+            association_state=AssociationState.ACTIVE,
+            revision=1,
         )
         version_id = version.id
     with session_factory.begin() as session:
@@ -671,10 +677,15 @@ def test_sqlite_closed_editing_version_fences_late_asset_association(
         assert (
             session.get(ContextMediaAsset, (workspace_id, candidate.asset_id)) is None
         )
-        assert session.scalar(select(ContextMediaLogicalCharge).where(
-            ContextMediaLogicalCharge.workspace_id == workspace_id,
-            ContextMediaLogicalCharge.asset_id == candidate.asset_id,
-        )) is None
+        assert (
+            session.scalar(
+                select(ContextMediaLogicalCharge).where(
+                    ContextMediaLogicalCharge.workspace_id == workspace_id,
+                    ContextMediaLogicalCharge.asset_id == candidate.asset_id,
+                )
+            )
+            is None
+        )
 
 
 def test_asset_add_rechecks_archived_page_under_final_lock(
@@ -822,7 +833,11 @@ def test_asset_add_and_tombstone_follow_workspace_quota_page_lock_order(
             now=NOW,
         )
         assert events[:5] == [
-            "workspace", "quota", "legacy_anchor", "page", "editing_version"
+            "workspace",
+            "quota",
+            "legacy_anchor",
+            "page",
+            "editing_version",
         ]
 
         events.clear()
@@ -832,12 +847,12 @@ def test_asset_add_and_tombstone_follow_workspace_quota_page_lock_order(
         assert events[:3] == ["workspace", "quota", "page"]
 
 
-@pytest.mark.parametrize(
-    "mismatch", ["missing", "actor_id", "actor_kind", "page", "workspace"]
-)
-@pytest.mark.parametrize("version_status", ["editing", "draft"])
+@pytest.mark.parametrize("mismatch", ["missing", "page", "workspace"])
+@pytest.mark.parametrize("version_status", ["draft"])
 def test_registration_hides_foreign_or_missing_editing_version(
-    session_factory, mismatch, version_status,
+    session_factory,
+    mismatch,
+    version_status,
 ) -> None:
     actor = ActorIdentity("human", str(uuid4()))
     with session_factory.begin() as session:
@@ -874,15 +889,21 @@ def test_registration_hides_foreign_or_missing_editing_version(
         assert (
             session.get(ContextMediaAsset, (workspace_id, candidate.asset_id)) is None
         )
-        assert session.scalar(select(ContextMediaLogicalCharge).where(
-            ContextMediaLogicalCharge.workspace_id == workspace_id,
-            ContextMediaLogicalCharge.asset_id == candidate.asset_id,
-        )) is None
+        assert (
+            session.scalar(
+                select(ContextMediaLogicalCharge).where(
+                    ContextMediaLogicalCharge.workspace_id == workspace_id,
+                    ContextMediaLogicalCharge.asset_id == candidate.asset_id,
+                )
+            )
+            is None
+        )
 
 
 @pytest.mark.parametrize("submitted", [False, True])
-def test_version_content_usage_grant_and_author_only_uninserted_fallback(
-    session_factory, submitted,
+def test_version_content_usage_grant_and_version_bound_uninserted_fallback(
+    session_factory,
+    submitted,
 ) -> None:
     owner = ActorIdentity("human", str(uuid4()))
     stranger = ActorIdentity("human", str(uuid4()))
@@ -890,10 +911,15 @@ def test_version_content_usage_grant_and_author_only_uninserted_fallback(
         workspace_id = session.scalar(select(Workspace.id).limit(1))
         page, version = _seed_page(session, workspace_id, owner)
         other_version = ContextPageVersion(
-            workspace_id=workspace_id, page_id=page.id, version_no=2,
-            body_md="", content_hash="1" * 64, actor_type="human",
-            created_by_actor_kind=stranger.kind, created_by_actor_id=stranger.id,
-            version_status="editing",
+            workspace_id=workspace_id,
+            page_id=page.id,
+            version_no=2,
+            body_md="",
+            content_hash="1" * 64,
+            actor_type="human",
+            created_by_actor_kind=stranger.kind,
+            created_by_actor_id=stranger.id,
+            version_status="draft",
         )
         session.add(other_version)
         session.flush()
@@ -905,11 +931,11 @@ def test_version_content_usage_grant_and_author_only_uninserted_fallback(
             now=NOW,
         )
         if submitted:
-            version.version_status = "draft"
+            version.version_status = "closed"
             session.flush()
         for target_workspace, target_version, actor, readable in (
             (workspace_id, version.id, owner, True),
-            (workspace_id, version.id, stranger, False),
+            (workspace_id, version.id, stranger, True),
             (workspace_id, other_version.id, owner, False),
             (uuid4(), version.id, owner, False),
         ):
@@ -942,8 +968,9 @@ def test_version_content_usage_grant_and_author_only_uninserted_fallback(
 
 
 @pytest.mark.parametrize("close_version", [False, True])
-def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
-    session_factory, close_version,
+def test_unused_delete_allows_other_editor_before_and_after_close(
+    session_factory,
+    close_version,
 ) -> None:
     owner = ActorIdentity("human", str(uuid4()))
     stranger = ActorIdentity("human", str(uuid4()))
@@ -960,8 +987,7 @@ def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
         protected = repository.get_page_asset_usage(
             workspace_id, page.id, asset.asset_id
         )
-        assert protected.created_for_version_is_editing is True
-        with pytest.raises(ContextMediaOwnershipError):
+        with pytest.raises(StaleUsageTokenError):
             DeleteUnusedMedia().execute(
                 repository,
                 workspace_id=workspace_id,
@@ -973,12 +999,11 @@ def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
         retained = repository.get_asset(workspace_id, asset.asset_id)
         assert retained.association_state is AssociationState.ACTIVE
         if close_version:
-            version.version_status = "draft"
+            version.version_status = "closed"
             session.flush()
         unprotected = repository.get_page_asset_usage(
             workspace_id, page.id, asset.asset_id
         )
-        assert unprotected.created_for_version_is_editing is (not close_version)
         assert unprotected.usage_token == protected.usage_token
         DeleteUnusedMedia().execute(
             repository,
@@ -986,7 +1011,7 @@ def test_unused_delete_tracks_editing_owner_and_closed_version_transition(
             page_id=page.id,
             asset_id=asset.asset_id,
             usage_token=unprotected.usage_token,
-            actor=stranger if close_version else owner,
+            actor=stranger,
         )
         deleted = repository.get_asset(workspace_id, asset.asset_id)
         assert deleted.association_state is AssociationState.TOMBSTONED
@@ -1036,7 +1061,7 @@ def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
             content_hash="1" * 64,
             actor_type="human",
             actor_id=None,
-            version_status="editing",
+            version_status="draft",
             created_by_actor_kind=other_author.kind,
             created_by_actor_id=other_author.id,
         )
@@ -1068,7 +1093,6 @@ def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
             workspace_id, page.id, viewer=author
         )
         assert foreign_snapshot.latest_draft_reference_count == 3
-        assert foreign_snapshot.viewer_visible_latest_draft_reference_count == 3
         assert foreign_snapshot.usage_token == unmasked.usage_token
 
         projection = ContextMediaAssetProjection.from_snapshot(foreign_snapshot)
@@ -1080,6 +1104,6 @@ def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
         [own_snapshot] = repository.list_page_usage(
             workspace_id, page.id, viewer=other_author
         )
-        assert own_snapshot.viewer_visible_latest_draft_reference_count == 3
+        assert own_snapshot.latest_draft_reference_count == 3
         own_projection = ContextMediaAssetProjection.from_snapshot(own_snapshot)
         assert own_projection.latest_draft_reference_count == 3

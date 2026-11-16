@@ -7,6 +7,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy import select
 
+from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.review import ReviewItem
@@ -57,12 +58,24 @@ def test_saved_draft_projection_pages_reviewless_and_open_rows(session_factory):
         reviewless = version(3, graph="discarded", parent=base.id)
         tie = version(4, parent=earlier.id)
         tie.last_saved_at = reviewless.last_saved_at
-        editing = version(5, "editing", parent=base.id)
+        editing = version(5, "draft", parent=base.id)
+        # The last collaborator may have an opaque MCP principal ID; the
+        # legacy UUID column must not pair their kind with the creator's ID.
+        editing.actor_type = "mcp_client"
+        session.add(
+            AuditEvent(
+                workspace_id=workspace.id,
+                actor_kind="mcp_client",
+                actor_id="last-mcp-saver",
+                action="context_page.draft.save",
+                target_kind="context_page",
+                target_id=page.id,
+                payload={"version_id": str(editing.id)},
+            )
+        )
         pending = version(6, parent=base.id)
-        rejected = version(7, parent=base.id)
-        # Legacy/corrupt ancestry must produce unknown rather than looping.
-        rejected.parent_version_id = rejected.id
-        superseded = version(8, parent=base.id)
+        rejected = version(7, "closed", parent=base.id)
+        superseded = version(8, "closed", parent=base.id)
         discarded = version(9, "discarded", parent=base.id)
         for row, status in (
             (pending, "pending"),
@@ -104,7 +117,6 @@ def test_saved_draft_projection_pages_reviewless_and_open_rows(session_factory):
         workspace_id, page_id = workspace.id, page.id
         expected = [pending.id, editing.id, reviewless.id, tie.id]
         rejected_id, discarded_id = rejected.id, discarded.id
-        latest_closed_id = superseded.id
 
     actor = ActorContext(
         actor_kind="human",
@@ -137,6 +149,8 @@ def test_saved_draft_projection_pages_reviewless_and_open_rows(session_factory):
         assert first.items[0].review.status == "pending"
         assert first.items[1].state == "writing"
         assert first.items[1].is_editing and first.items[1].is_mine
+        assert first.items[1].author.actor_kind == "mcp_client"
+        assert first.items[1].author.actor_id == "last-mcp-saver"
         assert first.items[0].is_behind is False
         assert second.items[1].is_behind is True
         assert first.next_cursor and second.next_cursor is None
@@ -154,8 +168,7 @@ def test_saved_draft_projection_pages_reviewless_and_open_rows(session_factory):
             session.get(ContextPageVersion, rejected_id),
             actor,
         )
-        assert closed.review.status == "rejected"
-        assert closed.is_behind is None
+        assert closed is None
         assert (
             project_context_draft(
                 session,
@@ -182,7 +195,7 @@ def test_saved_draft_projection_pages_reviewless_and_open_rows(session_factory):
         page.current_version_id = None
         page.latest_draft_version_id = None
         session.flush()
-        assert visible_context_version_id(page, actor)[0] == latest_closed_id
+        assert visible_context_version_id(page, actor)[0] == expected[0]
         assert (
             list_context_drafts(
                 session,
@@ -222,6 +235,6 @@ def test_saved_draft_projection_pages_reviewless_and_open_rows(session_factory):
                 page_id=page_id,
                 actor=actor,
             ).total
-            == 0
+            == 3
         )
-        assert visible_context_version_id(page, actor)[0] == latest_closed_id
+        assert visible_context_version_id(page, actor)[0] == expected[0]

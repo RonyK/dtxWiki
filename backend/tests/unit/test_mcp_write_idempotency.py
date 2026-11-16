@@ -11,7 +11,6 @@ from backend.mcp.operation_tools import KEYED_TOOL_COMMANDS
 from backend.models.base import utc_now
 from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
 from backend.models.workspace import Workspace
-from backend.schemas.context_write import UpdateDraftResult
 from backend.services.mcp_operation_attempt import (
     lookup_operation_status,
     start_operation_attempt,
@@ -25,25 +24,6 @@ from backend.services.read_errors import OperationOutcomeUnknownError
 
 class _Result(BaseModel):
     value: str
-
-
-def test_legacy_landing_match_replays_but_is_not_reemitted() -> None:
-    result = UpdateDraftResult.model_validate(
-        {
-            "diff_summary": "legacy replay",
-            "operation_receipts": [
-                {
-                    "op": "insert_text",
-                    "outcome": "already_landed",
-                    "landing_match": "raw_adjacent",
-                }
-            ],
-        }
-    )
-
-    assert result.operation_receipts is not None
-    assert result.operation_receipts[0].outcome == "already_landed"
-    assert "landing_match" not in result.model_dump()["operation_receipts"][0]
 
 
 def test_concurrent_miss_loser_replays_claim_winner_without_executing(
@@ -433,59 +413,3 @@ def test_execution_failure_rolls_back_claim_and_partial_side_effect(
             )
         ).all()
         assert rows == []
-
-
-def test_upgrade_replays_legacy_fingerprint_and_landing_match_together(
-    session_factory,
-) -> None:
-    with session_factory.begin() as session:
-        workspace_id = session.scalar(
-            select(Workspace.id).where(Workspace.slug == "default")
-        )
-        session.add(
-            MCPWriteIdempotency(
-                workspace_id=workspace_id,
-                actor_kind="human",
-                actor_id="legacy-patch-replay-actor",
-                tool_name="patch_draft",
-                idempotency_key="legacy-patch-replay-key",
-                request_fingerprint="legacy-request-fingerprint",
-                result_payload={
-                    "diff_summary": "legacy patch replay",
-                    "operation_receipts": [
-                        {
-                            "op": "insert_text",
-                            "outcome": "already_landed",
-                            "landing_match": "normalized_block",
-                        }
-                    ],
-                },
-                expires_at=utc_now() + IDEMPOTENCY_WINDOW,
-            )
-        )
-
-    execute_count = 0
-
-    def _must_not_execute() -> UpdateDraftResult:
-        nonlocal execute_count
-        execute_count += 1
-        return UpdateDraftResult(diff_summary="duplicate execution")
-
-    with session_factory.begin() as session:
-        replay = execute_idempotent_write(
-            session,
-            workspace_id=workspace_id,
-            actor_kind="human",
-            actor_id="legacy-patch-replay-actor",
-            tool_name="patch_draft",
-            idempotency_key="legacy-patch-replay-key",
-            fingerprint="new-base-aware-fingerprint",
-            compatible_fingerprints=("legacy-request-fingerprint",),
-            result_model=UpdateDraftResult,
-            execute=_must_not_execute,
-        )
-
-    assert execute_count == 0
-    assert replay.operation_receipts is not None
-    assert replay.operation_receipts[0].outcome == "already_landed"
-    assert "landing_match" not in replay.model_dump()["operation_receipts"][0]

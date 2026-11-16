@@ -6,7 +6,6 @@ from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.mcp_trace import MCPWriteIdempotency
 from backend.models.workspace import Workspace
 from backend.schemas.context_edit import ReplaceBlockOperation, ReplaceTextOperation
-from backend.services.page_service import pending_page_metadata_patch
 from backend.utils.content_hash import content_hash
 from backend.utils.page_frontmatter import parse_page_frontmatter
 
@@ -200,7 +199,7 @@ def test_context_edit_patch_fixes_final_body_and_replays_matching_receipt(
         expected_editing_revision=staged.editing_revision,
         idempotency_key="metadata-retain-external-title",
     )
-    assert unchanged_frontmatter.title == "External title"
+    assert unchanged_frontmatter.title == "Patch"
     retained = page_service.autosave_page(
         **save_command,
         body_md=parse_page_frontmatter(unchanged_frontmatter.body_md).body,
@@ -208,7 +207,7 @@ def test_context_edit_patch_fixes_final_body_and_replays_matching_receipt(
         idempotency_key="metadata-retain-staged",
     )
     assert (retained.title, retained.tags, retained.aliases) == (
-        "External title",
+        "Patch",
         ["staged"],
         ["Staged alias"],
     )
@@ -218,7 +217,7 @@ def test_context_edit_patch_fixes_final_body_and_replays_matching_receipt(
             "operations": [
                 ReplaceTextOperation(
                     op="replace_text",
-                    old_text='title: "External title"',
+                    old_text='title: "Patch"',
                     new_text='title: "Patched title"',
                 ),
                 ReplaceTextOperation(
@@ -243,9 +242,9 @@ def test_context_edit_patch_fixes_final_body_and_replays_matching_receipt(
     assert (parsed.title, parsed.tags, parsed.aliases) == ("Patched title", [], [])
     with session_factory() as session:
         page = session.get(ContextPage, created.id)
-        pending = pending_page_metadata_patch(
-            session, page=page, version_id=metadata_patch.version_id
-        )
+        pending = session.get(
+            ContextPageVersion, metadata_patch.version_id
+        ).page_metadata
         assert pending["title"] == "Patched title"
         assert pending["tags"] == pending["aliases"] == []
         assert page.title == "External title"

@@ -11,6 +11,7 @@ from backend.models.context import (
     ContextCitation,
     ContextPage,
     ContextPageVersion,
+    ContextVersionParent,
     EdgeProjection,
     PageLink,
     PageProvenance,
@@ -83,6 +84,11 @@ _GRAPH_FK_TARGET_TABLES = {
     "workspace_tree_node",
 }
 _NON_EDGE_RELATION_SOURCES = {
+    # Composite integrity components and the retained pre-transition merge field.
+    "context_version_parent.workspace_id->context_page_version.workspace_id",
+    "context_version_parent.page_id->context_page_version.page_id",
+    "context_version_parent.version_id->context_page_version.id",
+    "context_page_version.merged_into_version_id->context_page_version.id",
     # Lifetime counters feed the registered co_access extractor, not new kinds.
     "co_access_pair.source_kind+source_id",
     "co_access_pair.target_kind+target_id",
@@ -1048,9 +1054,18 @@ def test_half_life_kinds_never_join_a_page_and_a_hydratable_neighbor(
             created_by_actor_id="tester",
             version_status="draft",
             parent_version_id=seeded.version_a.id,
-            merged_into_version_id=child.id,
         )
         session.add(merged)
+        session.flush()
+        session.add(
+            ContextVersionParent(
+                workspace_id=workspace.id,
+                page_id=seeded.page_a.id,
+                version_id=child.id,
+                ordinal=1,
+                parent_version_id=merged.id,
+            )
+        )
         session.flush()
 
         rebuild_edge_projection(session, workspace.id, usage_signals_enabled=True)

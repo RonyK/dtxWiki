@@ -1,6 +1,7 @@
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.models.audit import AuditEvent
@@ -36,3 +37,17 @@ def insert_audit_event(
     session.add(event)
     session.flush()
     return event
+
+
+def select_workspace_audit_events(workspace_id: UUID, *, conditions=()):
+    """Read one workspace's audit rows, excluding global/detached history.
+
+    AuditEvent is deliberately a mixed-plane table with nullable scope, so
+    the workspace-plane model helpers cannot express this scoped projection.
+    A correlated workspace column is supported like the scoped query helpers.
+    """
+    if workspace_id is None:
+        raise ValueError("a workspace scope is required for audit projection")
+    return select(AuditEvent).where(
+        AuditEvent.workspace_id == workspace_id, *conditions
+    )
