@@ -9850,6 +9850,25 @@ export interface components {
             data: components["schemas"]["PageInlineComment"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /**
+         * PageMetadataPatch
+         * @description Metadata-only subset shared by REST page writes and MCP context writes.
+         */
+        PageMetadataPatch: {
+            /** Aliases */
+            aliases?: string[] | null;
+            /** Page Type */
+            page_type?: ("overview" | "source" | "entity" | "concept" | "synthesis" | "comparison" | "decision" | "contradiction" | "query" | "guide") | null;
+            /** Placement Parent Node Id */
+            placement_parent_node_id?: string | null;
+            /** Tags */
+            tags?: string[] | null;
+            /**
+             * Title
+             * @description Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.
+             */
+            title?: string | null;
+        };
         /** PageNameDisambiguationCandidate */
         PageNameDisambiguationCandidate: {
             /**
@@ -10338,10 +10357,7 @@ export interface components {
             result_body_md?: string | null;
             /** Result Hash */
             result_hash: string;
-            /** Result Page Metadata */
-            result_page_metadata?: {
-                [key: string]: unknown;
-            } | null;
+            result_page_metadata?: components["schemas"]["PageMetadataPatch"] | null;
         };
         /**
          * PublishedVersionInfo
@@ -11022,10 +11038,7 @@ export interface components {
             result_body_md?: string | null;
             /** Result Hash */
             result_hash?: string | null;
-            /** Result Page Metadata */
-            result_page_metadata?: {
-                [key: string]: unknown;
-            } | null;
+            result_page_metadata?: components["schemas"]["PageMetadataPatch"] | null;
         };
         /**
          * ReviewDecisionUndo

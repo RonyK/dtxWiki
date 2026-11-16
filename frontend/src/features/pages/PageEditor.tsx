@@ -98,6 +98,7 @@ import {
 } from "../../shared/api/operations";
 import {
   autosavePage,
+  beginPageEdit,
   createPage,
   createPageComment,
   diffPageVersions,
@@ -712,6 +713,9 @@ export function PageEditor({
   // dismissal followed by more edits still flushes.
   const dismissalAutosaveFingerprintRef = useRef<string | null>(null);
   const sessionVersionIdRef = useRef<string | null>(null);
+  const editablePageRef = useRef<PagePayload | null>(null);
+  const editableDraftPromiseRef = useRef<Promise<PagePayload> | null>(null);
+  const autosavePromiseRef = useRef<Promise<PagePayload> | null>(null);
   const commandRef = useRef<(
     commandId: EditorCommandId,
     view?: EditorViewType | null,
@@ -851,6 +855,53 @@ export function PageEditor({
       snapshot.editingVersionId === baseVersionIdRef.current
     );
   }, []);
+  // Adopt server concurrency metadata immediately, including before React renders.
+  const adoptEditablePage = useCallback((updated: PagePayload) => {
+    editablePageRef.current = updated;
+    pageIdRef.current = updated.id;
+    baseVersionIdRef.current = updated.version_id;
+    sessionVersionIdRef.current = updated.version_id;
+    draftBaseSnapshotRef.current = { body_md: updated.body_md, page_metadata: updated.page_metadata ?? {} };
+    setPage(updated);
+    if (mode === "edit") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("version_id", updated.version_id);
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, [mode]);
+  const ensureEditableDraft = useCallback(async (selected: PagePayload): Promise<PagePayload> => {
+    if (editableDraftPromiseRef.current) return editableDraftPromiseRef.current;
+    const workspace = workspaceIdRef.current;
+    const generation = editorGenerationRef.current;
+    if (!workspace) throw new Error(PAGE_EDITOR_LOCAL_ERROR.workspaceUnavailable);
+    if (autosavePromiseRef.current) await autosavePromiseRef.current;
+    if (!isEditorMountedRef.current || workspaceIdRef.current !== workspace ||
+        editorGenerationRef.current !== generation || pageIdRef.current !== selected.id) {
+      throw new DOMException("Editor is no longer current.", "AbortError");
+    }
+    if (editableDraftPromiseRef.current) return editableDraftPromiseRef.current;
+    const current = editablePageRef.current?.id === selected.id ? editablePageRef.current : selected;
+    if (current.version_status === "draft") return current;
+    const promise = beginPageEdit(workspace, current, current.version_id).then((draft) => {
+      if (!isEditorMountedRef.current || workspaceIdRef.current !== workspace ||
+          editorGenerationRef.current !== generation || pageIdRef.current !== current.id) {
+        throw new DOMException("Editor is no longer current.", "AbortError");
+      }
+      if (draft.version_status !== "draft") throw new Error("Expected an editable draft.");
+      // This deliberate transition must not invalidate the upload preparing it.
+      uploadAuthorityKeyRef.current = JSON.stringify([
+        actorIdRef.current, mode, slug, workspace, draft.id, draft.version_id,
+      ]);
+      adoptEditablePage(draft);
+      setPublicationState(draft.current_published_version_id ? "staged" : "never-published");
+      return draft;
+    });
+    const tracked = promise.finally(() => {
+      if (editableDraftPromiseRef.current === tracked) editableDraftPromiseRef.current = null;
+    });
+    editableDraftPromiseRef.current = tracked;
+    return tracked;
+  }, [adoptEditablePage, mode, slug]);
   const closeContextRail = useCallback(() => setContextRailOpen(false), []);
   const imageUploadOptions = useMemo<EditorPasteOptions>(() => ({
     getWorkspaceId: () => workspaceIdRef.current,
@@ -880,6 +931,13 @@ export function PageEditor({
       }
       let pageId = pageIdRef.current;
       let editingVersionId = baseVersionIdRef.current;
+      if (pageId && editablePageRef.current?.version_status !== "draft") {
+        const selected = editablePageRef.current;
+        if (!selected) throw new Error(PAGE_EDITOR_LOCAL_ERROR.pageCreationNotStarted);
+        const draft = await waitForPromiseOrAbort(ensureEditableDraft(selected), signal);
+        pageId = draft.id;
+        editingVersionId = draft.version_id;
+      }
       if (!pageId || !editingVersionId) {
         if (!pageCreationPromiseRef.current) {
           // No page exists yet for this brand-new draft. Page-first creation
@@ -922,7 +980,7 @@ export function PageEditor({
             // set, and canSave requires a non-empty slug. Seed it from the
             // server placeholder unless the author already typed one.
             setPageSlug((current) => (current.trim() ? current : created.slug));
-            setPage(created);
+            adoptEditablePage(created);
             setPublicationState("never-published");
             return created;
           });
@@ -942,7 +1000,7 @@ export function PageEditor({
         editingVersionId = created.version_id;
       }
       throwIfAborted(signal);
-      if (!pageId || !editingVersionId) {
+      if (!pageId || !editingVersionId || editablePageRef.current?.version_status !== "draft") {
         throw new Error(PAGE_EDITOR_LOCAL_ERROR.pageCreationNotStarted);
       }
       const snapshot = buildUploadTargetSnapshot({
@@ -1086,7 +1144,7 @@ export function PageEditor({
       }
       return result;
     },
-  }), [isCurrentUploadTarget, mode, slug]);
+  }), [adoptEditablePage, ensureEditableDraft, isCurrentUploadTarget, mode, slug]);
   const bodyAriaLabel = t("editor.bodyAria", { defaultValue: "Markdown body" });
   const resolveContextMediaAsset = useMemo<ContextMediaAssetUrlResolver>(
     () => (assetId: string) => {
@@ -1379,10 +1437,10 @@ export function PageEditor({
     stalePublishState === "idle" &&
     (saveState === "dirty" || (saveState === "error" && hasPreparedPublication) ||
       (saveState === "clean" && publicationState !== "published"));
-  // The server decides authorship and review state: another Editor's shared
-  // draft is readable here, but only its author can submit it.
+  // Existing drafts use server eligibility; a commit first starts a draft on request.
   const canRequestReview = canSave && saveState === "clean" && !conflict &&
-    Boolean(page?.can_submit_for_review);
+    Boolean(page && (page.version_status === "draft" ? page.can_submit_for_review :
+      workspaceRole === "owner" || workspaceRole === "editor"));
   const activeEditorMode =
     singlePaneViewport && editorMode === "split" ? "source" : editorMode;
   const showSourcePane = activeEditorMode !== "reading";
@@ -1606,6 +1664,8 @@ export function PageEditor({
       actorIdRef.current = actorId;
     }
     editorGenerationRef.current += 1;
+    editableDraftPromiseRef.current = null;
+    autosavePromiseRef.current = null;
     uploadAuthorityKeyRef.current = nextAuthorityKey;
     pageCreationPromiseRef.current = null;
     invalidateAllImageUploads(imageUploadOptions);
@@ -1741,7 +1801,8 @@ export function PageEditor({
     sourceSuggestionsRef.current = sourceSuggestions;
   }, [sourceSuggestions]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    editablePageRef.current = page;
     pageIdRef.current = page?.id ?? null;
     baseVersionIdRef.current = page?.version_id ?? null;
   }, [page]);
@@ -3142,8 +3203,7 @@ export function PageEditor({
         });
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
-        pageIdRef.current = created.id;
-        setPage(created);
+        adoptEditablePage(created);
         setPublicationState("never-published");
         sessionVersionIdRef.current = created.version_id;
         acknowledgeEditorRevision(dispatchedRevision);
@@ -3194,9 +3254,7 @@ export function PageEditor({
           savedDraft = followUpDraft;
           acknowledgeEditorRevision(followUpRevision);
         }
-        sessionVersionIdRef.current = savedPage.version_id;
-        pageIdRef.current = savedPage.id;
-        setPage(savedPage);
+        adoptEditablePage(savedPage);
         setSaveRelativeNow(Date.now());
         lastSavedRef.current = {
           ...savedDraft,
@@ -3290,6 +3348,9 @@ export function PageEditor({
         slug: pageSlug,
         title: title.trim(),
       };
+      if (editableDraftPromiseRef.current) await editableDraftPromiseRef.current;
+      if (!isCurrentSaveRequest(requestId, saveRequestIdRef) || !isEditorMountedRef.current) return;
+      const saveBase = editablePageRef.current ?? page;
       const requestedSessionVersionId = sessionVersionIdRef.current;
       const payload = {
         title: submittedDraft.title,
@@ -3297,22 +3358,26 @@ export function PageEditor({
         page_type: submittedDraft.pageType,
         tags: submittedDraft.tags,
         aliases: submittedDraft.aliases,
-        base_version_id: page.version_id,
-        base_content_hash: page.content_hash,
-        expected_editing_revision: page.editing_revision,
-        version_id: requestedSessionVersionId ?? page.version_id,
-        base_snapshot: draftBaseSnapshotRef.current ?? { body_md: page.body_md, page_metadata: page.page_metadata ?? {} },
+        base_version_id: saveBase.version_id,
+        base_content_hash: saveBase.content_hash,
+        expected_editing_revision: saveBase.editing_revision,
+        version_id: requestedSessionVersionId ?? saveBase.version_id,
+        base_snapshot: draftBaseSnapshotRef.current ?? { body_md: saveBase.body_md, page_metadata: saveBase.page_metadata ?? {} },
         destination_node_id: submittedDraft.destinationNodeId || null,
         idempotency_key: newIdempotencyKey(),
         on_stale: "conflict" as const,
         retry_only: false,
       };
-      const updated = await autosavePage(workspaceId, page.id, payload, {
+      const autosave = autosavePage(workspaceId, page.id, payload, {
         signal: controller.signal,
       });
+      autosavePromiseRef.current = autosave;
+      let updated: PagePayload;
+      try { updated = await autosave; }
+      finally { if (autosavePromiseRef.current === autosave) autosavePromiseRef.current = null; }
       if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
       if (!isEditorMountedRef.current) return;
-      rememberSessionVersion(updated.version_id, requestedSessionVersionId);
+      adoptEditablePage(updated);
       // Preserve the withdrawal notice if another operation superseded the review.
       const supersededReviewByEdit =
         fromReview &&
@@ -3323,8 +3388,6 @@ export function PageEditor({
         reviewEditCompletedRef.current = true;
       }
       acknowledgeEditorRevision(dispatchedRevision);
-      pageIdRef.current = updated.id;
-      setPage(updated);
       if (!fromReview && (updated.superseded_review_count ?? 0) > 0) {
         setStatus(t("editor.reviewRequestWithdrawn"));
       }
@@ -3632,17 +3695,18 @@ export function PageEditor({
       ) {
         return false;
       }
-      return sendPageAutosave(workspaceId, page.id, {
+      const saveBase = editablePageRef.current ?? page;
+      return sendPageAutosave(workspaceId, saveBase.id, {
         title: draft.title.trim(),
         body_md: serializedBody,
         page_type: draft.pageType,
         tags: draft.tags,
         aliases: draft.aliases,
-        base_version_id: page.version_id,
-        base_content_hash: page.content_hash,
-        expected_editing_revision: page.editing_revision,
-        version_id: sessionVersionIdRef.current ?? page.version_id,
-        base_snapshot: draftBaseSnapshotRef.current ?? { body_md: page.body_md, page_metadata: page.page_metadata ?? {} },
+        base_version_id: saveBase.version_id,
+        base_content_hash: saveBase.content_hash,
+        expected_editing_revision: saveBase.editing_revision,
+        version_id: sessionVersionIdRef.current ?? saveBase.version_id,
+        base_snapshot: draftBaseSnapshotRef.current ?? { body_md: saveBase.body_md, page_metadata: saveBase.page_metadata ?? {} },
         destination_node_id: draft.destinationNodeId || null,
         idempotency_key: newIdempotencyKey(),
         on_stale: "conflict",
@@ -3650,17 +3714,6 @@ export function PageEditor({
       });
     };
   });
-
-  function rememberSessionVersion(
-    savedVersionId: string,
-    requestedSessionVersionId: string | null,
-  ) {
-    if (requestedSessionVersionId && savedVersionId !== requestedSessionVersionId) {
-      sessionVersionIdRef.current = null;
-      return;
-    }
-    sessionVersionIdRef.current = savedVersionId;
-  }
 
   async function viewConflictChanges() {
     if (!page || !conflict || conflictDiffLoading || !workspaceId) {
@@ -3741,10 +3794,9 @@ export function PageEditor({
         contextTree.find((node) => node.target_id === latest.id)?.parent_id ??
         chooseDefaultDestination(contextTree);
       applyParsedMetadata(metadata);
+      adoptEditablePage(latest);
       sessionVersionIdRef.current = restoredPublication.sessionVersionId;
       setPublicationState(restoredPublication.state);
-      pageIdRef.current = latest.id;
-      setPage(latest);
       setTitle(latest.title);
       setPageSlug(latest.slug);
       bodyRef.current = parsed.body;
@@ -4259,10 +4311,6 @@ export function PageEditor({
   async function requestReview() {
     if (!workspaceId || !page || !canRequestReview || savingRef.current) return;
     const editorScope = referenceCommandScopeRef.current;
-    const scope = JSON.stringify([editorScope, page.version_id, page.editing_revision]);
-    if (reviewSubmissionRef.current?.scope !== scope) {
-      reviewSubmissionRef.current = { scope, key: newIdempotencyKey() };
-    }
     const owner = { scope: editorScope };
     referenceCommandOwnerRef.current = owner;
     savingRef.current = true;
@@ -4270,17 +4318,22 @@ export function PageEditor({
     setStatus(null);
     const isCurrent = () => isEditorMountedRef.current && referenceCommandOwnerRef.current === owner && referenceCommandScopeRef.current === editorScope;
     try {
-      const submitted = await submitPageForReview(workspaceId, page.id, {
-        version_id: page.version_id,
-        expected_editing_revision: page.editing_revision ?? 1,
+      const draft = await ensureEditableDraft(page);
+      if (!isCurrent()) return;
+      const scope = JSON.stringify([editorScope, draft.version_id, draft.editing_revision]);
+      if (reviewSubmissionRef.current?.scope !== scope) {
+        reviewSubmissionRef.current = { scope, key: newIdempotencyKey() };
+      }
+      const submitted = await submitPageForReview(workspaceId, draft.id, {
+        version_id: draft.version_id,
+        expected_editing_revision: draft.editing_revision ?? 1,
         idempotency_key: reviewSubmissionRef.current.key,
         reason: "Requested review from Page editor.",
         retry_only: false,
       });
       if (!isCurrent()) return;
       reviewSubmissionRef.current = null;
-      sessionVersionIdRef.current = submitted.version_id;
-      setPage(submitted);
+      adoptEditablePage(submitted);
       setStatus(t("editor.reviewRequested"));
     } catch (cause) {
       if (isCurrent()) setStatus(apiErrorMessage(cause, t("editor.reviewRequestFailed")));
@@ -4322,6 +4375,8 @@ export function PageEditor({
           try { savedPage = await creation; }
           finally { if (pageCreationPromiseRef.current === creation) pageCreationPromiseRef.current = null; }
         } else {
+          savedPage = await ensureEditableDraft(savedPage);
+          if (!isCurrent()) return;
           savedPage = await autosavePage(workspaceId, savedPage.id, {
             title: snapshot.title.trim() || savedPage.title,
             body_md: serializeDraftBody(snapshot, frontmatterExtraLinesRef.current),
@@ -4337,10 +4392,7 @@ export function PageEditor({
         if (fromReview && (savedPage.superseded_review_count ?? 0) > 0) {
           reviewEditCompletedRef.current = true;
         }
-        pageIdRef.current = savedPage.id;
-        baseVersionIdRef.current = savedPage.version_id;
-        sessionVersionIdRef.current = savedPage.version_id;
-        setPage(savedPage);
+        adoptEditablePage(savedPage);
         setPageSlug(savedPage.slug);
         acknowledgeEditorRevision(dispatchedRevision);
         lastSavedRef.current = { ...snapshot, title: savedPage.title, slug: savedPage.slug };
@@ -4359,7 +4411,7 @@ export function PageEditor({
       if (!isCurrent()) return;
       pendingReferenceCommandRef.current = null;
       setReferenceRetryAvailable(false);
-      setPage({ ...savedPage, version_status: changed.publication_state, editing_revision: changed.editing_revision, references_hash: changed.references_hash });
+      adoptEditablePage({ ...savedPage, version_status: changed.publication_state, editing_revision: changed.editing_revision, references_hash: changed.references_hash });
       setReferencePickerMode(null);
       const referenceStatus = t(operation === "add" ? "references.added" : "references.removed");
       // Staging forks a reviewed draft and withdraws its pending review.
@@ -4368,7 +4420,7 @@ export function PageEditor({
         : referenceStatus);
       try {
         const refreshed = await readPage(workspaceId, savedPage.id, savedPage.version_id);
-        if (isCurrent()) setPage(refreshed);
+        if (isCurrent()) adoptEditablePage(refreshed);
       } catch {
         if (isCurrent()) setStatus(t("references.savedReloadFailed"));
       }
@@ -4405,7 +4457,7 @@ export function PageEditor({
       if (!isCurrent()) return;
       // Reconcile concurrency metadata only. Writing done after the failed
       // request remains in CodeMirror and retains its unacknowledged revision.
-      setPage(refreshed);
+      adoptEditablePage(refreshed);
       pendingReferenceCommandRef.current = null;
       setReferenceRetryAvailable(false);
       setStatus(t("references.reconciled"));

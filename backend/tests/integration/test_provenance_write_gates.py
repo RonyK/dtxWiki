@@ -16,7 +16,6 @@ from backend.tests.integration._cross_transport_helpers import (
     issue_personal_api_token,
     make_client,
 )
-from backend.tests.utils.context_git import merge_preview_binding
 
 
 def _workspace_id(client) -> UUID:
@@ -427,35 +426,6 @@ def test_workspace_can_stop_requiring_a_person_for_ai_writes(page_service):
         },
     )
     assert response.status_code == 200, response.text
-    staged = response.json()["data"]
-    submitted = client.post(
-        f"{_pages_url(workspace_id)}/{created['id']}/submit-for-review",
-        headers=headers,
-        json={
-            "version_id": staged["version_id"],
-            "expected_editing_revision": staged["editing_revision"],
-            "idempotency_key": "trusted-agent-submit",
-        },
-    )
-    assert submitted.status_code == 200, submitted.text
-    with page_service.session_factory() as session:
-        requested = _review_for_context_version(session, UUID(staged["version_id"]))
-        assert requested.risk_signals["human_review_required"] is False
-    publish_url = (
-        f"{_pages_url(workspace_id)}/{created['id']}/versions/"
-        f"{staged['version_id']}/publish"
-    )
-    published = client.post(
-        publish_url,
-        headers=headers,
-        json={
-            **merge_preview_binding(client, publish_url, headers=headers),
-            "reason": "Publish an authorized trusted agent write",
-            "expected_content_hash": staged["content_hash"],
-        },
-    )
-    assert published.status_code == 200, published.text
-    response = published
     version_id = UUID(response.json()["data"]["version_id"])
 
     with page_service.session_factory() as session:
@@ -476,7 +446,9 @@ def test_workspace_can_stop_requiring_a_person_for_ai_writes(page_service):
         assert review.status == "approved"
         assert review.risk_signals["ai_authored"] is True
         assert review.risk_signals["human_review_required"] is False
-        assert review.id == UUID(submitted.json()["data"]["review_item_id"])
+        assert review.decision_summary == (
+            "agent-authored page write approved by policy"
+        )
 
 
 @pytest.mark.parametrize("path", ["create", "update", "autosave"])

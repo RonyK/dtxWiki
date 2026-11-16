@@ -194,7 +194,7 @@ class PublishPageRequest(BaseModel):
 
 class PublishPageVersionRequest(InputRequest):
     result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
-    result_page_metadata: dict[str, Any] | None = None
+    result_page_metadata: "PageMetadataPatch | None" = None
     expected_editing_revision: int = Field(ge=1)
     expected_published_version_id: UUID | None
     result_hash: str = Field(pattern=CONTENT_HASH_PATTERN)

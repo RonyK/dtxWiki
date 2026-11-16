@@ -652,76 +652,170 @@ class ReviewService:
         workspace_id: UUID,
         now: datetime | None = None,
     ) -> list[UUID]:
-        workspace = session.get(Workspace, workspace_id)
-        if workspace is None:
-            raise ReadNotFoundError("workspace not found")
-        policy = normalized_review_policy(workspace.review_policy)
-        entries = auto_approve_by_risk_entries(policy)
-        if not entries:
-            return []
+        # Writers lock page -> review; take the workspace writer lock first so
+        # the evaluation below sees no concurrent save (SQLite ignores FOR UPDATE).
+        acquire_workspace_write_intent(session)
         current_time = now or datetime.now(UTC)
-        delay_by_risk = {
-            str(entry["risk_level"]): int(entry["delay_days"]) for entry in entries
-        }
-        candidate_predicates = [
-            and_(
-                ReviewItem.risk_level == risk_level,
-                ReviewItem.created_at <= current_time - timedelta(days=delay_days),
-            )
-            for risk_level, delay_days in delay_by_risk.items()
-        ]
-        review_rows = list(
-            session.execute(
-                select(ReviewItem.id, ReviewItem.risk_level, ReviewItem.risk_signals)
-                .where(
-                    ReviewItem.workspace_id == workspace_id,
-                    ReviewItem.status == "pending",
-                    ReviewItem.review_type != "context_reconciliation",
-                    or_(*candidate_predicates),
-                )
-                .order_by(ReviewItem.created_at.asc(), ReviewItem.id.asc())
-            )
+        actor_id = str(default_actor_id())
+        system_actor = ActorContext(
+            actor_kind="system",
+            actor_id=actor_id,
+            user_id=None,
+            workspace_id=workspace_id,
+            workspace_role="owner",
+            role="owner",
+            provenance="internal",
+        )
+        from backend.services.page_service import PageService
+
+        preparer = PageService(
+            lambda: None,
+            body_preparer=self.body_preparer,
+            actor_context=system_actor,
         )
         approved: list[UUID] = []
-        for review_id, risk_level, risk_signals in review_rows:
-            review = get_in_workspace(
-                session,
-                ReviewItem,
-                workspace_id=workspace_id,
-                resource_id=review_id,
+        for review, risk_level, delay_days in self._aged_pending_reviews(
+            session, workspace_id, current_time
+        ):
+            self._lock_context_page_for_review_update(
+                session, workspace_id=workspace_id, review_item_id=review.id
             )
-            if review is None or review.review_type in {
-                "agent_guide",
-                "memory",
-                "context_reconciliation",
-            }:
+            # Re-read the review, its draft and siblings under the lock.
+            session.flush()
+            session.expire_all()
+            if review.status != "pending":
+                # Settled by an earlier approval of the same draft in this sweep.
                 continue
-            if (
-                _requires_human_review(risk_signals)
-                or _caller_requested_review(risk_signals)
-                or _has_lint_error(risk_signals)
-            ):
+            pins = self._auto_approval_pins(
+                session,
+                review,
+                cutoff=current_time - timedelta(days=delay_days),
+                prepare=lambda page, version: (
+                    lambda candidate: preparer._prepare_merge_candidate(
+                        session,
+                        page,
+                        version,
+                        candidate,
+                        "system",
+                        actor_id,
+                        "internal",
+                    )
+                ),
+            )
+            if pins is None:
                 continue
-            delay_days = delay_by_risk[risk_level]
             self.apply_decision(
                 session=session,
                 workspace_id=workspace_id,
-                review_item_id=review_id,
+                review_item_id=review.id,
                 request=ReviewDecisionRequest(
                     decision_type="approve",
                     decision_reason=(
                         "auto_approved_by_policy: aged out "
                         f"({risk_level}, {delay_days}d)"
                     ),
+                    **pins,
                 ),
                 actor_kind="system",
-                actor_id=str(default_actor_id()),
+                actor_id=actor_id,
                 actor_user_id=None,
                 actor_role="owner",
                 actor_provenance="internal",
+                actor=system_actor,
             )
-            approved.append(review_id)
+            approved.append(review.id)
         return approved
+
+    def _aged_pending_reviews(
+        self, session: Session, workspace_id: UUID, now: datetime
+    ) -> list[tuple[ReviewItem, str, int]]:
+        """Pending reviews whose policy delay has passed since they were opened."""
+        workspace = session.get(Workspace, workspace_id)
+        if workspace is None:
+            raise ReadNotFoundError("workspace not found")
+        entries = auto_approve_by_risk_entries(
+            normalized_review_policy(workspace.review_policy)
+        )
+        delay_by_risk = {
+            str(entry["risk_level"]): int(entry["delay_days"]) for entry in entries
+        }
+        if not delay_by_risk:
+            return []
+        reviews = session.scalars(
+            select(ReviewItem)
+            .where(
+                ReviewItem.workspace_id == workspace_id,
+                ReviewItem.status == "pending",
+                ReviewItem.review_type.not_in(
+                    ("agent_guide", "memory", "context_reconciliation")
+                ),
+                or_(
+                    *(
+                        and_(
+                            ReviewItem.risk_level == risk_level,
+                            ReviewItem.created_at <= now - timedelta(days=delay_days),
+                        )
+                        for risk_level, delay_days in delay_by_risk.items()
+                    )
+                ),
+            )
+            .order_by(ReviewItem.created_at.asc(), ReviewItem.id.asc())
+        ).all()
+        return [
+            (review, review.risk_level, delay_by_risk[review.risk_level])
+            for review in reviews
+        ]
+
+    def _auto_approval_pins(
+        self,
+        session: Session,
+        review: ReviewItem,
+        *,
+        cutoff: datetime,
+        prepare=None,
+    ) -> dict | None:
+        """The merge-preview pins an automatic approval may use, or None.
+
+        A shared draft keeps changing after its review opens, so the delay runs
+        from its last save as well, and the approval binds the exact result it
+        evaluated. A conflicting merge waits for a person to choose.
+        """
+        if not self.system_may_settle(session, review):
+            return None
+        change_set = get_in_workspace(
+            session,
+            ChangeSet,
+            workspace_id=review.workspace_id,
+            resource_id=review.change_set_id,
+        )
+        context = (
+            self._approval_supersession_context(session, review, change_set)
+            if change_set is not None
+            else None
+        )
+        if context is None:
+            return {}
+        page, version, _ = context
+        saved_at = version.last_saved_at or version.created_at
+        if saved_at.tzinfo is None:
+            saved_at = saved_at.replace(tzinfo=UTC)
+        if saved_at > cutoff:
+            return None
+        from backend.services.context_draft_workflow import preview_merge
+
+        preview = preview_merge(
+            session,
+            page,
+            version,
+            prepare=prepare(page, version) if prepare is not None else None,
+        )
+        if preview.clean is None:
+            return None
+        return {
+            "expected_editing_revision": preview.editing_revision,
+            "expected_published_version_id": preview.published_version_id,
+            "result_hash": preview.clean.result_hash,
+        }
 
     def count_auto_approve_candidates(
         self,
@@ -743,37 +837,16 @@ class ReviewService:
         session: Session,
         workspace_id: UUID,
     ) -> dict[str, int]:
-        workspace = session.get(Workspace, workspace_id)
-        if workspace is None:
-            raise ReadNotFoundError("workspace not found")
-        entries = auto_approve_by_risk_entries(
-            normalized_review_policy(workspace.review_policy)
-        )
         counts = {"low": 0, "medium": 0, "high": 0}
-        if not entries:
-            return counts
         now = datetime.now(UTC)
-        candidate_predicates = [
-            and_(
-                ReviewItem.risk_level == str(entry["risk_level"]),
-                ReviewItem.created_at <= now - timedelta(days=int(entry["delay_days"])),
-            )
-            for entry in entries
-        ]
-        rows = session.execute(
-            select(ReviewItem.risk_level, ReviewItem.risk_signals).where(
-                ReviewItem.workspace_id == workspace_id,
-                ReviewItem.status == "pending",
-                ReviewItem.review_type != "context_reconciliation",
-                or_(*candidate_predicates),
-            )
-        ).all()
-        for risk_level, risk_signals in rows:
-            if (
-                risk_level in counts
-                and not _requires_human_review(risk_signals)
-                and not _caller_requested_review(risk_signals)
-                and not _has_lint_error(risk_signals)
+        for review, risk_level, delay_days in self._aged_pending_reviews(
+            session, workspace_id, now
+        ):
+            if risk_level in counts and (
+                self._auto_approval_pins(
+                    session, review, cutoff=now - timedelta(days=delay_days)
+                )
+                is not None
             ):
                 counts[risk_level] += 1
         return counts
@@ -1318,6 +1391,30 @@ class ReviewService:
                 )
             )
         return items
+
+    @staticmethod
+    def system_may_settle(session: Session, review: ReviewItem) -> bool:
+        """Whether an automatic approval may settle this review.
+
+        Approving a draft settles every open review of that draft, so each
+        sibling's reservation for a person applies to the approval as well.
+        """
+        if not _system_may_decide(review.risk_signals):
+            return False
+        change_set = get_in_workspace(
+            session,
+            ChangeSet,
+            workspace_id=review.workspace_id,
+            resource_id=review.change_set_id,
+        )
+        context = (
+            ReviewService._approval_supersession_context(session, review, change_set)
+            if change_set is not None
+            else None
+        )
+        return context is None or all(
+            _system_may_decide(sibling.risk_signals) for sibling in context[2]
+        )
 
     @staticmethod
     def _approval_supersession_context(
@@ -2446,6 +2543,14 @@ class ReviewService:
             if approval_context is None:
                 raise ReadValidationError(
                     "cannot approve a stale or superseded Context review"
+                )
+            if actor_kind == "system" and not all(
+                _system_may_decide(item.risk_signals)
+                for item in (review, *approval_context[2])
+            ):
+                raise RejectedByPolicyError(
+                    "an automatic approval cannot settle a review a person must decide",
+                    error_code="human_approval_required",
                 )
         rejection_impact = (
             self._rejection_impact(session, review, change_set)
@@ -4660,3 +4765,12 @@ def _requires_human_review(risk_signals: object) -> bool:
 
 def _has_lint_error(risk_signals: object) -> bool:
     return isinstance(risk_signals, dict) and bool(risk_signals.get("lint_error"))
+
+
+def _system_may_decide(risk_signals: object) -> bool:
+    """No caller, lint finding or policy reserved this review for a person."""
+    return not (
+        _requires_human_review(risk_signals)
+        or _caller_requested_review(risk_signals)
+        or _has_lint_error(risk_signals)
+    )

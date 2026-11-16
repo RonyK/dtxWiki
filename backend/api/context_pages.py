@@ -523,7 +523,13 @@ def publish_page_version(
             expected_published_version_id=request_body.expected_published_version_id,
             result_hash=request_body.result_hash,
             result_body_md=request_body.result_body_md,
-            result_page_metadata=request_body.result_page_metadata,
+            result_page_metadata=(
+                request_body.result_page_metadata.model_dump(
+                    mode="json", exclude_unset=True
+                )
+                if request_body.result_page_metadata is not None
+                else None
+            ),
             on_conflict=request_body.on_conflict,
             idempotency_key=request_body.idempotency_key,
         )

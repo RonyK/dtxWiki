@@ -448,6 +448,9 @@ def _review(connection, tables, page, row, existing, counts, key):
                 status="pending",
                 risk_level="high",
                 risk_signals={
+                    # caller_needs_review is the request-intent signal saves
+                    # keep; the resolver derives human_review_required from it.
+                    "caller_needs_review": True,
                     "human_review_required": True,
                     "migration_parent_repaired": correction,
                 },
@@ -466,6 +469,7 @@ def _review(connection, tables, page, row, existing, counts, key):
             .values(
                 risk_signals={
                     **(review["risk_signals"] or {}),
+                    "caller_needs_review": True,
                     "human_review_required": True,
                     "migration_parent_repaired": correction,
                 },

@@ -839,7 +839,7 @@ def test_deadline_system_auto_approval_does_not_publish(session_factory):
         for risk in ("low", "medium", "high"):
             policy["automation"]["auto_approve_by_risk"][risk] = {
                 "allowed": True,
-                "delay_days": 0,
+                "delay_days": 1,
             }
         workspace.review_policy = policy
         created = write.write_draft(
@@ -857,7 +857,28 @@ def test_deadline_system_auto_approval_does_not_publish(session_factory):
             actor_role="owner",
         )
         review = session.get(ReviewItem, created.review_item_id)
-        review.created_at = datetime.now(UTC) - timedelta(days=1)
+        review.created_at = datetime.now(UTC) - timedelta(days=2)
+        # The shared draft was saved after the review opened: its delay restarts.
+        draft = session.get(ContextPageVersion, created.draft_version_id)
+        draft.last_saved_at = datetime.now(UTC)
+        assert reviews.sweep_auto_approve_reviews(session, workspace.id) == []
+        draft.last_saved_at = datetime.now(UTC) - timedelta(days=2)
+        # Approving the draft settles its other open reviews; one reserved for
+        # a person keeps the system from deciding either.
+        sibling = ReviewItem(
+            workspace_id=workspace.id,
+            change_set_id=review.change_set_id,
+            review_type="context_update",
+            status="pending",
+            risk_level="high",
+            risk_signals={"caller_needs_review": True},
+        )
+        session.add(sibling)
+        session.flush()
+        assert reviews.count_auto_approve_candidates(session, workspace.id) == 0
+        assert reviews.sweep_auto_approve_reviews(session, workspace.id) == []
+        session.delete(sibling)
+        session.flush()
         approved = reviews.sweep_auto_approve_reviews(
             session, workspace.id, now=datetime.now(UTC)
         )

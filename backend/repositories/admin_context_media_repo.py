@@ -7,7 +7,7 @@ from sqlalchemy import Integer, and_, bindparam, or_, select
 from backend.models.context import ContextPage
 from backend.models.context_media import ContextMediaAsset
 from backend.repositories.context_media_orphans import context_media_orphan_clause
-from backend.repositories.context_visibility import foreign_editing_version_exists
+from backend.repositories.context_visibility import foreign_discarded_version_exists
 
 
 @lru_cache(maxsize=16)
@@ -26,7 +26,9 @@ def _list_rows_statement(*, mine, search, orphan_only, after):
         ContextMediaAsset.workspace_id == workspace_id,
         ContextPage.workspace_id == workspace_id,
         ContextMediaAsset.association_state != "tombstoned",
-        ~foreign_editing_version_exists(ContextMediaAsset.created_for_version_id, None),
+        ~foreign_discarded_version_exists(
+            ContextMediaAsset.created_for_version_id, None
+        ),
     ]
     if mine:
         conditions += [

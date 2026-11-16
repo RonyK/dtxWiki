@@ -1424,9 +1424,9 @@ describe("PageEditor", () => {
       /draft saved · not published yet/i,
     ],
     [
-      "a fresh draft opened from the published page",
+      "a commit opened from the published page without starting a draft",
       { version_status: "published_snapshot", current_published_version_id: "v1" },
-      /unpublished draft saved/i,
+      /^saved$/i,
     ],
   ])(
     // PUB-09: the clean-state SyncPill used to say "Saved" for every
@@ -4753,7 +4753,7 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("heading", { name: /Edit Hello/ })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Split" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /split preview/i })).not.toBeInTheDocument();
-    expect(syncStatus()).toHaveTextContent(/draft saved/i);
+    expect(syncStatus()).toHaveTextContent(/^saved$/i);
     expect(document.querySelector(".editor-command-status")).not.toBeInTheDocument();
     expect(document.querySelector(".preview-pane")).not.toBeInTheDocument();
 
@@ -7423,6 +7423,7 @@ describe("PageEditor", () => {
             slug: "media-brief",
             title: "Media Brief",
             version_id: "version-1",
+            version_status: "draft",
             current_version_id: "version-1",
           },
         }, 201);
@@ -7454,6 +7455,7 @@ describe("PageEditor", () => {
             slug: "media-brief",
             title: "Media Brief",
             version_id: "version-1",
+            version_status: "draft",
             current_version_id: "version-1",
           },
         });

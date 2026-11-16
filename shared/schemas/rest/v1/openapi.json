@@ -17608,6 +17608,99 @@
         "title": "PageInlineCommentResponse",
         "type": "object"
       },
+      "PageMetadataPatch": {
+        "additionalProperties": false,
+        "description": "Metadata-only subset shared by REST page writes and MCP context writes.",
+        "properties": {
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "maxItems": 32,
+            "title": "Aliases",
+            "x-normalized-item-maxLength": 80,
+            "x-normalized-item-minLength": 1
+          },
+          "page_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "overview",
+                  "source",
+                  "entity",
+                  "concept",
+                  "synthesis",
+                  "comparison",
+                  "decision",
+                  "contradiction",
+                  "query",
+                  "guide"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Type"
+          },
+          "placement_parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Parent Node Id"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "maxItems": 32,
+            "title": "Tags",
+            "x-normalized-item-maxLength": 48,
+            "x-normalized-item-minLength": 1
+          },
+          "title": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+            "title": "Title",
+            "x-normalized-maxLength": 256
+          }
+        },
+        "title": "PageMetadataPatch",
+        "type": "object"
+      },
       "PageNameDisambiguationCandidate": {
         "additionalProperties": false,
         "properties": {
@@ -18850,14 +18943,12 @@
           "result_page_metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/PageMetadataPatch"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Result Page Metadata"
+            ]
           }
         },
         "required": [
@@ -20912,14 +21003,12 @@
           "result_page_metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/PageMetadataPatch"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Result Page Metadata"
+            ]
           }
         },
         "required": [

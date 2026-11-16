@@ -283,13 +283,14 @@ def test_page_service_updates_with_linear_parent_and_audit_row():
 
     # The two service calls establish the order; wall-clock timestamps do not,
     # because the clock may step back between the writes.
-    assert len(audits) == 4
+    assert len(audits) == 5
     assert all(audits[audit.id].action == audit.action for audit in created_audits)
     update_audits = [
         audit for key, audit in audits.items() if key not in created_audit_ids
     ]
     assert {audit.action for audit in update_audits} == {
         "context_page.draft.save",
+        "page.submit_context_edit_for_review",
         "context_page.draft.publish",
     }
     saved = next(
@@ -335,22 +336,25 @@ def test_page_service_emits_change_review_audit_bundle_for_writes():
         reviews = session.scalars(select(ReviewItem)).all()
         audits = _page_service_audit_rows(session)
 
-    assert len(change_sets) == 4
+    # Every update is recorded like a submission the review policy decides.
+    assert len(change_sets) == 5
     assert all(change.status == "applied" for change in change_sets)
     assert {(operation.operation, operation.diff_ref) for operation in operations} == {
         ("create", f"context_page_version:{created.version_id}"),
         ("publish", f"context_page_version:{created.version_id}"),
         ("save_draft", f"context_page_version:{updated.version_id}"),
+        ("update", f"context_page_version:{updated.version_id}"),
         ("publish", f"context_page_version:{updated.version_id}"),
     }
-    assert [review.status for review in reviews] == ["approved"]
+    assert [review.status for review in reviews] == ["approved", "approved"]
     audits_by_id = {audit.id: audit for audit in audits}
-    assert len(audits) == 4
+    assert len(audits) == 5
     assert all(
         audits_by_id[audit.id].action == audit.action for audit in created_audits
     )
     assert {audit.action for audit in audits if audit.id not in created_audit_ids} == {
         "context_page.draft.save",
+        "page.submit_context_edit_for_review",
         "context_page.draft.publish",
     }
 
@@ -435,6 +439,52 @@ def test_page_service_rejects_stale_update_without_overwriting():
 
     assert conflict.error_code == "context_merge_conflict"
     assert service.read_page(page_id=created.id).body_md == "# Hello v2"
+
+
+def test_page_update_finishes_every_writer_and_preserves_stale_bytes():
+    service = make_service()
+    created = service.write_page(
+        workspace_slug="default",
+        slug="hello",
+        title="Hello",
+        body_md="# Hello",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        actor_provenance="browser_session",
+    )
+    # A token write in a workspace that wants a person opens a review instead
+    # of leaving a draft nobody is asked to decide.
+    staged = service.update_page(
+        page_id=created.id,
+        title="Hello",
+        body_md="# Hello\n\nFrom a token.",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        base_version_id=created.version_id,
+        base_content_hash=created.content_hash,
+        actor_provenance="personal_access_token",
+    )
+    assert staged.review_item_id is not None
+    assert service.read_page(page_id=created.id).body_md == "# Hello"
+    # A stale save of that shared draft is kept as its own draft, unpublished.
+    preserved = service.update_page(
+        page_id=created.id,
+        title="Hello",
+        body_md="# Hello\n\nMy stale edit.",
+        actor_kind="human",
+        actor_id="dev-local-user",
+        base_version_id=staged.version_id,
+        base_content_hash=created.content_hash,
+        actor_provenance="browser_session",
+        on_stale="preserve_as_alternative",
+    )
+    assert preserved.alternative_draft_id not in {None, staged.version_id}
+    assert service.read_page(page_id=created.id).body_md == "# Hello"
+    with service.session_factory() as session:
+        kept = session.get(ContextPageVersion, preserved.alternative_draft_id)
+        assert kept.version_status == "draft"
+        assert kept.parent_version_id == created.version_id
+        assert kept.body_md == "# Hello\n\nMy stale edit."
 
 
 def test_page_service_rejects_version_id_belonging_to_another_page():

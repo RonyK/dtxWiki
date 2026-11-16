@@ -288,7 +288,9 @@ def preview_merge(session, page, version, *, commit_version_id=None, prepare=Non
     conflict_bodies = {"keep_both": both.body_md, "latest": latest.body_md}
     if clean is not None:
         conflict_bodies["result"] = clean.body_md
-    if prepare is not None:
+    if prepare is not None and kind == "fast_forward":
+        clean = both = latest = prepare(clean)
+    elif prepare is not None:
         both = prepare(both)
         latest = prepare(latest)
         clean = prepare(clean) if clean else None
@@ -641,15 +643,18 @@ def materialize_publication(
 
 def edit_merge_candidate(candidate, *, body_md=None, page_metadata=None):
     """Apply a reviewer's explicit result edit before preparation and hashing."""
+    from backend.schemas.page import PageMetadataPatch
+
     metadata = candidate.metadata
     if page_metadata is not None:
+        edit = PageMetadataPatch.model_validate(page_metadata)
         metadata = PageMetadata(
-            page_metadata.get("title", metadata.title),
-            page_metadata.get("page_type", metadata.page_type),
-            tuple(page_metadata.get("tags", metadata.tags)),
-            tuple(page_metadata.get("aliases", metadata.aliases)),
-            parse_uuid_or_none(page_metadata.get("placement_parent_node_id"))
-            if "placement_parent_node_id" in page_metadata
+            edit.title if edit.title is not None else metadata.title,
+            edit.page_type if edit.page_type is not None else metadata.page_type,
+            tuple(edit.tags) if edit.tags is not None else metadata.tags,
+            tuple(edit.aliases) if edit.aliases is not None else metadata.aliases,
+            edit.placement_parent_node_id
+            if edit.placement_parent_node_id is not None
             else metadata.placement_parent_node_id,
         )
     body = candidate.body_md if body_md is None else body_md

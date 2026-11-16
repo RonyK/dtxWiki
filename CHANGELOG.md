@@ -16,6 +16,12 @@
   `submit_revision_for_review`. Refresh cached tool catalogs and schemas.
 - Upgrade the draft schema after the document-identity migration. This data
   conversion cannot be downgraded; recovery uses the pre-upgrade backup.
+- Opening the editor on a published version no longer creates a draft; the
+  first save starts one. Page updates through REST finish every writer the
+  same way: published, or held in a review when the policy wants a person.
+- Automatic review approval waits from a draft's last save and approves only
+  the merge result it evaluated; publishing keeps the tree placement unless
+  the published result moves the page.
 
 
 ### Context body links

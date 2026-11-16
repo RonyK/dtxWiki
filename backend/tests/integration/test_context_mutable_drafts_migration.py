@@ -384,6 +384,10 @@ def test_mutable_draft_conversion_traversal(tmp_path, dialect):
                 review["risk_signals"]["migration_parent_repaired"]["version_id"]
                 for review in inspections
             } == {str(rejected_id), str(withdrawn_id), str(cycle_id)}
+            # The intent signal survives draft saves; the verdict is derived.
+            assert all(
+                review["risk_signals"]["caller_needs_review"] for review in inspections
+            )
             normal = next(
                 row
                 for row in pending_reviews

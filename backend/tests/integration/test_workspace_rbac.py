@@ -10,6 +10,7 @@ from sqlalchemy.exc import OperationalError
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
+from backend.models.context import ContextPageVersion
 from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.user import User
 from backend.models.workspace import Workspace
@@ -650,6 +651,13 @@ def test_admin_can_trigger_review_auto_approval_sweep(page_service):
         medium_review = session.get(ReviewItem, UUID(medium_review_item_id))
         medium_review.risk_level = "medium"
         medium_review.created_at = datetime.now(UTC) - timedelta(days=2)
+        # A shared draft's delay also runs from its last save.
+        for draft in session.scalars(
+            select(ContextPageVersion).where(
+                ContextPageVersion.workspace_id == UUID(workspace_id)
+            )
+        ):
+            draft.last_saved_at = datetime.now(UTC) - timedelta(days=2)
 
     swept = owner.post(
         f"/api/v1/workspaces/{workspace_id}/reviews/sweep-auto-approvals"

@@ -93,6 +93,23 @@ describe("pages api", () => {
     });
   });
 
+  it("reads a published commit on entry and URL re-entry without creating a draft", async () => {
+    const published = pageDetail({ version_status: "published", current_published_version_id: "v1" });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ data: published }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+    const selected = await readEditablePage(WORKSPACE_ID, "p1");
+    expect(selected).toEqual(published);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method ?? "GET").toBe("GET");
+    // The editor puts the selected commit in the URL; re-entry still only reads it.
+    await expect(readEditablePage(WORKSPACE_ID, "p1", selected.version_id)).resolves.toEqual(published);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/p1?version_id=v1");
+    expect(fetchMock.mock.calls[1][1]?.method ?? "GET").toBe("GET");
+  });
+
   it("sends cookie credentials and create payload", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

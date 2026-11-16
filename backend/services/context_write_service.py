@@ -3313,6 +3313,19 @@ class ContextWriteService:
             )
 
             was_archived = page.lifecycle_status == "archived"
+            # The commit carries every metadata field; only the fields this
+            # publication changes relative to the live head reach the tree.
+            previous_metadata = metadata_for(
+                page,
+                get_in_workspace(
+                    session,
+                    ContextPageVersion,
+                    workspace_id=workspace_id,
+                    resource_id=page.current_published_version_id,
+                )
+                if page.current_published_version_id
+                else None,
+            )
             recorded = record_context_decision(
                 session,
                 action="publish",
@@ -3330,15 +3343,20 @@ class ContextWriteService:
             )
             previous_published_version_id = recorded.previous_published_version_id
             change_set, audit_event = recorded.change_set, recorded.audit_event
-            applied_metadata_patch = dict(version.page_metadata or {})
+            published_metadata = metadata_for(page, version)
+            placement_changed = (
+                published_metadata.placement_parent_node_id
+                != previous_metadata.placement_parent_node_id
+            )
             # Publishing an archived page (draft created before the folder
             # cascade archived it, then approved) resurrects it — revive its
             # tree node too, or it becomes a searchable-but-tree-invisible
-            # ghost (B-8). Placement/title patches already trigger the same
-            # call; the was_archived arm covers the no-patch publish path.
+            # ghost (B-8). A title change syncs the node label; only a changed
+            # placement moves a node the tree may have moved since.
             if (
                 was_archived
-                or {"title", "placement_parent_node_id"} & applied_metadata_patch.keys()
+                or placement_changed
+                or published_metadata.title != previous_metadata.title
             ):
                 PageService._ensure_context_tree_placement(
                     session=session,
@@ -3347,7 +3365,7 @@ class ContextWriteService:
                     parent_id=page.placement_parent_node_id,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    move_existing=True,
+                    move_existing=placement_changed,
                 )
             change_set.status = "applied"
             # The publishing draft's own change sets move approved -> applied:
@@ -3648,17 +3666,16 @@ class ContextWriteService:
                 metadata_for,
             )
 
-            version.page_metadata = metadata_dict(
-                metadata_for(page, reference_source_version)
-            )
-            version.page_metadata.update(
-                {
-                    "title": body.metadata.title or page.title,
-                    "page_type": body.metadata.page_type or page.page_type,
-                    "tags": list(body.metadata.tags or page.tags or []),
-                    "aliases": list(body.metadata.aliases or page.aliases or []),
-                }
-            )
+            # Prepared values override the source snapshot; an explicit empty
+            # tag or alias list is a value, only None means "not supplied".
+            metadata = metadata_dict(metadata_for(page, reference_source_version))
+            for field in ("title", "page_type", "tags", "aliases"):
+                value = getattr(body.metadata, field)
+                if value is not None and value != "":
+                    metadata[field] = (
+                        list(value) if field in {"tags", "aliases"} else value
+                    )
+            version.page_metadata = metadata
             return version
         except MarkdownMediaPolicyError as exc:
             raise RejectedByPolicyError(str(exc), error_code=exc.error_code) from exc
@@ -3990,6 +4007,11 @@ class ContextWriteService:
         from backend.schemas.context_write import ReviewDecisionRequest
         from backend.services.review_service import ReviewService
 
+        review = get_in_workspace(
+            session, ReviewItem, workspace_id=workspace_id, resource_id=review_item_id
+        )
+        if review is None or not ReviewService.system_may_settle(session, review):
+            return
         ReviewService(
             audit_service=self.audit_service,
             context_media_repository_factory=self.context_media_repository_factory,

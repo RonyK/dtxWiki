@@ -433,7 +433,7 @@ class UpdateDraftResult(BaseModel):
 
 class PublishContextPageRequest(InputRequest):
     result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
-    result_page_metadata: dict[str, Any] | None = None
+    result_page_metadata: PageMetadataPatch | None = None
     expected_editing_revision: int | None = Field(default=None, ge=1)
     expected_published_version_id: UUID | None = None
     result_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
@@ -596,7 +596,7 @@ class FeedbackListResponse(RESTResponseBase):
 
 class ReviewDecisionRequest(InputRequest):
     result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
-    result_page_metadata: dict[str, Any] | None = None
+    result_page_metadata: PageMetadataPatch | None = None
     expected_editing_revision: int | None = Field(default=None, ge=1)
     expected_published_version_id: UUID | None = None
     result_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)

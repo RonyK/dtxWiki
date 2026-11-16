@@ -2333,7 +2333,6 @@ class PageService:
         from backend.services.context_draft_workflow import (
             merge_draft_references,
             metadata_dict,
-            metadata_for,
             preview_merge,
             set_parents,
         )
@@ -2380,17 +2379,9 @@ class PageService:
                             server_version_id=source.id if source else None,
                             server_content_hash=source.content_hash if source else None,
                         )
-                    version = self._insert_version_copy(
-                        session,
-                        page_id=page.id,
-                        parent_version_id=source.id if source else None,
-                        source_version=source,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                        version_status="draft",
+                    version = self._start_draft_from_commit(
+                        session, page, source, actor_kind=actor_kind, actor_id=actor_id
                     )
-                    version.page_metadata = metadata_dict(metadata_for(page, source))
-                    set_parents(session, version, ids[:1])
                     for other in sources[1:]:
                         # The same preparation as bring-in: the merged body
                         # passes the body budget, format and media policy.
@@ -3631,7 +3622,12 @@ class PageService:
         aliases: list[str] | None = None,
         destination_node_id: UUID | None = None,
     ) -> PagePayload:
-        from backend.services.context_draft_workflow import metadata_dict, metadata_for
+        from backend.services.context_draft_workflow import (
+            direct_publication_risk,
+            metadata_for,
+            preview_merge,
+            publication_candidate,
+        )
 
         with self.session_factory.begin() as session:
             acquire_write_intent(session)
@@ -3640,10 +3636,19 @@ class PageService:
             if page is None:
                 raise PageNotFoundError("page not found")
             source = self._require_page_version(session, page, base_version_id)
-            if source.content_hash != base_content_hash or (
+            is_draft = source.version_status == "draft"
+            if not is_draft and not source.commit_oid:
+                raise PageConflictError(
+                    server_version_id=source.id, server_content_hash=source.content_hash
+                )
+            # A shared draft is checked against the revision the caller read. A
+            # commit is a starting point like any other; it merges at publish.
+            stale = source.content_hash != base_content_hash or (
                 expected_editing_revision is not None
                 and source.editing_revision != expected_editing_revision
-            ):
+            )
+            preserve = on_stale == "preserve_as_alternative"
+            if stale and not preserve:
                 raise PageConflictError(
                     server_version_id=source.id,
                     server_content_hash=source.content_hash,
@@ -3651,7 +3656,8 @@ class PageService:
                 )
             source_metadata = metadata_for(page, source)
             if (
-                same_authored_markdown(body_md, source.body_md)
+                not stale
+                and same_authored_markdown(body_md, source.body_md)
                 and (title is None or title == source_metadata.title)
                 and (page_type is None or page_type == source_metadata.page_type)
                 and (tags is None or list(tags) == list(source_metadata.tags))
@@ -3662,27 +3668,29 @@ class PageService:
                 )
             ):
                 return self._payload_from_page(session, page, source)
-            if source.version_status == "draft":
+            # A stale write is kept as its own draft from the commit the shared
+            # draft started from; it is neither published nor sent to review.
+            start_id = source.parent_version_id if stale and is_draft else source.id
+            if is_draft and not stale:
                 version = source
-            elif source.commit_oid:
-                version = self._insert_version_copy(
+            elif start_id is None:
+                raise PageConflictError(
+                    server_version_id=source.id,
+                    server_content_hash=source.content_hash,
+                    server_editing_revision=source.editing_revision,
+                )
+            else:
+                version = self._start_draft_from_commit(
                     session,
-                    page_id=page.id,
-                    parent_version_id=source.id,
-                    source_version=source,
+                    page,
+                    self._require_page_version(session, page, start_id),
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    version_status="draft",
-                )
-                version.page_metadata = metadata_dict(metadata_for(page, source))
-            else:
-                raise PageConflictError(
-                    server_version_id=source.id, server_content_hash=source.content_hash
                 )
             prepared = self._autosave_prepare(
                 session=session,
                 page=page,
-                current=source,
+                current=version,
                 title=title,
                 body_md=body_md,
                 page_type=page_type,
@@ -3709,37 +3717,104 @@ class PageService:
                 baseline_patch=None,
                 metadata_patch=patch,
             )
-            if actor_provenance == "browser_session":
-                from backend.schemas.context_write import PublishContextPageRequest
-                from backend.services.context_write_service import ContextWriteService
+            if stale or (
+                preserve and preview_merge(session, page, version).clean is None
+            ):
+                payload.alternative_draft_id = version.id
+                return payload
+            # The same completion for every writer, judged on the prepared
+            # result the publication would store: a write that must wait for a
+            # person opens a review, any other write is published.
+            from backend.schemas.context_write import PublishContextPageRequest
 
-                published = ContextWriteService(
-                    context_version_writer=self.context_version_writer,
-                    body_preparer=self.body_preparer,
-                    actor_context=self.actor_context,
-                    context_media_repository_factory=self.context_media_repository_factory,
-                ).publish_draft(
-                    session=session,
-                    workspace_id=page.workspace_id,
-                    page_id=page.id,
-                    request=PublishContextPageRequest(
-                        version_id=version.id, reason="page.update"
-                    ),
-                    actor_kind=actor_kind,
-                    actor_id=actor_id,
-                )
-                final_version = self._require_page_version(
-                    session, page, published.published_version_id
-                )
-                return self._payload_from_page(
+            publish_request = PublishContextPageRequest(
+                version_id=version.id, reason="page.update"
+            )
+            _, candidate = publication_candidate(
+                session,
+                page,
+                version,
+                publish_request,
+                prepare=lambda merged: self._prepare_merge_candidate(
                     session,
                     page,
-                    final_version,
-                    prepared=prepared
-                    if final_version.body_md == prepared.body
-                    else None,
+                    version,
+                    merged,
+                    actor_kind,
+                    actor_id,
+                    actor_provenance,
+                ),
+            )
+            workspace = self._workspace_for(session, page.workspace_id)
+            requires_review = self._stages_as_draft(
+                workspace=workspace,
+                actor_provenance=actor_provenance,
+                body_md=candidate.body_md,
+            ) or (
+                actor_provenance in AI_PROVENANCES
+                and direct_publication_risk(
+                    session,
+                    page,
+                    candidate,
+                    workspace=workspace,
+                    reviews=[],
+                    actor_provenance=actor_provenance,
+                    risk_resolver=self.change_audit_recorder.risk_resolver,
+                    lint_registry=self.lint_registry,
+                ).review_required
+            )
+            # The write is recorded like a submission: the review policy either
+            # approves it on the record or leaves it pending for a person.
+            submitted = self._submit_context_edit_in_session(
+                session=session,
+                page_id=page.id,
+                version_id=version.id,
+                workspace_id=page.workspace_id,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                actor_provenance=actor_provenance,
+                expected_editing_revision=version.editing_revision,
+                idempotency_key=f"page-update:{version.id}:{version.editing_revision}",
+                reason="page.update",
+                needs_review=False,
+                force_pending_review=requires_review,
+            )
+            review = (
+                get_in_workspace(
+                    session,
+                    ReviewItem,
+                    workspace_id=page.workspace_id,
+                    resource_id=submitted.review_item_id,
                 )
-            return payload
+                if submitted.review_item_id
+                else None
+            )
+            if review is not None and review.status != "approved":
+                return submitted
+            from backend.services.context_write_service import ContextWriteService
+
+            published = ContextWriteService(
+                context_version_writer=self.context_version_writer,
+                body_preparer=self.body_preparer,
+                actor_context=self.actor_context,
+                context_media_repository_factory=self.context_media_repository_factory,
+            ).publish_draft(
+                session=session,
+                workspace_id=page.workspace_id,
+                page_id=page.id,
+                request=publish_request,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
+            final_version = self._require_page_version(
+                session, page, published.published_version_id
+            )
+            return self._payload_from_page(
+                session,
+                page,
+                final_version,
+                prepared=prepared if final_version.body_md == prepared.body else None,
+            )
 
     def _refresh_page_links(
         self, session: Session, *, page: ContextPage, version: ContextPageVersion
@@ -3883,6 +3958,7 @@ class PageService:
             return version
         except MarkdownMediaPolicyError as exc:
             raise PageMediaPolicyError(str(exc), reason_code=exc.reason_code) from exc
+
         except ContextMediaError as exc:
             raise PageContextMediaError(str(exc), error_code=exc.error_code) from exc
         except ValueError as exc:
@@ -3892,6 +3968,30 @@ class PageService:
             ):
                 raise PageValidationError(str(exc)) from exc
             raise
+
+    def _start_draft_from_commit(
+        self,
+        session: Session,
+        page: ContextPage,
+        source: ContextPageVersion,
+        *,
+        actor_kind: str,
+        actor_id: str,
+    ) -> ContextPageVersion:
+        """A new shared draft whose first parent is the commit it starts from."""
+        from backend.services.context_draft_workflow import set_parents
+
+        version = self._insert_version_copy(
+            session,
+            page_id=page.id,
+            parent_version_id=source.id,
+            source_version=source,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            version_status="draft",
+        )
+        set_parents(session, version, [source.id])
+        return version
 
     def _require_context_media_repository(
         self, session: Session
@@ -4046,8 +4146,31 @@ class PageService:
                     raise PageNotFoundError("page not found")
                 if target_id is None:
                     raise PageValidationError("version_id is required to save a draft")
+                current = self._require_page_version(session, page, target_id)
+                expected_revision = expected_editing_revision
+                if current.version_status in {
+                    "published_snapshot",
+                    "superseded_snapshot",
+                }:
+                    # Saving onto a published version starts a draft from the
+                    # version the editor read, so opening an editor creates
+                    # nothing. An ended draft (closed, discarded) still refuses.
+                    if expected_revision != current.editing_revision or (
+                        base_content_hash is not None
+                        and base_content_hash != current.content_hash
+                    ):
+                        raise PageConflictError(
+                            server_version_id=current.id,
+                            server_content_hash=current.content_hash,
+                            server_editing_revision=current.editing_revision,
+                            error_code="editing_revision_conflict",
+                        )
+                    current = self._start_draft_from_commit(
+                        session, page, current, actor_kind=actor_kind, actor_id=actor_id
+                    )
+                    expected_revision = current.editing_revision
                 current = self._require_named_open_edit(
-                    session, page, target_id, actor_kind, actor_id
+                    session, page, current.id, actor_kind, actor_id
                 )
                 before, revision_before = current.body_md, current.editing_revision
                 prepared = self._autosave_prepare(
@@ -4074,7 +4197,7 @@ class PageService:
                 )
                 if destination_node_id is not None:
                     data["placement_parent_node_id"] = str(destination_node_id)
-                stale = expected_editing_revision != revision_before or (
+                stale = expected_revision != revision_before or (
                     base_content_hash is not None
                     and base_content_hash != current.content_hash
                 )

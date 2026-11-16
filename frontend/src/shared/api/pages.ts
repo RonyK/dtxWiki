@@ -181,16 +181,15 @@ export class PageEditingUnavailableError extends Error {
   }
 }
 
-// The URL's explicit version chooses a shared draft or a historical commit.
-// An ordinary editor entry starts a fresh draft from the published head.
+// Published versions are read-only entry points until the first save starts a
+// draft. Explicit shared drafts and never-published pages join the existing
+// draft; an ended draft named from history starts a new one when opened.
 export async function readEditablePage(workspaceId: string, id: string, versionId?: string) {
   const selected = await readPage(workspaceId, id, versionId);
-  const fromVersionId = versionId ?? (
-    !selected.current_published_version_id && selected.version_status === "draft"
-      ? selected.version_id
-      : undefined
-  );
-  return beginPageEdit(workspaceId, selected, fromVersionId);
+  const joinsDraft = selected.version_status === "draft" && (versionId || !selected.current_published_version_id);
+  const endedDraft = Boolean(versionId) &&
+    (selected.version_status === "closed" || selected.version_status === "discarded");
+  return joinsDraft || endedDraft ? beginPageEdit(workspaceId, selected, selected.version_id) : selected;
 }
 
 export async function beginPageEdit(workspaceId: string, page: PagePayload, fromVersionId?: string) {
