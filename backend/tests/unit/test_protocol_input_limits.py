@@ -131,7 +131,7 @@ def test_dcr_metadata_invalid_before_persistence():
         {**valid, "redirect_uris": ["https://client.example/" + "a" * 2048]},
         {**valid, "scope": ["mcp:read"]},
         {**valid, "grant_types": ["client_credentials"]},
-        {**valid, "response_types": ["code", "code"]},
+        {**valid, "response_types": ["token"]},
         {**valid, "application_type": {"native": True}},
     ):
         with pytest.raises(InvalidClientRegistrationError):
@@ -175,9 +175,10 @@ def test_cimd_same_redirect_budget_and_original_body_limit():
         _parse_metadata(client_id, json.dumps(payload).encode())
     with pytest.raises(CIMDFetchError):
         _parse_metadata(client_id, b" " * 5121)
-    # Unlike DCR, CIMD rejects a confidential client instead of storing "none".
+    # Unlike DCR, CIMD rejects a shared-secret client instead of storing "none":
+    # a published document cannot keep a secret, even beside "none".
     payload["redirect_uris"] = ["https://client.example/cb"]
-    payload["token_endpoint_auth_method"] = "client_secret_basic"
+    payload["token_endpoint_auth_methods_supported"] = ["none", "client_secret_basic"]
     with pytest.raises(CIMDFetchError):
         _parse_metadata(client_id, json.dumps(payload).encode())
 

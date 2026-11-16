@@ -413,3 +413,48 @@ def test_single_flight_lock_wait_is_bounded_by_total_deadline(monkeypatch):
 
 def test_address_predicate_allows_public_control():
     assert not oauth_cimd.address_is_forbidden(ipaddress.ip_address(PUBLIC_IP))
+
+
+def test_published_client_document_registers_its_supported_subset():
+    """Hosted MCP clients publish one document for every server they reach.
+
+    Combines what Claude, ChatGPT and Claude Code published on 2026-11-17: a
+    grant type this server lacks, a private_key_jwt preference that still
+    offers ``none``, and port-less loopback callbacks beside a callback on a
+    scheme this server does not redirect to. The document must register what
+    this server supports, with every offered scope requestable.
+    """
+
+    from backend.services.oauth_service import _validated_cimd_registration
+
+    document = {
+        "client_id": CLIENT_ID,
+        "client_name": "Hosted MCP Client",
+        "client_uri": "https://client.example",
+        "redirect_uris": [
+            "app.example.client:/oauth/callback",
+            "http://localhost/callback",
+            "http://127.0.0.1/callback",
+        ],
+        "grant_types": [
+            "authorization_code",
+            "refresh_token",
+            "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        ],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "private_key_jwt",
+        "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+        "token_endpoint_auth_signing_alg": "RS256",
+        "jwks_uri": "https://client.example/oauth/jwks.json",
+    }
+
+    registration = _validated_cimd_registration(
+        oauth_cimd._parse_metadata(CLIENT_ID, json.dumps(document).encode())
+    )
+
+    assert registration.redirect_uris == (
+        "http://localhost/callback",
+        "http://127.0.0.1/callback",
+    )
+    assert registration.grant_types == ("authorization_code", "refresh_token")
+    assert registration.scope == "mcp:read mcp:write mcp:agent offline_access"

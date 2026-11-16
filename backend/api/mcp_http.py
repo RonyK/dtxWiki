@@ -84,6 +84,7 @@ from backend.policy.workspace_resolution import (
     resolve_and_check,
     resolve_workspace_for_actor,
 )
+from backend.services.oauth_service import ALLOWED_OAUTH_SCOPES, MCP_RESOURCE_PATH
 from backend.services.page_service import PageService
 from backend.services.read_errors import RejectedByPolicyError
 from backend.services.restricted_library_policy import (
@@ -431,6 +432,22 @@ async def mcp_http_get(request: Request):
     # disconnect), so we cannot buffer the response — return an ASGI
     # delegate that the framework will invoke with the same scope.
     return _StreamingMCPResponse(request, manager, actor, bearer_fingerprint)
+
+
+@router.head("/mcp", include_in_schema=False)
+async def mcp_http_head(request: Request):
+    # Some MCP clients probe with HEAD to read the authentication challenge
+    # when their transport hides the POST response headers. Authenticate like
+    # every other /mcp method; HEAD itself carries no MCP message.
+    authorization = request.headers.get("authorization", "")
+    if not authorization_header_is_valid(
+        authorization
+    ) or not authorization.lower().startswith("bearer "):
+        return mcp_unauthorized(request)
+    actor = _authenticate_mcp_actor(request, authorization[7:].strip(" \t"))
+    if isinstance(actor, JSONResponse):
+        return actor
+    return Response(status_code=405, headers={"Allow": "GET, POST, DELETE"})
 
 
 @router.delete("/mcp", include_in_schema=False)
@@ -1659,12 +1676,21 @@ def _validate_mcp_session_id(
 
 def mcp_unauthorized(request: Request) -> JSONResponse:
     metadata_url = (
-        f"{public_base_url_from_request(request)}/.well-known/oauth-protected-resource"
+        f"{public_base_url_from_request(request)}"
+        f"/.well-known/oauth-protected-resource{MCP_RESOURCE_PATH}"
     )
+    # MCP clients request the challenge's scope first (MCP authorization,
+    # scope selection), so naming every offered scope lets one consent cover
+    # reading, editing and agent work; the user still approves it.
+    scope = " ".join(ALLOWED_OAUTH_SCOPES)
     return JSONResponse(
         {"error": "unauthorized"},
         status_code=401,
-        headers={"WWW-Authenticate": (f'Bearer resource_metadata="{metadata_url}"')},
+        headers={
+            "WWW-Authenticate": (
+                f'Bearer resource_metadata="{metadata_url}", scope="{scope}"'
+            )
+        },
     )
 
 

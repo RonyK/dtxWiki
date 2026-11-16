@@ -130,40 +130,17 @@ def test_fragment_redirect_uri_rejected_with_keyword() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Sprint_5 Phase_3 Task 3.7 (SEC-FR3MID-1): http loopback URI requires an
-# explicit port. RFC 8252 §7.3 says the native client picks a runtime port
-# and registers it; accepting the missing-port form would let a later
-# runtime match consult only host + path, which is not the RFC's intent.
-# https paths still accept the implicit port (default 443).
+# RFC 8252 §7.3: a native client picks the loopback port when it makes the
+# request, so a registration may omit it; https implies 443.
 # ---------------------------------------------------------------------------
 
 
-def test_http_loopback_without_port_rejected() -> None:
-    """Negative pin: ``http://127.0.0.1/cb`` (no port) must be rejected
-    with the ``port is required`` keyword."""
+def test_registration_without_port_accepted() -> None:
+    """Client metadata documents publish ``http://127.0.0.1/callback``;
+    ``redirect_uri_matches`` then lets the request choose the port."""
 
-    with pytest.raises(InvalidClientRegistrationError) as exc:
-        validate_redirect_uri("http://127.0.0.1/cb")
-    assert "port is required" in str(exc.value)
-
-
-def test_http_localhost_without_port_rejected() -> None:
-    """Same rule for ``http://localhost/cb`` — RFC 8252 §7.3 requires
-    a concrete runtime port."""
-
-    with pytest.raises(InvalidClientRegistrationError) as exc:
-        validate_redirect_uri("http://localhost/cb")
-    assert "port is required" in str(exc.value)
-
-
-def test_https_without_port_accepted() -> None:
-    """Positive control paired with the http-port-required negatives:
-    https default-port form is allowed because https implies 443."""
-
-    assert (
-        validate_redirect_uri("https://example.com/cb")
-        == "https://example.com/cb"
-    )
+    for uri in ("http://127.0.0.1/cb", "http://localhost/cb", "https://example.com/cb"):
+        assert validate_redirect_uri(uri) == uri
 
 
 # ---------------------------------------------------------------------------
@@ -233,9 +210,13 @@ def test_runtime_port_match_rejects_requested_out_of_range_port() -> None:
     assert redirect_uri_matches("http://127.0.0.1:99999/cb", registered) is False
 
 
-def test_runtime_port_match_rejects_registered_missing_port() -> None:
+def test_runtime_port_match_accepts_registered_missing_port() -> None:
+    """A port-less loopback registration matches any request port, and
+    nothing but the port may differ."""
+
     registered = ["http://127.0.0.1/cb"]
-    assert redirect_uri_matches("http://127.0.0.1:62345/cb", registered) is False
+    assert redirect_uri_matches("http://127.0.0.1:62345/cb", registered) is True
+    assert redirect_uri_matches("http://127.0.0.1:62345/other", registered) is False
 
 
 def test_runtime_port_match_rejects_non_loopback_host() -> None:

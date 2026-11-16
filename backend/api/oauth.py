@@ -58,6 +58,7 @@ from backend.schemas.auth import (
 )
 from backend.schemas.common import RESTErrorBody
 from backend.services.oauth_service import (
+    MCP_RESOURCE_PATH,
     OAUTH_CSRF_COOKIE_MAX_AGE,
     OAUTH_CSRF_COOKIE_NAME,
     OAUTH_CSRF_COOKIE_PATH,
@@ -134,6 +135,13 @@ class RevokeActor:
 
 
 @router.get("/.well-known/oauth-protected-resource")
+# RFC 9728 §3.1 places a resource's metadata at the well-known path followed
+# by the resource path. The 401 challenge names this one; the root path stays
+# for clients and tools that already use it.
+@router.get(
+    f"/.well-known/oauth-protected-resource{MCP_RESOURCE_PATH}",
+    include_in_schema=False,
+)
 def oauth_protected_resource(request: Request, session_factory: SessionFactoryDep):
     return oauth_service(request, session_factory).protected_resource_metadata()
 

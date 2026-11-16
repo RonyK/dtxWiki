@@ -2095,10 +2095,11 @@ def test_initialize_without_session_in_json_stateless_no_op(page_service):
 # string is unambiguous (no scheme/host drift from default fixtures).
 _PUBLIC_ORIGIN = "https://mcp.example.com"
 _EXPECTED_METADATA_URL = (
-    f"{_PUBLIC_ORIGIN}/.well-known/oauth-protected-resource"
+    f"{_PUBLIC_ORIGIN}/.well-known/oauth-protected-resource/mcp"
 )
 _EXPECTED_WWW_AUTH = (
-    f'Bearer resource_metadata="{_EXPECTED_METADATA_URL}"'
+    f'Bearer resource_metadata="{_EXPECTED_METADATA_URL}", '
+    'scope="mcp:read mcp:write mcp:agent offline_access"'
 )
 
 
@@ -2124,7 +2125,9 @@ def _make_settings_with_public_origin(
 def test_unauthorized_metadata_uses_public_origin(mcp_modes):
     """Plan-named test (B5.7): POST /mcp without bearer → 401 with
     ``WWW-Authenticate: Bearer resource_metadata="<public_base_url>/
-    .well-known/oauth-protected-resource"`` exactly.
+    .well-known/oauth-protected-resource/mcp", scope="<offered scopes>"``
+    exactly, and the named metadata URL serves the ``/mcp`` resource
+    (RFC 9728 §3.1).
 
     Negative-test rule (ADR A6): paired positive control
     ``test_unauthorized_omitted_when_authorized`` below — same setup
@@ -2146,6 +2149,9 @@ def test_unauthorized_metadata_uses_public_origin(mcp_modes):
     assert response.headers["www-authenticate"] == _EXPECTED_WWW_AUTH, (
         response.headers["www-authenticate"]
     )
+    metadata = client.get(_EXPECTED_METADATA_URL.removeprefix(_PUBLIC_ORIGIN))
+    assert metadata.status_code == 200, metadata.text
+    assert metadata.json()["resource"] == f"{_PUBLIC_ORIGIN}/mcp"
 
 
 def test_unauthorized_no_public_base_url_uses_request_base_url(page_service):
@@ -2199,9 +2205,10 @@ def test_unauthorized_body_is_single_key(mcp_modes):
     Negative-test rule (ADR A6): pins the exact key set and asserts
     common leakage keys are absent.
 
-    Bearer auth is required on every verb, and GET/DELETE return the same
-    ``WWW-Authenticate`` metadata URL as POST (B5.7), built from
-    ``settings.public_base_url``.
+    Bearer auth is required on every verb, and GET/DELETE/HEAD return the
+    same ``WWW-Authenticate`` metadata URL as POST (B5.7), built from
+    ``settings.public_base_url``. HEAD is the discovery probe some clients
+    send when their transport hides the POST challenge.
     """
     client = mcp_modes.client("streamable", public_origin=True)
     # Three verbs, three asserts — minimal-disclosure must hold
@@ -2234,6 +2241,9 @@ def test_unauthorized_body_is_single_key(mcp_modes):
             f"{verb}: leaked 'error_description' in body"
         )
         assert "error_code" not in body, f"{verb}: leaked 'error_code' in body"
+    head_resp = client.head("/mcp")
+    assert head_resp.status_code == 401
+    assert head_resp.headers["www-authenticate"] == _EXPECTED_WWW_AUTH
 
 
 def test_unauthorized_metadata_ignores_host_header_injection(page_service, monkeypatch):

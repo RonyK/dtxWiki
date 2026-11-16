@@ -16,6 +16,9 @@ import httpx
 
 from backend.domain.credential_input import OAUTH_IDENTIFIER_MAX_BYTES
 from backend.domain.oauth_input import (
+    SUPPORTED_GRANT_TYPES,
+    SUPPORTED_RESPONSE_TYPES,
+    supported_values,
     validate_client_name,
     validate_identifier,
     validate_redirect_list,
@@ -391,56 +394,22 @@ def _parse_metadata(client_id: str, body: bytes) -> CIMDClientMetadata:
         raise CIMDFetchError() from None
     if not isinstance(payload, dict) or payload.get("client_id") != client_id:
         raise CIMDFetchError()
+    client_name = payload.get("client_name", "Client ID Metadata client")
+    redirect_uris = payload.get("redirect_uris")
+    # An omitted scope names no restriction; registration decides what the
+    # client may request (``registration_scope``).
+    scope = payload.get("scope", "")
     try:
         validate_identifier(client_id)
         validate_supported_metadata(payload)
-        validate_redirect_list(payload.get("redirect_uris"))
-        validate_client_name(payload.get("client_name", "Client ID Metadata client"))
-        validate_scope_input(payload.get("scope", "mcp:read"))
+        validate_redirect_list(redirect_uris)
+        validate_client_name(client_name)
+        validate_scope_input(scope)
     except ValueError:
         raise CIMDFetchError() from None
-
-    client_name = payload.get("client_name", "Client ID Metadata client")
-    redirect_uris = payload.get("redirect_uris")
-    scope = payload.get("scope", "mcp:read")
-    grant_types = payload.get(
-        "grant_types",
-        ["authorization_code", "refresh_token"],
-    )
-    response_types = payload.get("response_types", ["code"])
-    application_type = payload.get("application_type", "native")
-    token_auth_method = payload.get("token_endpoint_auth_method", "none")
-
-    if not isinstance(client_name, str) or not 1 <= len(client_name) <= 200:
-        raise CIMDFetchError()
-    if (
-        not isinstance(redirect_uris, list)
-        or not redirect_uris
-        or not all(isinstance(uri, str) for uri in redirect_uris)
-    ):
-        raise CIMDFetchError()
-    if not isinstance(scope, str):
-        raise CIMDFetchError()
-    if (
-        not isinstance(grant_types, list)
-        or not grant_types
-        or not all(isinstance(value, str) for value in grant_types)
-        or "authorization_code" not in grant_types
-        or any(
-            value not in {"authorization_code", "refresh_token"}
-            for value in grant_types
-        )
-    ):
-        raise CIMDFetchError()
-    if (
-        not isinstance(response_types, list)
-        or not response_types
-        or not all(isinstance(value, str) for value in response_types)
-        or "code" not in response_types
-        or any(value != "code" for value in response_types)
-    ):
-        raise CIMDFetchError()
-    if application_type not in {"native", "web"} or token_auth_method != "none":
+    # This server authenticates no client at the token endpoint, so the client
+    # must offer ``none``.
+    if "none" not in _offered_token_endpoint_auth_methods(payload):
         raise CIMDFetchError()
     if "client_secret" in payload or "client_secret_expires_at" in payload:
         raise CIMDFetchError()
@@ -450,7 +419,40 @@ def _parse_metadata(client_id: str, body: bytes) -> CIMDClientMetadata:
         client_name=client_name,
         redirect_uris=tuple(redirect_uris),
         scope=scope,
-        grant_types=tuple(grant_types),
-        response_types=tuple(response_types),
-        application_type=application_type,
+        grant_types=supported_values(
+            payload.get("grant_types", list(SUPPORTED_GRANT_TYPES)),
+            SUPPORTED_GRANT_TYPES,
+        ),
+        response_types=supported_values(
+            payload.get("response_types", list(SUPPORTED_RESPONSE_TYPES)),
+            SUPPORTED_RESPONSE_TYPES,
+        ),
+        # Like DCR, register only a type this server knows.
+        application_type=(
+            "web" if payload.get("application_type") == "web" else "native"
+        ),
     )
+
+
+def _offered_token_endpoint_auth_methods(payload: dict) -> tuple[str, ...]:
+    """The token endpoint authentication methods a document says it can use.
+
+    ``token_endpoint_auth_methods_supported`` lists every method the client
+    can use, and a singular ``token_endpoint_auth_method`` must be one of
+    them, naming the client's preference. With neither, a client metadata
+    document defaults to ``none``. A published document cannot keep a shared
+    secret, so no ``client_secret_*`` method may appear (Client ID Metadata
+    Document §4.1, §5).
+    """
+
+    preferred = payload.get("token_endpoint_auth_method", "none")
+    offered = payload.get("token_endpoint_auth_methods_supported", [preferred])
+    if (
+        not isinstance(offered, list)
+        or not offered
+        or not all(isinstance(method, str) for method in offered)
+        or preferred not in offered
+        or any(method.startswith("client_secret_") for method in offered)
+    ):
+        raise CIMDFetchError()
+    return tuple(offered)

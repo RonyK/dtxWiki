@@ -91,6 +91,9 @@ ALLOWED_OAUTH_SCOPES = (
     "offline_access",
 )
 DEFAULT_GRANT_TYPES = ["authorization_code", "refresh_token"]
+# The MCP endpoint is the one protected resource; its RFC 9728 metadata lives
+# at /.well-known/oauth-protected-resource followed by this path.
+MCP_RESOURCE_PATH = "/mcp"
 DEFAULT_RESPONSE_TYPES = ["code"]
 CODE_TTL_SECONDS = 60
 # P10.3 T3 (section 2.3, ADR A5 amendment): a rotated refresh token reused
@@ -1088,7 +1091,7 @@ class OAuthService:
 
     @property
     def resource(self) -> str:
-        return f"{self.issuer}/mcp"
+        return f"{self.issuer}{MCP_RESOURCE_PATH}"
 
     def _workspace_session_factory(self, workspace_id: UUID):
         if self.database_provider is None:
@@ -1150,11 +1153,10 @@ class OAuthService:
         }
 
     def authorization_server_metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "issuer": self.issuer,
             "authorization_endpoint": f"{self.issuer}/oauth/authorize",
             "token_endpoint": f"{self.issuer}/oauth/token",
-            "registration_endpoint": f"{self.issuer}/oauth/register",
             # Sprint_5 Phase_3 Task 3.5 (RFC 7009): revoke endpoint
             # advertised on the authorization-server metadata document so
             # native clients (Claude Code, Codex CLI) can discover it.
@@ -1167,7 +1169,15 @@ class OAuthService:
             "token_endpoint_auth_methods_supported": ["none"],
             "scopes_supported": list(ALLOWED_OAUTH_SCOPES),
             "client_id_metadata_document_supported": True,
+            # Every authorization response, success or denial, carries ``iss``
+            # (RFC 9207); clients choose their mix-up defense from this flag.
+            "authorization_response_iss_parameter_supported": True,
         }
+        # Advertise registration only where it is open, so a client that
+        # could use a client metadata document is not sent to a closed door.
+        if self.settings.oauth_allow_dcr:
+            metadata["registration_endpoint"] = f"{self.issuer}/oauth/register"
+        return metadata
 
     def jwks(self) -> dict[str, Any]:
         public_key = _load_private_key(self.settings).public_key()
@@ -1207,19 +1217,16 @@ class OAuthService:
             redirects = validate_redirect_list(payload.get("redirect_uris"))
         except ValueError as exc:
             raise InvalidClientRegistrationError(str(exc)) from exc
-        normalized_redirects = [validate_redirect_uri(uri) for uri in redirects]
+        normalized_redirects = supported_redirect_uris(redirects)
         # Sprint_5 Phase_3 Task 3.2: scope subset of ALLOWED_OAUTH_SCOPES.
         # ``normalize_scope`` raises ``InvalidOAuthRequestError`` for unknown
         # scopes; DCR converts that to ``InvalidClientRegistrationError`` so
         # the /oauth/register endpoint returns 400 instead of 500 and the
         # error_code reads ``invalid_client_metadata`` per RFC 7591 §3.2.2.
-        raw_scope = payload.get("scope")
-        # Least-privilege default (RFC 7591): an omitted scope registers read-only,
-        # not every scope. A client wanting mcp:write/mcp:agent must request it
-        # explicitly (and the user still approves it at /oauth/authorize consent).
-        default_scope = "mcp:read"
+        # An omitted or empty scope limits nothing; the user approves the
+        # requested scopes at /oauth/authorize consent.
         try:
-            scope = normalize_scope(default_scope if raw_scope is None else raw_scope)
+            scope = registration_scope(payload.get("scope"))
         except InvalidOAuthRequestError as exc:
             raise InvalidClientRegistrationError(f"scope is invalid: {exc}") from exc
         # Sprint_5 Phase_3 Task 3.2: client_name length ∈ [1, 200]. Previously
@@ -3603,8 +3610,8 @@ def _validated_cimd_registration(
 ) -> CIMDClientMetadata:
     """Apply the exact DCR/runtime redirect and scope validators to CIMD."""
 
-    redirects = tuple(validate_redirect_uri(uri) for uri in metadata.redirect_uris)
-    scope = normalize_scope(metadata.scope)
+    redirects = tuple(supported_redirect_uris(list(metadata.redirect_uris)))
+    scope = registration_scope(metadata.scope)
     return CIMDClientMetadata(
         client_id=metadata.client_id,
         client_name=metadata.client_name,
@@ -3669,6 +3676,20 @@ def normalize_scope(scope: str) -> str:
     if unknown:
         raise InvalidOAuthRequestError(f"unsupported scope: {unknown[0]}")
     return " ".join(dict.fromkeys(requested))
+
+
+def registration_scope(scope: object) -> str:
+    """The scopes a registered client may request.
+
+    A client that names no scope (omitted or empty, as client metadata
+    documents and many DCR clients send) may request any scope this server
+    offers; the user's consent decides what it receives. A scope the client
+    names stays its ceiling.
+    """
+
+    if scope is None or (isinstance(scope, str) and not scope.split()):
+        return " ".join(ALLOWED_OAUTH_SCOPES)
+    return normalize_scope(scope)
 
 
 def scope_covers(granted_scope: str, requested_scope: str) -> bool:
@@ -4220,14 +4241,10 @@ def validate_redirect_uri(uri: str) -> str:
     if "\\" in uri:
         raise InvalidClientRegistrationError("redirect_uri backslash not allowed")
     # Port range guard (ADR A2 (2)): reject port 0 and out-of-range ports.
-    # Sprint_5 Phase_3 Task 3.7 (SEC-FR3MID-1): an http loopback URI MUST
-    # carry an explicit port. RFC 8252 §7.3 requires the native client to
-    # bind a runtime port and put it into ``redirect_uris`` at DCR time;
-    # accepting ``port=None`` (e.g. ``http://127.0.0.1/cb``) would let a
-    # later ``redirect_uri_matches`` query bypass the loopback-port
-    # exception and match ``http://127.0.0.1:1234/cb`` only by virtue of
-    # the missing-port wildcard, which is not the RFC's intent. https
-    # registrations may omit the port (default 443 is implied).
+    # A registered http loopback URI may omit the port: RFC 8252 §7.3 has the
+    # native client pick an ephemeral port when it makes the request, so the
+    # registration names only host and path and ``redirect_uri_matches``
+    # accepts any request port. A runtime request still names its port.
     try:
         port = parsed.port
     except ValueError as exc:
@@ -4241,10 +4258,6 @@ def validate_redirect_uri(uri: str) -> str:
         )
     if port == 0:
         raise InvalidClientRegistrationError("redirect_uri loopback port 0 not allowed")
-    if parsed.scheme == "http" and port is None:
-        raise InvalidClientRegistrationError(
-            "redirect_uri loopback port is required (RFC 8252 §7.3)"
-        )
     if parsed.scheme == "http":
         netloc = parsed.netloc
         # ADR A2 (5): reject IPv6 zone identifier (raw `%` or `%25` in netloc).
@@ -4266,6 +4279,28 @@ def validate_redirect_uri(uri: str) -> str:
                 "(localhost, 127.0.0.1, ::1)"
             )
     return uri
+
+
+def supported_redirect_uris(uris: list[str]) -> list[str]:
+    """The redirect URIs in a client's list that this server accepts.
+
+    A client may list callbacks for several platforms, for example a
+    private-use ``app:`` scheme beside a loopback URI. Entries this server
+    does not accept are left out rather than failing the registration, the
+    same way unsupported grant types are. When none remain, the first
+    entry's reason is raised.
+    """
+
+    accepted: list[str] = []
+    first_error: InvalidClientRegistrationError | None = None
+    for uri in uris:
+        try:
+            accepted.append(validate_redirect_uri(uri))
+        except InvalidClientRegistrationError as exc:
+            first_error = first_error or exc
+    if not accepted:
+        raise first_error or InvalidClientRegistrationError("redirect_uris is required")
+    return accepted
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -4320,8 +4355,6 @@ def redirect_uri_matches(requested: str, registered_uris: list[str]) -> bool:
         if parsed_reg.fragment:
             continue
         if not _is_loopback_host(parsed_reg.hostname):
-            continue
-        if not _has_valid_explicit_port(parsed_reg):
             continue
         if parsed_reg.path != parsed_req.path:
             continue

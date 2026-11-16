@@ -108,6 +108,7 @@ def test_authorization_server_metadata_advertises_cimd(page_service):
 
     assert response.status_code == 200
     assert response.json()["client_id_metadata_document_supported"] is True
+    assert response.json()["authorization_response_iss_parameter_supported"] is True
     assert "registration_endpoint" in response.json()
 
 
@@ -336,6 +337,8 @@ def test_cimd_authorizes_and_exchanges_even_when_dcr_is_disabled(
         },
     )
     assert denied.status_code == 400, denied.text
+    metadata = client.get("/.well-known/oauth-authorization-server").json()
+    assert "registration_endpoint" not in metadata
 
     tokens = _issue_cimd_tokens(client)
     assert tokens["access_token"]

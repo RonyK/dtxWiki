@@ -59,7 +59,7 @@ def test_dcr_20_callbacks_and_2048_byte_uri_round_trip(page_service):
     assert registered.status_code == 201, registered.text
     assert registered.json()["redirect_uris"] == redirects
     assert registered.json()["token_endpoint_auth_method"] == "none"
-    assert registered.json()["scope"] == "mcp:read"
+    assert registered.json()["scope"] == "mcp:read mcp:write mcp:agent offline_access"
     with page_service.session_factory() as session:
         row = session.get(OAuthClient, registered.json()["client_id"])
         assert row.application_type == "native"

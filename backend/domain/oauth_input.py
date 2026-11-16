@@ -2,6 +2,7 @@
 
 from backend.domain.credential_input import (
     OAUTH_IDENTIFIER_MAX_BYTES,
+    OAUTH_METADATA_LIST_MAX_COUNT,
     OAUTH_REDIRECT_MAX_COUNT,
     OAUTH_SCOPE_MAX_BYTES,
     utf8_size_is_valid,
@@ -63,25 +64,35 @@ def validate_redirect_list(value: object) -> list[str]:
     return value
 
 
+SUPPORTED_GRANT_TYPES = ("authorization_code", "refresh_token")
+SUPPORTED_RESPONSE_TYPES = ("code",)
+
+
+def supported_values(values: list[str], supported: tuple[str, ...]) -> tuple[str, ...]:
+    """The part of a client's list this server implements, in server order.
+
+    Client metadata describes everything a client can do with any server, so
+    it may name grants or response types this server does not offer. Those
+    are ignored rather than fatal (Client ID Metadata Document §6); a client
+    metadata document registers this intersection, while DCR registers the
+    server's own values (RFC 7591 §3.2.1).
+    """
+
+    return tuple(value for value in supported if value in values)
+
+
 def validate_supported_metadata(payload: dict) -> None:
-    for field, supported, maximum, required in (
-        (
-            "grant_types",
-            {"authorization_code", "refresh_token"},
-            2,
-            "authorization_code",
-        ),
-        ("response_types", {"code"}, 1, "code"),
+    for field, required in (
+        ("grant_types", "authorization_code"),
+        ("response_types", "code"),
     ):
         if field not in payload:
             continue
         values = payload[field]
         if (
             not isinstance(values, list)
-            or not 1 <= len(values) <= maximum
-            or not all(
-                isinstance(value, str) and value in supported for value in values
-            )
+            or not 1 <= len(values) <= OAUTH_METADATA_LIST_MAX_COUNT
+            or not all(isinstance(value, str) for value in values)
             or required not in values
         ):
             raise ValueError(f"{field} contains unsupported client metadata")
