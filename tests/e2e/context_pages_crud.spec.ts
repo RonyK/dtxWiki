@@ -108,14 +108,23 @@ test("creates, reads, edits, and shows stale conflict in the browser", async ({
   await expect(article.getByText("rendered")).toBeVisible();
   await expect(page).toHaveTitle("Hello PoC - dtxWiki");
 
-  const beginResponse = page.waitForResponse((response) =>
-    new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/context/pages/${createdPage.id}/begin-edit`
-      && response.request().method() === "POST",
-  );
+  // Opening the editor reads the published version; the first save starts
+  // the shared draft that a second writer can then change underneath it.
   await page.goto(workspaceUrl(workspace.id, `context/pages/${createdPage.id}/edit`));
-  const editing = (await (await beginResponse).json()).data;
   await expect(page.getByLabel("Title")).toHaveValue("Hello PoC");
   await expect(page).toHaveTitle("dtxWiki");
+  const firstSave = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/context/pages/${createdPage.id}/autosave`
+      && response.request().method() === "POST",
+  );
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.insertText("# Browser draft");
+  await page.getByRole("button", { name: "Save draft" }).click();
+  const firstSaveResponse = await firstSave;
+  expect(firstSaveResponse.ok(), await firstSaveResponse.text()).toBeTruthy();
+  const editing = (await firstSaveResponse.json()).data;
+  expect(editing.version_status).toBe("draft");
 
   const readResponse = await request.get(
     `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${createdPage.id}`,

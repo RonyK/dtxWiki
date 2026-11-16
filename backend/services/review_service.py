@@ -742,24 +742,26 @@ class ReviewService:
         if not delay_by_risk:
             return []
         reviews = session.scalars(
-            select(ReviewItem)
-            .where(
-                ReviewItem.workspace_id == workspace_id,
-                ReviewItem.status == "pending",
-                ReviewItem.review_type.not_in(
-                    ("agent_guide", "memory", "context_reconciliation")
-                ),
-                or_(
-                    *(
-                        and_(
-                            ReviewItem.risk_level == risk_level,
-                            ReviewItem.created_at <= now - timedelta(days=delay_days),
+            select_in_workspace(
+                ReviewItem,
+                workspace_id=workspace_id,
+                conditions=(
+                    ReviewItem.status == "pending",
+                    ReviewItem.review_type.not_in(
+                        ("agent_guide", "memory", "context_reconciliation")
+                    ),
+                    or_(
+                        *(
+                            and_(
+                                ReviewItem.risk_level == risk_level,
+                                ReviewItem.created_at
+                                <= now - timedelta(days=delay_days),
+                            )
+                            for risk_level, delay_days in delay_by_risk.items()
                         )
-                        for risk_level, delay_days in delay_by_risk.items()
-                    )
+                    ),
                 ),
-            )
-            .order_by(ReviewItem.created_at.asc(), ReviewItem.id.asc())
+            ).order_by(ReviewItem.created_at.asc(), ReviewItem.id.asc())
         ).all()
         return [
             (review, review.risk_level, delay_by_risk[review.risk_level])

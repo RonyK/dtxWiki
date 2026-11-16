@@ -220,17 +220,11 @@ def test_rest_stale_patch_after_mcp_update_returns_conflict(page_service):
     body = stale.json()
     assert body["error_code"] == "stale_base_version", body
 
-    # The pre-P2.2 version of this test asserted the 409 NAMED the winning
-    # version (`server_version_id == v2`). That assertion is now wrong by
-    # design and is deliberately not restored: v2 is another author's private
-    # "editing" row (one user wrote it through PAT-authenticated MCP; a
-    # different user is the REST caller), and PageService's disclosure policy
-    # returns
-    # (None, None) in exactly that case, because naming the row would be the
-    # disclosure P2.2/P2.6 exist to prevent. So the modern invariant is
-    # stronger than the old one: the stale write loses AND learns nothing.
-    assert "server_version_id" not in body, body
-    assert "server_content_hash" not in body, body
+    # Drafts are shared with every editor, and the MCP save rewrote the same
+    # draft in place, so the 409 names the draft the caller already sent and
+    # its current hash for the re-read.
+    assert body["server_version_id"] == v1["data"]["version_id"], body
+    assert body["server_content_hash"] == updated["data"]["content_hash"], body
 
     # Losing must mean losing: the MCP author's v2 is still what is stored.
     after = _mcp_call(

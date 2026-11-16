@@ -11,11 +11,14 @@ from sqlalchemy import func, select
 from backend.app.bootstrap import bootstrap
 from backend.app.main import create_app
 from backend.app.settings import Settings
+from backend.models.change import ChangeOperation
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.context_media import ContextMediaAsset, ContextMediaUsage
+from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.utils.context_commands import review_binding
 
 
 def _png_bytes(color: tuple[int, int, int]) -> bytes:
@@ -199,20 +202,6 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
         name="P0.3 image author",
     )
 
-    foreign_rest = TestClient(app)
-    authenticate_test_client_in_workspace(
-        foreign_rest,
-        factory,
-        email="p0-3-foreign@example.com",
-        workspace_slug="default",
-        role="editor",
-    )
-    foreign_actor_headers = _issue_pat(
-        foreign_rest,
-        (workspace_id,),
-        name="P0.3 foreign image actor",
-    )
-
     with factory.begin() as session:
         foreign_workspace = Workspace(
             slug="p0-3-foreign",
@@ -356,26 +345,26 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
     assert submitted["envelope"]["result_status"] == "succeeded"
     assert submitted["data"]["version_status"] == "draft"
     token = submitted["envelope"]["conversation_token"]
-
-    blocked = _mcp_structured(
-        rest,
-        headers,
-        16,
-        "upload_image",
-        {
-            "workspace_id": str(workspace_id),
-            "filename": "blocked.png",
-            "mime_type": "image/png",
-            "content_base64": base64.b64encode(first_png).decode("ascii"),
-            "marker_uuid": str(uuid4()),
-            "page_id": page_id,
-            "version_id": v1_id,
-            "conversation_token": token,
+    with factory() as session:
+        review_id = session.scalar(
+            select(ReviewItem.id)
+            .join(
+                ChangeOperation,
+                ChangeOperation.change_set_id == ReviewItem.change_set_id,
+            )
+            .where(
+                ChangeOperation.diff_ref == f"context_page_version:{v1_id}",
+                ReviewItem.status == "pending",
+            )
+        )
+    approved = rest.post(
+        f"/api/v1/workspaces/{workspace_id}/reviews/{review_id}/decision",
+        json={
+            "decision_type": "approve",
+            **review_binding(rest, workspace_id, review_id),
         },
     )
-    assert blocked["envelope"]["error_code"] == "media_editing_not_open"
-    assert blocked["envelope"]["retryable"] is False
-    token = blocked["envelope"]["conversation_token"]
+    assert approved.status_code == 200, approved.text
 
     foreign_workspace = _mcp_structured(
         rest,
@@ -396,8 +385,8 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
     assert foreign_workspace["envelope"]["error_code"] == "not_found"
     token = foreign_workspace["envelope"]["conversation_token"]
 
-    # This round verifies independent historical image usage. A new chat
-    # creates v2; reopening in the submitting chat would reuse v1 instead.
+    # This round verifies independent historical image usage: v1 is now a
+    # published commit, and a new edit starts v2 from it.
     reopened = _mcp_structured(
         rest,
         headers,
@@ -414,26 +403,6 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
     assert reopened["data"]["version_id"] != v1_id
     assert reopened["data"]["body_md"] == v1_body
     v2_id = reopened["data"]["version_id"]
-
-    foreign_actor = _mcp_structured(
-        foreign_rest,
-        foreign_actor_headers,
-        19,
-        "upload_image",
-        {
-            "workspace_id": str(workspace_id),
-            "page_id": page_id,
-            "version_id": v2_id,
-            "filename": "foreign-actor.png",
-            "mime_type": "image/png",
-            "content_base64": base64.b64encode(first_png).decode("ascii"),
-            "marker_uuid": str(uuid4()),
-            "conversation_token": "new",
-        },
-    )
-    assert foreign_actor["envelope"]["error_code"] == "not_found"
-    assert foreign_actor["envelope"]["result_status"] == "failed"
-    assert foreign_actor["envelope"]["retryable"] is False
 
     third = _mcp_structured(
         rest,
@@ -483,6 +452,7 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
             "workspace_id": str(workspace_id),
             "page_id": page_id,
             "idempotency_key": "p0-3-http-resume-v2",
+            "from": v2_id,
             "conversation_token": "new",
         },
     )
@@ -535,6 +505,40 @@ def test_pat_http_context_images_survive_page_round_trips_and_actor_boundaries(
         ).all()
         assert persisted_bodies
         assert all("/api/v1/" not in body for body in persisted_bodies)
+
+    # An ended draft accepts no more images.
+    discarded = _mcp_structured(
+        rest,
+        headers,
+        23,
+        "discard_context_edit",
+        {
+            "workspace_id": str(workspace_id),
+            "page_id": page_id,
+            "version_id": v2_id,
+            "idempotency_key": "p0-3-http-discard-v2",
+            "conversation_token": "new",
+        },
+    )
+    assert discarded["envelope"]["result_status"] == "succeeded", discarded
+    blocked = _mcp_structured(
+        rest,
+        headers,
+        24,
+        "upload_image",
+        {
+            "workspace_id": str(workspace_id),
+            "filename": "blocked.png",
+            "mime_type": "image/png",
+            "content_base64": base64.b64encode(first_png).decode("ascii"),
+            "marker_uuid": str(uuid4()),
+            "page_id": page_id,
+            "version_id": v2_id,
+            "conversation_token": "new",
+        },
+    )
+    assert blocked["envelope"]["error_code"] == "media_editing_not_open"
+    assert blocked["envelope"]["retryable"] is False
 
 
 def test_one_pat_round_trips_two_workspaces_and_is_denied_a_third(tmp_path):

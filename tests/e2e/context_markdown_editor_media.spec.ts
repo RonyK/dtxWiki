@@ -763,7 +763,6 @@ test("preserves a five-image batch through retry, publication, revocation, and r
     });
 
     let created!: PagePayload;
-    let previewDraft!: PagePayload;
     let canonicalBody = "";
     let assetIds: string[] = [];
     await test.step("save and publish only canonical logical references", async () => {
@@ -877,18 +876,9 @@ test("preserves a five-image batch through retry, publication, revocation, and r
         200,
       );
 
-      const beginPreview = page.waitForResponse((response) =>
-        new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/begin-edit`
-          && response.request().method() === "POST",
-      );
+      // Opening the editor reads the published version until the first save.
       await page.goto(workspaceUrl(workspace.id, `context/pages/${created.id}/edit`));
-      const previewResponse = await beginPreview;
-      expect(previewResponse.ok(), await previewResponse.text()).toBeTruthy();
-      previewDraft = (await previewResponse.json()).data as PagePayload;
-      expect(previewDraft.version_id).not.toBe(created.version_id);
-      const previewMediaUrls = assetIds.map((assetId) =>
-        `/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/versions/${previewDraft.version_id}/media/${assetId}/content`,
-      );
+      const previewMediaUrls = exactVersionUrls;
       await expect(page.getByLabel("Title")).toHaveValue(title);
       await page.getByRole("tab", { name: "Reading" }).click();
       const privateGeometry = await expectMediaGeometry(
@@ -949,11 +939,11 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       const nextBody = `# ${title}\n\nThe current published version no longer references media.`;
       const beginResponse = await page.request.post(
         `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/begin-edit`,
-        { data: { from: previewDraft.version_id, idempotency_key: randomUUID() } },
+        { data: { idempotency_key: randomUUID() } },
       );
       expect(beginResponse.ok(), await beginResponse.text()).toBeTruthy();
       const opened = (await beginResponse.json()).data as PagePayload;
-      expect(opened.version_id).toBe(previewDraft.version_id);
+      expect(opened.version_id).not.toBe(created.version_id);
       const updateResponse = await page.request.post(
         `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/autosave`,
         {
