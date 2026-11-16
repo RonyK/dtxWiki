@@ -16,7 +16,6 @@ from backend.context_versions.application import ContextVersionWriter
 from backend.context_versions.domain import ContentPayload
 from backend.models import Job
 from backend.models.context import ContextPageVersion
-from backend.models.user_attribution import _private_version_outstanding
 from backend.schemas.context_write import ReviewDecisionRequest
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.context_review_disposition import context_version_review_metadata
@@ -435,18 +434,6 @@ def test_mutable_draft_conversion_traversal(tmp_path, dialect):
                 job.status == "completed" and job.next_attempt_at is None
                 for job in reminders
             )
-            # Converted states must retain the prior sole-author cleanup;
-            # execute its correlated UUID/JSON predicate on both dialects here.
-            cleanup_ids = set(
-                session.scalars(
-                    sa.select(ContextPageVersion.id).where(
-                        ContextPageVersion.workspace_id == workspace_id,
-                        ContextPageVersion.created_by_actor_id == str(actor_id),
-                        *_private_version_outstanding(),
-                    )
-                )
-            )
-            assert cleanup_ids == {editing_id, shared_id, discarded_id}
             service = ReviewService(context_version_writer=writer)
             ended_versions = session.scalars(
                 sa.select(ContextPageVersion).where(

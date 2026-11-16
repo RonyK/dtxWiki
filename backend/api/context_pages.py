@@ -640,7 +640,7 @@ def begin_context_edit(
     request_body: BeginContextEditRequest,
     actor: RestActorDep,
 ):
-    """P8.3: idempotently resume or open the caller's own editing session."""
+    """Idempotently join a named draft or start a draft from commits."""
 
     try:
         actor, page_service = _workspace_page_service(
@@ -680,7 +680,7 @@ def submit_context_edit_for_review(
     request_body: SubmitContextEditRequest,
     actor: RestActorDep,
 ):
-    """P8.1: "Save draft" -- lock the caller's own editing row and submit it."""
+    """Submit a draft for review."""
 
     try:
         actor, page_service = _workspace_page_service(
@@ -720,7 +720,7 @@ def discard_context_edit(
     request_body: DiscardContextEditRequest,
     actor: RestActorDep,
 ):
-    """P8.3: discard the caller's own open editing row (terminal, not a hard-delete)."""
+    """Discard an open draft (terminal, not a hard-delete)."""
 
     try:
         actor, page_service = _workspace_page_service(
@@ -759,7 +759,7 @@ def restore_page_version(
             request, actor, workspace_id, required_role="editor"
         )
         # P2.2/P2.6: restoring FROM a version this actor cannot otherwise see
-        # (another author's private `editing` row) must not be a back door to
+        # (another author's discarded row) must not be a back door to
         # it -- reuse read_page's own explicit-version visibility gate rather
         # than letting restore_version's bare page-scoped id lookup skip it.
         page_service.read_page(

@@ -173,8 +173,8 @@ def context_version_is_visible(
         return True
     if not actor_can_read_drafts(actor):
         return False
-    # Editing rows share the ordinary draft-read boundary. Discarded work
-    # keeps its author-only visibility until its later physical cleanup.
+    # Drafts share the ordinary draft-read boundary. Discarded work keeps its
+    # author-only visibility until its later physical cleanup.
     from backend.repositories.context_visibility import discarded_row_hidden_from_actor
 
     return not discarded_row_hidden_from_actor(version, actor)

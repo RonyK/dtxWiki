@@ -201,7 +201,7 @@ def test_repeated_updates_stay_on_one_editing_row_until_submit(page_service, act
     assert second.data.version_id == created.version_id
     assert second.data.version_status == "draft"
     assert second.data.editing_revision == created.editing_revision + 2
-    # Autosaves of a private editing row are not review events.
+    # Autosaves of a draft are not review events.
     assert _review_statuses_for_page(page_service, created.id) == []
     assert second.data.review_item_id is None
 

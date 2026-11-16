@@ -68,12 +68,12 @@ export type PageInlineCommentCreateInput = {
   anchor: PageInlineCommentAnchor;
 };
 
-export type PageCreateInput = Omit<components["schemas"]["ContextPageCreateRequest"], "share_draft">;
+export type PageCreateInput = components["schemas"]["ContextPageCreateRequest"];
 
 export type PageUpdateInput = components["schemas"]["PageUpdateRequest"];
 
 // Browser saves stage shared drafts and require a client-held retry key.
-export type PageAutosaveInput = Omit<components["schemas"]["PageAutosaveRequest"], "share_draft">;
+export type PageAutosaveInput = components["schemas"]["PageAutosaveRequest"];
 
 export type PageRestoreInput = components["schemas"]["PageRestoreRequest"];
 

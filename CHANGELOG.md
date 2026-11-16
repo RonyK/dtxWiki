@@ -12,8 +12,9 @@
 - Collect all open drafts for indexing while preserving the existing
   single-result search presentation. Existing draft-pointer and reconciliation
   columns remain for the later cleanup.
-- MCP contract revision 34 adapts existing editing tools and removes
-  `submit_revision_for_review`. Refresh cached tool catalogs and schemas.
+- MCP contract revision 34 adapts existing editing tools, removes
+  `submit_revision_for_review` and the retired `current_editing` history
+  status. Refresh cached tool catalogs and schemas.
 - Upgrade the draft schema after the document-identity migration. This data
   conversion cannot be downgraded; recovery uses the pre-upgrade backup.
 - Opening the editor on a published version no longer creates a draft; the
@@ -22,6 +23,9 @@
 - Automatic review approval waits from a draft's last save and approves only
   the merge result it evaluated; publishing keeps the tree placement unless
   the published result moves the page.
+- Private drafts are gone: every draft is shared. Draft editing events show
+  in Activity like other changes, and account deletion keeps the account's
+  drafts and shows its author name on what it wrote instead of "Human editor".
 
 
 ### Context body links

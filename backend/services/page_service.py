@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 from collections import Counter, OrderedDict
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
@@ -40,7 +40,6 @@ from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
 from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories import context_page_repo, workspace_repo
-from backend.repositories.context_visibility import PRIVATE_VERSION_STATUSES
 from backend.repositories.workspace_scoped import (
     delete_in_workspace,
     get_in_workspace,
@@ -89,11 +88,9 @@ from backend.services.context_editing import (
     block_operation_provenance,
 )
 from backend.services.context_lifecycle import (
-    RejectedDraftRestart,
     project_context_version,
     record_context_decision,
     record_metadata_snapshot,
-    rejected_draft_restart,
 )
 from backend.services.context_link_targets import context_link_targets
 from backend.services.context_media_legacy_cutover import (
@@ -142,7 +139,6 @@ from backend.services.read_errors import (
 )
 from backend.services.review_risk_policy import ai_writes_require_human_review
 from backend.services.review_supersession import supersede_review_with_lineage
-from backend.services.temporal_read import publish_timeline
 from backend.services.tree_service import ensure_primary_tree_placement
 from backend.spi.types import AI_PROVENANCES
 from backend.utils.actor_display import (
@@ -174,10 +170,6 @@ from backend.utils.page_frontmatter import (
 from backend.utils.page_frontmatter import (
     normalize_page_tags as normalize_page_tags,
 )
-from backend.utils.uuid import parse_uuid_or_none
-
-MAX_ACTIVE_ALTERNATIVE_DRAFTS = 20
-
 
 if TYPE_CHECKING:
     from backend.policy.auth import ActorContext
@@ -290,10 +282,9 @@ class PageConflictError(PageServiceError):
         super().__init__(self.error_code.replace("_", " "))
         self.server_version_id = server_version_id
         self.server_content_hash = server_content_hash
-        # Only ever set for the caller's OWN open edit (the same disclosure
-        # rule as the two fields above). It says where that edit stands now
-        # so the caller knows what to re-read. It is not a value to resend
-        # unchanged: the edit moved because something else saved to it.
+        # Where the named draft stands now, so the caller knows what to
+        # re-read. It is not a value to resend unchanged: the draft moved
+        # because something else saved to it.
         self.server_editing_revision = server_editing_revision
         # The caller named its open edit, and it has none any more: that edit
         # was submitted or discarded since the caller last read it.
@@ -678,13 +669,13 @@ class PageService:
                 slug=page.slug,
                 # Title from the PUBLISHED body's heading — NOT page.title, which
                 # tracks the (possibly unpublished) draft version, so a draft
-                # rename would leak a private title while the body stays the
+                # rename would leak an unpublished title while the body stays the
                 # published snapshot. Fall back to the slug (already in the public
                 # URL), never to page.title.
                 title=title_from_markdown_heading(public_body) or page.slug,
                 body_md=public_body,
                 # The PUBLISHED head's own timestamp — NOT page.updated_at, which
-                # is re-stamped by private draft/autosave edits that never change
+                # is re-stamped by draft saves that never change
                 # the published body and would leak the timing of non-public
                 # editing activity to anonymous observers.
                 updated_at=version.created_at,
@@ -848,18 +839,12 @@ class PageService:
                 },
             )
             # This operation changes public EXPOSURE, not the editable head, so
-            # the published version is what the response should describe. The
-            # `current_version_id` fallback below only applies to a page with
-            # no published version yet, and even then must not hand back a
-            # DIFFERENT author's private `editing` row: this actor may hold no
-            # relationship to it at all beyond editor/owner role.
-            fallback_id = _editable_target_or_published(
-                page, page.current_version_id, actor_kind, actor_id
-            )
+            # the published version is what the response should describe; a
+            # page with no published version yet describes its current draft.
             version = self._require_page_version(
                 session,
                 page,
-                page.current_published_version_id or fallback_id,
+                page.current_published_version_id or page.current_version_id,
             )
             # `_payload_from_page`'s own `current_version_id` field defaults to
             # the raw page-global pointer (safe only for a self-view write
@@ -1027,9 +1012,9 @@ class PageService:
             if page is None:
                 raise PageNotFoundError("page not found")
             before_version_no = self._parse_version_cursor(cursor, page.id)
-            # P2.2/P2.6: `context_version_is_visible` additionally hides a
-            # DIFFERENT author's "editing" row that the coarser role-based
-            # `visible_statuses` filter above lets through. Filtering after a
+            # `context_version_is_visible` additionally hides another author's
+            # discarded row that the coarser role-based `visible_statuses`
+            # filter above lets through. Filtering after a
             # single `limit + 1` fetch would silently undercount `has_more`
             # whenever a hidden row lands in that window -- fetch again from
             # where the batch left off until a full page of actually-visible
@@ -1422,8 +1407,6 @@ class PageService:
                 session,
                 page=page,
                 branch_id=branch_id,
-                actor_kind=actor.actor_kind,
-                actor_id=actor.actor_id,
             )
             return project_reconciliation_detail(session, snapshot)
 
@@ -2156,10 +2139,9 @@ class PageService:
         aliases: list[str] | None = None,
         placement_parent_node_id: UUID | None = None,
         with_edit_receipt: bool = False,
-        share_draft: bool = False,
         idempotency_key: str | None = None,
     ) -> PagePayload:
-        """Create a page with a private edit or an explicitly shared browser draft.
+        """Create a page with its first shared draft.
 
         P2.3: used when the caller omits `slug` -- title defaults to "제목
         없음", slug to `p-{page_id}` (computed from a fresh id chosen before
@@ -2171,11 +2153,6 @@ class PageService:
         Empty `body_md` is allowed; publish-time content validation is a
         separate, later check.
         """
-
-        if share_draft and actor_provenance != "browser_session":
-            raise PageValidationError(
-                "sharing a browser draft requires a browser session"
-            )
 
         with self.session_factory.begin() as session:
             workspace = self._require_workspace(session, workspace_slug)
@@ -2238,8 +2215,6 @@ class PageService:
                 # after a 201 create, since nothing else ever points at a fresh
                 # page's first version for them (confirmed the hard way -- an
                 # end-to-end create-then-read test failed until this was added).
-                # Private creation keeps the submitted pointer empty. Browser
-                # creation explicitly shares the saved draft without publishing.
                 page.current_version_id = version.id
                 page.placement_parent_node_id = placement_parent_node_id
                 sync_page_link_projection(session, page=page, version=version)
@@ -2263,7 +2238,6 @@ class PageService:
                     payload={
                         "version_id": str(version.id),
                         "editing_revision": version.editing_revision,
-                        "was_private_edit": not share_draft,
                     },
                 )
                 payload = self._payload_from_page(
@@ -2307,7 +2281,6 @@ class PageService:
                             if placement_parent_node_id is not None
                             else None
                         ),
-                        "share_draft": share_draft,
                     }
                 ),
                 result_model=PagePayload,
@@ -2472,121 +2445,6 @@ class PageService:
                 retry_only=retry_only,
             )
 
-    def _reopen_own_pending_submission(
-        self,
-        session: Session,
-        page: ContextPage,
-        *,
-        actor_kind: str,
-        actor_id: str,
-        chat_session_id: UUID | None,
-        base_version_id: UUID | None,
-        base_content_hash: str | None,
-    ) -> ContextPageVersion | None:
-        """Reopen the submission this chat is still waiting on, as its open edit.
-
-        One chat editing one page keeps one version. An edit begun after a
-        submit used to start again from the published head, so an agent that
-        kept refining its work left a sibling draft and a pending review per
-        round, and only the newest could ever be approved.
-
-        Only this actor's own submission qualifies: stamped with this chat,
-        still the page's latest draft, its review still pending and the only
-        open review on that version. Anything else returns None and the
-        caller opens a new branch as before. The review is superseded before
-        the row turns editable, so no pending review ever names bytes that
-        change; the next submit opens a new one on the same version.
-        """
-
-        if chat_session_id is None or page.latest_draft_version_id is None:
-            return None
-        draft = context_page_repo.get_version(session, page.latest_draft_version_id)
-        if (
-            draft is None
-            or draft.page_id != page.id
-            or draft.version_status != "draft"
-            or draft.graph_status != "linear"
-            or draft.created_by_actor_kind != actor_kind
-            or draft.created_by_actor_id != actor_id
-        ):
-            return None
-        open_reviews = [
-            review
-            for review in self._context_reviews_for_version(
-                session=session, page=page, version=draft
-            )
-            if review.status in {"pending", "changes_requested"}
-        ]
-        if len(open_reviews) != 1:
-            return None
-        # An approval undone after the fact returns its draft to pending, but
-        # as_of reads still serve those bytes for the time it was live
-        # (resolve_version_as_of): editing it in place would rewrite history.
-        if any(
-            event.version_id == draft.id for event in publish_timeline(session, page.id)
-        ):
-            return None
-        # Page then review, the order review decisions lock in. The status is
-        # read again under the lock, so a decision that just landed wins.
-        review = session.scalar(
-            select_in_workspace(
-                ReviewItem,
-                workspace_id=page.workspace_id,
-                conditions=(ReviewItem.id == open_reviews[0].id,),
-            )
-            .execution_options(populate_existing=True)
-            .with_for_update()
-        )
-        change_set = (
-            get_in_workspace(
-                session,
-                ChangeSet,
-                workspace_id=page.workspace_id,
-                resource_id=review.change_set_id,
-            )
-            if review is not None
-            else None
-        )
-        if (
-            review is None
-            or review.status != "pending"
-            or change_set is None
-            or change_set.reason != SUBMIT_CONTEXT_EDIT_ACTION
-            or change_set.origin_chat_session_id != chat_session_id
-        ):
-            return None
-        # For this chat the head it builds on is its own submission now.
-        if (base_version_id is not None or base_content_hash is not None) and (
-            base_version_id != draft.id or base_content_hash != draft.content_hash
-        ):
-            raise PageConflictError(
-                server_version_id=draft.id,
-                server_content_hash=draft.content_hash,
-            )
-        review.status = "superseded"
-        review.claimed_by = None
-        review.claimed_at = None
-        change_set.status = "superseded"
-        draft.version_status = "editing"
-        # A revision read before the submit must not reach the reopened row.
-        previous_revision = self._highest_editing_revision(
-            session, page, actor_kind, actor_id, excluding=draft.id
-        )
-        draft.editing_revision = max(draft.editing_revision, previous_revision or 0) + 1
-        session.add_all([review, change_set, draft])
-        session.flush()
-        self.change_audit_recorder.audit_service.emit(
-            session=session,
-            workspace_id=page.workspace_id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            action="review.withdrawn_for_reopen",
-            target_kind="review_item",
-            target_id=review.id,
-            payload={"version_id": str(draft.id)},
-        )
-        return draft
-
     def submit_context_edit_for_review(
         self,
         page_id: UUID,
@@ -2699,9 +2557,8 @@ class PageService:
                     current_version_id_override=version.id,
                 )
             if version.editing_revision != expected_editing_revision:
-                # The caller's own open edit (ownership checked above):
-                # name where it stands now, as patch and update do, so the
-                # caller knows what to re-read before submitting it.
+                # Name where the draft stands now, as patch and update do, so
+                # the caller knows what to re-read before submitting it.
                 raise PageConflictError(
                     server_version_id=version.id,
                     server_content_hash=version.content_hash,
@@ -2876,7 +2733,7 @@ class PageService:
         limit: int = 50,
         cursor: str | None = None,
     ) -> ListMyContextEditsResult:
-        """This actor's own open "editing" rows across the workspace (P8.3/P8.6).
+        """The open drafts this actor started, across the workspace.
 
         Read-only, so unlike the write commands above this needs no
         idempotency ledger. Cursor pagination reuses the same opaque
@@ -2986,17 +2843,10 @@ class PageService:
                         session, page, version_id, actor_kind, actor_id
                     )
                 if version.editing_revision != expected_editing_revision:
-                    disclosed_id, disclosed_hash = self._disclosable_version_fields(
-                        version, actor_kind, actor_id
-                    )
                     raise PageConflictError(
-                        server_version_id=disclosed_id,
-                        server_content_hash=disclosed_hash,
-                        server_editing_revision=(
-                            version.editing_revision
-                            if disclosed_id is not None
-                            else None
-                        ),
+                        server_version_id=version.id,
+                        server_content_hash=version.content_hash,
+                        server_editing_revision=version.editing_revision,
                         error_code="editing_revision_conflict",
                     )
 
@@ -3102,10 +2952,6 @@ class PageService:
                     next_title=prepared.metadata.title,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    session_version_id=None,
-                    same_actor_draft=True,
-                    own_open_edit=True,
-                    baseline_patch=baseline_patch,
                     metadata_patch=metadata_patch,
                     base_block_map=block_map,
                     prepared_block_map=next_block_map,
@@ -3120,7 +2966,6 @@ class PageService:
                     target_id=page.id,
                     payload={
                         "version_id": str(version.id),
-                        "was_private_edit": True,
                         "editing_revision": version.editing_revision,
                         "operation_count": len(operations),
                     },
@@ -3256,8 +3101,6 @@ class PageService:
                     current,
                     base_version_id,
                     base_content_hash,
-                    actor_kind=actor_kind,
-                    actor_id=actor_id,
                 )
             prepared = self._prepare_body(
                 BodyInput(
@@ -3311,8 +3154,6 @@ class PageService:
                         current,
                         base_version_id,
                         base_content_hash,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
                     )
                     prepared = self._prepare_body(
                         BodyInput(
@@ -3404,10 +3245,7 @@ class PageService:
                     session, page, version, prepared=prepared
                 )
 
-            # Not actor-scoped: `write_page`'s upsert-by-slug write always
-            # targets the page's own shared head, same as before P8.1 -- it
-            # has no "resume my private editing row" contract of its own
-            # (that is `begin_context_edit`/`autosave_page`'s job).
+            # `write_page`'s upsert-by-slug write targets the page's shared head.
             stage_metadata = should_stage_page_metadata(page, current)
             metadata_patch = page_metadata_delta(
                 page,
@@ -3441,14 +3279,11 @@ class PageService:
                 not _block_map_needs_save(current)
                 and same_authored_markdown(body_md, current.body_md)
                 and (
-                    (
-                        current.version_status not in ("editing", "draft")
-                        and not requires_human_review
-                    )
+                    (current.version_status != "draft" and not requires_human_review)
                     or (
                         current.created_by_actor_kind == actor_kind
                         and current.created_by_actor_id == actor_id
-                        and current.version_status in ("editing", "draft")
+                        and current.version_status == "draft"
                     )
                 )
             ):
@@ -3711,10 +3546,6 @@ class PageService:
                 next_title=prepared.metadata.title,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
-                session_version_id=version.id,
-                same_actor_draft=True,
-                own_open_edit=True,
-                baseline_patch=None,
                 metadata_patch=patch,
             )
             if stale or (
@@ -3993,13 +3824,6 @@ class PageService:
         set_parents(session, version, [source.id])
         return version
 
-    def _require_context_media_repository(
-        self, session: Session
-    ) -> ContextMediaRepository:
-        if self.context_media_repository_factory is None:
-            raise PageValidationError("Context media is not configured")
-        return self.context_media_repository_factory(session)
-
     def _lock_context_media_usage_intent(
         self,
         session: Session,
@@ -4119,7 +3943,6 @@ class PageService:
         retry_only: bool = False,
         with_edit_receipt: bool = False,
         editing_version_id: UUID | None = None,
-        share_draft: bool = False,
         version_id: UUID | None = None,
         base_snapshot: dict | None = None,
         on_conflict: str | None = None,
@@ -4277,10 +4100,6 @@ class PageService:
                     next_title=prepared.metadata.title,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    session_version_id=target_id,
-                    same_actor_draft=True,
-                    own_open_edit=True,
-                    baseline_patch=None,
                     metadata_patch=data,
                 )
                 result.autosave_merged = merged
@@ -4361,16 +4180,13 @@ class PageService:
         if page.workspace_id != workspace_id:
             raise PageNotFoundError("page not found")
         current = self._require_page_version(session, page, editing_version_id)
-        self._autosave_check_base(
-            session=session,
-            page=page,
-            current=current,
-            base_version_id=editing_version_id,
-            base_content_hash=base_content_hash,
-            expected_editing_revision=expected_editing_revision,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            on_stale="conflict",
+        self._validate_base(
+            session,
+            page,
+            current,
+            editing_version_id,
+            base_content_hash,
+            expected_editing_revision,
         )
         receipt_base = {
             "body": current.body_md,
@@ -4386,10 +4202,6 @@ class PageService:
             next_title=page.title,
             actor_kind=actor_kind,
             actor_id=actor_id,
-            session_version_id=None,
-            same_actor_draft=True,
-            own_open_edit=True,
-            baseline_patch=None,
             metadata_patch={},
         )
         return self._autosave_receipt(
@@ -4418,101 +4230,6 @@ class PageService:
                 session, page, editing_version_id, actor_kind, actor_id
             )
         return page
-
-    def _autosave_resolve_target(
-        self,
-        *,
-        session: Session,
-        page: ContextPage,
-        session_version_id: UUID | None,
-        actor_kind: str,
-        actor_id: str,
-        browser_named_ids: Collection[UUID | None] | None = None,
-    ) -> tuple[ContextPageVersion, RejectedDraftRestart | None]:
-        editable_version_id = self._editable_version_id_for_actor(
-            session,
-            page,
-            actor_kind,
-            actor_id,
-            browser_named_ids=browser_named_ids,
-        )
-        # Rejection may leave no head. Resolve the submitting session's
-        # retired draft before deciding whether there is an editable version.
-        current = (
-            None
-            if editable_version_id is None and session_version_id is not None
-            else self._require_page_version(session, page, editable_version_id)
-        )
-        restart = None
-        if session_version_id is not None:
-            session_version = self._require_page_version(
-                session,
-                page,
-                session_version_id,
-            )
-            if current is None or current.id != session_version.id:
-                restart = (
-                    rejected_draft_restart(session, page, session_version)
-                    if session_version.created_by_actor_kind == actor_kind
-                    and session_version.created_by_actor_id == actor_id
-                    else None
-                )
-                if restart is None and current is None:
-                    raise PageNotFoundError("page version not found")
-                if restart is None:
-                    disclosed_version_id, disclosed_content_hash = (
-                        self._disclosable_version_fields(current, actor_kind, actor_id)
-                    )
-                    raise PageConflictError(
-                        server_version_id=disclosed_version_id,
-                        server_content_hash=disclosed_content_hash,
-                    )
-                # Keep the rejected bytes as source evidence, but start the
-                # successor on the surviving head, never on retired history.
-                current = session_version
-                for retired in restart.retired_versions:
-                    retired.graph_status = "discarded"
-        return current, restart
-
-    def _autosave_check_base(
-        self,
-        *,
-        session: Session,
-        page: ContextPage,
-        current: ContextPageVersion,
-        base_version_id: UUID | None,
-        base_content_hash: str | None,
-        expected_editing_revision: int | None,
-        actor_kind: str,
-        actor_id: str,
-        on_stale: str,
-    ) -> ContextPageVersion | None:
-        try:
-            self._validate_base(
-                session,
-                page,
-                current,
-                base_version_id,
-                base_content_hash,
-                expected_editing_revision,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-            )
-        except PageConflictError:
-            if on_stale != "preserve_as_alternative":
-                raise
-            # A stale ID must still identify the exact historical bytes the
-            # caller read before preparation can validate the proposed body.
-            return self._require_alternative_base(
-                session=session,
-                page=page,
-                current=current,
-                base_version_id=base_version_id,
-                base_content_hash=base_content_hash,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-            )
-        return None
 
     def _autosave_prepare(
         self,
@@ -4575,12 +4292,7 @@ class PageService:
         next_title: str,
         actor_kind: str,
         actor_id: str,
-        session_version_id: UUID | None,
-        same_actor_draft: bool,
-        own_open_edit: bool,
-        baseline_patch: dict[str, object] | None,
         metadata_patch: dict[str, object],
-        restart=None,
         base_block_map=None,
         prepared_block_map=None,
     ) -> PagePayload:
@@ -4687,331 +4399,6 @@ class PageService:
             )
         return result
 
-    def _autosave_persist_reviewed_draft(
-        self,
-        *,
-        session: Session,
-        page: ContextPage,
-        current: ContextPageVersion,
-        prepared: PreparedBody,
-        actor_kind: str,
-        actor_id: str,
-        actor_provenance: str,
-        session_version_id: UUID | None,
-        metadata_patch: dict[str, object],
-        restart: RejectedDraftRestart | None = None,
-    ) -> PagePayload:
-        """Stage an AI autosave without mutating any published projection."""
-        body_md = prepared.body
-
-        targeting_reviews = self._context_reviews_for_version(
-            session=session,
-            page=page,
-            version=current,
-        )
-        unresolved_reviews = [
-            review
-            for review in targeting_reviews
-            if review.status in {"pending", "changes_requested"}
-        ]
-        same_actor_unreviewed_draft = (
-            restart is None
-            and current.version_status in ("editing", "draft")
-            and current.graph_status == "linear"
-            and current.created_by_actor_kind == actor_kind
-            and current.created_by_actor_id == actor_id
-            and not targeting_reviews
-        )
-        before_hash = current.content_hash
-        if same_actor_unreviewed_draft:
-            version = current
-            self._rewrite_body_in_place(version, prepared)
-            version.actor_type = actor_kind
-            version.actor_id = parse_uuid_or_none(actor_id)
-            version.actor_display_name = resolve_actor_display_name(
-                session,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-            )
-            version.editing_revision += 1
-            session.add(version)
-            self._sync_version_usage(
-                session,
-                page=page,
-                version=version,
-                body_md=body_md,
-            )
-            action = "page.autosave.overwrite"
-        else:
-            version = self._insert_version(
-                session,
-                page_id=page.id,
-                parent_version_id=(
-                    restart.parent_version_id if restart is not None else current.id
-                ),
-                body=prepared,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-                version_status="draft",
-            )
-            action = "page.autosave.draft"
-
-        self._set_current_version(session, page, version)
-        result = self.change_audit_recorder.record_context_page_write(
-            session=session,
-            workspace_id=page.workspace_id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            action=action,
-            page_id=page.id,
-            version_id=version.id,
-            payload={
-                "before_content_hash": before_hash,
-                "after_content_hash": version.content_hash,
-                "parent_version_id": (
-                    str(version.parent_version_id)
-                    if version.parent_version_id is not None
-                    else None
-                ),
-                "session_version_id": (
-                    str(session_version_id) if session_version_id is not None else None
-                ),
-                "staged_metadata": bool(metadata_patch),
-            },
-            actor_provenance=actor_provenance,
-            body=body_md,
-        )
-        stage_page_metadata_patch(
-            session,
-            change_set_id=result.change_set_id,
-            page=page,
-            version=version,
-            patch=metadata_patch,
-        )
-        if result.change_set_id is not None:
-            record_metadata_snapshot(
-                session,
-                change_set_id=result.change_set_id,
-                page=page,
-                version=version,
-            )
-        self._refresh_page_links(session, page=page, version=version)
-        for unresolved_review in unresolved_reviews:
-            supersede_review_with_lineage(
-                session=session,
-                audit_service=self.change_audit_recorder.audit_service,
-                workspace_id=page.workspace_id,
-                review=unresolved_review,
-                new_change_set_id=result.change_set_id,
-                new_review_item_id=result.review_item_id,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-                payload={
-                    "replaced_version_id": str(current.id),
-                    "successor_version_id": str(version.id),
-                },
-            )
-        superseded_review_count = len(unresolved_reviews)
-        return self._payload_from_page(
-            session,
-            page,
-            version,
-            change_set_id=result.change_set_id,
-            review_item_id=result.review_item_id,
-            superseded_review_count=superseded_review_count,
-            prepared=prepared,
-        )
-
-    @staticmethod
-    def _autosave_session_operation(
-        session: Session,
-        page: ContextPage,
-        version: ContextPageVersion,
-        actor_kind: str,
-        actor_id: str,
-    ) -> ChangeOperation | None:
-        """The ledger row THIS editing session owns for ``version``, if any.
-
-        A session rewrites its own row as the author keeps typing, which is how
-        a whole session costs one change set. It must find that row by
-        ownership, never by "the newest row on this version": an editing
-        session can adopt a draft somebody else's change set created -- a
-        restore, an accepted proposal, an agent's staged draft -- and rewriting
-        that row would erase the record of what that change set did.
-
-        Reason and actor alone do not establish ownership. ``reason`` is
-        caller-supplied text on the MCP write lanes, so an agent can send
-        `page.autosave.draft` verbatim, and the AI staging path records that
-        same reason by design -- while a bearer token resolves to the very same
-        actor as the person's browser. What no browser session ever produces is
-        a ReviewItem: this ledger row is written directly precisely so a
-        keystroke does not ask anyone for a decision. So a change set carrying a
-        review belongs to a write that wanted one, and is not ours to reuse.
-        """
-
-        return session.scalars(
-            select(ChangeOperation)
-            .join(ChangeSet, ChangeSet.id == ChangeOperation.change_set_id)
-            .where(
-                ChangeOperation.target_type == "context_page",
-                ChangeOperation.target_id == page.id,
-                ChangeOperation.diff_ref == f"context_page_version:{version.id}",
-                ChangeSet.reason == "page.autosave.draft",
-                ChangeSet.trigger_type == "manual_edit",
-                ChangeSet.actor_type == actor_kind,
-                ChangeSet.actor_id == parse_uuid_or_none(actor_id),
-                ~select(ReviewItem.id)
-                .where(ReviewItem.change_set_id == ChangeSet.id)
-                .exists(),
-            )
-            .order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
-        ).first()
-
-    @staticmethod
-    def _replace_autosave_metadata_patch(
-        *,
-        session: Session,
-        patch: dict[str, object],
-        operation: ChangeOperation,
-    ) -> None:
-        """Keep staged browser metadata in the session's own ledger row."""
-
-        if patch:
-            operation.operation = "metadata_patch"
-            operation.diff_summary = json.dumps(
-                patch,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-        else:
-            operation.operation = "update"
-            operation.diff_summary = "page.autosave.draft"
-        session.add(operation)
-
-    def _require_alternative_base(
-        self,
-        *,
-        session: Session,
-        page: ContextPage,
-        current: ContextPageVersion,
-        actor_kind: str,
-        actor_id: str,
-        base_version_id: UUID | None,
-        base_content_hash: str | None,
-    ) -> ContextPageVersion:
-        base_version = self._require_page_version(session, page, base_version_id)
-        # A base that is the current head itself means the caller's own tab
-        # overwrote the draft row in place (page.updated_at, current session
-        # write model). That is not an unrelated conflict -- it is exactly the
-        # case "preserve as alternative" exists to rescue -- so branch off
-        # head instead of refusing. A base naming any other version is still a
-        # real conflict and stays refused.
-        if (
-            base_version.content_hash != base_content_hash
-            and base_version.id != current.id
-        ):
-            disclosed_version_id, disclosed_content_hash = (
-                self._disclosable_version_fields(current, actor_kind, actor_id)
-            )
-            raise PageConflictError(
-                server_version_id=disclosed_version_id,
-                server_content_hash=disclosed_content_hash,
-            )
-        return base_version
-
-    def _preserve_alternative(
-        self,
-        session: Session,
-        page: ContextPage,
-        current: ContextPageVersion,
-        base_version: ContextPageVersion,
-        title: str | None,
-        prepared: PreparedBody,
-        actor_kind: str,
-        actor_id: str,
-        actor_provenance: str,
-    ) -> PagePayload:
-        version = self._insert_version(
-            session,
-            page_id=page.id,
-            parent_version_id=base_version.id,
-            body=prepared,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            version_status="draft",
-            graph_status="branched",
-        )
-        active_alternatives = session.scalars(
-            select(ContextPageVersion)
-            .where(
-                ContextPageVersion.page_id == page.id,
-                ContextPageVersion.graph_status == "branched",
-                ContextPageVersion.id != version.id,
-                # Durable MCP reconciliation branches are correctness state,
-                # not browser alternative overflow. They may terminate only by
-                # patch_draft(reconciles=...) or explicit discard, never because
-                # another stale browser save happened to cross this UI cap.
-                ContextPageVersion.reconcile_manifest.is_(None),
-                ~select(ChangeSet.id)
-                .where(
-                    ChangeSet.id == ContextPageVersion.change_set_id,
-                    ChangeSet.workspace_id == page.workspace_id,
-                    ChangeSet.trigger_type == "mcp_patch_draft_diverged",
-                )
-                .exists(),
-                ~select(ReviewItem.id)
-                .where(
-                    ReviewItem.change_set_id == ContextPageVersion.change_set_id,
-                    ReviewItem.workspace_id == page.workspace_id,
-                    ReviewItem.review_type == "context_reconciliation",
-                )
-                .exists(),
-            )
-            .order_by(ContextPageVersion.version_no.desc())
-        ).all()
-        for overflow in active_alternatives[MAX_ACTIVE_ALTERNATIVE_DRAFTS - 1 :]:
-            overflow.graph_status = "discarded"
-            session.add(overflow)
-        result = self.change_audit_recorder.record_context_page_alternative(
-            session=session,
-            workspace_id=page.workspace_id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            page_id=page.id,
-            version_id=version.id,
-            payload={
-                "base_version_id": str(base_version.id),
-                "server_version_id": str(current.id),
-                "server_content_hash": current.content_hash,
-                "proposed_title": title,
-                "proposed_page_type": prepared.metadata.page_type,
-                "proposed_tags": prepared.metadata.tags,
-                "proposed_aliases": prepared.metadata.aliases,
-            },
-            actor_provenance=actor_provenance,
-        )
-        # `current` is the page-global head at conflict time -- it must not
-        # name a DIFFERENT author's private `editing` row even as a bare
-        # pointer (P2.2/P2.6: no opaque-id disclosure either), and that
-        # applies to BOTH `visible_version_id` and `_payload_from_page`'s own
-        # `current_version_id` field (which otherwise defaults to the raw
-        # page-global pointer -- safe only for a true self-view response).
-        safe_current_id = _editable_target_or_published(
-            page, current.id, actor_kind, actor_id
-        )
-        return self._payload_from_page(
-            session,
-            page,
-            version,
-            alternative_draft_id=version.id,
-            change_set_id=result.change_set_id,
-            review_item_id=result.review_item_id,
-            preserved_as_alternative=True,
-            visible_version_id=safe_current_id,
-            current_version_id_override=safe_current_id,
-            prepared=prepared,
-        )
-
     def _supersede_unresolved_context_reviews_for_version(
         self,
         *,
@@ -5095,28 +4482,6 @@ class PageService:
             .all()
         )
 
-    @staticmethod
-    def _is_unreviewed_browser_draft(
-        *,
-        session: Session,
-        page: ContextPage,
-        version: ContextPageVersion,
-        actor_provenance: str | None,
-    ) -> bool:
-        """A shared browser draft that its author may still change or submit.
-
-        Browser saves share drafts with Editors. A version that a review
-        already names is immutable evidence, so a later save forks it instead.
-        """
-        return (
-            actor_provenance == "browser_session"
-            and version.version_status == "draft"
-            and page.latest_draft_version_id == version.id
-            and not PageService._context_reviews_for_version(
-                session=session, page=page, version=version
-            )
-        )
-
     def _can_submit_for_review(
         self,
         session: Session,
@@ -5171,116 +4536,6 @@ class PageService:
         version.content_hash = prepared.content_hash
         version.last_saved_at = utc_now()
 
-    def _settle_autosave_reviews_of_open_edit(
-        self,
-        *,
-        session: Session,
-        page: ContextPage,
-        version: ContextPageVersion,
-        reviews: list[ReviewItem],
-        actor_kind: str,
-        actor_id: str,
-    ) -> list[ReviewItem]:
-        """Retire review items that earlier AI autosaves attached to an open edit.
-
-        Before own-editing-row AI saves took the session path, each one
-        recorded a ReviewItem against the row it was still editing. Such an
-        item never described a submitted state: the row stayed private and
-        kept changing. Left in place they made every later save fork a draft
-        and left a phantom entry in the review queue. They are settled here,
-        audited; the real review is the one submit_context_edit_for_review
-        records.
-
-        A submission's own review, already withdrawn because this chat
-        reopened the row (``_reopen_own_pending_submission``), is dropped as
-        well: it no longer speaks for the row's bytes, so it must not fork the
-        save either. An open edit carries such a review no other way.
-        """
-
-        remaining: list[ReviewItem] = []
-        settled = False
-        for review in reviews:
-            change_set = get_in_workspace(
-                session,
-                ChangeSet,
-                workspace_id=page.workspace_id,
-                resource_id=review.change_set_id,
-            )
-            if (
-                review.status == "superseded"
-                and change_set is not None
-                and change_set.reason == SUBMIT_CONTEXT_EDIT_ACTION
-            ):
-                continue
-            from_autosave = change_set is not None and (
-                change_set.reason or ""
-            ).startswith("page.autosave")
-            if not from_autosave:
-                remaining.append(review)
-                continue
-            if review.status in {"pending", "changes_requested"}:
-                review.status = "superseded"
-                review.claimed_by = None
-                review.claimed_at = None
-                change_set.status = "superseded"
-                self.change_audit_recorder.audit_service.emit(
-                    session=session,
-                    workspace_id=page.workspace_id,
-                    actor_kind=actor_kind,
-                    actor_id=actor_id,
-                    action="review.superseded_autosave_of_open_edit",
-                    target_kind="review_item",
-                    target_id=review.id,
-                    payload={"version_id": str(version.id)},
-                )
-                settled = True
-        if settled:
-            session.flush()
-        return remaining
-
-    def _supersede_content_replaced_reviews(
-        self,
-        *,
-        session: Session,
-        page: ContextPage,
-        replaced_version: ContextPageVersion,
-        successor_version: ContextPageVersion,
-        reviews: list[ReviewItem],
-        new_change_set_id: UUID,
-        actor_kind: str,
-        actor_id: str,
-    ) -> int:
-        """Settle only reviews whose immutable target the browser replaced."""
-
-        if successor_version.id == replaced_version.id:
-            if reviews:
-                raise RuntimeError("reviewed Context bytes must not be overwritten")
-            return 0
-        for review in reviews:
-            review.status = "superseded"
-            review.claimed_by = None
-            review.claimed_at = None
-            stale_change_set = session.get(ChangeSet, review.change_set_id)
-            if stale_change_set is not None:
-                stale_change_set.status = "superseded"
-            self.change_audit_recorder.audit_service.emit(
-                session=session,
-                workspace_id=page.workspace_id,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-                action="review.superseded_by_content_replacement",
-                target_kind="review_item",
-                target_id=review.id,
-                payload={
-                    "original_review_item_id": str(review.id),
-                    "replaced_version_id": str(replaced_version.id),
-                    "successor_version_id": str(successor_version.id),
-                    "new_change_set_id": str(new_change_set_id),
-                },
-            )
-        session.flush()
-        return len(reviews)
-
     def _set_current_version(
         self,
         session: Session,
@@ -5300,9 +4555,7 @@ class PageService:
         draft autosave — publishing a draft is an explicit step.
         """
         should_publish = (
-            version.version_status not in ("editing", "draft")
-            if publish is None
-            else publish
+            version.version_status != "draft" if publish is None else publish
         )
         if not should_publish:
             if page.lifecycle_status != "archived":
@@ -5341,31 +4594,6 @@ class PageService:
         return page
 
     @staticmethod
-    def _private_edit_may_hold_head(
-        session: Session,
-        page: ContextPage,
-        version: ContextPageVersion,
-    ) -> bool:
-        """Whether saving a private edit may move the page-global pointers.
-
-        Only on a page nobody else can read yet: never published, and no
-        pointer naming a version other people can see. Otherwise every other
-        reader falls back to the published version, and every other editor's
-        save is based on a row they cannot read, so it is refused as stale.
-        The author reaches the private edit through its own editing row.
-        """
-
-        if page.current_published_version_id is not None:
-            return False
-        for pointer_id in (page.latest_draft_version_id, page.current_version_id):
-            if pointer_id is None or pointer_id == version.id:
-                continue
-            head = context_page_repo.get_version(session, pointer_id)
-            if head is not None and head.version_status not in PRIVATE_VERSION_STATUSES:
-                return False
-        return True
-
-    @staticmethod
     def _ensure_context_tree_placement(
         *,
         session: Session,
@@ -5400,34 +4628,6 @@ class PageService:
                 "the page write was rolled back.",
                 cause_error_code=exc.error_code,
             ) from exc
-
-    def _move_context_tree_placement(
-        self,
-        *,
-        session: Session,
-        workspace_id: UUID,
-        page: ContextPage,
-        destination_node_id: UUID | None,
-        actor_kind: str,
-        actor_id: str,
-    ) -> bool:
-        if destination_node_id is None:
-            return False
-        previous_parent_id = page.placement_parent_node_id
-        self._ensure_context_tree_placement(
-            session=session,
-            workspace_id=workspace_id,
-            page=page,
-            parent_id=destination_node_id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            move_existing=True,
-        )
-        if previous_parent_id == destination_node_id:
-            return False
-        page.placement_parent_node_id = destination_node_id
-        session.add(page)
-        return True
 
     def _require_workspace(self, session: Session, workspace_slug: str):
         workspace = workspace_repo.get_workspace_by_slug(session, workspace_slug)
@@ -5573,93 +4773,6 @@ class PageService:
             raise PageNotFoundError("page version not found")
         return version
 
-    def _editable_version_id_for_actor(
-        self,
-        session: Session,
-        page: ContextPage,
-        actor_kind: str,
-        actor_id: str,
-        *,
-        browser_named_ids: Collection[UUID | None] | None = None,
-    ) -> UUID | None:
-        """The version an ordinary save by THIS actor should land on (P8.1/P8.4).
-
-        ``editable_context_version_id(page)`` is a page-global pointer -- it
-        cannot tell two authors' own open "editing" rows apart, so it would
-        collide them onto the same version, exactly the ambiguity P2.2 was
-        meant to rule out. Prefer this actor's own open "editing" row when
-        one exists; otherwise fall back to the page-global pointer (ordinary
-        single-author save, or a submitted draft this actor is continuing to
-        amend before review).
-
-        A browser save (``browser_named_ids``) continues the shared draft
-        line. It lands on this actor's private edit -- an MCP edit, say --
-        only when the request names that row, i.e. the editor opened it.
-
-        The page-global pointer can still name another author's private edit
-        (written before private saves stopped moving it, or a reopened
-        submission). This actor cannot read that row, so the save starts from
-        the version they can see instead of failing as stale forever.
-        """
-
-        own_editing_id = session.scalar(
-            select(ContextPageVersion.id).where(
-                ContextPageVersion.page_id == page.id,
-                ContextPageVersion.version_status == "editing",
-                ContextPageVersion.created_by_actor_kind == actor_kind,
-                ContextPageVersion.created_by_actor_id == actor_id,
-            )
-        )
-        if own_editing_id is not None and (
-            browser_named_ids is None or own_editing_id in browser_named_ids
-        ):
-            return own_editing_id
-        for pointer_id in (page.latest_draft_version_id, page.current_version_id):
-            if pointer_id is None:
-                continue
-            head = context_page_repo.get_version(session, pointer_id)
-            if (
-                head is not None
-                and head.version_status in PRIVATE_VERSION_STATUSES
-                and (
-                    head.created_by_actor_kind != actor_kind
-                    or head.created_by_actor_id != actor_id
-                )
-            ):
-                continue
-            return pointer_id
-        return page.current_published_version_id
-
-    @staticmethod
-    def _highest_editing_revision(
-        session: Session,
-        page: ContextPage,
-        actor_kind: str,
-        actor_id: str,
-        *,
-        excluding: UUID,
-    ) -> int | None:
-        """The highest editing_revision any other row of this author on this
-        page ever reached -- discarded, submitted and published rows included.
-
-        editing_revision alone guards update_context_edit when no base is
-        sent. Restarting every new editing row at 1 let a revision read from
-        an EARLIER row of the same author match the new one, so a stale
-        whole-body save replaced work the caller had never seen. A new row
-        starts above this value instead. Per author, so the starting value
-        says nothing about anyone else's private edits.
-        """
-
-        return session.scalar(
-            select(func.max(ContextPageVersion.editing_revision)).where(
-                ContextPageVersion.workspace_id == page.workspace_id,
-                ContextPageVersion.page_id == page.id,
-                ContextPageVersion.created_by_actor_kind == actor_kind,
-                ContextPageVersion.created_by_actor_id == actor_id,
-                ContextPageVersion.id != excluding,
-            )
-        )
-
     def _require_named_open_edit(
         self,
         session: Session,
@@ -5721,28 +4834,6 @@ class PageService:
             raise PageNotFoundError("page version not found")
         return version
 
-    def _disclosable_version_fields(
-        self,
-        current: ContextPageVersion,
-        actor_kind: str | None,
-        actor_id: str | None,
-    ) -> tuple[UUID | None, str | None]:
-        """P2.2/P2.6: a conflict response must never name another author's
-        private "editing" row's id/content_hash -- that would itself be the
-        disclosure those sections exist to prevent. Any caller that raises a
-        ``PageConflictError`` naming ``current`` (page-global pointers can
-        durably resolve to another author's open editing row, see
-        ``editable_context_version_id``) must route the disclosed fields
-        through this check first, not just ``_validate_base``'s own callers.
-        """
-
-        if current.version_status == "editing" and (
-            current.created_by_actor_kind != actor_kind
-            or current.created_by_actor_id != actor_id
-        ):
-            return None, None
-        return current.id, current.content_hash
-
     def _validate_base(
         self,
         session: Session,
@@ -5751,32 +4842,7 @@ class PageService:
         base_version_id: UUID | None,
         base_content_hash: str | None,
         expected_editing_revision: int | None = None,
-        *,
-        actor_kind: str | None = None,
-        actor_id: str | None = None,
     ) -> None:
-        if base_version_id is None and base_content_hash is None:
-            own_open_edit = (
-                current.version_status == "editing"
-                and current.created_by_actor_kind == actor_kind
-                and current.created_by_actor_id == actor_id
-            )
-            # The author's own editing row: editing_revision moves on every
-            # save of it, and a new row starts above every earlier row's
-            # revision (begin_context_edit), so it alone proves the caller saw
-            # the latest state of THIS row.
-            if own_open_edit and expected_editing_revision is not None:
-                if expected_editing_revision != current.editing_revision:
-                    raise PageConflictError(
-                        server_version_id=current.id,
-                        server_content_hash=current.content_hash,
-                        server_editing_revision=current.editing_revision,
-                        error_code="editing_revision_conflict",
-                    )
-                return
-            raise PageValidationError(
-                "base_version_id and base_content_hash are required"
-            )
         if base_version_id is None or base_content_hash is None:
             raise PageValidationError(
                 "base_version_id and base_content_hash are required"
@@ -5784,29 +4850,11 @@ class PageService:
         base_version = context_page_repo.get_version(session, base_version_id)
         if base_version is None or base_version.page_id != page.id:
             raise PageNotFoundError("page version not found")
-        # `current` can be `page.latest_draft_version_id`/`current_version_id`,
-        # a page-global pointer that -- since P8.1 -- can durably name another
-        # author's private "editing" row (see `editable_context_version_id`).
-        # A conflict response naming that row's id/content_hash to a caller
-        # who is not its author would itself be the disclosure P2.2/P2.6
-        # exists to prevent, even though the write these callers perform is
-        # not itself actor-scoped (their own doc comments explain why not).
-        disclosed_version_id, disclosed_content_hash = self._disclosable_version_fields(
-            current, actor_kind, actor_id
-        )
-        disclosed_revision = (
-            current.editing_revision
-            if disclosed_version_id is not None
-            and current.version_status == "editing"
-            and current.created_by_actor_kind == actor_kind
-            and current.created_by_actor_id == actor_id
-            else None
-        )
         if base_version_id != current.id or base_content_hash != current.content_hash:
             raise PageConflictError(
-                server_version_id=disclosed_version_id,
-                server_content_hash=disclosed_content_hash,
-                server_editing_revision=disclosed_revision,
+                server_version_id=current.id,
+                server_content_hash=current.content_hash,
+                server_editing_revision=current.editing_revision,
             )
         # base_content_hash alone only covers the markdown body: a save that
         # changed only title/tags/aliases/metadata on this same row does not
@@ -5819,9 +4867,9 @@ class PageService:
             and expected_editing_revision != current.editing_revision
         ):
             raise PageConflictError(
-                server_version_id=disclosed_version_id,
-                server_content_hash=disclosed_content_hash,
-                server_editing_revision=disclosed_revision,
+                server_version_id=current.id,
+                server_content_hash=current.content_hash,
+                server_editing_revision=current.editing_revision,
                 error_code="editing_revision_conflict",
             )
 
@@ -5859,7 +4907,7 @@ class PageService:
             tags=tags,
             aliases=aliases,
             visible_version_id=version.id,
-            current_version_id=_editable_head_for_actor(page, can_read_drafts, actor),
+            current_version_id=_editable_head(page, can_read_drafts),
             current_published_version_id=page.current_published_version_id,
             published_version_no=(
                 published_version.version_no if published_version is not None else None
@@ -5944,15 +4992,11 @@ class PageService:
             else None
         )
         parent_version_id = version.parent_version_id
-        # P8.4: project the parent whenever we have an actor to project it
-        # for -- not just when `can_read_drafts` (a coarse role gate) is
-        # False. `can_read_drafts=True` only means "may see some draft
-        # content"; it says nothing about THIS actor being the author of a
-        # private "editing" parent, which is an identity check
-        # `context_parent_projection` -> `context_version_is_visible` makes
-        # on its own. Skipping projection whenever a Viewer/Editor could
-        # read drafts leaked another author's hidden editing-row id as this
-        # version's raw `parent_version_id`.
+        # Project the parent whenever there is an actor to project it for --
+        # not just when `can_read_drafts` (a coarse role gate) is False.
+        # `context_parent_projection` -> `context_version_is_visible` also
+        # hides another author's discarded parent, which the role gate alone
+        # would let through as this version's raw `parent_version_id`.
         if not can_read_drafts or parent_visibility_actor is not None:
             parent = (
                 context_page_repo.get_version(session, version.parent_version_id)
@@ -5992,7 +5036,7 @@ class PageService:
             aliases=aliases,
             visible_version_id=projected_visible_id,
             current_version_id=(
-                _editable_head_for_actor(page, can_read_drafts, parent_visibility_actor)
+                _editable_head(page, can_read_drafts)
                 if current_version_id_override is _UNSET
                 else current_version_id_override
             ),
@@ -6246,64 +5290,12 @@ def _draft_review_reason(statuses: list[str]) -> DraftReviewReason | None:
     return None
 
 
-def _editable_target_or_published(
-    page: ContextPage, candidate: UUID | None, actor_kind: str, actor_id: str
-) -> UUID | None:
-    """Choose a resumable edit target, falling back from another actor's work.
-
-    Editing rows are readable by other editors, but only their author can
-    resume that session. Callers also use this target in write conflicts.
-    Without a session, inspect only the loaded current/latest relationships;
-    an unrecognized candidate falls back to the published version.
-    """
-
-    if candidate is None or candidate == page.current_published_version_id:
-        return candidate
-
-    def _is_hidden(editing: ContextPageVersion | None) -> bool:
-        return (
-            editing is not None
-            and editing.version_status == "editing"
-            and (
-                editing.created_by_actor_kind != actor_kind
-                or editing.created_by_actor_id != actor_id
-            )
-        )
-
-    if candidate == page.latest_draft_version_id:
-        return (
-            page.current_published_version_id
-            if _is_hidden(page.latest_draft_version)
-            else candidate
-        )
-    if candidate == page.current_version_id:
-        return (
-            page.current_published_version_id
-            if _is_hidden(page.current_version)
-            else candidate
-        )
-    return page.current_published_version_id
-
-
-def _editable_head_for_actor(
-    page: ContextPage,
-    can_read_drafts: bool,
-    actor: ActorContext | None = None,
-) -> UUID | None:
-    """The actor's edit target, independently of the default body selection.
-
-    Keep the current pointer for author-owned sessions and shared drafts.
-    Another actor's editing row remains readable by version ID but cannot
-    be adopted as this actor's resumable session.
-    """
+def _editable_head(page: ContextPage, can_read_drafts: bool) -> UUID | None:
+    """The edit head a reader may see: drafts only for draft readers."""
 
     if not can_read_drafts:
         return page.current_published_version_id
-    if actor is None:
-        return page.current_version_id
-    return _editable_target_or_published(
-        page, page.current_version_id, actor.actor_kind, actor.actor_id
-    )
+    return page.current_version_id
 
 
 def _page_version_projection_fields(
@@ -6835,21 +5827,6 @@ def _delete_stale_page_link_versions(session: Session, *, page: ContextPage) -> 
     return max(int(result.rowcount or 0), 0)
 
 
-def _delete_page_links_for_version(
-    session: Session,
-    *,
-    page: ContextPage,
-    version_id: UUID,
-) -> None:
-    session.execute(
-        delete(PageLink).where(
-            PageLink.workspace_id == page.workspace_id,
-            PageLink.source_page_id == page.id,
-            PageLink.source_version_id == version_id,
-        )
-    )
-
-
 def _sync_page_name_index(session: Session, *, page: ContextPage) -> None:
     session.execute(delete(PageNameIndex).where(PageNameIndex.page_id == page.id))
     index_rows: list[PageNameIndex] = []
@@ -7087,27 +6064,9 @@ def should_stage_page_metadata(
     version: ContextPageVersion,
 ) -> bool:
     # `page.title`/`tags`/`aliases` are page-level columns shared by every
-    # version, so applying them immediately during a private `editing`
-    # session would leak that author's unpublished metadata change to public
-    # readers (who still see the old body via current_published_version_id)
-    # the moment it's saved -- not just to a reviewer, which is why this
-    # cannot stay "draft"-only now that "editing" is unreviewed and private.
-    #
-    # This used to also require `page.current_published_version_id is not
-    # None`, on the assumption that a page which has never published has
-    # nothing to protect yet. A real Codex review found that reachable and
-    # wrong: a never-published page can still carry an already-SUBMITTED
-    # draft D awaiting review while a second editing session E is opened on
-    # the same page. `should_stage_page_metadata(page, D)` used the same
-    # page-global condition, so it would ALSO skip overlaying D's own staged
-    # patch -- E's private, unsubmitted title then reads back as D's, to any
-    # draft-reader, through the shared canonical columns both versions read.
-    # Confirmed by reproducing it end to end (submit D, begin+autosave E,
-    # read D as a different actor) before this fix, and that the same
-    # contaminated title also lands in D's own PageNameIndex entry.
-    # Publication history is irrelevant to whether staging is needed --
-    # only this version's own status is.
-    return version.version_status in ("editing", "draft")
+    # version. A draft's metadata stays in the draft until it is published,
+    # so readers of the published version never see it early.
+    return version.version_status == "draft"
 
 
 def slugify_wikilink_target(value: str | None) -> str:

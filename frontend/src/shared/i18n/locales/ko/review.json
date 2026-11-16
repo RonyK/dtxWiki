@@ -410,8 +410,7 @@
       "not_requested_changes": "변경 요청 상태가 아닙니다.",
       "unsupported_revision": "이 변경 버전은 해당 결정을 지원하지 않습니다.",
       "superseded_by_rejected_ancestor": "바탕이 된 이전 버전이 거절되어 함께 정리됐습니다.",
-      "review_decision_impact_changed": "확인하는 동안 거절 영향이 바뀌었습니다. 바뀐 내용을 확인하고 다시 거절하세요.",
-      "review_reject_blocked_by_private_edit": "이 초안 위에서 다른 작성자의 비공개 편집이 진행 중이라 거절할 수 없습니다. 편집이 제출되거나 취소된 뒤 다시 시도하세요."
+      "review_decision_impact_changed": "확인하는 동안 거절 영향이 바뀌었습니다. 바뀐 내용을 확인하고 다시 거절하세요."
     },
     "savedDecision": "{{version}} {{decision}} 저장 완료",
     "queueComplete": "현재 조건의 남은 리뷰가 없습니다.",

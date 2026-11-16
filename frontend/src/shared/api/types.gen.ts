@@ -1775,7 +1775,7 @@ export interface paths {
         put?: never;
         /**
          * Begin Context Edit
-         * @description P8.3: idempotently resume or open the caller's own editing session.
+         * @description Idempotently join a named draft or start a draft from commits.
          */
         post: operations["begin_context_edit_api_v1_workspaces__workspace_id__context_pages__page_id__begin_edit_post"];
         delete?: never;
@@ -1847,7 +1847,7 @@ export interface paths {
         put?: never;
         /**
          * Discard Context Edit
-         * @description P8.3: discard the caller's own open editing row (terminal, not a hard-delete).
+         * @description Discard an open draft (terminal, not a hard-delete).
          */
         post: operations["discard_context_edit_api_v1_workspaces__workspace_id__context_pages__page_id__discard_edit_post"];
         delete?: never;
@@ -2004,7 +2004,7 @@ export interface paths {
         put?: never;
         /**
          * Submit Context Edit For Review
-         * @description P8.1: "Save draft" -- lock the caller's own editing row and submit it.
+         * @description Submit a draft for review.
          */
         post: operations["submit_context_edit_for_review_api_v1_workspaces__workspace_id__context_pages__page_id__submit_for_review_post"];
         delete?: never;
@@ -5838,7 +5838,7 @@ export interface components {
             /** Graph Status */
             graph_status?: string | null;
             /** History Status */
-            history_status?: ("closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            history_status?: ("closed" | "state_inconsistent" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**
              * Id
              * Format: uuid
@@ -6141,7 +6141,7 @@ export interface components {
             /** Graph Status */
             graph_status?: string | null;
             /** History Status */
-            history_status?: ("closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            history_status?: ("closed" | "state_inconsistent" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**
              * Id
              * Format: uuid
@@ -9991,7 +9991,7 @@ export interface components {
              * History Status
              * @enum {string}
              */
-            history_status: "closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft";
+            history_status: "closed" | "state_inconsistent" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft";
             /**
              * Is Alternative
              * @default false
@@ -11267,8 +11267,6 @@ export interface components {
         };
         /** ReviewRejectEffect */
         ReviewRejectEffect: {
-            /** Blocked Reason */
-            blocked_reason?: "private_edit_in_progress" | null;
             /** Candidate Version Id */
             candidate_version_id?: string | null;
             /** Candidate Version No */
@@ -12251,7 +12249,7 @@ export interface components {
             /** Graph Status */
             graph_status?: string | null;
             /** History Status */
-            history_status?: ("closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            history_status?: ("closed" | "state_inconsistent" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**
              * Is Alternative
              * @default false
@@ -12344,7 +12342,7 @@ export interface components {
             /** Graph Status */
             graph_status?: string | null;
             /** History Status */
-            history_status?: ("closed" | "state_inconsistent" | "current_editing" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
+            history_status?: ("closed" | "state_inconsistent" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**
              * Is Alternative
              * @default false

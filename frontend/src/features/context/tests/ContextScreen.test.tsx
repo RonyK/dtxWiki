@@ -866,7 +866,7 @@ describe("ContextScreen", () => {
     const base = (await (await originalFetch(pageUrl, undefined)).json()).data;
     const author = { actor_kind: "human", actor_id: "author-1", display_name: "Draft Author" };
     const writing = {
-      version_id: "writing-1", version_status: "editing", author,
+      version_id: "writing-1", version_status: "draft", author,
       last_saved_at: "2026-05-11T01:00:00Z", is_editing: true,
       review: null, is_behind: false, is_mine: false, state: "writing",
     };
@@ -931,7 +931,7 @@ describe("ContextScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
     await screen.findByText("Published body");
     await act(async () => pending.resolve(jsonResponse({ data: {
-      ...base, version_id: "writing-1", version_status: "editing", draft: writing,
+      ...base, version_id: "writing-1", version_status: "draft", draft: writing,
       open_drafts: openDrafts, body_md: "Late writing body",
     } })));
     expect(screen.queryByText("Late writing body")).not.toBeInTheDocument();

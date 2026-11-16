@@ -42,7 +42,6 @@ from backend.services.activity_service import (
     _audit_only_observation_event_clause,
     _is_review_decision_activity_item,
     _is_system_activity_item,
-    _private_editing_visible,
     _review_decision_audit_event_clause,
     _system_audit_event_clause,
     period_bounds,
@@ -492,9 +491,6 @@ class ActivityFeedService:
             conditions = []
             if source == "audit":
                 conditions.append(~_audit_only_observation_event_clause())
-                # Absent rather than redacted: a private record is not even a
-                # group boundary for another reader.
-                conditions.append(_private_editing_visible(actor))
                 # The same SQL split _audit_history applies, so audit rows of
                 # another kind are not scanned and hydrated only to be dropped.
                 if kind == "system":

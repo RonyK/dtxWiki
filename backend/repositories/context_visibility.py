@@ -40,11 +40,6 @@ def _actor_identity(actor: ActorContext | None) -> tuple[str, str] | None:
     return actor_kind, actor_id
 
 
-# Unsubmitted rows: also used by retention and account cleanup. Reading an
-# editing row is governed separately so exposing it cannot change its lifetime.
-PRIVATE_VERSION_STATUSES = frozenset({"discarded"})
-
-
 def discarded_row_hidden_from_actor(
     version: ContextPageVersion | None, actor: ActorContext | None
 ) -> bool:
@@ -62,42 +57,28 @@ def discarded_row_hidden_from_actor(
     )
 
 
-def foreign_editing_version_exists(pointer_column, identity: tuple[str, str] | None):
-    """SQL for an unsubmitted row owned by someone else.
+def foreign_discarded_version_exists(pointer_column, identity: tuple[str, str] | None):
+    """SQL equivalent of ``discarded_row_hidden_from_actor`` for read surfaces.
 
     A correlated EXISTS rather than a join: callers embed this expression
-    against queries that may (context_page_repo.py) or may not already join
-    `context_page_version` under its own name, so an unaliased reference here
-    would collide/ambiguously correlate with that unrelated join instead of
-    naming a fresh row to inspect.
-
-    Retention and account cleanup retain this rule even though editing rows
-    are readable by other editors.
+    against queries that may or may not already join `context_page_version`
+    under its own name, so an unaliased reference here would collide with
+    that unrelated join instead of naming a fresh row to inspect.
     """
 
-    return _foreign_version_exists(pointer_column, identity, ("draft", "discarded"))
-
-
-def foreign_discarded_version_exists(pointer_column, identity: tuple[str, str] | None):
-    """SQL equivalent of ``discarded_row_hidden_from_actor`` for read surfaces."""
-
-    return _foreign_version_exists(pointer_column, identity, ("discarded",))
-
-
-def _foreign_version_exists(pointer_column, identity, statuses):
-    editing_row = aliased(ContextPageVersion)
+    discarded = aliased(ContextPageVersion)
     return (
         select_in_workspace(
-            editing_row,
+            discarded,
             workspace_id=pointer_column.class_.workspace_id,
             conditions=(
-                editing_row.id == pointer_column,
-                editing_row.version_status.in_(tuple(statuses)),
+                discarded.id == pointer_column,
+                discarded.version_status == "discarded",
                 (
                     not_(
                         and_(
-                            editing_row.created_by_actor_kind == identity[0],
-                            editing_row.created_by_actor_id == identity[1],
+                            discarded.created_by_actor_kind == identity[0],
+                            discarded.created_by_actor_id == identity[1],
                         )
                     )
                     if identity is not None
@@ -105,8 +86,8 @@ def _foreign_version_exists(pointer_column, identity, statuses):
                 ),
             ),
         )
-        .with_only_columns(editing_row.id)
-        .correlate_except(editing_row)
+        .with_only_columns(discarded.id)
+        .correlate_except(discarded)
         .exists()
     )
 
@@ -212,7 +193,7 @@ def searchable_context_version_id(
 def editable_head_context_version_id(
     page: ContextPage, actor: ActorContext | None
 ) -> tuple[UUID | None, bool]:
-    """Preserve the writer's latest-slot base, including its own open work."""
+    """The writer's latest-slot base under the ordinary draft-read rule."""
 
     return visible_context_version_id(page, actor)
 

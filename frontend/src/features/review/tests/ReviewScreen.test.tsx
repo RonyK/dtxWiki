@@ -831,11 +831,10 @@ describe("ReviewScreen", () => {
       cascaded_versions: [7, 4, 6, 5].map(version => ({ version_id: `version-${version}`, version_no: version })),
       visible_cascaded_review_ids: ["later-review"], cascaded_review_count: 2,
       visible_sibling_count: 1, impact_fingerprint: "impact-first",
-      blocked_reason: "private_edit_in_progress",
     };
-    // The private edit can end without changing this review's list revision.
+    // Impact can change without changing this review's list revision.
     const ready: ReviewItem = { ...current, reject_effect: {
-      ...current.reject_effect, blocked_reason: null, impact_fingerprint: "impact-ready",
+      ...current.reject_effect, impact_fingerprint: "impact-ready",
     } };
     const updated: ReviewItem = {
       ...ready,
@@ -917,10 +916,12 @@ describe("ReviewScreen", () => {
     dialog = await screen.findByRole("dialog", { name: "Reject this review?" });
     await waitFor(() => expect(detailCalls).toBe(3));
     await act(async () => { finishCancelledRefresh(); });
-    expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
-    expect(within(dialog).getByText(i18n.t("review:workflow.reasons.review_reject_blocked_by_private_edit"))).toBeVisible();
-    await user.click(within(dialog).getByRole("button", { name: "Check again" }));
+    expect(within(dialog).getByRole("button", { name: "Reject" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    dialog = await screen.findByRole("dialog", { name: "Reject this review?" });
     await waitFor(() => expect(detailCalls).toBe(4));
+    await waitFor(() => expect(dialog).toHaveFocus());
     const reason = within(dialog).getByRole("textbox", { name: "Decision reason" });
     reason.focus();
     await act(async () => { finishReadyRefresh(); });
@@ -3802,7 +3803,7 @@ function reviewItem(
       published_version_id: null, published_version_no: null,
       visible_sibling_review_ids: [], visible_sibling_count: 0,
       cascaded_versions: [], visible_cascaded_review_ids: [], cascaded_review_count: 0,
-      restores_review: false, metadata_kept: false, blocked_reason: null,
+      restores_review: false, metadata_kept: false,
       impact_fingerprint: "impact-review-1",
     },
     reconciliation_available: overrides.reconciliationAvailable ?? false,

@@ -395,7 +395,7 @@ def test_sparse_filter_scans_a_bounded_window_and_resumes_by_cursor(
         assert not second.has_more and second.next_cursor is None
 
 
-def test_private_editing_audit_and_mcp_transitions(session_factory):
+def test_shared_draft_audit_and_mcp_transitions(session_factory):
     service = _service()
     with session_factory.begin() as session:
         setup = _setup(session)
@@ -454,8 +454,8 @@ def test_private_editing_audit_and_mcp_transitions(session_factory):
                 if (entry.event.body or "").startswith("page.")
             }
 
-        # An editing session is the author's alone, as its MCP calls are.
-        assert page_actions("reader") == {"page.publish"}
+        # Shared draft events are visible to other readers as well.
+        assert page_actions("reader") == page_actions("author")
         assert page_actions("author") == {
             "page.begin_context_edit",
             "page.patch_context_edit",

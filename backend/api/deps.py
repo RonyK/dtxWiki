@@ -259,7 +259,6 @@ def status_code_for_read_error(exc: ReadServiceError) -> int:
         "idempotency_key_conflict",
         "decision_id_conflict",
         "review_decision_impact_changed",
-        "review_reject_blocked_by_private_edit",
         "review_decision_undo_unavailable",
     }:
         return 409

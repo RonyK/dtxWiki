@@ -119,8 +119,8 @@ ERROR_STATUSES = {"failed", "rejected_by_policy", "conflict"}
 PRESENTATION_ELIGIBLE_STATUSES = frozenset(
     {"accepted", "succeeded", "partial", "needs_review"}
 )
-# The P8.6 Context editing commands. Each one creates, changes, submits or
-# closes the caller's own editing session, so each counts as a write.
+# The Context editing commands. Each one creates, changes, submits or closes
+# a draft, so each counts as a write.
 CONTEXT_EDIT_TOOLS = frozenset(
     {
         "create_context_page",
@@ -2106,8 +2106,9 @@ class _ReaderGate:
     def call_content_visible(self, row: MCPToolCall, chat: McpChatSession) -> bool:
         """Whether the reader may see what a context-edit call wrote.
 
-        A page can be visible while the edit went into its author's private
-        editing row, so this is decided by the version the call wrote into.
+        A page can be visible while the edit went into a version this reader
+        cannot see (a draft without draft access, or another author's
+        discarded row), so this is decided by the version the call wrote into.
         When capture did not record that version (older calls, and a failed
         whole-body update, which names none), only the caller -- the chat's
         owner -- may see the content.
@@ -2567,7 +2568,7 @@ def _visible_call_item(
         input_summary = _version_hidden_input(row.input_summary)
         receipt = _version_hidden_receipt(_stored_receipt(row))
         # Success messages are generic today; anything else could quote the
-        # private edit, so only a bare status echo survives.
+        # hidden version, so only a bare status echo survives.
         result_summary = (
             row.result_summary
             if isinstance(row.result_summary, str)

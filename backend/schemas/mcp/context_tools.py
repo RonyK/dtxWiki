@@ -22,12 +22,12 @@ from backend.schemas.page import (
     PAGE_LIST_CURSOR_PATTERN,
     PAGE_LIST_LIMIT_MAX,
     BeginContextEditCommand,
+    ContextPageCreateRequest,
     DiscardContextEditCommand,
     DiscardContextEditResult,
     DraftReviewReason,
     ListMyContextEditsResult,
     PagePayload,
-    PrivateContextPageCreateRequest,
     SubmitContextEditCommand,
     UpdateContextEditRequest,
 )
@@ -88,7 +88,7 @@ class SubmitFeedbackToolOutput(BaseModel):
 # Context draft tools share their commands with browser REST.
 
 
-class CreateContextPageInput(PrivateContextPageCreateRequest):
+class CreateContextPageInput(ContextPageCreateRequest):
     workspace_id: UUID
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD

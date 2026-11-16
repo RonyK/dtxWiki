@@ -12,7 +12,6 @@ from backend.models import (
     AccountInboxEntry,
     ApiToken,
     AppMetadata,
-    AuditEvent,
     ChangeSet,
     ContextMediaUsage,
     ContextPage,
@@ -40,6 +39,7 @@ from backend.services.server_admin_service import grant_server_admin
 from backend.services.user_admin_service import UserAdminService
 from backend.services.user_deletion_service import UserDeletionService
 from backend.services.workspace_content_storage import WorkspaceContentStorage
+from backend.utils.actor_display import resolve_actor_display_name
 
 
 def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
@@ -187,55 +187,24 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         session.add(version)
         session.flush()
         version_id = version.id
-        private_version = ContextPageVersion(
+        draft_version = ContextPageVersion(
             workspace_id=shared_id,
             page_id=page_id,
             version_no=2,
-            body_md="Private unsent edit",
+            body_md="Unsent draft edit",
             actor_type="human",
             actor_id=target.user_id,
             actor_display_name=target.display_name,
             created_by_actor_kind="human",
             created_by_actor_id=str(target.user_id),
-            content_hash="private-content-hash",
+            content_hash="draft-content-hash",
             version_status="draft",
         )
-        session.add(private_version)
+        session.add(draft_version)
         session.flush()
-        private_version_id = private_version.id
-        # A later save by the creator does not erase another editor's
-        # earlier contribution. The durable version-scoped audit proves it.
-        collaborative = ContextPageVersion(
-            workspace_id=shared_id,
-            page_id=page_id,
-            version_no=3,
-            body_md="Retained collaborative draft",
-            content_hash="collaborative-hash",
-            actor_type="human",
-            actor_id=target.user_id,
-            created_by_actor_kind="human",
-            created_by_actor_id=str(target.user_id),
-            version_status="draft",
-            page_metadata={"title": "Shared collaborative title"},
-        )
-        session.add(collaborative)
-        session.flush()
-        collaborative_id = collaborative.id
-        session.add(
-            AuditEvent(
-                workspace_id=shared_id,
-                actor_kind="human",
-                actor_id=str(admin.user_id),
-                actor_type="human",
-                action="context_page.draft.save",
-                target_kind="context_page",
-                target_type="context_page",
-                target_id=page_id,
-                payload={"version_id": str(collaborative_id)},
-            )
-        )
+        draft_version_id = draft_version.id
         for owner, note in (
-            (private_version_id, "Unsubmitted private reference note"),
+            (draft_version_id, "Draft reference note"),
             (version_id, "Retained shared reference note"),
         ):
             session.add(
@@ -258,7 +227,7 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
                     "note": note,
                 }
                 for owner, note in (
-                    (private_version_id, "Private deleted reference note"),
+                    (draft_version_id, "Draft deleted reference note"),
                     (version_id, "Shared deleted reference note"),
                 )
             ],
@@ -267,48 +236,48 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         session.flush()
         deleted_reference_id = deleted_reference.id
         page.current_published_version_id = version_id
-        page.latest_draft_version_id = private_version_id
-        page.current_version_id = private_version_id
+        page.latest_draft_version_id = draft_version_id
+        page.current_version_id = draft_version_id
         page.lifecycle_status = "published"
-        private_page = ContextPage(
+        draft_page = ContextPage(
             workspace_id=shared_id,
-            slug="private-title",
-            title="Private title",
+            slug="draft-title",
+            title="Draft title",
             created_by_actor_type="human",
             created_by_actor_id=target.user_id,
         )
-        session.add(private_page)
+        session.add(draft_page)
         session.flush()
-        private_page_id = private_page.id
-        private_page_version = ContextPageVersion(
+        draft_page_id = draft_page.id
+        draft_page_version = ContextPageVersion(
             workspace_id=shared_id,
-            page_id=private_page_id,
+            page_id=draft_page_id,
             version_no=1,
-            body_md="Unsubmitted private document",
+            body_md="Unsubmitted draft document",
             actor_type="human",
             actor_id=target.user_id,
             created_by_actor_kind="human",
             created_by_actor_id=str(target.user_id),
-            content_hash="private-document-hash",
+            content_hash="draft-document-hash",
             version_status="draft",
         )
-        session.add(private_page_version)
+        session.add(draft_page_version)
         session.flush()
-        private_page.current_version_id = private_page_version.id
-        private_page.latest_draft_version_id = private_page_version.id
-        private_node = WorkspaceTreeNode(
+        draft_page.current_version_id = draft_page_version.id
+        draft_page.latest_draft_version_id = draft_page_version.id
+        draft_node = WorkspaceTreeNode(
             workspace_id=shared_id,
             section="context",
             node_kind="context_page",
             target_kind="context_page",
-            target_id=private_page_id,
-            title="Private title",
-            slug="private-title",
+            target_id=draft_page_id,
+            title="Draft title",
+            slug="draft-title",
             sort_key="a0",
         )
-        session.add(private_node)
+        session.add(draft_node)
         session.flush()
-        private_node_id = private_node.id
+        draft_node_id = draft_node.id
         session.add(
             UserFavorite(
                 user_id=target.user_id,
@@ -436,19 +405,19 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         f"/api/v1/workspaces/{shared_id}/context/pages/{page_id}/media",
         data={
             "marker_uuid": str(uuid4()),
-            "editing_version_id": str(private_version_id),
+            "editing_version_id": str(draft_version_id),
         },
-        files={"file": ("private.png", png, "image/png")},
+        files={"file": ("draft.png", png, "image/png")},
     )
     assert uploaded.status_code == 200, uploaded.text
-    private_asset_id = UUID(uploaded.json()["data"]["asset_id"])
+    draft_asset_id = UUID(uploaded.json()["data"]["asset_id"])
     with factory.begin() as session:
         session.add(
             ContextMediaUsage(
                 workspace_id=shared_id,
                 page_id=page_id,
-                asset_id=private_asset_id,
-                page_version_id=private_version_id,
+                asset_id=draft_asset_id,
+                page_version_id=draft_version_id,
                 reference_count=1,
             )
         )
@@ -796,6 +765,13 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     with factory() as session:
         assert session.get(User, target.user_id) is None
         assert session.get(User, admin.user_id) is not None
+        # The author's name stays on what they wrote after the account is gone.
+        assert (
+            resolve_actor_display_name(
+                session, actor_kind="human", actor_id=str(target.user_id)
+            )
+            == target.display_name
+        )
         assert (
             session.get(WorkspaceInboxRecipient, (team_id, target.user_id)).deleted_at
             is not None
@@ -827,26 +803,21 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         assert session.get(ContextPage, page_id) is not None
         retained_version = session.get(ContextPageVersion, version_id)
         assert retained_version.body_md == "Retained team documentation"
-        assert retained_version.actor_display_name is None
+        assert retained_version.actor_display_name == target.display_name
         foreign = session.get(ContextPageVersion, foreign_version_id)
         assert foreign.body_md == "Contributed before leaving"
-        assert foreign.actor_display_name is None
-        # Sole-author unsubmitted bytes are removed; evidence of another
-        # contributor and already-submitted work keeps shared drafts intact.
-        collaborative = session.get(ContextPageVersion, collaborative_id)
-        assert collaborative.body_md == "Retained collaborative draft"
-        assert collaborative.page_metadata["title"] == "Shared collaborative title"
-        private_version = session.get(ContextPageVersion, private_version_id)
-        assert private_version.version_status == "discarded"
-        assert private_version.body_md == ""
-        assert private_version.page_metadata == {}
+        assert foreign.actor_display_name == target.display_name
+        # Drafts are shared content: the leaver's drafts stay with their
+        # bytes, references, media and pages, like everything else they wrote.
+        draft = session.get(ContextPageVersion, draft_version_id)
+        assert (draft.version_status, draft.body_md) == ("draft", "Unsent draft edit")
         assert (
-            session.scalars(
-                select(ContextDocumentReference).where(
-                    ContextDocumentReference.owner_version_id == private_version_id
+            session.scalar(
+                select(ContextDocumentReference.note).where(
+                    ContextDocumentReference.owner_version_id == draft_version_id
                 )
-            ).all()
-            == []
+            )
+            == "Draft reference note"
         )
         assert (
             session.scalar(
@@ -856,31 +827,26 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             )
             == "Retained shared reference note"
         )
-        assert [
+        assert sorted(
             entry["note"]
             for entry in session.get(
                 LibraryItemTombstone, deleted_reference_id
             ).citations
-        ] == ["Shared deleted reference note"]
+        ) == ["Draft deleted reference note", "Shared deleted reference note"]
         assert (
             session.get(ContextPage, page_id).current_published_version_id == version_id
         )
         assert (
             session.get(
                 ContextMediaUsage,
-                (shared_id, page_id, private_asset_id, private_version_id),
+                (shared_id, page_id, draft_asset_id, draft_version_id),
             )
-            is None
+            is not None
         )
-        private_page = session.get(ContextPage, private_page_id)
-        assert private_page.lifecycle_status == "archived"
-        private_node = session.get(WorkspaceTreeNode, private_node_id)
-        assert private_node.title == private_page.title == "Deleted draft"
-        assert (
-            private_node.slug
-            == private_page.slug
-            == f"deleted-draft-{private_page.id.hex}"
-        )
+        draft_page = session.get(ContextPage, draft_page_id)
+        assert draft_page.lifecycle_status != "archived"
+        draft_node = session.get(WorkspaceTreeNode, draft_node_id)
+        assert draft_node.title == draft_page.title == "Draft title"
         assert session.get(Workspace, shared_id) is not None
         shared_chat = session.get(McpChatSession, shared_chat_id)
         assert shared_chat.owner_user_id is None

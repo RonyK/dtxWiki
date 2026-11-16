@@ -18,8 +18,7 @@ export function mediaDeleteErrorKind(error: unknown): MediaDeleteErrorKind {
   if (error instanceof ApiError && error.status === 409) {
     // Still referenced by a page version. Reachable even when the row said
     // can_delete: that flag is computed from viewer-MASKED usage, so an asset
-    // referenced only by another author's private draft looks free and is not.
-    // Masking it the other way would disclose that someone is editing.
+    // referenced only by another author's discarded version can look unused.
     return "inUse";
   }
   return "delete";

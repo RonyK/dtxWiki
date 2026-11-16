@@ -418,8 +418,6 @@ class ContextActivityProjection:
             and (event.actor_kind, event.actor_id)
             == (self.actor.actor_kind, self.actor.actor_id)
         )
-        # Another reader's private editing records never reach this projection:
-        # the audit query drops them (activity_service._private_editing_visible).
         review = self.reviews.get(
             event.target_id
             if event.target_kind == "review_item"

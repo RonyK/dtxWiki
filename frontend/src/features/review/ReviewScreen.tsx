@@ -1289,7 +1289,7 @@ export function ReviewScreen() {
       return await runDecision(decision, undefined, undefined, expectedImpactFingerprint);
     } catch (exc) {
       if (decision === "reject" && exc instanceof ApiError
-        && ["review_decision_impact_changed", "review_reject_blocked_by_private_edit"].includes(exc.body.error_code)) throw exc;
+        && exc.body.error_code === "review_decision_impact_changed") throw exc;
       setError(reviewErrorMessage(exc, t("errors.decide")));
       return "failed";
     }
@@ -2771,13 +2771,11 @@ function ReviewDetail({
   const reasonTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
-  const [rejectBlockedByResponse, setRejectBlockedByResponse] = useState(false);
   const [rejectPreviewState, setRejectPreviewState] = useState<"unverified" | "loading" | "ready">("unverified");
   const rejectChecking = rejectPreviewState === "loading";
   const rejectPreviewReady = rejectPreviewState === "ready";
   const rejectReadRef = useRef<AbortController | null>(null);
   useEffect(() => () => rejectReadRef.current?.abort(), []);
-  const rejectBlocked = rejectBlockedByResponse || review.reject_effect?.blocked_reason === "private_edit_in_progress";
   const [routingOpen, setRoutingOpen] = useState(false);
   const [routingAudience, setRoutingAudience] =
     useState<ReviewAudienceKind>("requester");
@@ -2825,7 +2823,6 @@ function ReviewDetail({
     // an explicit confirm Dialog instead of submitting on the first click. The
     // decision reason stays optional — only the confirm is required.
     setRejectError(null);
-    setRejectBlockedByResponse(false);
     onRejectDialogChange(review.id, reviewContentKey(review));
     setRejectOpen(true);
     void reloadRejectPreview();
@@ -2845,7 +2842,6 @@ function ReviewDetail({
         setRejectPreviewState("unverified");
         return;
       }
-      setRejectBlockedByResponse(false);
       setRejectPreviewState("ready");
     } catch (error) {
       if (!controller.signal.aborted && rejectReadRef.current === controller) {
@@ -2880,7 +2876,7 @@ function ReviewDetail({
   async function confirmReject() {
     // The busy re-entry guard mirrors the routing dialog: the inline button is
     // disabled while submitting, but a stale double-submit is still bounced.
-    if (!canReject || rejectBlocked || rejectReadRef.current || !rejectPreviewReady) {
+    if (!canReject || rejectReadRef.current || !rejectPreviewReady) {
       return;
     }
     setRejectError(null);
@@ -2892,7 +2888,6 @@ function ReviewDetail({
       }
       else setRejectError(t(result === "unknown" ? "workflow.decisionOutcomeUnknown" : "workflow.decisionFailedKeepDraft"));
     } catch (exc) {
-      if (exc instanceof ApiError && exc.body.error_code === "review_reject_blocked_by_private_edit") setRejectBlockedByResponse(true);
       const message = reviewErrorMessage(exc, t("errors.decide"));
       if (exc instanceof ApiError && exc.body.error_code === "review_decision_impact_changed") {
         await reloadRejectPreview(message);
@@ -3288,7 +3283,7 @@ function ReviewDetail({
           busy={busy}
           busyLabel={t("reject.confirming", { defaultValue: "Rejecting" })}
           className="review-reject-dialog"
-          confirmDisabled={!canReject || rejectBlocked || rejectChecking || !rejectPreviewReady}
+          confirmDisabled={!canReject || rejectChecking || !rejectPreviewReady}
           confirmLabel={t("shell:actions.reject")}
           labelledBy={rejectTitleId}
           onCancel={closeReject}
@@ -3307,10 +3302,10 @@ function ReviewDetail({
           <FormField htmlFor={`${rejectTitleId}-reason`} label={t("detail.reasonLabel")} hint={decisionReasonHint}>
             <textarea {...textInputLimit(2000, false)} id={`${rejectTitleId}-reason`} value={decisionReason} onChange={(event) => onReasonChange(event.currentTarget.value)} />
           </FormField>
-          {rejectBlocked || rejectError ? <StatusBanner tone="warning" action={
+          {rejectError ? <StatusBanner tone="warning" action={
             <button className="icon-button" disabled={busy || decisionsBlocked || rejectChecking}
               onClick={() => void reloadRejectPreview()} type="button">{t("reject.recheckImpact")}</button>
-          }>{rejectBlocked ? t("workflow.reasons.review_reject_blocked_by_private_edit") : rejectError}</StatusBanner> : null}
+          }>{rejectError}</StatusBanner> : null}
         </ConfirmDialog>
       ) : null}
       {!isReadOnly && routingOpen ? (

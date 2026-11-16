@@ -377,7 +377,6 @@ ERROR_CODES = (
 ContextHistoryStatus = Literal[
     "closed",
     "state_inconsistent",
-    "current_editing",
     "current_draft",
     "published_snapshot",
     "alternative_draft",

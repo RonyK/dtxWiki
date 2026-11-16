@@ -628,8 +628,8 @@ class PageInlineCommentCreateRequest(InputRequest):
         return stripped
 
 
-class PrivateContextPageCreateRequest(InputRequest):
-    """Create a new page with its first shared mutable draft."""
+class ContextPageCreateRequest(InputRequest):
+    """Create a page with its first shared mutable draft."""
 
     title: str | None = Field(default=None, min_length=1)
     body_md: str = Field(default="", max_length=BODY_MD_MAX_LENGTH)
@@ -649,10 +649,6 @@ class PrivateContextPageCreateRequest(InputRequest):
     @classmethod
     def _validate_alias_items(cls, value: list[str] | None) -> list[str] | None:
         return _check_alias_lengths(value)
-
-
-class ContextPageCreateRequest(PrivateContextPageCreateRequest):
-    """Create a page with its first shared mutable draft."""
 
 
 class ContextPageWriteDetail(PagePayload):

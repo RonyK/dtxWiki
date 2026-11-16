@@ -219,9 +219,7 @@ class SqlAlchemyContextMediaRepository:
             self._session.info[_USAGE_LOCK_STATE_KEY] = lock_state
         lock_state[2].add(workspace_id)
 
-    def add_asset(
-        self, asset: ContextMediaAssetRecord, *, allow_shared_draft: bool = False
-    ) -> ContextMediaAssetRecord:
+    def add_asset(self, asset: ContextMediaAssetRecord) -> ContextMediaAssetRecord:
         _lock_context_workspace(self._session, asset.workspace_id)
         self._logical_quota.lock_workspace(asset.workspace_id)
         if asset.legacy_upload_asset_id is not None:
@@ -400,9 +398,9 @@ class SqlAlchemyContextMediaRepository:
             # later, in a different (e.g. post-publish) revision -- that
             # reuse is exactly what
             # `test_context_media_in_place_autosave_replaces_exact_version_
-            # usage` exercises, and publishing an editing row is a normal,
+            # usage` exercises, and publishing a draft row is a normal,
             # deliberate close, not a race. The one case this closes: the
-            # creating editing row was DISCARDED (its content and any of its
+            # creating draft row was DISCARDED (its content and any of its
             # never-used uploads were deliberately thrown away) and this is
             # that asset's first-ever reference, arriving in some other
             # version afterward -- a stale client racing (or simply
@@ -453,7 +451,7 @@ class SqlAlchemyContextMediaRepository:
                     ):
                         raise ContextMediaEditingNotOpenError(
                             "logical reference was never associated before "
-                            "its creating editing session was discarded"
+                            "its creating draft was discarded"
                         )
         self._session.execute(
             delete(ContextMediaUsage).where(
@@ -722,7 +720,7 @@ class SqlAlchemyContextMediaRepository:
                 # the raw SQL fetch (`WorkspaceUsagePage`'s docstring).
                 continue
             # A reference in a readable version permits preview even when
-            # the upload originated in another author's private edit. An
+            # the upload originated in another author's shared draft. An
             # uninserted upload permits preview only to its own uploader.
             candidates = [u.page_version_id for u in grouped.get(asset.id, ())]
             if (asset.created_by_actor_kind, asset.created_by_actor_id) == (
@@ -966,7 +964,7 @@ class SqlAlchemyContextMediaRepository:
         if usage is not None:
             # Real content: this exact version's Markdown references the
             # asset. The caller's own outer version-visibility check (role
-            # for draft/published, author-only for a private editing head)
+            # for draft/published, author-only for discarded versions)
             # already decided whether this actor may see page_version_id at
             # all -- authorized uniformly like every other version's usage.
             #
@@ -1193,7 +1191,7 @@ def _usage_snapshot(
         if usage.page_version_id not in active_ids:
             historical_count += usage.reference_count
     # Canonical counts continue to drive deletion CAS. Only discarded work
-    # is masked in the editor-facing projection; editing usage is readable.
+    # is masked in the editor-facing projection; shared draft usage is readable.
     viewer_latest_count = latest_count
     viewer_published_count = published_count
     viewer_historical_count = historical_count
@@ -1243,7 +1241,7 @@ def _usage_snapshot(
         latest_draft_reference_count=latest_count,
         current_published_reference_count=published_count,
         historical_reference_count=historical_count,
-        created_for_version_is_editing=(
+        created_for_version_is_open_draft=(
             created_for_version is not None
             and created_for_version.version_status == "draft"
         ),

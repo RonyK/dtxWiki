@@ -84,7 +84,6 @@ class ContextImageIngestCommand:
     actor_id: str
     policy_revision: str
     legacy_upload_asset_id: UUID | None = None
-    allow_shared_draft: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,7 +251,6 @@ class ContextImageIngestService:
                 policy_revision=command.policy_revision,
                 validated_image=prepared.validated_image,
                 legacy_upload_asset_id=command.legacy_upload_asset_id,
-                allow_shared_draft=command.allow_shared_draft,
             )
         except ContextLogicalQuotaExceededError as exc:
             raise _downstream_error(
@@ -323,7 +321,7 @@ def _safe_downstream_message(error_code: str) -> str:
             "Media policy changed; refresh capabilities and retry the upload."
         ),
         "media_owner_mismatch": "The media target belongs to another actor.",
-        "media_editing_not_open": "The editing session is no longer open.",
+        "media_editing_not_open": "The draft is no longer open.",
         "media_unavailable": "The media target is temporarily unavailable.",
         "media_quota_exceeded": "The Workspace media quota has been reached.",
         "media_staging_limit_exceeded": ("Media staging is temporarily rate limited."),

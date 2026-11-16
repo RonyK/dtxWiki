@@ -745,8 +745,6 @@ class ReviewRejectEffect(BaseModel):
     # Before a first publication, the earlier draft's page metadata could not
     # be restored (it predates per-draft metadata), so the current values stay.
     metadata_kept: bool = False
-    # Set when the rejection cannot run, e.g. a private edit sits on top.
-    blocked_reason: Literal["private_edit_in_progress"] | None = None
     # Binds a confirmation to exactly this impact (see ReviewDecisionRequest).
     impact_fingerprint: str | None = None
 

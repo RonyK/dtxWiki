@@ -31,9 +31,9 @@ class UploadImageInput(BaseModel):
     page_id: MCPPageInput
     version_id: UUID = Field(
         description=(
-            "The caller's own currently-open editing version for this page. "
+            "The open draft of this page the image is uploaded into. "
             "The image is registered against it; uploading requires an open "
-            "editing session, not merely page access."
+            "draft, not merely page access."
         ),
     )
     alt_text: str | None = Field(default=None, max_length=1000)

@@ -183,7 +183,7 @@ def live_draft_chain(session: Session, page: ContextPage) -> list[ContextPageVer
             version is None
             or version.page_id != page.id
             or any(member.id == version.id for member in chain)
-            or version.version_status not in ("draft", "editing")
+            or version.version_status != "draft"
             or version.graph_status != "linear"
         ):
             return []
@@ -391,9 +391,6 @@ class ContextRejectionPlan:
     retired: tuple[ContextPageVersion, ...]
     # restore_previous_draft: the earlier draft that becomes the edit head.
     destination: ContextPageVersion | None
-    # A private editing row would be retired with them, or would become the
-    # head; the rejection must wait for it.
-    blocked: bool
     # Never-published page: the destination's recorded metadata, if any.
     destination_metadata: dict[str, object] | None
     never_published: bool = False
@@ -460,8 +457,6 @@ def plan_context_rejection(
         ),
         retired=retired,
         destination=destination,
-        blocked=any(member.version_status == "editing" for member in retired)
-        or (destination is not None and destination.version_status != "draft"),
         destination_metadata=(
             effective_metadata_snapshots(session, page, [destination.id]).get(
                 destination.id

@@ -11,18 +11,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import String, and_, cast, func, literal, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import InstrumentedAttribute
 
 from backend.models.agent import AgentPageVersion
 from backend.models.api_token import ApiToken
-from backend.models.audit import AuditEvent
 from backend.models.auth_identity import AuthLoginTransaction, UserIdentity
 from backend.models.auth_verification import (
     EmailConflictRequest,
     EmailReauthenticationChallenge,
 )
-from backend.models.change import ChangeOperation, ChangeSet
+from backend.models.change import ChangeSet
 from backend.models.context import ContextPageVersion
 from backend.models.favorite import UserFavorite
 from backend.models.inbox import (
@@ -40,7 +39,6 @@ from backend.models.oauth import (
     OAuthRefreshToken,
 )
 from backend.models.password_reset import PasswordResetToken
-from backend.models.review import ReviewItem
 from backend.models.server_admin import ServerAdmin
 from backend.models.workspace import MCPClient, Workspace, WorkspaceMembership
 from backend.models.workspace_credential_grant import WorkspaceCredentialGrant
@@ -52,115 +50,12 @@ def _no_conditions() -> tuple:
     return ()
 
 
-def _private_version_outstanding() -> tuple:
-    """Unsubmitted sole-author bytes retain their existing deletion treatment.
-
-    Draft visibility is shared, so creation alone is insufficient: a request
-    or another contributor's persisted write keeps the shared content intact.
-    """
-    version = ContextPageVersion
-    own_id = func.replace(version.created_by_actor_id, "-", "")
-    version_id = func.replace(cast(version.id, String), "-", "")
-    reference = literal("context_page_version:") + version_id
-    from backend.repositories.audit_repo import select_workspace_audit_events
-    from backend.repositories.workspace_scoped import select_in_workspace
-
-    operation_sets = (
-        select_in_workspace(
-            ChangeOperation,
-            workspace_id=version.workspace_id,
-            conditions=(func.replace(ChangeOperation.diff_ref, "-", "") == reference,),
-        )
-        .with_only_columns(ChangeOperation.change_set_id)
-        .correlate(ContextPageVersion)
-    )
-    submitted = (
-        select_in_workspace(
-            ReviewItem,
-            workspace_id=version.workspace_id,
-            conditions=(ReviewItem.change_set_id.in_(operation_sets),),
-        )
-        .with_only_columns(ReviewItem.id)
-        .correlate(ContextPageVersion)
-        .exists()
-    )
-    contributor = (
-        select_in_workspace(
-            ChangeSet,
-            workspace_id=version.workspace_id,
-            conditions=(
-                ChangeSet.id.in_(operation_sets),
-                ChangeSet.actor_id.is_not(None),
-                or_(
-                    ChangeSet.actor_type != version.created_by_actor_kind,
-                    func.replace(cast(ChangeSet.actor_id, String), "-", "") != own_id,
-                ),
-            ),
-        )
-        .with_only_columns(ChangeSet.id)
-        .correlate(ContextPageVersion)
-        .exists()
-    )
-    authored_audit = (
-        select_workspace_audit_events(
-            version.workspace_id,
-            conditions=(
-                func.replace(AuditEvent.payload["version_id"].as_string(), "-", "")
-                == version_id,
-                AuditEvent.action.in_(
-                    (
-                        "context_page.draft.save",
-                        "context_page.references.update",
-                        "page.patch_context_edit",
-                        "page.update",
-                        "page.autosave.draft",
-                        "page.autosave.overwrite",
-                    )
-                ),
-                or_(
-                    AuditEvent.actor_kind != version.created_by_actor_kind,
-                    func.replace(AuditEvent.actor_id, "-", "") != own_id,
-                ),
-            ),
-        )
-        .with_only_columns(AuditEvent.id)
-        .correlate(ContextPageVersion)
-        .exists()
-    )
-    last_actor_is_other = or_(
-        version.actor_type != version.created_by_actor_kind,
-        and_(
-            version.actor_id.is_not(None),
-            func.replace(cast(version.actor_id, String), "-", "") != own_id,
-        ),
-    )
-    return (
-        or_(
-            and_(
-                version.version_status == "discarded",
-                or_(
-                    version.body_md != "",
-                    version.actor_display_name.is_not(None),
-                ),
-            ),
-            and_(
-                version.version_status == "draft",
-                version.commit_oid.is_(None),
-                ~submitted,
-                ~contributor,
-                ~authored_audit,
-                ~last_actor_is_other,
-            ),
-        ),
-    )
-
-
 @dataclass(frozen=True)
 class UserAttribution:
     """One way a row names a user, and what account cleanup does with it."""
 
     columns: tuple[InstrumentedAttribute, ...]
-    # delete | clear | private_versions | author_name | api_tokens |
+    # delete | clear | api_tokens |
     # owner_projection | preserve | retire_inbox_recipient
     cleanup: str
     workspace_scoped: bool
@@ -190,15 +85,14 @@ class UserAttribution:
 
 
 USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
-    # Workspace plane, in cleanup order. Unsubmitted sole-author drafts go
-    # first; submitted or collaboratively changed versions retain their bytes.
+    # Workspace plane, in cleanup order. Context content and its authorship,
+    # author names included, stay with the workspace.
     UserAttribution(
         (ContextPageVersion.created_by_actor_id,),
-        "private_versions",
+        "preserve",
         workspace_scoped=True,
         actor_kind=("created_by_actor_kind", "human"),
         as_text=True,
-        outstanding=_private_version_outstanding,
     ),
     # Submitted shared changes retain their author UUID. They can produce a
     # later review result even after every other user footprint is gone.
@@ -210,17 +104,15 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
     ),
     UserAttribution(
         (ContextPageVersion.actor_id,),
-        "author_name",
+        "preserve",
         workspace_scoped=True,
         actor_kind=("actor_type", "human"),
-        outstanding=lambda: (ContextPageVersion.actor_display_name.is_not(None),),
     ),
     UserAttribution(
         (AgentPageVersion.actor_id,),
-        "author_name",
+        "preserve",
         workspace_scoped=True,
         actor_kind=("actor_type", "human"),
-        outstanding=lambda: (AgentPageVersion.actor_display_name.is_not(None),),
     ),
     UserAttribution(
         (McpChatSession.owner_user_id,),

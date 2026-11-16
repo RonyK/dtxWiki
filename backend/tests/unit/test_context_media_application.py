@@ -86,9 +86,7 @@ class FakeRepository:
         has_more = len(fetched) > limit
         page = fetched[:limit]
         next_after = (
-            (page[-1].created_at, page[-1].usage.asset.asset_id)
-            if has_more
-            else None
+            (page[-1].created_at, page[-1].usage.asset.asset_id) if has_more else None
         )
         return WorkspaceUsagePage(
             snapshots=tuple(page), has_more=has_more, next_after=next_after
@@ -190,7 +188,7 @@ def _attachment(
         latest_draft_reference_count=0,
         current_published_reference_count=1 if used else 0,
         historical_reference_count=0,
-        created_for_version_is_editing=False,
+        created_for_version_is_open_draft=False,
     )
     return ContextMediaAttachmentSnapshot(
         usage=usage,

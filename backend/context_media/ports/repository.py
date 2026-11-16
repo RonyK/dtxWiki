@@ -17,9 +17,7 @@ from backend.context_media.domain import (
 class ContextMediaRepository(Protocol):
     def lock_workspace_for_usage(self, workspace_id: UUID) -> None: ...
 
-    def add_asset(
-        self, asset: ContextMediaAssetRecord, *, allow_shared_draft: bool = False
-    ) -> ContextMediaAssetRecord: ...
+    def add_asset(self, asset: ContextMediaAssetRecord) -> ContextMediaAssetRecord: ...
 
     def get_asset(
         self, workspace_id: UUID, asset_id: UUID
@@ -49,8 +47,8 @@ class ContextMediaRepository(Protocol):
         *,
         viewer: ActorIdentity | None = None,
     ) -> tuple[AssetUsageSnapshot, ...]:
-        # `viewer` scopes out other authors' private "editing" uploads (P8.4).
-        # `None` is fail-closed: it hides every editing-staged asset.
+        # `viewer` controls discarded-version visibility and uploader-only
+        # previews of uninserted assets. Shared draft usage remains readable.
         ...
 
     def list_workspace_usage(
@@ -68,8 +66,8 @@ class ContextMediaRepository(Protocol):
     ) -> WorkspaceUsagePage:
         # Same `viewer` contract as list_page_usage, and it matters more here:
         # this is the first listing that spans a whole workspace, so it is the
-        # first place another author's private "editing" upload could leak.
-        # `None` is fail-closed.
+        # first place discarded-version references and uninserted previews
+        # need the same visibility rules as page-level listings.
         #
         # `created_by` is the "mine" filter. `after` is the keyset cursor
         # (created_at, asset_id), matching the DESC ordering the adapter

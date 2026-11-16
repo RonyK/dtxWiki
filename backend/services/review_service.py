@@ -85,7 +85,6 @@ from backend.services.read_errors import (
     ReviewDecisionIdConflictError,
     ReviewDecisionImpactChangedError,
     ReviewDecisionUndoUnavailableError,
-    ReviewRejectBlockedError,
     ScopeDeniedError,
 )
 from backend.services.review_approval import (
@@ -107,7 +106,10 @@ from backend.services.review_risk_policy import (
 )
 from backend.services.review_supersession import supersede_review_with_lineage
 from backend.services.review_targets import operation_version_id, project_review_target
-from backend.utils.actor_display import resolve_actor_display_name
+from backend.utils.actor_display import (
+    resolve_actor_display_name,
+    resolve_actor_display_names,
+)
 from backend.utils.uuid import parse_uuid_or_none
 
 if TYPE_CHECKING:
@@ -1344,21 +1346,12 @@ class ReviewService:
             review_decision_audience_clause(actor_role, audience_for)
         )
         decision_rows = list(session.execute(statement))
-        actor_ids = {
-            decision.actor_id
-            for decision, _review in decision_rows
-            if decision.actor_type == "human" and decision.actor_id is not None
-        }
-        actor_names = (
-            # .all() matters: a Result has .keys(), so dict() would treat it as
-            # a mapping and subscript it instead of iterating the rows.
-            dict(
-                session.execute(
-                    select(User.id, User.display_name).where(User.id.in_(actor_ids))
-                ).all()
-            )
-            if actor_ids
-            else {}
+        actor_names = resolve_actor_display_names(
+            session,
+            (
+                (decision.actor_type, decision.actor_id)
+                for decision, _review in decision_rows
+            ),
         )
         target_metadata = _recent_context_target_metadata(
             session,
@@ -1382,10 +1375,9 @@ class ReviewService:
                     decision_summary=review.decision_summary,
                     decision_summary_code=review.decision_summary_code,
                     decision_type=decision.decision_type,
-                    actor_display_name=_hydrated_actor_display_name(
-                        actor_kind=decision.actor_type,
-                        display_name=actor_names.get(decision.actor_id),
-                    ),
+                    actor_display_name=actor_names[
+                        (decision.actor_type, decision.actor_id)
+                    ],
                     decision_reason=decision.decision_reason,
                     resulting_review_status=decision.resulting_review_status,
                     risk_level=review.risk_level,
@@ -2559,12 +2551,6 @@ class ReviewService:
             if request.decision_type == "reject"
             else None
         )
-        if (
-            rejection_impact is not None
-            and rejection_impact.plan is not None
-            and rejection_impact.plan.blocked
-        ):
-            raise ReviewRejectBlockedError()
         if request.expected_impact_fingerprint is not None and (
             rejection_impact is None
             or rejection_impact.fingerprint != request.expected_impact_fingerprint
@@ -4111,11 +4097,6 @@ class ReviewService:
             ),
             restores_review=impact.restores_review,
             metadata_kept=bool(plan and plan.metadata_kept),
-            blocked_reason=(
-                "private_edit_in_progress"
-                if plan is not None and plan.blocked
-                else None
-            ),
             impact_fingerprint=impact.fingerprint,
         )
 
@@ -4596,26 +4577,6 @@ def _review_context_target_metadata(
             else None
         ),
     }
-
-
-def _hydrated_actor_display_name(
-    *,
-    actor_kind: str,
-    display_name: str | None,
-) -> str:
-    if actor_kind == "human":
-        return (
-            display_name.strip()
-            if display_name and display_name.strip()
-            else "Human editor"
-        )
-    if actor_kind == "agent":
-        return "Agent worker"
-    if actor_kind == "mcp_client":
-        return "MCP client"
-    if actor_kind == "system":
-        return "System"
-    return actor_kind.replace("_", " ").title()
 
 
 def _revision_content_hash(

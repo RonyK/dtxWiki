@@ -55,7 +55,6 @@
       "failed": "실패",
       "deleted": "삭제됨",
       "state_inconsistent": "상태 확인 필요",
-      "current_editing": "편집 중",
       "current_draft": "현재 초안",
       "published_snapshot": "현재 게시 스냅샷",
       "alternative_draft": "대안 초안",

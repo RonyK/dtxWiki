@@ -56,16 +56,10 @@ _GFM_AUTOLINK_LITERAL = re.compile(
     # mid-literal quote, missing an occurrence GFM would still render.
     r"(?i)(?:(?<![A-Za-z])https?://|(?<![^\W_])www\.)[^\s\ufeff<>]+"
 )
-_GFM_AUTOLINK_TRAILING_PUNCTUATION = re.compile(
-    r"[!\"&')*,.:;<>?\]_~]+$"
-)
+_GFM_AUTOLINK_TRAILING_PUNCTUATION = re.compile(r"[!\"&')*,.:;<>?\]_~]+$")
 _GFM_AUTOLINK_RESOURCE_START = re.compile(r"\](?:\(|\[)")
-_GFM_TRAILING_NAMED_CHARACTER_REFERENCE = re.compile(
-    r"&[A-Za-z][A-Za-z\d]+;$"
-)
-_PAGE_FRONTMATTER_KEYS = frozenset(
-    {"title", "slug", "icon", "type", "tags", "aliases"}
-)
+_GFM_TRAILING_NAMED_CHARACTER_REFERENCE = re.compile(r"&[A-Za-z][A-Za-z\d]+;$")
+_PAGE_FRONTMATTER_KEYS = frozenset({"title", "slug", "icon", "type", "tags", "aliases"})
 _ECMASCRIPT_WHITESPACE = (
     "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680"
     "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
@@ -276,19 +270,13 @@ class _LegacyRawHtmlDetector(HTMLParser):
             normalized_name = name.casefold()
             if normalized_name == "src" and normalized_tag in self._SRC_TAGS:
                 candidates = (value,)
-            elif (
-                normalized_name == "href"
-                and normalized_tag in self._HREF_TAGS
-            ):
+            elif normalized_name == "href" and normalized_tag in self._HREF_TAGS:
                 candidates = (value,)
             elif normalized_name == "longdesc" and normalized_tag == "img":
                 candidates = (value,)
             elif normalized_name == "poster" and normalized_tag == "video":
                 candidates = (value,)
-            elif (
-                normalized_name == "srcset"
-                and normalized_tag in self._SRCSET_TAGS
-            ):
+            elif normalized_name == "srcset" and normalized_tag in self._SRCSET_TAGS:
                 candidates = _parse_raw_html_srcset_urls(value)
             else:
                 continue
@@ -296,27 +284,21 @@ class _LegacyRawHtmlDetector(HTMLParser):
                 if normalized_name == "src" and normalized_tag == "img":
                     identity = _legacy_identity_from_page_image_source(
                         candidate,
-                        allow_unknown_http_origins=(
-                            self.allow_unknown_http_origins
-                        ),
+                        allow_unknown_http_origins=(self.allow_unknown_http_origins),
                         trusted_http_origins=self.trusted_http_origins,
                         relative_url_base_path=self.relative_url_base_path,
                     )
                 elif normalized_name == "src" and normalized_tag == "video":
                     identity = _legacy_identity_from_sanitized_src(
                         candidate,
-                        allow_unknown_http_origins=(
-                            self.allow_unknown_http_origins
-                        ),
+                        allow_unknown_http_origins=(self.allow_unknown_http_origins),
                         trusted_http_origins=self.trusted_http_origins,
                         relative_url_base_path=self.relative_url_base_path,
                     )
                 else:
                     identity = _legacy_identity_from_raw_html_url(
                         candidate,
-                        allow_unknown_http_origins=(
-                            self.allow_unknown_http_origins
-                        ),
+                        allow_unknown_http_origins=(self.allow_unknown_http_origins),
                         trusted_http_origins=self.trusted_http_origins,
                         relative_url_base_path=self.relative_url_base_path,
                     )
@@ -437,9 +419,7 @@ def source_mapped_local_legacy_upload_references(
         return ()
 
     body_start_bytes = len(body[:body_start].encode("utf-8"))
-    source_candidates: list[
-        tuple[int, int, LegacyUploadIdentity, int, int]
-    ] = []
+    source_candidates: list[tuple[int, int, LegacyUploadIdentity, int, int]] = []
     occupied_paths: set[str] = set()
     source_cursor = 0
     rendered_byte_cursor = 0
@@ -1260,9 +1240,7 @@ def _legacy_identity_from_browser_local_reference(
         browser_reference,
         trusted_http_origins,
     ):
-        if prefix and (
-            asgi_path == prefix or asgi_path.startswith(f"{prefix}/")
-        ):
+        if prefix and (asgi_path == prefix or asgi_path.startswith(f"{prefix}/")):
             identity = _legacy_identity_from_exact_path(asgi_path[len(prefix) :])
             if identity is not None:
                 return identity
@@ -1407,9 +1385,7 @@ def _trusted_http_base_paths_for_reference(
                 authority,
                 scheme=scheme,
             )
-            applicable = tuple(
-                base for base in trusted if base[:3] == parsed_authority
-            )
+            applicable = tuple(base for base in trusted if base[:3] == parsed_authority)
         else:
             applicable = tuple(base for base in trusted if base[0] == scheme)
     elif reference.startswith("//"):
@@ -1586,11 +1562,7 @@ def _browser_idna_label_is_valid(label: str) -> bool:
 
 def _is_forbidden_domain_code_point(character: str) -> bool:
     codepoint = ord(character)
-    return (
-        codepoint <= 0x1F
-        or codepoint == 0x7F
-        or character in " #/%:<>?@[\\]^|"
-    )
+    return codepoint <= 0x1F or codepoint == 0x7F or character in " #/%:<>?@[\\]^|"
 
 
 def _whatwg_domain_ends_in_number(domain: str) -> bool:
@@ -1651,8 +1623,7 @@ def _whatwg_ipv4_address(domain: str) -> str | None:
     if parsed[-1] >= 256 ** (5 - len(parsed)):
         return None
     ipv4 = parsed[-1] + sum(
-        number * 256 ** (3 - index)
-        for index, number in enumerate(parsed[:-1])
+        number * 256 ** (3 - index) for index, number in enumerate(parsed[:-1])
     )
     return ".".join(str((ipv4 >> shift) & 0xFF) for shift in (24, 16, 8, 0))
 
@@ -1778,9 +1749,7 @@ def _verify_rendered_destinations(
         for child in token.children or ()
         if child.type in {"link_open", "image"}
         if (
-            destination := child.attrGet(
-                "href" if child.type == "link_open" else "src"
-            )
+            destination := child.attrGet("href" if child.type == "link_open" else "src")
         )
         is not None
     }
@@ -1798,9 +1767,7 @@ def _verify_rendered_destinations(
             or sentinel in sentinels
         ):
             nonce += 1
-            sentinel = (
-                f"https://reconcile.invalid/legacy-occurrence-{index}-{nonce}"
-            )
+            sentinel = f"https://reconcile.invalid/legacy-occurrence-{index}-{nonce}"
         sentinels.add(sentinel)
         expected[sentinel] = len(occurrence.usage_ranges)
         probe_parts.extend(
@@ -2050,8 +2017,7 @@ def _batch_visible_source_spans(
             # permissive raw-HTML classification for the authored URL.
             scheme_end = source.index("://") + 3
             replacement = (
-                f"{source[:scheme_end]}dtxwiki-source-probe.invalid/="
-                f"{marker_text}"
+                f"{source[:scheme_end]}dtxwiki-source-probe.invalid/={marker_text}"
             )
         elif casefolded_source.startswith("www."):
             replacement = f"{source[:4]}dtxwiki-source-probe.invalid/={marker_text}"
@@ -2069,9 +2035,7 @@ def _batch_visible_source_spans(
     marker = re.compile(rf"{re.escape(prefix)}(?P<source_id>\d+)End")
 
     visible: set[int] = set()
-    for token in MarkdownIt("commonmark", {"html": True}).enable("table").parse(
-        probe
-    ):
+    for token in MarkdownIt("commonmark", {"html": True}).enable("table").parse(probe):
         if token.type != "inline":
             continue
         excluded_link_depth = 0
@@ -2114,8 +2078,7 @@ def _math_mask(
     container_ranges = tuple(
         (token.type, token.map[0], token.map[1])
         for token in tokens
-        if token.type in {"blockquote_open", "list_item_open"}
-        and token.map is not None
+        if token.type in {"blockquote_open", "list_item_open"} and token.map is not None
     )
     table_lines = {
         line
@@ -2389,8 +2352,7 @@ def _mask_inline_math(
                 break
             before_same = found > start and markdown[found - 1] == "$"
             after_same = (
-                found + len(delimiter) < end
-                and markdown[found + len(delimiter)] == "$"
+                found + len(delimiter) < end and markdown[found + len(delimiter)] == "$"
             )
             if not masked[found] and not before_same and not after_same:
                 closing = found
@@ -2432,8 +2394,7 @@ def _inline_delimiter_opener_visibility(
     url_cursor = 0
     for index in ordered_indices:
         while (
-            url_cursor < len(gfm_url_ranges)
-            and gfm_url_ranges[url_cursor][1] <= index
+            url_cursor < len(gfm_url_ranges) and gfm_url_ranges[url_cursor][1] <= index
         ):
             url_cursor += 1
         if (
@@ -2564,8 +2525,7 @@ def _rendered_page_body(markdown: str) -> tuple[str, int]:
         return markdown, 0
 
     has_known_key = any(
-        (match := _PAGE_FRONTMATTER_KEY_VALUE.match(line.rstrip("\r\n")))
-        is not None
+        (match := _PAGE_FRONTMATTER_KEY_VALUE.match(line.rstrip("\r\n"))) is not None
         and match.group(1) in _PAGE_FRONTMATTER_KEYS
         for line in lines[1:closing_index]
     )

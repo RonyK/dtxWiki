@@ -71,12 +71,10 @@ class ContextMediaOwnershipError(ContextMediaError):
 
 
 class ContextMediaEditingNotOpenError(ContextMediaError):
-    """The named version is not the caller's own currently-open "editing" row.
+    """The named version is not an open draft of the page.
 
-    Covers both "already submitted/published/discarded" and "belongs to a
-    different, non-editing status" -- P3.2 requires every upload to name the
-    uploader's own open editing session, not merely an existing version of
-    the right page.
+    Every upload names an open draft, not merely an existing version of the
+    right page; a published, closed or discarded version refuses it.
     """
 
     error_code = "media_editing_not_open"
@@ -233,21 +231,17 @@ class AssetUsageSnapshot:
     latest_draft_reference_count: int
     current_published_reference_count: int
     historical_reference_count: int
-    created_for_version_is_editing: bool
-    """Whether ``asset.created_for_version_id``'s own row is still status
-    "editing" right now. P3.4: an unshared, uninserted upload stays exempt
-    from orphan reclamation and author-restricted for explicit delete only
-    while this is true -- once its editing session is submitted, published,
-    or discarded, ordinary editor-wide delete/orphan rules apply, same as
-    any other page asset with zero usage."""
+    created_for_version_is_open_draft: bool
+    """Whether the creating version is still an open shared draft.
+    While true, orphan reclamation is deferred and explicit deletion requires
+    the uploader. Once published or discarded, ordinary editor-wide deletion
+    and orphan rules apply to assets with zero usage."""
     viewer_visible_latest_draft_reference_count: int | None = None
     viewer_visible_current_published_reference_count: int | None = None
     viewer_visible_historical_reference_count: int | None = None
     """P8.4: a viewer-scoped projection of the three ``*_reference_count``
-    fields above, excluding any usage row still pointed at by a DIFFERENT
-    author's currently-open, private "editing" row (several authors can each
-    hold their own concurrent editing row on one page -- P2.2's uniqueness is
-    per page+author, not per page). ``None`` means "no viewer given, use the
+    fields above, excluding usage on another author's discarded versions.
+    ``None`` means "no viewer given, use the
     real count" (``get_page_asset_usage``'s CAS-critical read never passes a
     viewer and always gets ``None`` here). These fields are deliberately NOT
     inputs to ``usage_token`` below -- that stays a hash of the real,
@@ -258,8 +252,8 @@ class AssetUsageSnapshot:
     def __post_init__(self) -> None:
         if not isinstance(self.asset, ContextMediaAssetRecord):
             raise ValueError("asset must be a ContextMediaAssetRecord")
-        if not isinstance(self.created_for_version_is_editing, bool):
-            raise ValueError("created_for_version_is_editing must be a bool")
+        if not isinstance(self.created_for_version_is_open_draft, bool):
+            raise ValueError("created_for_version_is_open_draft must be a bool")
         for name in ("latest_draft_version_id", "current_published_version_id"):
             value = getattr(self, name)
             if value is not None:
@@ -316,7 +310,7 @@ class ContextMediaAssetProjection:
     current_published_reference_count: int
     historical_reference_count: int
     usage_token: str
-    created_for_version_is_editing: bool = False
+    created_for_version_is_open_draft: bool = False
 
     @classmethod
     def from_snapshot(cls, snapshot: AssetUsageSnapshot) -> ContextMediaAssetProjection:
@@ -359,7 +353,7 @@ class ContextMediaAssetProjection:
             current_published_reference_count=published,
             historical_reference_count=historical,
             usage_token=snapshot.usage_token,
-            created_for_version_is_editing=snapshot.created_for_version_is_editing,
+            created_for_version_is_open_draft=snapshot.created_for_version_is_open_draft,
         )
 
     @property
@@ -369,7 +363,7 @@ class ContextMediaAssetProjection:
     def can_delete_by(self, actor: ActorIdentity) -> bool:
         """Mirror the existing ownership guard for open-session uploads."""
         return self.can_delete and (
-            not self.created_for_version_is_editing or self.asset.created_by == actor
+            not self.created_for_version_is_open_draft or self.asset.created_by == actor
         )
 
 

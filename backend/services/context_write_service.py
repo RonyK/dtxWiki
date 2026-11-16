@@ -1170,9 +1170,7 @@ class ContextWriteService:
                     "base version not found", error_code="base_not_found"
                 )
             if require_current_base and requested_base_version.id != base_version.id:
-                disclosed_id, disclosed_hash = self._disclosable_stale_base_fields(
-                    base_version, actor_kind, actor_id
-                )
+                disclosed_id, disclosed_hash = self._stale_base_fields(base_version)
                 raise StaleBaseVersionError(
                     "reconciliation head advanced; refresh before committing",
                     latest_version_id=disclosed_id,
@@ -1298,9 +1296,7 @@ class ContextWriteService:
             target_ids = target_ids_for_operations(effective_operations)
             base_is_stale = requested_base_version.id != base_version.id
             if retired_restorations and base_is_stale:
-                disclosed_id, disclosed_hash = self._disclosable_stale_base_fields(
-                    base_version, actor_kind, actor_id
-                )
+                disclosed_id, disclosed_hash = self._stale_base_fields(base_version)
                 raise StaleBaseVersionError(
                     "restore_yours requires the current linear head as base",
                     latest_version_id=disclosed_id,
@@ -1323,9 +1319,7 @@ class ContextWriteService:
                 # target. A stale write therefore has no sound rebase proof or
                 # conflict set: never apply it to content the caller did not
                 # read and never invent a positional target.
-                disclosed_id, disclosed_hash = self._disclosable_stale_base_fields(
-                    base_version, actor_kind, actor_id
-                )
+                disclosed_id, disclosed_hash = self._stale_base_fields(base_version)
                 raise StaleBaseVersionError(
                     "unaddressable patch_draft operation has a stale base",
                     latest_version_id=disclosed_id,
@@ -3065,9 +3059,7 @@ class ContextWriteService:
                 request.expected_content_hash is not None
                 and version.content_hash != request.expected_content_hash
             ):
-                disclosed_id, disclosed_hash = self._disclosable_stale_base_fields(
-                    version, actor_kind, actor_id
-                )
+                disclosed_id, disclosed_hash = self._stale_base_fields(version)
                 raise StaleBaseVersionError(
                     "published content hash mismatch",
                     latest_version_id=disclosed_id,
@@ -4369,20 +4361,10 @@ class ContextWriteService:
         )
 
     @staticmethod
-    def _disclosable_stale_base_fields(
+    def _stale_base_fields(
         version: ContextPageVersion | None,
-        actor_kind: str | None,
-        actor_id: str | None,
     ) -> tuple[UUID | None, str | None]:
-        """P2.2/P2.6, MCP analog of ``page_service._disclosable_version_
-        fields``: ``version`` here typically comes from ``_latest_edit_base``
-        (``editable_context_version_id``, a page-global pointer that -- since
-        P8.1 -- can durably name a DIFFERENT author's private "editing" row).
-        A ``StaleBaseVersionError`` naming that row's id/content_hash to a
-        caller who is not its author is the same disclosure P2.2/P2.6 exists
-        to prevent on the REST side; every raise site here must route through
-        this check rather than disclosing ``version``'s fields directly.
-        """
+        """The version a stale write is told to re-read, if there is one."""
 
         if version is None:
             return None, None

@@ -2988,7 +2988,6 @@ function ContextReader({
   const publishedTipId = `context-published-version-tip-${detail.id}`;
   const displayedVersionIsDraft =
     Boolean(detail.draft) ||
-    detail.version_info?.version_status === "editing" ||
     detail.version_info?.version_status === "draft";
   const pendingCompareCandidate = pendingReviewCompareCandidate(
     detail,

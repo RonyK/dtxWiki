@@ -60,7 +60,7 @@ def _create_page(page_service, actor, workspace_id, **overrides):
     return response.data
 
 
-def test_create_context_page_creates_private_editing_version(page_service, actor):
+def test_create_context_page_creates_shared_draft(page_service, actor):
     workspace_id = _workspace(page_service)
     data = _create_page(page_service, actor, workspace_id)
     assert data.version_status == "draft"
@@ -467,9 +467,7 @@ def test_patch_context_edit_rejects_stale_revision_as_masked_conflict(
     assert stale.envelope.result_status == "conflict"
     assert stale.envelope.error_code == "editing_revision_conflict"
     assert stale.data is None
-    # The conflict names the caller's OWN current version -- masking
-    # (_disclosable_version_fields) must pass through real data for the
-    # version's own author, not just suppress it unconditionally.
+    # The conflict names the draft's current version so the caller can re-read.
     assert f"server_version_id={first.data.version_id}" in (
         stale.envelope.error_message or ""
     )

@@ -489,11 +489,11 @@ def _served_version_visible(
         UUID(read["version_id"]),
         UUID(read["resource_id"]),
     )
-    # A served draft or editing state stays draft-readers-only after the row
-    # is published or activated in place: the recorded state decides, not the
-    # row's current status.
+    # A served draft stays draft-readers-only after the row is published or
+    # activated in place: the recorded state decides, not the row's current
+    # status.
     if (
-        read["version_status"] in {"draft", "editing"}
+        read["version_status"] == "draft"
         and actor is not None
         and not actor_can_read_drafts(actor)
     ):

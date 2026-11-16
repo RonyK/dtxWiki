@@ -1122,6 +1122,11 @@ def test_workspace_factory_gate_catches_the_documented_pre_fix_shape(
 # rotting -- add or remove an importer and this goes red until the record is
 # rewritten.
 ACTOR_DISPLAY_IDENTITY_READERS: dict[str, str] = {
+    "backend/services/user_deletion_service.py": (
+        "FIXED. keep_departed_author_name writes the leaver's name to "
+        "control-plane app_metadata in the same identity transaction that "
+        "deletes the users row; it reads no workspace rows."
+    ),
     "backend/services/admin_context_media.py": (
         "FIXED. Control sessions read only Workspace roster/existence and users "
         "uploader labels, after shard sessions close. Metadata and cleanup route "

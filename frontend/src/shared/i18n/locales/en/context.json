@@ -240,10 +240,6 @@
         "label": "State review required",
         "description": "Operator repair is required"
       },
-      "current_editing": {
-        "label": "Currently editing",
-        "description": "A private, unsubmitted edit in progress. Visible only to its author until submitted for review."
-      },
       "current_draft": {
         "label": "Current draft",
         "description": "The current edit is not published yet. Readers still see the published version."

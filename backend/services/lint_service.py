@@ -281,9 +281,7 @@ class LintService:
             if getattr(rule, "runtime_checkable", True)
             if rule.rule_id not in enabled_ids
         ]
-        conditions = (
-            (LintFinding.rule_id.not_in(disabled_ids),) if disabled_ids else ()
-        )
+        conditions = (LintFinding.rule_id.not_in(disabled_ids),) if disabled_ids else ()
         return select_in_workspace(
             LintFinding, workspace_id=workspace_id, conditions=conditions
         )
@@ -852,7 +850,6 @@ class LintService:
     @staticmethod
     def _system_run_actor(workspace_id: UUID) -> ActorContext:
         # A queued run is an internal editor regardless of who requested it.
-        # This sees shared drafts while unrelated private edits remain hidden.
         return ActorContext(
             actor_kind="system",
             actor_id="lint-autofix",

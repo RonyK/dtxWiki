@@ -41,7 +41,7 @@ def context_media_orphan_clause():
         .with_only_columns(ContextMediaUsage.asset_id)
         .exists()
     )
-    created_for_version_is_editing = (
+    created_for_version_is_open_draft = (
         select_in_workspace(
             ContextPageVersion,
             workspace_id=ContextMediaAsset.workspace_id,
@@ -53,4 +53,4 @@ def context_media_orphan_clause():
         .with_only_columns(ContextPageVersion.id)
         .exists()
     )
-    return ~usage_exists & ~created_for_version_is_editing
+    return ~usage_exists & ~created_for_version_is_open_draft

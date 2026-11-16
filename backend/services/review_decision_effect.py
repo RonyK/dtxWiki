@@ -201,7 +201,7 @@ class DecisionEffectRecorder:
                     "closed"
                     if isinstance(obj, ContextPageVersion)
                     and column == "version_status"
-                    and value in {"draft", "editing"}
+                    and value == "draft"
                     and obj.commit_oid
                     else _encode(value),
                     _encode(getattr(obj, column)),
@@ -275,7 +275,7 @@ def effect_still_current(
     """Whether every column the decision changed still holds what it left.
 
     A newer version of the page means someone wrote on top of the result,
-    even where no tracked column moved (a fresh draft, a private edit).
+    even where no tracked column moved (a fresh draft).
     """
 
     loaded = _load_rows(session, workspace_id, effect)
@@ -366,7 +366,9 @@ def restore_effect(
                 restored.setdefault(table, set()).add(column)
             if isinstance(obj, ContextPageVersion) and obj.commit_oid:
                 # Old effect payloads may include snapshot fields; immutable
-                # Git mappings are never removed by a decision undo.
+                # Git mappings are never removed by a decision undo. Effects
+                # recorded before the draft conversion may still name the
+                # retired "editing" status.
                 if obj.version_status in {"draft", "editing"}:
                     obj.version_status = "closed"
                 if obj.version_status == "closed":

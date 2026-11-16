@@ -442,7 +442,7 @@ def test_open_editing_upload_is_protected_without_age_limit(session_factory) -> 
         )
         _pin_created_at(session, workspace_id, asset.asset_id, NOW)
         # A separate visible head does not remove protection of the upload's
-        # own private row (the page-first pointer shape).
+        # own shared draft (the page-first pointer shape).
         visible = ContextPageVersion(
             workspace_id=workspace_id,
             page_id=page.id,
@@ -503,10 +503,10 @@ def test_autosave_via_service_keeps_editing_status_and_protects_unattached_uploa
     session_factory, page_service
 ) -> None:
     """P8.1 regression: the P6-era `_set_current_version` eager promotion
-    ("editing" -> "draft" on the very first autosave) silently reopened this
+    (closing the draft on the very first autosave) silently reopened this
     exact protection window (`_page_orphan_statement`'s
-    `created_for_version_is_editing` gate only matches `version_status ==
-    "editing"`) on top of breaking the P2.2 author-only read privacy this
+    `created_for_version_is_open_draft` gate only matches `version_status ==
+    "draft"`) on top of breaking the open-draft protection this
     session's own P8.1 fix restores. Prove the fix through the real
     `autosave_page` code path (not a hand-built row), across more than one
     autosave, not just the first."""

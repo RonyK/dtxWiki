@@ -319,7 +319,7 @@ def test_context_activity_details_reviews_and_stable_cursor(session_factory):
             )
 
 
-def test_context_activity_never_reconstructs_private_or_foreign_details(
+def test_context_activity_shares_draft_events_without_foreign_details(
     session_factory,
 ):
     service = ActivityService(ReviewService())
@@ -363,8 +363,7 @@ def test_context_activity_never_reconstructs_private_or_foreign_details(
             {
                 "version_id": str(version.id),
                 "editing_revision": 7,
-                "was_private_edit": True,
-                "reason": "private historical reason",
+                "reason": "historical draft reason",
             },
             {"version_id": str(foreign_version.id), "reason": "foreign version reason"},
             {
@@ -409,9 +408,8 @@ def test_context_activity_never_reconstructs_private_or_foreign_details(
             actor=_owner(workspace.id),
         )
         by_action = {i.body: i for i in result.items}
-        # Another author's private edit is absent, not a redacted row; an
-        # autosave bound to a review is a shared staged draft and stays.
-        assert "page.autosave.draft" not in by_action
+        # Draft autosaves are shared with other readers.
+        assert "page.autosave.draft" in by_action
         assert "page.autosave.overwrite" in by_action
         invalid = by_action["page.update"].details
         assert invalid.version is None and invalid.reason is None
