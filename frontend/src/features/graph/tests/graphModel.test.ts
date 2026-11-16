@@ -6,6 +6,8 @@ import {
   coAccessSentence,
   deriveGraphScene,
   graphFacets,
+  visitGraphTimelineFrames,
+  type GraphScene,
 } from "../graphModel";
 import { decorateStaticDiagramSvg, graphSceneToMermaid } from "../local/staticDiagram";
 import { readGraphTokens } from "../shared/graphTokens";
@@ -139,6 +141,34 @@ describe("graphModel", () => {
       nodes: [expect.objectContaining({ id: "node:seed" })],
       edges: [],
     });
+  });
+
+  // Incremental replay introduces cross-frame state: single-cursor tests cannot
+  // catch endpoint closure retained until a removed edge's node snapshot arrives.
+  it("keeps late endpoint snapshots out of later frames after their edge is removed", () => {
+    const payload = graphFixture();
+    const seed = payload.nodes[0];
+    const lateNode = payload.nodes[1];
+    const edge = { ...payload.edges[0], source: seed.id, target: lateNode.id };
+    payload.nodes = [seed];
+    payload.edges = [];
+    payload.timeline = [
+      { id: "added", operation: "edge_created", action_kind: "referenced", label: "Added",
+        occurred_at: "2026-08-02T00:00:00Z", sequence: 1, node_ids: [], edge_ids: [], edge_snapshots: [edge] },
+      { id: "removed", operation: "edge_removed", action_kind: "removed", label: "Removed",
+        occurred_at: "2026-08-03T00:00:00Z", sequence: 2, node_ids: [], edge_ids: [edge.id], node_snapshots: [lateNode] },
+    ];
+    const filters = graphFacets(payload);
+    const frames: { cursor: number; scene: GraphScene; content: string }[] = [];
+    visitGraphTimelineFrames(payload, filters, (cursor, scene) => {
+      frames.push({ cursor, scene, content: JSON.stringify(scene) });
+    });
+    expect(frames.map(({ cursor }) => cursor)).toEqual([-1, 0, 1]);
+    for (const { cursor, scene, content } of frames) {
+      expect(scene).toEqual(deriveGraphScene(payload, filters, cursor));
+      expect(scene).toEqual({ nodes: [seed], edges: [] });
+      expect(JSON.stringify(scene)).toBe(content);
+    }
   });
 
   it("keeps observation-free current facts in the partial-history baseline", () => {

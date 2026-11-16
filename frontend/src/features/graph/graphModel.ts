@@ -212,10 +212,46 @@ function deriveTimelineScene(
   payload: GraphQueryPayload,
   cursor: number | null,
 ): GraphScene {
+  if (cursor === null) return { nodes: payload.nodes, edges: payload.edges };
   const events = sortedTimeline(payload);
-  if (cursor === null || events.length === 0) {
+  if (events.length === 0) {
     return { nodes: payload.nodes, edges: payload.edges };
   }
+  const state = createTimelineReplay(payload, events);
+  for (const event of events.slice(0, Math.max(0, cursor + 1))) {
+    applyTimelineEvent(state, event);
+  }
+  return materializeTimelineScene(state);
+}
+
+/** Visit the baseline (-1), then each recorded frame, without retaining frames. */
+export function visitGraphTimelineFrames(
+  payload: GraphQueryPayload,
+  filters: GraphFilters,
+  visit: (cursor: number, scene: GraphScene) => void,
+): void {
+  const events = sortedTimeline(payload);
+  if (events.length === 0) {
+    visit(-1, filterGraphScene({ nodes: payload.nodes, edges: payload.edges }, filters, payload.nodes));
+    return;
+  }
+  const state = createTimelineReplay(payload, events);
+  const frame = () => filterGraphScene(materializeTimelineScene(state), filters, payload.nodes);
+  visit(-1, frame());
+  events.forEach((event, cursor) => {
+    applyTimelineEvent(state, event);
+    visit(cursor, frame());
+  });
+}
+
+type TimelineReplay = {
+  nodeCatalog: Map<string, GraphNode>;
+  edgeCatalog: Map<string, GraphEdge>;
+  visibleNodes: Set<string>;
+  visibleEdges: Set<string>;
+};
+
+function createTimelineReplay(payload: GraphQueryPayload, events: GraphTimelineEvent[]): TimelineReplay {
   const eventNodeIds = new Set(events.flatMap((event) => [
     ...(event.node_ids ?? []),
     ...timelineNodeSnapshots(event).map((node) => node.id),
@@ -244,41 +280,54 @@ function deriveTimelineScene(
     visibleNodes.add(edge.source);
     visibleNodes.add(edge.target);
   }
-  for (const event of events.slice(0, Math.max(0, cursor + 1))) {
-    for (const snapshot of timelineNodeSnapshots(event)) {
-      nodeCatalog.set(snapshot.id, snapshot);
-    }
-    for (const nodeId of event.node_ids ?? []) {
-      if (nodeCatalog.has(nodeId)) visibleNodes.add(nodeId);
-    }
-    for (const snapshot of timelineEdgeSnapshots(event)) {
-      edgeCatalog.set(snapshot.id, snapshot);
-    }
-    const eventEdges = new Set([
-      ...(event.edge_ids ?? []),
-      ...timelineEdgeSnapshots(event).map((edge) => edge.id),
-    ]);
-    for (const edgeId of eventEdges) {
-      if (event.operation === "edge_removed") {
-        visibleEdges.delete(edgeId);
-      } else {
-        visibleEdges.add(edgeId);
-        const edge = edgeCatalog.get(edgeId);
-        if (edge) {
-          if (nodeCatalog.has(edge.source)) visibleNodes.add(edge.source);
-          if (nodeCatalog.has(edge.target)) visibleNodes.add(edge.target);
-        }
+  return { nodeCatalog, edgeCatalog, visibleNodes, visibleEdges };
+}
+
+function applyTimelineEvent(
+  { nodeCatalog, edgeCatalog, visibleNodes, visibleEdges }: TimelineReplay,
+  event: GraphTimelineEvent,
+) {
+  for (const snapshot of timelineNodeSnapshots(event)) {
+    nodeCatalog.set(snapshot.id, snapshot);
+  }
+  for (const nodeId of event.node_ids ?? []) {
+    if (nodeCatalog.has(nodeId)) visibleNodes.add(nodeId);
+  }
+  for (const snapshot of timelineEdgeSnapshots(event)) {
+    edgeCatalog.set(snapshot.id, snapshot);
+  }
+  const eventEdges = new Set([
+    ...(event.edge_ids ?? []),
+    ...timelineEdgeSnapshots(event).map((edge) => edge.id),
+  ]);
+  for (const edgeId of eventEdges) {
+    if (event.operation === "edge_removed") {
+      visibleEdges.delete(edgeId);
+    } else {
+      visibleEdges.add(edgeId);
+      const edge = edgeCatalog.get(edgeId);
+      if (edge) {
+        if (nodeCatalog.has(edge.source)) visibleNodes.add(edge.source);
+        if (nodeCatalog.has(edge.target)) visibleNodes.add(edge.target);
       }
     }
   }
+}
+
+function materializeTimelineScene(
+  { nodeCatalog, edgeCatalog, visibleNodes, visibleEdges }: TimelineReplay,
+): GraphScene {
   const edges = [...visibleEdges]
     .flatMap((edgeId) => edgeCatalog.get(edgeId) ? [edgeCatalog.get(edgeId)!] : []);
+  // Endpoint closure belongs to this output only: a missing endpoint snapshot
+  // arriving after removal must not reveal a node in the next replay frame.
+  const nodeIds = new Set(visibleNodes);
   for (const edge of edges) {
-    visibleNodes.add(edge.source);
-    visibleNodes.add(edge.target);
+    nodeIds.add(edge.source);
+    nodeIds.add(edge.target);
   }
   return {
-    nodes: [...visibleNodes]
+    nodes: [...nodeIds]
       .flatMap((nodeId) => nodeCatalog.get(nodeId) ? [nodeCatalog.get(nodeId)!] : []),
     edges,
   };
