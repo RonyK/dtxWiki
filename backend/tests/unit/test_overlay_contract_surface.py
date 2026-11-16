@@ -276,6 +276,8 @@ SPI_PAYLOAD_FIELD_SHAPES = {
         "link_markdown": "str | None",
         "concept_type": "str | None",
         "version_id": "uuid.UUID | None",
+        "version_status": "str | None",
+        "draft": "dict[str, typing.Any] | None",
         "heading_path": "list[str] | None",
         "section_id": "str | None",
         "source_ref": "dict[str, str] | None",

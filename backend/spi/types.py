@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -117,6 +117,8 @@ class RankedResult(BaseModel):
     link_markdown: str | None = None
     concept_type: str | None = None
     version_id: UUID | None = None
+    version_status: str | None = None
+    draft: dict[str, Any] | None = None
     heading_path: list[str] | None = None
     section_id: str | None = None
     source_ref: dict[str, str] | None = None

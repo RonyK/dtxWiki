@@ -19339,6 +19339,18 @@
             ],
             "title": "Concept Type"
           },
+          "draft": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
+          },
           "entity_ref": {
             "anyOf": [
               {
@@ -19520,6 +19532,17 @@
               }
             ],
             "title": "Version Id"
+          },
+          "version_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Status"
           }
         },
         "required": [

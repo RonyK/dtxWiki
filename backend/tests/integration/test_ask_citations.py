@@ -295,11 +295,51 @@ def test_ask_cites_page_id_for_semantic_chunk_result(session_factory):
     with session_factory.begin() as session:
         workspace = _ws(session)
         page = _seed_page(session, workspace.id)
-        service = AskService(
-            search_service=FakeSemanticSearch(
-                context=[_semantic_context_result(page.id)]
-            )
+        published = _semantic_context_result(page.id).model_copy(
+            update={
+                "version_id": uuid4(),
+                "version_status": "published_snapshot",
+            }
         )
+        # A versioned search window can also contain a mutable draft of this
+        # page; its body must never be attributed to the published citation.
+        draft = published.model_copy(
+            update={
+                "id": uuid4(),
+                "version_id": uuid4(),
+                "version_status": "draft",
+                "citation_available": False,
+                "snippet": "Unpublished draft evidence must not be cited",
+            }
+        )
+        class PaginatedSearch(FakeSemanticSearch):
+            def __init__(self):
+                # All first-page slots are occupied by different open drafts.
+                super().__init__(
+                    context=[
+                        draft,
+                        draft.model_copy(
+                            update={"id": uuid4(), "version_id": uuid4()}
+                        ),
+                        draft.model_copy(
+                            update={"id": uuid4(), "version_id": uuid4()}
+                        ),
+                    ]
+                )
+                self.calls = []
+
+            def search(self, **kwargs):
+                self.calls.append((kwargs["scope"], kwargs.get("cursor")))
+                payload = super().search(**kwargs)
+                if kwargs["scope"] != "context_page":
+                    return payload
+                if kwargs.get("cursor") is None:
+                    return payload.model_copy(update={"next_cursor": "published"})
+                assert kwargs["cursor"] == "published"
+                return payload.model_copy(update={"ranked_results": [published]})
+
+        search = PaginatedSearch()
+        service = AskService(search_service=search)
         turn, detail = _create_turn(
             service, session, workspace.id, "how do we roll out?"
         )
@@ -310,7 +350,11 @@ def test_ask_cites_page_id_for_semantic_chunk_result(session_factory):
             .order_by(AskTurnCitation.rank)
         ).all()
     assert cited == [page.id]
+    assert search.calls == [("context_page", None), ("context_page", "published")]
+    assert len(detail.retrieval_trace) == 1
     assert detail.retrieval_trace[0]["id"] == str(page.id)
+    assert detail.retrieval_trace[0]["version_id"] == str(published.version_id)
+    assert "Unpublished draft evidence" not in detail.assistant_message
 
 
 def test_ask_session_read_redacts_evidence_for_actor_without_visibility(

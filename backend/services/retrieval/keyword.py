@@ -32,6 +32,11 @@ from backend.repositories.search_projection import (
     FtsDocumentHit,
     WorkspaceFts5ProjectionRepository,
 )
+from backend.repositories.workspace_scoped import (
+    join_in_workspace,
+    select_in_workspace,
+    where_in_workspace,
+)
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 from backend.schemas.read import RankedResult, SearchFilters
 from backend.services.actor_visible_read import (
@@ -172,7 +177,7 @@ class KeywordRetriever:
         scan_budget = min(_MAX_FTS_SCAN, max(128, limit * 8))
         hits_by_key: dict[tuple[str, UUID], list[FtsDocumentHit]] = {}
         hydrated_by_key: dict[
-            tuple[str, UUID], tuple[FtsDocumentHit, RankedResult]
+            tuple[str, UUID, UUID | None], tuple[FtsDocumentHit, RankedResult]
         ] = {}
         repository = WorkspaceFts5ProjectionRepository(session, workspace_id)
         offset = 0
@@ -194,8 +199,9 @@ class KeywordRetriever:
             for hit in batch_hits:
                 hits_by_key.setdefault((hit.source_kind, hit.entity_id), []).append(hit)
             impacted_hits = [hit for key in impacted_keys for hit in hits_by_key[key]]
-            for key in impacted_keys:
-                hydrated_by_key.pop(key, None)
+            for key in list(hydrated_by_key):
+                if key[:2] in impacted_keys:
+                    hydrated_by_key.pop(key, None)
             for hit, result in self._hydrate_hit_pairs(
                 session=session,
                 workspace_id=workspace_id,
@@ -204,7 +210,10 @@ class KeywordRetriever:
                 filters=filters,
                 actor=actor,
             ):
-                hydrated_by_key[(hit.source_kind, hit.entity_id)] = (hit, result)
+                hydrated_by_key[(hit.source_kind, hit.entity_id, hit.version_id)] = (
+                    hit,
+                    result,
+                )
             if scanned_count < take:
                 break
         hydrated = sorted(
@@ -256,52 +265,75 @@ class KeywordRetriever:
         grouped = _hits_by_entity(hits, "context_page")
         if not grouped:
             return []
-        statement = select(ContextPage).where(
-            ContextPage.workspace_id == workspace_id,
+        wanted_versions = {
+            hit.version_id for page_hits in grouped.values() for hit in page_hits
+        }
+        conditions = [
+            ContextPageVersion.id.in_(wanted_versions),
             ContextPage.id.in_(grouped),
             ContextPage.lifecycle_status != "archived",
-        )
+            (ContextPageVersion.id == ContextPage.current_published_version_id)
+            | (
+                (ContextPageVersion.version_status == "draft")
+                if actor_can_read_drafts(actor)
+                else False
+            ),
+        ]
         if filters.context_type:
-            statement = statement.where(ContextPage.page_type.in_(filters.context_type))
+            conditions.append(
+                func.coalesce(
+                    ContextPageVersion.page_metadata["page_type"].as_string(),
+                    ContextPage.page_type,
+                ).in_(filters.context_type)
+            )
         if filters.status:
-            statement = statement.where(
-                ContextPage.lifecycle_status.in_(filters.status)
-            )
+            conditions.append(ContextPage.lifecycle_status.in_(filters.status))
+        statement = join_in_workspace(
+            select_in_workspace(
+                ContextPageVersion, workspace_id=workspace_id, conditions=conditions
+            ),
+            ContextPageVersion,
+            ContextPage,
+            workspace_id=workspace_id,
+            on=ContextPageVersion.page_id == ContextPage.id,
+        ).with_only_columns(ContextPageVersion, ContextPage)
+        rows = {
+            version.id: (version, page) for version, page in session.execute(statement)
+        }
         results: list[tuple[FtsDocumentHit, RankedResult]] = []
-        for page in session.scalars(statement).all():
-            chosen = _choose_visible_hit(
-                grouped[page.id], visible_search_version_ids(page, actor)
-            )
-            if chosen is None:
-                continue
-            version = session.get(ContextPageVersion, chosen.version_id)
-            if version is None or version.page_id != page.id:
-                continue
-            location = heading_location_for_query(version.body_md, query)
-            results.append(
-                (
-                    chosen,
-                    _ranked(
+        for page_hits in grouped.values():
+            for chosen in page_hits:
+                selected = rows.get(chosen.version_id)
+                if selected is None or selected[0].page_id != chosen.entity_id:
+                    continue
+                version, page = selected
+                metadata = version.page_metadata or {}
+                location = heading_location_for_query(version.body_md, query)
+                results.append(
+                    (
                         chosen,
-                        result_id=page.id,
-                        result_type="context_page",
-                        title=page.title,
-                        citation_available=True,
-                        summary_markdown=version.body_md,
-                        archived=page.lifecycle_status == "archived",
-                        stable_url=format_stable_url(page.workspace_id, page.id),
-                        concept_type=page.page_type,
-                        heading_path=public_heading_path(location),
-                        section_id=(
-                            location.section_id if location is not None else None
+                        _ranked(
+                            chosen,
+                            result_id=page.id,
+                            result_type="context_page",
+                            title=metadata.get("title") or page.title,
+                            citation_available=version.id
+                            == page.current_published_version_id,
+                            summary_markdown=version.body_md,
+                            archived=page.lifecycle_status == "archived",
+                            stable_url=format_stable_url(page.workspace_id, page.id),
+                            concept_type=metadata.get("page_type") or page.page_type,
+                            heading_path=public_heading_path(location),
+                            section_id=location.section_id
+                            if location is not None
+                            else None,
+                            source_ref={
+                                "kind": "context_page_version",
+                                "id": str(chosen.version_id),
+                            },
                         ),
-                        source_ref={
-                            "kind": "context_page_version",
-                            "id": str(chosen.version_id),
-                        },
-                    ),
+                    )
                 )
-            )
         return results
 
     @staticmethod
@@ -330,7 +362,17 @@ class KeywordRetriever:
             )
         )
         if filters.context_type:
-            statement = statement.where(ContextPage.page_type.in_(filters.context_type))
+            statement = where_in_workspace(
+                statement,
+                ContextPageVersion,
+                workspace_id=workspace_id,
+                conditions=(
+                    func.coalesce(
+                        ContextPageVersion.page_metadata["page_type"].as_string(),
+                        ContextPage.page_type,
+                    ).in_(filters.context_type),
+                ),
+            )
         if filters.status:
             statement = statement.where(
                 ContextPage.lifecycle_status.in_(filters.status)
@@ -353,10 +395,12 @@ class KeywordRetriever:
                         result_type="context_claim",
                         title="Context claim",
                         summary_markdown=version.body_md,
-                        citation_available=True,
+                        citation_available=version.id
+                        == page.current_published_version_id,
                         archived=claim.status != "active",
                         stable_url=format_stable_url(page.workspace_id, page.id),
-                        concept_type=page.page_type,
+                        concept_type=(version.page_metadata or {}).get("page_type")
+                        or page.page_type,
                         heading_path=public_heading_path(location),
                         section_id=(
                             location.section_id if location is not None else None

@@ -599,7 +599,7 @@ function SearchResults({
         <div className="operations-list">
           {payload.ranked_results.map((result) => (
             <SearchResultRow
-              key={`${result.type}-${result.id}`}
+              key={`${result.type}-${result.id}-${result.version_id ?? ""}`}
               result={result}
               workspaceId={workspaceId}
               query={query}
@@ -668,13 +668,22 @@ function SearchResultRow({
   const location = resultLocation(result);
   const locationParts = presentLocation(location);
   const fullPath = location.join(" › ");
+  const review = result.draft?.review;
+  const reviewStatus = review && typeof review === "object" && "status" in review
+    ? review.status : null;
+  const versionState = result.type !== "context_page" && result.type !== "context_claim" ? null
+    : result.version_status === "published_snapshot" ? "published"
+    : result.version_status === "draft"
+      ? reviewStatus === "pending" || reviewStatus === "changes_requested" ? "reviewing" : "draft"
+      : null;
+  const versionLabel = versionState ? t(`results.versions.${versionState}`) : null;
   const unavailable = !link ? t(
     result.type === "change_set" ? "results.reviewLinkMissing" : "results.linkMissing",
     { defaultValue: result.type === "change_set"
       ? "Cannot open directly from search · Review link information unavailable"
       : "Cannot open directly from search · Link information unavailable" },
   ) : null;
-  const description = [fullPath, matchReason, unavailable].filter(Boolean).join(". ");
+  const description = [versionLabel, fullPath, matchReason, unavailable].filter(Boolean).join(". ");
   const content = (
     <>
       <div className="search-result-body">
@@ -683,6 +692,7 @@ function SearchResultRow({
             {typeLabel}
           </span>
           <span className="search-result-title-text">{result.title}</span>
+          {versionState && versionLabel ? <StatusPill status={versionState} label={versionLabel} title={versionLabel} compact /> : null}
           {result.archived ? <StatusPill status="archived" compact /> : null}
         </p>
         {preview ? (

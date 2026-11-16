@@ -1039,6 +1039,9 @@ def test_ask_session_turn_uses_context_first_search(page_service):
         "score",
         "match_reason",
         "stable_url",
+        "version_id",
+        "version_status",
+        "citation_available",
     }
 
     reread = client.get(

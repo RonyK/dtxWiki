@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 from datetime import datetime
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import ValidationError
 
@@ -126,7 +126,10 @@ from backend.services.retrieval.outline_location import (
     outline_for_body,
     raw_body_sha256,
 )
-from backend.services.search_service import KEYWORD_LANE_UNAVAILABLE_WARNING
+from backend.services.search_service import (
+    KEYWORD_LANE_UNAVAILABLE_WARNING,
+    group_context_version_results,
+)
 from backend.utils.block_identity import heal_block_map
 from backend.utils.block_map import compute_blocks
 from backend.utils.content_hash import content_hash as calculate_content_hash
@@ -520,7 +523,9 @@ def search(payload: dict, ctx: ToolCallContext) -> SearchOutput:
             candidates = data.ranked_results[:20]
             state = rerank_codec.issue(
                 workspace_id=ctx.workspace_id,
-                task_ids=[candidate.id for candidate in candidates],
+                task_ids=[
+                    _borrowed_candidate_id(candidate) for candidate in candidates
+                ],
                 request_fingerprint=request_fingerprint,
             )
             input_required = _borrowed_rerank_request(candidates, state)
@@ -673,6 +678,20 @@ def _borrowed_rewrite_query(responses: dict[str, dict] | None) -> str | None:
     return query
 
 
+def _borrowed_candidate_id(result: RankedResult) -> UUID:
+    if result.type not in {"context_page", "context_claim"}:
+        return result.id
+    from backend.services.entity_ref import EntityKind, ranked_result_entity_ref
+
+    ref = ranked_result_entity_ref(result)
+    if ref.kind != EntityKind.CONTEXT_PAGE or ref.version_id is None:
+        return result.id
+    return uuid5(
+        NAMESPACE_URL,
+        f"dtxwiki:search:{ref.kind}:{ref.id or result.id}:{ref.version_id}",
+    )
+
+
 def _borrowed_rerank_request(
     candidates: list[RankedResult],
     request_state: str,
@@ -690,7 +709,7 @@ def _borrowed_rerank_request(
                 "untrustedContextNotice": UNTRUSTED_CONTEXT_NOTICE,
                 "candidates": [
                     {
-                        "id": str(candidate.id),
+                        "id": str(_borrowed_candidate_id(candidate)),
                         "title": candidate.title,
                         "snippet": candidate.snippet[:160],
                     }
@@ -748,15 +767,20 @@ def _apply_borrowed_ranking(
     ranking: list[UUID],
     signed_ids: set[UUID],
 ) -> list[RankedResult]:
-    by_id = {result.id: result for result in results if result.id in signed_ids}
+    by_id = {
+        candidate_id: result
+        for result in results
+        if (candidate_id := _borrowed_candidate_id(result)) in signed_ids
+    }
     ordered = [by_id[result_id] for result_id in ranking if result_id in by_id]
-    included = {result.id for result in ordered}
+    included = {_borrowed_candidate_id(result) for result in ordered}
     ordered.extend(
         result
         for result in results
-        if result.id in signed_ids and result.id not in included
+        if _borrowed_candidate_id(result) in signed_ids
+        and _borrowed_candidate_id(result) not in included
     )
-    return ordered[:8]
+    return group_context_version_results(ordered)[:8]
 
 
 def read(payload: dict, ctx: ToolCallContext) -> ReadOutput:

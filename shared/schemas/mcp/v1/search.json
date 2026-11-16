@@ -430,6 +430,19 @@
             "default": null,
             "title": "Concept Type"
           },
+          "draft": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Draft"
+          },
           "entity_ref": {
             "anyOf": [
               {
@@ -622,6 +635,18 @@
             ],
             "default": null,
             "title": "Version Id"
+          },
+          "version_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Status"
           }
         },
         "required": [

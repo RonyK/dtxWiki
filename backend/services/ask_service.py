@@ -534,16 +534,51 @@ class AskService:
             limit=3,
             actor=actor,
         )
-        context = context_payload.ranked_results
+        # Search can show mutable drafts, but Ask evidence names published heads.
+        # Draft variants must not hide citable Context hits on the next page.
+        context = []
         tried_lanes = list(context_payload.tried_lanes)
         search_warnings = list(context_payload.warnings)
+        nearest_candidates = list(context_payload.nearest_candidates)
+        seen_cursors: set[str] = set()
+        seen_context: set[UUID] = set()
+        while True:
+            for result in context_payload.ranked_results:
+                if not result.citation_available or result.version_status == "draft":
+                    continue
+                document_id = self._result_document_id(result) or result.id
+                if document_id not in seen_context:
+                    seen_context.add(document_id)
+                    context.append(result)
+            context = context[:3]
+            cursor = context_payload.next_cursor
+            if len(context) == 3 or cursor is None or cursor in seen_cursors:
+                break
+            seen_cursors.add(cursor)
+            context_payload = self.search_service.search(
+                session=session,
+                workspace_id=workspace_id,
+                query=question,
+                scope="context_page",
+                retrieval_mode=mode,
+                limit=3,
+                cursor=cursor,
+                actor=actor,
+            )
+            tried_lanes = _stable_unique([*tried_lanes, *context_payload.tried_lanes])
+            search_warnings = _stable_unique(
+                [*search_warnings, *context_payload.warnings]
+            )
+            nearest_candidates = [
+                *nearest_candidates,
+                *context_payload.nearest_candidates,
+            ][:3]
         if not honored:
             search_warnings = [
                 *search_warnings,
                 UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING,
             ]
         fallback = False
-        nearest_candidates = list(context_payload.nearest_candidates)
         results: list[RankedResult] = context
         if not results:
             fallback = True
@@ -609,16 +644,21 @@ class AskService:
                 if artifact_id is not None and artifact_id not in artifact_ids:
                     artifact_ids.append(artifact_id)
                     evidence_id = artifact_id
-            trace.append(
-                {
-                    "id": str(evidence_id),
-                    "type": result.type,
-                    "title": result.title,
-                    "score": f"{result.score:.2f}",
-                    "match_reason": result.match_reason or "",
-                    "stable_url": result.stable_url or "",
-                }
-            )
+            evidence_trace = {
+                "id": str(evidence_id),
+                "type": result.type,
+                "title": result.title,
+                "score": f"{result.score:.2f}",
+                "match_reason": result.match_reason or "",
+                "stable_url": result.stable_url or "",
+            }
+            if result.version_id is not None:
+                evidence_trace["version_id"] = str(result.version_id)
+                evidence_trace["version_status"] = result.version_status or ""
+                evidence_trace["citation_available"] = str(
+                    result.citation_available
+                ).lower()
+            trace.append(evidence_trace)
         pack_text = "\n".join(lines)
         answer = pack_text
         if self.provider_unavailable_reason:

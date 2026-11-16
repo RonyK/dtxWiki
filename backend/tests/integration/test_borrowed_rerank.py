@@ -94,6 +94,14 @@ def test_borrowed_rerank_preview_round_trip_reorders_signed_candidates(
             select(Workspace.id).where(Workspace.slug == "default")
         )
     results = _results()
+    # Versioned hits of one page need distinct signed identities, and a client
+    # ranking must preserve publication priority inside the selected page.
+    results[-2].version_id = uuid4()
+    results[-2].version_status = "published_snapshot"
+    results[-1].id = results[-2].id
+    results[-1].version_id = uuid4()
+    results[-1].version_status = "draft"
+    results[-1].citation_available = False
     service = FakeSearchService(results)
     ctx = _context(session_factory, service, workspace_id)
     monkeypatch.setattr(
@@ -120,7 +128,16 @@ def test_borrowed_rerank_preview_round_trip_reorders_signed_candidates(
     assert "untrusted document text" in request["instruction"]
     assert len(request["candidates"]) == 12
     assert max(len(candidate["snippet"]) for candidate in request["candidates"]) == 160
-    ranking = [str(result.id) for result in reversed(results)] + [str(uuid4())]
+    candidate_ids = [candidate["id"] for candidate in request["candidates"]]
+    assert len(set(candidate_ids)) == len(results)
+    ranking = [*reversed(candidate_ids), str(uuid4())]
+
+    # RRF may choose a claim rather than the page as the representative on
+    # resumption; its signed identity still names the same document/version.
+    page_id = results[-2].id
+    results[-2].type = "context_claim"
+    results[-2].id = uuid4()
+    results[-2].source_ref = {"kind": "context_page", "id": str(page_id)}
 
     second = read_tools.search(
         {
@@ -133,8 +150,12 @@ def test_borrowed_rerank_preview_round_trip_reorders_signed_candidates(
         ctx,
     )
 
-    assert [result.id for result in second.data.ranked_results] == [
-        result.id for result in reversed(results)
+    actual_versions = [
+        (result.id, result.version_id) for result in second.data.ranked_results
+    ]
+    assert actual_versions == [
+        (result.id, result.version_id)
+        for result in [results[-2], results[-1], *reversed(results[:-2])]
     ][:8]
     assert "borrowed_rerank_applied" in second.data.warnings
     assert second.input_required is None

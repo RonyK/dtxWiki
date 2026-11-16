@@ -13,6 +13,12 @@ describe("searchResultHref", () => {
         }), "00000000-0000-4000-8000-000000000001"
       ),
     ).toBe("/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000101");
+    expect(searchResultHref(result("chunk-1", "context_page", {
+      kind: "content_chunk",
+      document_id: "00000000-0000-4000-8000-000000000101",
+      version_id: "00000000-0000-4000-8000-000000000201",
+    }), "00000000-0000-4000-8000-000000000001"))
+      .toBe("/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000101?version_id=00000000-0000-4000-8000-000000000201");
   });
 
   it("opens library artifact hits with their canonical document URL", () => {

@@ -197,6 +197,67 @@ def test_search_without_reranker_keeps_fusion_order():
 
     assert result_identifier(feedback[0]) == f"feedback:{feedback[0].id}"
 
+    # Document-version identity is independent of the audit-target rule above:
+    # each version survives, while its keyword and chunk hits collapse together.
+    published_id, draft_id = uuid4(), uuid4()
+    versions = [
+        _result("Published", 0.9).model_copy(
+            update={"id": target_id, "version_id": published_id}
+        ),
+        _result("Draft", 0.8).model_copy(
+            update={"id": target_id, "version_id": draft_id}
+        ),
+    ]
+    chunks = [
+        result.model_copy(
+            update={
+                "id": uuid4(),
+                "source_ref": {
+                    "kind": "content_chunk",
+                    "document_kind": "context_page",
+                    "document_id": str(target_id),
+                    "version_id": str(result.version_id),
+                },
+            }
+        )
+        for result in versions
+    ]
+    # Legacy chunk-shaped providers may carry the version only in source_ref.
+    chunks[0].version_id = None
+    fused = reciprocal_rank_fusion([versions, chunks], key=ranked_result_key)
+    assert [(result.id, result.version_id) for result in fused] == [
+        (target_id, published_id),
+        (target_id, draft_id),
+    ]
+    # Golden retrieval quality is measured by document, not by its version rows.
+    from backend.services.eval.harness import _predicted_identifiers
+
+    assert _predicted_identifiers(
+        SearchService(retrievers=[_FakeRetriever(fused)]),
+        None,
+        None,
+        query="versioned document quality",
+        mode="keyword",
+        k=2,
+        actor=None,
+    ) == [f"context_page:{target_id}"]
+    # Resolver/fallback composition must use the same versioned document key
+    # when a claim, rather than a page or chunk, represents the matching body.
+    from backend.services.search_service import _merge_ranked_results
+
+    claim = chunks[0].model_copy(
+        update={
+            "type": "context_claim",
+            "version_id": published_id,
+            "source_ref": {"kind": "context_page", "id": str(target_id)},
+        }
+    )
+    merged = _merge_ranked_results(primary=[versions[0]], fallback=[claim, *chunks])
+    assert [(result.id, result.version_id) for result in merged] == [
+        (target_id, published_id),
+        (chunks[1].id, draft_id),
+    ]
+
 
 def test_search_rerank_failure_falls_back_to_fusion_order():
     service = SearchService(

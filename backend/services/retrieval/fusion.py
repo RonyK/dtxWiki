@@ -35,8 +35,8 @@ def reciprocal_rank_fusion(
     return fused
 
 
-def ranked_result_key(result: RankedResult) -> str:
-    """Deduplicate search hits by document kind and UUID."""
+def ranked_result_document_key(result: RankedResult) -> str:
+    """Identify canonical documents while keeping audit results independent."""
     from backend.services.entity_ref import ranked_result_entity_ref
 
     if result.type not in {
@@ -49,3 +49,15 @@ def ranked_result_key(result: RankedResult) -> str:
         return f"{result.type}:{result.id}"
     ref = ranked_result_entity_ref(result)
     return f"{ref.kind}:{ref.id or result.id}"
+
+
+def ranked_result_key(result: RankedResult) -> str:
+    """Deduplicate matching Context versions without changing document identity."""
+    document_key = ranked_result_document_key(result)
+    if document_key.startswith("context_page:"):
+        from backend.services.entity_ref import ranked_result_entity_ref
+
+        version_id = ranked_result_entity_ref(result).version_id
+        if version_id is not None:
+            return f"{document_key}:{version_id}"
+    return document_key

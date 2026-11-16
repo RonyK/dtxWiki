@@ -1,5 +1,6 @@
 """MCP-specific read shapes, independent of REST and retriever identities."""
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -21,6 +22,8 @@ class MCPRankedResult(BaseModel):
     location: list[str] | None = None
     concept_type: str | None = None
     version_id: UUID | None = None
+    version_status: str | None = None
+    draft: dict[str, Any] | None = None
     heading_path: list[str] | None = None
     section_id: str | None = None
     source_ref: dict[str, str] | None = None

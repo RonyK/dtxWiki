@@ -1196,7 +1196,9 @@ def test_pending_title_is_editor_only_until_restore_draft_is_published():
     assert editor_hit.id == created.id
     assert editor_hit.version_id == restored.version_id
     assert editor_hit.matched_name == "Pending Restore Name"
-    assert editor_hit.title == "Restore Meta"
+    assert editor_hit.title == "Pending Restore Name"
+    assert editor_hit.version_status == "draft"
+    assert editor_hit.citation_available is False
 
     with service.session_factory.begin() as session:
         node_id = session.scalar(
