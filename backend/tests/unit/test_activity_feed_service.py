@@ -291,7 +291,7 @@ def test_same_snapshot_and_member_set_produce_stable_opaque_group_id(service):
         ("page.discard_context_edit", "delete", None),
         ("page.submit_context_edit_for_review", "request_review", None),
         ("page.restore_version", "restore", None),
-        ("context_page.draft.update", "edit", None),
+        ("context_page.draft.save", "edit", None),
         ("library.item.register", "create", None),
         ("library.item.version.create", "create", None),
         ("agent_page.draft.create", "create", None),

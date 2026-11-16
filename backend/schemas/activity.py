@@ -26,6 +26,7 @@ ActivityEventKey = Literal[
     "page.inline_comment",
     "context_page.draft.create",
     "context_page.draft.update",
+    "context_page.draft.save",
     "context_page.draft.diverged",
     "context_page.draft.diverged_discarded",
     "context_page.draft.publish",

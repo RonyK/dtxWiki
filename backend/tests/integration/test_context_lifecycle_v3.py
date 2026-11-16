@@ -357,6 +357,7 @@ def test_context_detail_history_and_mcp_changes_hide_draft_metadata_from_viewer(
     assert viewer_detail.published_version_info.version_no == 1
 
     assert editor_detail.open_drafts.total == 1
+    assert editor_detail.latest_draft_version_id == draft.version_id
     assert editor_detail.version_info is not None
     assert editor_detail.version_info.history_status == "published_snapshot"
     assert editor_detail.version_info.is_draft_head is False

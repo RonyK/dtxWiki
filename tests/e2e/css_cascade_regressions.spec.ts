@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import { randomUUID } from "node:crypto";
+import { approveContextDraft } from "./context_workflow";
 
 import {
   authenticatePage,
@@ -188,32 +189,24 @@ test.describe("U-1/U-5/U-7: entity-row badge grid overflow", () => {
     const submitted = (await submitResponse.json()).data as {
       version_id: string;
       content_hash: string;
-      review_item_id: string | null;
+      review_item_id: string;
     };
-    const decisionResponse = await request.post(
-      `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/reviews/${submitted.review_item_id}/decision`,
-      { data: { decision_type: "approve" } },
+    await approveContextDraft(request, workspace.id, created.id, submitted.version_id, submitted.review_item_id);
+    const beginResponse = await request.post(
+      `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/begin-edit`,
+      { data: { from: submitted.version_id, idempotency_key: randomUUID() } },
     );
-    expect(decisionResponse.ok(), await decisionResponse.text()).toBeTruthy();
-    const publishResponse = await request.post(
-      `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/versions/${submitted.version_id}/publish`,
-      {
-        data: {
-          reason: "e2e: publish before staging a newer draft",
-          expected_content_hash: submitted.content_hash,
-        },
-      },
-    );
-    expect(publishResponse.ok(), await publishResponse.text()).toBeTruthy();
-    const publishedVersion = (await publishResponse.json()).data;
+    expect(beginResponse.ok(), await beginResponse.text()).toBeTruthy();
+    const draft = (await beginResponse.json()).data;
     const autosaveResponse = await request.post(
       `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/pages/${created.id}/autosave`,
       {
         data: {
           body_md: "# Alpha\n\nstaged edit",
-          base_version_id: publishedVersion.version_id,
-          base_content_hash: publishedVersion.content_hash,
-          expected_editing_revision: publishedVersion.editing_revision,
+          version_id: draft.version_id,
+          base_version_id: draft.version_id,
+          base_content_hash: draft.content_hash,
+          expected_editing_revision: draft.editing_revision,
           idempotency_key: randomUUID(),
         },
       },

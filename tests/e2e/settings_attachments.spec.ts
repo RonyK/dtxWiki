@@ -10,6 +10,7 @@ import {
 } from "./auth";
 import type { APIRequestContext } from "./fixtures";
 import { evidenceScreenshot } from "./evidence";
+import { approveContextDraft } from "./context_workflow";
 
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAYAAACzzX7wAAAAFUlEQVR4nGOUq7jznwEPYMInSR0FAD1JAnlVwrsyAAAAAElFTkSuQmCC",
@@ -75,6 +76,16 @@ for (const locale of ["en", "ko"]) {
       },
     );
     expect(submitted.ok(), await submitted.text()).toBeTruthy();
+    const submittedVersion = (await submitted.json()).data;
+    // Review submission keeps the shared draft open and protects its uploads.
+    // Close it through approval before exercising unused-file cleanup.
+    await approveContextDraft(
+      page.request,
+      workspace.id,
+      created.id,
+      submittedVersion.version_id,
+      submittedVersion.review_item_id,
+    );
     const memberContext = await browser.newContext();
     const memberEmail = `attachments-member-${randomUUID()}@example.com`;
     await signUp(memberContext.request, memberEmail);
@@ -118,6 +129,14 @@ for (const locale of ["en", "ko"]) {
       },
     );
     expect(memberSubmitted.ok(), await memberSubmitted.text()).toBeTruthy();
+    const memberSubmittedVersion = (await memberSubmitted.json()).data;
+    await approveContextDraft(
+      page.request,
+      workspace.id,
+      otherPage.id,
+      memberSubmittedVersion.version_id,
+      memberSubmittedVersion.review_item_id,
+    );
     await memberContext.close();
     await page.addInitScript(
       (language) => localStorage.setItem("dtxwiki.uiLanguage", language),
@@ -412,6 +431,14 @@ async function uploadOrphan(request: APIRequestContext, filename: string) {
     },
   );
   expect(submitted.ok(), await submitted.text()).toBeTruthy();
+  const submittedVersion = (await submitted.json()).data;
+  await approveContextDraft(
+    request,
+    workspace.id,
+    created.id,
+    submittedVersion.version_id,
+    submittedVersion.review_item_id,
+  );
   return workspace;
 }
 

@@ -9,6 +9,7 @@ import {
 } from "./fixtures";
 import { randomUUID } from "node:crypto";
 import type { GraphQueryPayload } from "../../frontend/src/shared/api/graph";
+import { approveContextDraft } from "./context_workflow";
 
 import { execFileSync } from "node:child_process";
 
@@ -1221,7 +1222,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
               `# ${decisionTitle}`,
               "",
               "This decision keeps an accessible graph fallback.",
-              `See [[${related.slug}|${relatedTitle}]].`,
+              `See [${relatedTitle}](/p/${workspace.id}/${related.id}).`,
             ].join("\n"),
             page_type: "decision",
             tags: ["e2e", "context-ia"],
@@ -1596,12 +1597,8 @@ function parseOutboxTotal(value: string) {
   return Number(match?.[1] ?? 0) + Number(match?.[2] ?? 0);
 }
 
-// P8.1/P9.1: `create_page_first` always lands a brand-new page in the
-// private "editing" state -- graph/wikilink relationships are derived from
-// PUBLISHED content, so a fixture that other assertions expect to already be
-// linked into the graph must go all the way through submit-for-review,
-// review approval, and publish (see css_cascade_regressions.spec.ts's U-1
-// fixture for the same sequence against the raw REST contract).
+// Graph relationships use published content. Create a shared draft, submit
+// it, and approve its exact merge preview to publish the fixture.
 async function createAndPublishContextPage(
   request: APIRequestContext,
   workspaceId: string,
@@ -1634,22 +1631,15 @@ async function createAndPublishContextPage(
     content_hash: string;
     review_item_id: string;
   };
-  const decisionResponse = await request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/reviews/${submitted.review_item_id}/decision`,
-    { data: { decision_type: "approve" } },
+  await approveContextDraft(
+    request, workspaceId, created.id, submitted.version_id, submitted.review_item_id,
+    { decision_reason: "e2e: publish fixture for graph relationships" },
   );
-  expect(decisionResponse.ok(), await decisionResponse.text()).toBeTruthy();
-  const publishResponse = await request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/context/pages/${created.id}/versions/${submitted.version_id}/publish`,
-    {
-      data: {
-        reason: "e2e: publish fixture for graph/wikilink relationships",
-        expected_content_hash: submitted.content_hash,
-      },
-    },
+  const publishedResponse = await request.get(
+    `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/context/pages/${created.id}?view=published`,
   );
-  expect(publishResponse.ok(), await publishResponse.text()).toBeTruthy();
-  return (await publishResponse.json()).data as {
+  expect(publishedResponse.ok(), await publishedResponse.text()).toBeTruthy();
+  return (await publishedResponse.json()).data as {
     id: string;
     slug: string;
     version_id: string;

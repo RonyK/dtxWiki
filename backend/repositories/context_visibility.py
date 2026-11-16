@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import and_, case, not_
+from sqlalchemy import and_, case, not_, null
 from sqlalchemy.orm import aliased, object_session
 
 from backend.models.context import ContextPage, ContextPageVersion
@@ -118,14 +118,20 @@ def visible_context_version_id(
 
     if page.current_published_version_id is not None:
         return page.current_published_version_id, False
+    version_id = latest_saved_context_draft_version_id(page, actor)
+    return version_id, version_id is not None
+
+
+def latest_saved_context_draft_version_id(
+    page: ContextPage, actor: ActorContext | None
+) -> UUID | None:
+    """Project the latest visible open draft without consulting retired slots."""
+
     if not actor_can_read_drafts(actor):
-        return None, False
+        return None
     session = object_session(page)
     if session is not None:
-        version_id = session.scalar(
-            _latest_saved_draft_statement(page.id, page.workspace_id)
-        )
-        return version_id, version_id is not None
+        return session.scalar(_latest_saved_draft_statement(page.id, page.workspace_id))
     # Detached/constructed pages can only inspect relationships already loaded.
     versions = list(page.__dict__.get("versions", ()))
     versions.extend(
@@ -135,7 +141,7 @@ def visible_context_version_id(
     )
     candidates = [version for version in versions if version.version_status == "draft"]
     if not candidates:
-        return None, False
+        return None
     version = min(
         candidates,
         key=lambda row: (
@@ -145,7 +151,7 @@ def visible_context_version_id(
             str(row.id),
         ),
     )
-    return version.id, True
+    return version.id
 
 
 def visible_context_version_ids(
@@ -255,10 +261,18 @@ def visible_context_version_expression(actor: ActorContext | None):
             ContextPage.current_published_version_id.is_not(None),
             ContextPage.current_published_version_id,
         ),
-        else_=_latest_saved_draft_statement(
-            ContextPage.id, ContextPage.workspace_id
-        ).scalar_subquery(),
+        else_=latest_saved_context_draft_version_expression(actor),
     )
+
+
+def latest_saved_context_draft_version_expression(actor: ActorContext | None):
+    """SQL counterpart of latest saved draft discovery for lists and badges."""
+
+    if not actor_can_read_drafts(actor):
+        return null()
+    return _latest_saved_draft_statement(
+        ContextPage.id, ContextPage.workspace_id
+    ).scalar_subquery()
 
 
 def searchable_context_version_expression(actor: ActorContext | None):

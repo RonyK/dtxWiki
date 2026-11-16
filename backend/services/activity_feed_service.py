@@ -142,6 +142,7 @@ _AUDIT_OPERATIONS = {
     "page.restore_version": "restore",
     "context_page.draft.create": "create",
     "context_page.draft.update": "edit",
+    "context_page.draft.save": "edit",
     "context_page.draft.publish": "publish",
     "context_page.updated": "edit",
     "context_page.draft.reconciled": "edit",

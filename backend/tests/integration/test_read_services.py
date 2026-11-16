@@ -2407,9 +2407,11 @@ def test_list_context_pages_filters_unpublished_heads_and_hides_archived_by_defa
         item for item in with_drafts.items if item.id == legacy_draft_head.id
     )
     assert selected.updated_at == saved_at
-    assert selected.latest_draft_version_id is None
+    assert selected.latest_draft_version_id == active.id
+    assert all(item.latest_draft_version_id is not None for item in with_drafts.items)
     assert {item.id for item in without_drafts.items} == {published_only.id}
     assert without_drafts.total == len(without_drafts.items) == 1
+    assert without_drafts.items[0].latest_draft_version_id is None
     assert {item.id for item in archived.items} == {archived_with_draft.id}
     assert archived.total == len(archived.items) == 1
 

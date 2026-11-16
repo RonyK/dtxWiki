@@ -369,7 +369,8 @@ def test_reader_modified_time_stays_at_published_head_when_draft_is_staged(
         page for page in page_list.json()["data"] if page["id"] == published["id"]
     )
     assert datetime.fromisoformat(listed["updated_at"]) == published_at
-    assert listed["latest_draft_version_id"] is None
+    # Editors see the open draft badge without changing published read ordering.
+    assert listed["latest_draft_version_id"] == draft["version_id"]
     page_ids = [page["id"] for page in page_list.json()["data"]]
     assert page_ids.index(newer["id"]) < page_ids.index(published["id"])
 

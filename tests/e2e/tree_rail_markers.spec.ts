@@ -13,6 +13,7 @@ import {
 } from "./fixtures";
 import { authenticatePage, backendBaseUrl, configureWorkspaceLabs, currentWorkspace, signUp, workspaceUrl } from "./auth";
 import { evidenceLocatorScreenshot, evidenceScreenshot } from "./evidence";
+import { approveContextDraft } from "./context_workflow";
 
 type Section = "context" | "library" | "agent";
 type FavoriteKind = "context_page" | "library_item" | "agent_page";
@@ -595,17 +596,15 @@ async function publishContext(request: APIRequestContext, workspaceId: string, t
     { data: { title, body_md: `# ${title}\n\nPublished TreeRail marker acceptance fixture.`, page_type: "guide" } }));
   const submitted = await responseData<ContextVersion & { review_item_id: string }>(await request.post(endpoint(workspaceId, `/context/pages/${created.id}/submit-for-review`),
     { data: { version_id: created.version_id, expected_editing_revision: created.editing_revision, idempotency_key: randomUUID() } }));
-  await responseData(await request.post(endpoint(workspaceId, `/reviews/${submitted.review_item_id}/decision`),
-    { data: { decision_type: "approve" } }));
-  return responseData<ContextVersion>(await request.post(endpoint(workspaceId, `/context/pages/${created.id}/versions/${submitted.version_id}/publish`),
-    { data: { expected_content_hash: submitted.content_hash, reason: "E2E publish TreeRail marker fixture" } }));
+  await approveContextDraft(request, workspaceId, created.id, submitted.version_id, submitted.review_item_id);
+  return responseData<ContextVersion>(await request.get(endpoint(workspaceId, `/context/pages/${created.id}`)));
 }
 
 async function submitSuccessor(request: APIRequestContext, workspaceId: string, published: ContextVersion) {
   const editing = await responseData<ContextVersion>(await request.post(endpoint(workspaceId, `/context/pages/${published.id}/begin-edit`),
     { data: { base_content_hash: published.content_hash, base_version_id: published.version_id, idempotency_key: randomUUID() } }));
   const saved = await responseData<ContextVersion>(await request.post(endpoint(workspaceId, `/context/pages/${published.id}/autosave`),
-    { data: { base_content_hash: editing.content_hash, base_version_id: editing.version_id, expected_editing_revision: editing.editing_revision, body_md: "# Proposed update\n\nUnpublished review fixture.", idempotency_key: randomUUID() } }));
+    { data: { version_id: editing.version_id, base_content_hash: editing.content_hash, base_version_id: editing.version_id, expected_editing_revision: editing.editing_revision, body_md: "# Proposed update\n\nUnpublished review fixture.", idempotency_key: randomUUID() } }));
   const submitted = await responseData<{ review_item_id: string }>(await request.post(endpoint(workspaceId, `/context/pages/${published.id}/submit-for-review`),
     { data: { version_id: saved.version_id, expected_editing_revision: saved.editing_revision, idempotency_key: randomUUID() } }));
   return submitted.review_item_id;

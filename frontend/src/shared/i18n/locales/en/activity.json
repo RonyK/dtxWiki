@@ -130,6 +130,7 @@
     "page_inline_comment": "Added a comment",
     "context_page_draft_create": "Created a draft",
     "context_page_draft_update": "Updated a draft",
+    "context_page_draft_save": "Saved a draft",
     "context_page_draft_diverged": "Preserved a divergent draft",
     "context_page_draft_diverged_discarded": "Discarded a divergent draft",
     "review_decision": "Made a review decision",

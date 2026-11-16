@@ -292,6 +292,10 @@ def test_page_service_updates_with_linear_parent_and_audit_row():
         "context_page.draft.save",
         "context_page.draft.publish",
     }
+    saved = next(
+        audit for audit in update_audits if audit.action == "context_page.draft.save"
+    )
+    assert saved.payload["base_version_id"] == str(created.version_id)
 
 
 def test_page_service_emits_change_review_audit_bundle_for_writes():

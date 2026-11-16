@@ -2439,6 +2439,9 @@ class PageService:
                     target_id=page.id,
                     payload={
                         "version_id": str(version.id),
+                        "base_version_id": str(version.parent_version_id)
+                        if version.parent_version_id
+                        else None,
                         "editing_revision": version.editing_revision,
                     },
                 )

@@ -8,6 +8,7 @@ import {
   type TestInfo,
 } from "./fixtures";
 import { randomUUID } from "node:crypto";
+import { approveContextDraft, mergeBinding } from "./context_workflow";
 
 import {
   backendBaseUrl,
@@ -265,11 +266,9 @@ test("publishes real GIF and animated WebP uploads through the trusted Context r
   const submitted = (await submitResponse.json()).data as PagePayload & {
     review_item_id: string;
   };
-  const decisionResponse = await page.request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/reviews/${submitted.review_item_id}/decision`,
-    { data: { decision_type: "approve", ...await mergeBinding(page.request, workspace.id, created.id, submitted.version_id) } },
+  await approveContextDraft(
+    page.request, workspace.id, created.id, submitted.version_id, submitted.review_item_id,
   );
-  expect(decisionResponse.ok(), await decisionResponse.text()).toBeTruthy();
   const published = await readPage(page.request, workspace.id, created.id);
   expect(published.current_published_version_id).toBe(submitted.version_id);
 
@@ -1258,23 +1257,6 @@ async function setPagePublic(
   );
   expect(response.ok(), await response.text()).toBeTruthy();
   return (await response.json()).data as PagePayload;
-}
-
-async function mergeBinding(
-  request: APIRequestContext, workspaceId: string, pageId: string, versionId: string,
-) {
-  const response = await request.post(
-    `${backendBaseUrl}/api/v1/workspaces/${workspaceId}/context/pages/${pageId}/merge-preview`,
-    { data: { version_id: versionId } },
-  );
-  expect(response.ok(), await response.text()).toBeTruthy();
-  const preview = (await response.json()).data;
-  expect(preview.result).not.toBeNull();
-  return {
-    expected_editing_revision: preview.editing_revision,
-    expected_published_version_id: preview.published_version_id,
-    result_hash: preview.result.result_hash,
-  };
 }
 
 async function publishVersion(

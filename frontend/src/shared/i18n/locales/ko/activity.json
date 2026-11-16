@@ -130,6 +130,7 @@
     "page_inline_comment": "의견을 남겼습니다.",
     "context_page_draft_create": "초안을 만들었습니다.",
     "context_page_draft_update": "초안을 수정했습니다.",
+    "context_page_draft_save": "초안을 저장했습니다.",
     "context_page_draft_diverged": "분기 초안을 보존했습니다.",
     "context_page_draft_diverged_discarded": "분기 초안을 폐기했습니다.",
     "review_decision": "검토를 결정했습니다.",

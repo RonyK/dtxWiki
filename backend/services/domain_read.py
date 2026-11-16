@@ -35,6 +35,10 @@ from backend.policy.trust_boundaries import (
     actor_can_read_drafts,
     actor_can_read_sensitive_agent_pages,
 )
+from backend.repositories.context_visibility import (
+    latest_saved_context_draft_version_expression,
+    latest_saved_context_draft_version_id,
+)
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
     join_in_workspace,
@@ -137,6 +141,7 @@ from backend.utils.actor_display import (
 from backend.utils.request_markdown_memo import with_request_markdown_memo
 
 _RECONCILIATION_SUMMARY_SCAN_LIMIT = 20
+_DRAFT_PROJECTION_UNSET = object()
 
 
 def _encode_version_history_cursor(
@@ -749,6 +754,7 @@ class DomainReadService:
                 "filtering Context pages by draft state requires draft-read capability"
             )
         visible_version = visible_context_version_expression(actor)
+        latest_draft_version = latest_saved_context_draft_version_expression(actor)
         selected_version = aliased(ContextPageVersion)
         modified_at = func.coalesce(
             case(
@@ -800,19 +806,7 @@ class DomainReadService:
                 conditions=(ContextPage.lifecycle_status != "archived",),
             )
         if has_draft is not None:
-            has_unpublished_head = (
-                select_in_workspace(
-                    ContextPageVersion,
-                    workspace_id=workspace_id,
-                    conditions=(
-                        ContextPageVersion.page_id == ContextPage.id,
-                        ContextPageVersion.version_status == "draft",
-                    ),
-                )
-                .with_only_columns(ContextPageVersion.id)
-                .correlate(ContextPage)
-                .exists()
-            )
+            has_unpublished_head = latest_draft_version.is_not(None)
             base = where_in_workspace(
                 base,
                 ContextPage,
@@ -821,7 +815,10 @@ class DomainReadService:
                     has_unpublished_head if has_draft else ~has_unpublished_head,
                 ),
             )
-        base = base.add_columns(visible_version.label("visible_version_id"))
+        base = base.add_columns(
+            visible_version.label("visible_version_id"),
+            latest_draft_version.label("latest_draft_version_id"),
+        )
         total = session.scalar(select(func.count()).select_from(base.subquery())) or 0
         stmt = base.order_by(modified_at.desc(), ContextPage.id.desc())
         decoded = _decode_keyset_cursor(cursor)
@@ -850,6 +847,7 @@ class DomainReadService:
                     actor=actor,
                     modified_at=row.modified_at,
                     visible_version_id=row.visible_version_id,
+                    latest_draft_version_id=row.latest_draft_version_id,
                 )
                 for row in page_rows
             ],
@@ -2253,6 +2251,7 @@ class DomainReadService:
         actor: ActorContext | None = None,
         modified_at=None,
         visible_version_id: UUID | None = None,
+        latest_draft_version_id: UUID | None | object = _DRAFT_PROJECTION_UNSET,
     ) -> ContextPageSummary:
         visible_id = (
             visible_version_id
@@ -2269,7 +2268,13 @@ class DomainReadService:
             visible_version_id=visible_id,
             current_version_id=visible_id,
             current_published_version_id=page.current_published_version_id,
-            latest_draft_version_id=None,
+            latest_draft_version_id=(
+                latest_saved_context_draft_version_id(page, actor)
+                if latest_draft_version_id is _DRAFT_PROJECTION_UNSET
+                else latest_draft_version_id
+                if actor_can_read_drafts(actor)
+                else None
+            ),
             is_public=page.is_public,
             updated_at=modified_at or page.updated_at,
         )
