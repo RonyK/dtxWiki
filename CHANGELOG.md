@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### MCP Context merge tools
+
+- Add `preview_context_merge`, `bring_in_context_version`, and
+  `publish_context_edit` for shared Context drafts. Preview publication without
+  saving, bring a commit into a draft, and publish the result under the existing
+  workspace and review policies.
+- Bind publication to the preview's editing revision, published version and
+  prepared result hash. Resolve conflicts explicitly with `keep_both` or
+  `latest`; preview edited results again before publishing them.
+- Recover both merge writes through `get_operation_status` or same-key replay.
+  Chats records previews as references and the writes against their result
+  versions, with authored merge inputs reduced to digests in durable traces.
+- MCP contract revision 36 adds these three tools and typed merge-preview
+  results. Refresh cached tool catalogs and result schemas before using them.
+
 ### Versioned Context search
 
 - Keep matching published and shared draft versions as separate search results,
@@ -42,7 +57,6 @@
   everyone who can see its draft whether or not it is in the body yet.
   Account deletion keeps the account's drafts and shows its author name on
   what it wrote instead of "Human editor".
-
 
 ### Context body links
 

@@ -251,7 +251,10 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  35 -- Search retains matching Context versions with enumerated version_status
 #        and ContextDraftInfo facts, grouped published-first. Refresh schemas; pass
 #        version_id to read the exact hit. Drafts remain non-citable.
-MCP_TOOL_CONTRACT_REVISION = 35
+#  36 -- Preview, bring-in and publish shared Context drafts through MCP.
+#        Publication binds the preview revision, head and prepared result hash;
+#        keyed writes support operation-status recovery. Refresh cached tools.
+MCP_TOOL_CONTRACT_REVISION = 36
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

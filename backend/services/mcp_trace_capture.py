@@ -252,7 +252,7 @@ def derive_artifact_links(
                     root_hash=data.get("content_hash"),
                 )
             )
-    elif tool_name == "begin_context_edit":
+    elif tool_name in {"begin_context_edit", "preview_context_merge"}:
         # Joins or starts a draft -- no content
         # changes yet, so this is closer to a read-like touch than a write.
         page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
@@ -269,6 +269,8 @@ def derive_artifact_links(
         "update_context_edit",
         "submit_context_edit_for_review",
         "patch_context_edit",
+        "bring_in_context_version",
+        "publish_context_edit",
     }:
         page_id = _uuid_or_none(data.get("page_id") or data.get("id"))
         if page_id is not None:
@@ -391,6 +393,9 @@ EDGE_DERIVING_TOOLS = frozenset(
         "submit_context_edit_for_review",
         "discard_context_edit",
         "patch_context_edit",
+        "preview_context_merge",
+        "bring_in_context_version",
+        "publish_context_edit",
     }
 )
 EDGE_LESS_TOOLS = frozenset(

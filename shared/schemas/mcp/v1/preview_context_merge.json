@@ -1,0 +1,921 @@
+{
+  "input": {
+    "$defs": {
+      "PageMetadataPatch": {
+        "additionalProperties": false,
+        "description": "Metadata-only subset shared by REST page writes and MCP context writes.",
+        "properties": {
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "maxItems": 32,
+            "title": "Aliases",
+            "x-normalized-item-maxLength": 80,
+            "x-normalized-item-minLength": 1
+          },
+          "page_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "overview",
+                  "source",
+                  "entity",
+                  "concept",
+                  "synthesis",
+                  "comparison",
+                  "decision",
+                  "contradiction",
+                  "query",
+                  "guide"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page Type"
+          },
+          "placement_parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Placement Parent Node Id"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "maxItems": 32,
+            "title": "Tags",
+            "x-normalized-item-maxLength": 48,
+            "x-normalized-item-minLength": 1
+          },
+          "title": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Maximum 256 Unicode code points after approved edge-space normalization. Explicit input is never truncated.",
+            "title": "Title",
+            "x-normalized-maxLength": 256
+          }
+        },
+        "title": "PageMetadataPatch",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "body_md": {
+        "anyOf": [
+          {
+            "maxLength": 1000000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
+        "maxLength": 1000000,
+        "title": "Body Md",
+        "x-final-maxLength": 1000000
+      },
+      "conversation_token": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Opaque MCP conversation token. Omit or pass 'new' to start a new dtxWiki MCP chat; echo the returned envelope value to append.",
+        "title": "Conversation Token"
+      },
+      "on_conflict": {
+        "anyOf": [
+          {
+            "enum": [
+              "keep_both",
+              "latest"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "On Conflict"
+      },
+      "page_id": {
+        "description": "Context page UUID or stable_url: /p/<workspace_id>/<page_id> or /p/<page_id> in this workspace.",
+        "maxLength": 512,
+        "minLength": 1,
+        "pattern": "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|/p/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?(?:#[^\\s]*)?)$",
+        "title": "Page Id",
+        "type": "string"
+      },
+      "page_metadata": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PageMetadataPatch"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "version_id": {
+        "format": "uuid",
+        "title": "Version Id",
+        "type": "string"
+      },
+      "workspace_id": {
+        "format": "uuid",
+        "title": "Workspace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_id",
+      "page_id",
+      "version_id"
+    ],
+    "title": "PreviewContextMergeInput",
+    "type": "object"
+  },
+  "output": {
+    "$defs": {
+      "ContextMergeCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "block_map": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Block Map",
+            "type": "array"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "conflict_body_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Conflict Body Md"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/$defs/ContextMergeConflict"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "offset_unit": {
+            "const": "unicode_code_points",
+            "title": "Offset Unit",
+            "type": "string"
+          },
+          "page_metadata": {
+            "$ref": "#/$defs/ContextMergeMetadata"
+          },
+          "result_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Result Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body_md",
+          "page_metadata",
+          "block_map",
+          "result_hash",
+          "conflicts",
+          "offset_unit"
+        ],
+        "title": "ContextMergeCandidate",
+        "type": "object"
+      },
+      "ContextMergeConflict": {
+        "additionalProperties": false,
+        "properties": {
+          "keep_both_end": {
+            "title": "Keep Both End",
+            "type": "integer"
+          },
+          "keep_both_start": {
+            "title": "Keep Both Start",
+            "type": "integer"
+          },
+          "latest_end": {
+            "title": "Latest End",
+            "type": "integer"
+          },
+          "latest_start": {
+            "title": "Latest Start",
+            "type": "integer"
+          },
+          "ours": {
+            "title": "Ours",
+            "type": "string"
+          },
+          "theirs": {
+            "title": "Theirs",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ours",
+          "theirs",
+          "keep_both_start",
+          "keep_both_end",
+          "latest_start",
+          "latest_end"
+        ],
+        "title": "ContextMergeConflict",
+        "type": "object"
+      },
+      "ContextMergeMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "page_type": {
+            "title": "Page Type",
+            "type": "string"
+          },
+          "placement_parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Parent Node Id"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "page_type",
+          "tags",
+          "aliases",
+          "placement_parent_node_id"
+        ],
+        "title": "ContextMergeMetadata",
+        "type": "object"
+      },
+      "EnvelopeWarning": {
+        "additionalProperties": false,
+        "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
+        "properties": {
+          "code": {
+            "description": "Stable warning code; must be drawn from WARNING_CODES.",
+            "enum": [
+              "metadata_frontmatter_overridden",
+              "stale",
+              "permission_limited",
+              "citation_missing",
+              "citation_weak",
+              "citation_stale",
+              "token_budget",
+              "workflow_sequence_incomplete",
+              "draft_not_injectable",
+              "expired_context",
+              "archived",
+              "unsupported_retrieval_mode_fallback",
+              "deprecated_tool",
+              "conversation_token_not_supplied",
+              "conversation_read_stale",
+              "lint_publish_blocked",
+              "published_with_findings",
+              "draft_unpublished",
+              "text_occurrence_mismatch",
+              "text_not_found",
+              "unsupported_filter_tag",
+              "unsupported_filter_date",
+              "semantic_fallback_used",
+              "keyword_lane_unavailable",
+              "coverage_gap_recorded",
+              "evidence_not_citable",
+              "mrtr_preview_unavailable",
+              "borrowed_rerank_applied",
+              "borrowed_query_rewrite_applied",
+              "llm_provider_unavailable",
+              "llm_composer_failed",
+              "job_fanout_incomplete",
+              "context_page_has_no_graph_visible_links"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "EnvelopeWarning",
+        "type": "object"
+      },
+      "MCPActor": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "mcp_client",
+              "agent",
+              "system"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "MCPActor",
+        "type": "object"
+      },
+      "MCPErrorDetail": {
+        "additionalProperties": false,
+        "description": "One actionable defect in a rejected tool call.\n\nShaped for a caller that has to repair its own request: `field` locates the\nproblem, `message` states it, and `fix` says what to send instead. Never\necho the offending value here \u2014 a rejected `body_markdown` can be a\nmegabyte, and reflecting client input back into a response (and into the\nstored trace) is both wasteful and an injection vector.",
+        "properties": {
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/TextMatchCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidates"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fix"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "operation_index": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation Index"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "MCPErrorDetail",
+        "type": "object"
+      },
+      "MCPResultEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_ref": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Activity Ref"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MCPActor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "human",
+                  "mcp_client",
+                  "agent",
+                  "system"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actor Kind"
+          },
+          "audit_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Audit Event Id"
+          },
+          "client_self_reported": {
+            "default": false,
+            "title": "Client Self Reported",
+            "type": "boolean"
+          },
+          "conversation_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Opaque MCP conversation token. Echo this value on the next tool call to append to the same dtxWiki MCP chat.",
+            "title": "Conversation Token"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "error_details": {
+            "items": {
+              "$ref": "#/$defs/MCPErrorDetail"
+            },
+            "title": "Error Details",
+            "type": "array"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Message"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Meta"
+          },
+          "model_id": {
+            "default": "unknown",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Version"
+          },
+          "params_summary": {
+            "additionalProperties": true,
+            "title": "Params Summary",
+            "type": "object"
+          },
+          "provider": {
+            "default": "unknown",
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result_status": {
+            "enum": [
+              "accepted",
+              "succeeded",
+              "failed",
+              "partial",
+              "rejected_by_policy",
+              "needs_review",
+              "conflict"
+            ],
+            "title": "Result Status",
+            "type": "string"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Summary"
+          },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retryable",
+            "x-wire-explicit": true
+          },
+          "review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Item Id"
+          },
+          "schema_version": {
+            "const": "llmwiki.mcp.v1",
+            "default": "llmwiki.mcp.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "result_status"
+        ],
+        "title": "MCPResultEnvelope",
+        "type": "object"
+      },
+      "PreviewContextMergeResult": {
+        "additionalProperties": false,
+        "properties": {
+          "base_conflicted": {
+            "title": "Base Conflicted",
+            "type": "boolean"
+          },
+          "editing_revision": {
+            "title": "Editing Revision",
+            "type": "integer"
+          },
+          "keep_both": {
+            "$ref": "#/$defs/ContextMergeCandidate"
+          },
+          "kind": {
+            "enum": [
+              "fast_forward",
+              "automatic_merge",
+              "conflict"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest": {
+            "$ref": "#/$defs/ContextMergeCandidate"
+          },
+          "latest_side": {
+            "enum": [
+              "ours",
+              "theirs"
+            ],
+            "title": "Latest Side",
+            "type": "string"
+          },
+          "metadata_conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Metadata Conflicts",
+            "type": "array"
+          },
+          "offset_unit": {
+            "const": "unicode_code_points",
+            "title": "Offset Unit",
+            "type": "string"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
+          "published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Id",
+            "x-wire-explicit": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextMergeCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "x-wire-explicit": true
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "version_id",
+          "editing_revision",
+          "published_version_id",
+          "parent_version_ids",
+          "kind",
+          "result",
+          "keep_both",
+          "latest",
+          "metadata_conflicts",
+          "base_conflicted",
+          "latest_side",
+          "offset_unit"
+        ],
+        "title": "PreviewContextMergeResult",
+        "type": "object"
+      },
+      "TextMatchCandidate": {
+        "additionalProperties": false,
+        "description": "Where replace_text's old_text nearly matched, by position only.\n\nEvidence for a refused match, so the caller can re-address one block\ninstead of re-reading the page. It deliberately carries no text: the\ncandidate is page content, and echoing it would put authored text into\nserver guidance and the durable trace.",
+        "properties": {
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Block Id"
+          },
+          "line_end": {
+            "minimum": 1,
+            "title": "Line End",
+            "type": "integer"
+          },
+          "line_start": {
+            "minimum": 1,
+            "title": "Line Start",
+            "type": "integer"
+          },
+          "match_kind": {
+            "enum": [
+              "exact",
+              "normalized",
+              "fuzzy"
+            ],
+            "title": "Match Kind",
+            "type": "string"
+          },
+          "similarity": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "line_start",
+          "line_end",
+          "similarity",
+          "match_kind"
+        ],
+        "title": "TextMatchCandidate",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "data": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PreviewContextMergeResult"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "envelope": {
+        "$ref": "#/$defs/MCPResultEnvelope"
+      }
+    },
+    "required": [
+      "envelope"
+    ],
+    "title": "PreviewContextMergeToolOutput",
+    "type": "object"
+  }
+}

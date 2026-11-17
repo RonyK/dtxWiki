@@ -72,6 +72,7 @@
     },
     "toolTitles": {
       "begin_context_edit": "Begin context edit",
+      "bring_in_context_version": "Bring in context version",
       "build_agent_input_bundle": "Build agent input bundle",
       "cite": "Register references",
       "create_context_page": "Create context page",
@@ -87,6 +88,8 @@
       "list_my_workspaces": "List my workspaces",
       "list_requested_changes": "List requested changes",
       "patch_context_edit": "Patch context edit",
+      "preview_context_merge": "Preview context merge",
+      "publish_context_edit": "Publish context edit",
       "read": "Read workspace entity",
       "read_agent_page": "Read agent page",
       "read_concept": "Read concept",

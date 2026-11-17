@@ -1,12 +1,11 @@
 ---
 name: dtxwiki-authoring-review
-description: Create or update grounded dtxWiki Context pages, upload images safely, and handle requested-change resubmission without crossing the human approval boundary. Use for every dtxWiki authoring or review-response workflow.
+description: Create or update grounded dtxWiki Context pages, upload images safely, handle requested changes, and preview authorized publication under the workspace review policy. Use for every dtxWiki authoring or review-response workflow.
 ---
 
 # dtxWiki Authoring and Review
 
 Generate and retain an idempotency_key for each write. If its response is lost, call get_operation_status with that key and follow next_action. Keep every original argument on a resend; changed content uses a new key. Successful receipts confirm saving without a read. Use page_id and version_id from the result for subsequent writes. Partial reads use top-level page_id and optional version_id.
-
 
 Read `dtxwiki-conventions` before writing. Call `guide` for the current write policy, citation policy, and effective capabilities; do not hardcode values it reports.
 
@@ -26,6 +25,18 @@ Never write against a base you did not read. `update_context_edit` and `patch_co
 4. Use `update_context_edit` for a full-document autosave -- title/body/tags/aliases/placement together, always sending the complete `body_md`. Changing tags, aliases, or placement requires the unchanged body too. Use `cite` for reference-only additions, note changes, or removals; it does not rewrite the body.
 5. Call `submit_context_edit_for_review` once, when the whole task is ready for human review ("Save draft"), not after each change. The requested draft stays editable at that same `version_id`; use its current revision for later saves. An unsubmitted draft remains readable as work in progress. Submission follows the workspace review and automatic-approval policy; inspect returned review/publication state and `data.publish_blocked_reasons`.
 6. Call `discard_context_edit` to withdraw the specified shared draft. It becomes a closed commit with its history preserved. A draft-only page follows the existing page lifecycle rules; a published page retains its published head.
+
+## Preview and publish an authorized result
+
+Use this flow when the user requested publication and the caller's workspace permissions allow it. Saving or requesting review remains a separate action; do not turn an ordinary draft task into publication.
+
+1. Call `preview_context_merge` with the page and draft `version_id`. It calculates publication against the current published version without saving. Keep its `editing_revision`, `published_version_id`, and the intended candidate's `result_hash`.
+2. For a clean preview, use `result`. An unedited conflict preview has `kind` set to `conflict` and `result` set to null: inspect `keep_both` and `latest` and make an explicit choice within the user's instructions. Use the chosen candidate's hash and send that choice as `on_conflict`; there is no default conflict choice. Passing only `on_conflict` to preview does not move that candidate into `result`.
+3. To edit the result, preview again with `body_md` and/or `page_metadata`, and the chosen `on_conflict` when needed. Use the edited candidate in `result` and its server-computed hash, even if `kind` remains `conflict`; do not calculate a replacement hash yourself.
+4. Call `publish_context_edit` with `expected_editing_revision` from the preview, `expected_published_version_id` set to its published ID (explicit null when none), the candidate's `result_hash`, a `reason`, and a retained `idempotency_key`. If the result was edited, send those same edits as `result_body_md` and/or `result_page_metadata`. Preserve the chosen `on_conflict` for publication, including after an edited conflict preview. Publication still follows the existing workspace and review policies.
+5. If the preview is stale, request a new preview, reconsider the result, and use a new key for the revised request. If the response is lost, use `get_operation_status` with the original key and follow `next_action`; a resend keeps every original argument. Use the successful result's `version_id`, which can differ from the source draft after a merge publication.
+
+Use `bring_in_context_version` to merge an immutable `commit_version_id` into an existing shared draft before further editing; omitting it uses the current published version. Send the draft's current `expected_editing_revision` and a retained `idempotency_key`, and use the returned revision afterward. A conflict without `on_conflict` saves nothing and offers `keep_both` and `latest`. This command does not accept a replacement body; use the existing update or patch tools for later edits. `preview_context_merge` previews publication against the current published version, not an arbitrary bring-in commit.
 
 ## Register document references
 
@@ -56,4 +67,4 @@ When a human requests changes:
 3. Save the changes to that shared draft with `update_context_edit` or `patch_context_edit`.
 4. Keep the existing open review request attached to the draft; inspect the returned review state.
 
-Submitting a revision never approves it. No MCP approval action exists. Never claim that a human approved, accepted, or published the work unless returned human-authored state proves it.
+Submitting a revision never approves it. No MCP review-decision action exists. `publish_context_edit` uses the caller's existing publication permissions and review policy. Describe saved, requested, approved, and published states only as the returned result establishes them; never claim a human approved or published the work unless returned human-authored state proves it.

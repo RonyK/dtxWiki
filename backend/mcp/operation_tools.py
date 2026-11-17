@@ -43,6 +43,12 @@ KEYED_TOOLS: dict[str, KeyedTool] = {
     "begin_context_edit": KeyedTool(
         "begin_context_edit", PagePayload, _begin_edit_result
     ),
+    "bring_in_context_version": KeyedTool(
+        "bring_in_context_version", PagePayload, _edit_result
+    ),
+    "publish_context_edit": KeyedTool(
+        "publish_context_edit", PagePayload, _edit_result
+    ),
     "update_context_edit": KeyedTool("autosave_page", PagePayload, _edit_result),
     "patch_context_edit": KeyedTool("patch_context_edit", PagePayload, _edit_result),
     "submit_context_edit_for_review": KeyedTool(

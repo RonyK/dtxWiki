@@ -1,5 +1,6 @@
 {
   "begin_context_edit": "begin_context_edit",
+  "bring_in_context_version": "bring_in_context_version",
   "build_agent_input_bundle": "build_agent_input_bundle",
   "cite": "cite",
   "create_context_page": "create_context_page",
@@ -16,6 +17,8 @@
   "list_my_workspaces": "list_my_workspaces",
   "list_requested_changes": "list_requested_changes",
   "patch_context_edit": "patch_context_edit",
+  "preview_context_merge": "preview_context_merge",
+  "publish_context_edit": "publish_context_edit",
   "read": "read",
   "read_agent_page": "read_agent_page",
   "read_concept": "read_concept",

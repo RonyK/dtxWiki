@@ -41,6 +41,8 @@ from backend.schemas.mcp.agent_tools import (
 from backend.schemas.mcp.context_tools import (
     BeginContextEditInput,
     BeginContextEditToolOutput,
+    BringInContextVersionInput,
+    BringInContextVersionToolOutput,
     CiteInput,
     CiteToolOutput,
     CreateContextPageInput,
@@ -51,6 +53,10 @@ from backend.schemas.mcp.context_tools import (
     ListMyContextEditsToolOutput,
     PatchContextEditInput,
     PatchContextEditToolOutput,
+    PreviewContextMergeInput,
+    PreviewContextMergeToolOutput,
+    PublishContextEditInput,
+    PublishContextEditToolOutput,
     SubmitContextEditForReviewInput,
     SubmitContextEditForReviewToolOutput,
     SubmitFeedbackInput,
@@ -117,6 +123,40 @@ class ToolMeta:
 
 
 TOOL_META = {
+    "preview_context_merge": (
+        "Preview context merge",
+        "Preview this version against the current published head without saving. "
+        "Returns the draft revision, published version and prepared result hash, "
+        "or both keep_both and latest choices when changes conflict. To edit a "
+        "result, preview body_md/page_metadata again, then publish the same values "
+        "as result_body_md/result_page_metadata with that result hash. "
+        "This does not preview an arbitrary bring-in commit.",
+        True,
+    ),
+    "bring_in_context_version": (
+        "Bring in context version",
+        "Merge commit_version_id into the named shared draft; omission uses the "
+        "current published version. Requires its expected_editing_revision and "
+        "an idempotency_key. A conflict saves nothing and requires an explicit "
+        "keep_both or latest choice. Continue with the returned revision. "
+        "After a lost response, use get_operation_status with the original key.",
+        False,
+        False,
+        True,
+    ),
+    "publish_context_edit": (
+        "Publish context edit",
+        "When publication is authorized, publish the exact prepared merge result "
+        "from preview_context_merge: send expected_editing_revision, explicit "
+        "nullable expected_published_version_id, and result_hash. A stale preview "
+        "requires a new preview and key. Send any result edit unchanged from its "
+        "preview as result_body_md/result_page_metadata. Existing workspace "
+        "publication and review policies apply. The returned version may be a "
+        "new merge commit. Recover a lost response with get_operation_status.",
+        False,
+        False,
+        True,
+    ),
     "get_operation_status": (
         "Get operation status",
         "Recover your keyed write within 24 hours without resending its body. "
@@ -547,6 +587,21 @@ def list_dtxwiki_tools(tool_names: Iterable[str] | None = None) -> list[Tool]:
             "get_operation_status",
             GetOperationStatusInput.model_json_schema(),
             GetOperationStatusOutput.model_json_schema(),
+        ),
+        tool(
+            "preview_context_merge",
+            PreviewContextMergeInput.model_json_schema(),
+            PreviewContextMergeToolOutput.model_json_schema(),
+        ),
+        tool(
+            "bring_in_context_version",
+            BringInContextVersionInput.model_json_schema(),
+            BringInContextVersionToolOutput.model_json_schema(),
+        ),
+        tool(
+            "publish_context_edit",
+            PublishContextEditInput.model_json_schema(),
+            PublishContextEditToolOutput.model_json_schema(),
         ),
         tool(
             "create_context_page",

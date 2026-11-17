@@ -104,6 +104,10 @@ def test_wire_phase_rejects_an_audit_only_envelope_field_the_handler_phase_allow
     assert excinfo.value.validator == "additionalProperties"
 
 
+# Catalog-budget exception: PR3-E adds three automatically collected inputs
+# to this existing guard, alongside its two authored behavior cases. Each new
+# output schema must accept the runner fallback in both phases; checking another
+# tool or only validating Pydantic cannot prove that schema-specific boundary.
 @pytest.mark.parametrize("tool_name", sorted(build_mcp_schemas()))
 def test_tool_error_payload_satisfies_every_tool_contract_in_both_phases(tool_name):
     """The standing proof that ``validate_contract=False`` in the runner's

@@ -129,6 +129,8 @@ CONTEXT_EDIT_TOOLS = frozenset(
         "patch_context_edit",
         "submit_context_edit_for_review",
         "discard_context_edit",
+        "bring_in_context_version",
+        "publish_context_edit",
     }
 )
 WRITE_TOOLS = {
@@ -208,12 +210,20 @@ _EDIT_SUMMARY_TOOLS = frozenset(
     }
 )
 _SESSION_EDIT_TOOLS = frozenset(
-    {"create_context_page", "update_context_edit", "patch_context_edit"}
+    {
+        "create_context_page",
+        "update_context_edit",
+        "patch_context_edit",
+        "bring_in_context_version",
+    }
 )
 # Calls whose receipt (result_detail.version_id) names the Context version they
 # wrote or submitted: Chats diffs that version, the graph links the chat to it.
 # begin only opens an edit and discard ends one; neither produced its version.
-VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | {"submit_context_edit_for_review"}
+VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | {
+    "submit_context_edit_for_review",
+    "publish_context_edit",
+}
 # Commands whose input names the editing row they act on.
 _VERSION_NAMING_EDIT_TOOLS = frozenset(
     {
@@ -221,6 +231,7 @@ _VERSION_NAMING_EDIT_TOOLS = frozenset(
         "patch_context_edit",
         "submit_context_edit_for_review",
         "discard_context_edit",
+        "bring_in_context_version",
     }
 )
 _INPUT_EDIT_MODES = {
@@ -253,6 +264,8 @@ _CONTEXT_VERSION_ID_FIELDS = frozenset(
         "base_version_id",
         "editing_version_id",
         "cited_context_page_version_id",
+        "commit_version_id",
+        "expected_published_version_id",
     }
 )
 # write_agent_page_draft's base_version_id is an AgentPageVersion.
@@ -2075,6 +2088,8 @@ class _ReaderGate:
             ("base_version_id", "base_version"),
             ("editing_version_id", "editing_version"),
             ("cited_context_page_version_id", "cited_version"),
+            ("commit_version_id", "commit_version"),
+            ("expected_published_version_id", "expected_published_version"),
         ):
             if _target_kind_for_field(row.tool_name, field) != "context_version":
                 continue
@@ -2114,7 +2129,30 @@ class _ReaderGate:
         owner -- may see the content.
         """
 
-        if self.actor is None or row.tool_name not in CONTEXT_EDIT_TOOLS:
+        if self.actor is None:
+            return True
+        if row.tool_name in {
+            "preview_context_merge",
+            "bring_in_context_version",
+            "publish_context_edit",
+        }:
+            # Publication can return a visible merge commit while its source
+            # draft is closed and unreadable. Output provenance must follow
+            # that returned commit, but it cannot expose hidden input IDs or
+            # digests. The same rule covers a brought-in commit and preview.
+            if _parse_uuid_value(row.input_summary.get("version_id")) is None:
+                return False
+            if any(
+                self.visible_version(version_id) is None
+                for kind, version_id in _input_target_refs(
+                    row.tool_name, row.input_summary
+                )
+                if kind == "context_version"
+            ):
+                return False
+            if row.tool_name == "preview_context_merge":
+                return True
+        if row.tool_name not in CONTEXT_EDIT_TOOLS:
             return True
         version_id = _edited_version_id(row)
         if version_id is not None:

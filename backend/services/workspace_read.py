@@ -70,6 +70,9 @@ AVAILABLE_READ_TOOLS = [
     "discard_context_edit",
     "patch_context_edit",
     "list_my_context_edits",
+    "preview_context_merge",
+    "bring_in_context_version",
+    "publish_context_edit",
     "upload_image",
     "list_context_drafts",
     "list_changes",
@@ -131,6 +134,14 @@ REQUIRED_WORKFLOW = [
         "instead of re-reading; submit_context_edit_for_review once when done. "
         "Continue editing submitted drafts by version_id. Use begin_context_edit "
         "with from to join an existing draft or start from a commit."
+    ),
+    (
+        "publish: when publication is authorized, call preview_context_merge, "
+        "inspect its result or the named keep_both/latest candidate, then send "
+        "its editing_revision, published_version_id and result_hash to "
+        "publish_context_edit. Preview result edits again before publishing. "
+        "Use bring_in_context_version to merge a commit into a named draft; "
+        "continue with its returned revision."
     ),
     (
         "place a new page: walk get_index(format='nodes') from /context and "

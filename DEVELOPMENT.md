@@ -1042,7 +1042,7 @@ means server-confirmed links, not permission to activate arbitrary authored
 references. An omitted or empty value confirms no additional references. This
 MCP revision does not add that metadata to read responses.
 
-- **MCP Streamable HTTP**: 30 tools are registered; the tools available to a
+- **MCP Streamable HTTP**: 33 tools are registered; the tools available to a
   particular client are determined by its permissions and returned by `tools/list`.
 
 <!-- mcp-tool-catalog:start -->
@@ -1050,7 +1050,7 @@ MCP revision does not add that metadata to read responses.
 | Purpose | Tools |
 | --- | --- |
 | Discover and read | `list_my_workspaces`, `guide`, `search`, `fetch`, `grep_wiki`, `what_changed`, `read`, `get_index`, `read_concept`, `read_context_outline`, `read_structure_map`, `list_context_drafts`, `list_changes` |
-| Edit Context | `create_context_page`, `begin_context_edit`, `update_context_edit`, `submit_context_edit_for_review`, `discard_context_edit`, `patch_context_edit`, `list_my_context_edits`, `upload_image`, `cite`, `submit_feedback` |
+| Edit Context | `create_context_page`, `begin_context_edit`, `update_context_edit`, `submit_context_edit_for_review`, `discard_context_edit`, `patch_context_edit`, `list_my_context_edits`, `preview_context_merge`, `bring_in_context_version`, `publish_context_edit`, `upload_image`, `cite`, `submit_feedback` |
 | Recover writes | `get_operation_status` |
 | Agent workflows | `list_agent_categories`, `read_agent_page`, `write_agent_page_draft`, `build_agent_input_bundle` |
 | Review and maintenance | `list_requested_changes`, `wiki_maintenance` |
@@ -1118,6 +1118,43 @@ recheck them under the page lock. The editor asks for confirmation of an
 automatically merged result before publishing it. Conflict choice controls are
 provided separately from this minimum editor integration.
 
+MCP `preview_context_merge` calculates a publication result without saving.
+It returns the draft's `editing_revision`, nullable `published_version_id`,
+and `result`, `keep_both` and `latest` candidates with their `result_hash`.
+For an unedited conflict preview, `kind` is `conflict` and `result` is null.
+Choose the hash from `keep_both` or `latest` and send the corresponding
+`on_conflict="keep_both"` or `on_conflict="latest"` before publication.
+Passing only `on_conflict` to preview does not move that candidate into `result`.
+An authorized `publish_context_edit` sends that revision as
+`expected_editing_revision`, that published ID as
+`expected_published_version_id` (including explicit null when absent), the
+chosen `result_hash`, a `reason`, and an `idempotency_key`. The existing
+publication and review policies still apply; MCP cannot bypass format findings.
+If the preview changed, nothing is published: request a new preview and use a
+new key for the revised request.
+
+To edit the publication result, call `preview_context_merge` again with
+`body_md` and/or `page_metadata` and the chosen `on_conflict` when needed.
+Use the edited candidate in `result` and its hash, even if `kind` remains
+`conflict`, then send those same edits as
+`result_body_md` and/or `result_page_metadata` to `publish_context_edit`, with
+the newly returned hash and the same `on_conflict` choice. The server computes
+the hash of the prepared result.
+The successful write returns the actual published `version_id`, which can
+differ from the source draft when publication creates a merge commit.
+
+`bring_in_context_version` merges an immutable `commit_version_id` into a
+named open draft; omitting that field brings in the current published version.
+It requires the draft's current `expected_editing_revision` and an
+`idempotency_key`. After a save, use the returned revision for further writes.
+Without a conflict choice, a conflicting merge saves nothing and reports the
+two allowed `on_conflict` values. `preview_context_merge` previews publication
+against the current published version, not an arbitrary bring-in target.
+Both merge writes require conversation continuity and support
+`get_operation_status` recovery. A same-key replay returns the original result
+without another save or publication. Preview calls count as references in
+Chats; bring-in and publication calls record the version they changed.
+
 Drafts remain in the database. Publication, rejection, withdrawal and restore
 close a draft into a Git commit with its existing ID and commit parents. The
 current published version retains its database body copy; closed and superseded
@@ -1129,8 +1166,10 @@ the most recently saved open draft. Editors and Owners receive `open_drafts`
 and unpublished bodies carry `draft` metadata, including commit parents and
 review state. `list_context_drafts` and the REST `/drafts` endpoint paginate
 summaries without loading bodies. Index collection includes every open draft;
-search continues returning one result per document until version-aware result
-presentation is introduced. Discarded historical editing rows remain hidden.
+search retains matching versions, grouped by page and ordered by published,
+review-requested draft, then other drafts. Read a hit's exact `version_id` to
+retrieve its matching content. Drafts remain excluded from Ask evidence and
+citation grounding. Discarded historical editing rows remain hidden.
 
 REST detail and write responses carry `can_submit_for_review` for the calling
 actor; the editor enables **Request review** only when it is true. MCP tool

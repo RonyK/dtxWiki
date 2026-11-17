@@ -19,6 +19,8 @@ from backend.schemas.mcp.agent_tools import (
 from backend.schemas.mcp.context_tools import (
     BeginContextEditInput,
     BeginContextEditToolOutput,
+    BringInContextVersionInput,
+    BringInContextVersionToolOutput,
     CiteInput,
     CiteToolOutput,
     CreateContextPageInput,
@@ -29,6 +31,10 @@ from backend.schemas.mcp.context_tools import (
     ListMyContextEditsToolOutput,
     PatchContextEditInput,
     PatchContextEditToolOutput,
+    PreviewContextMergeInput,
+    PreviewContextMergeToolOutput,
+    PublishContextEditInput,
+    PublishContextEditToolOutput,
     SubmitContextEditForReviewInput,
     SubmitContextEditForReviewToolOutput,
     SubmitFeedbackInput,
@@ -95,6 +101,18 @@ SCHEMA_DIR = Path(__file__).resolve().parents[2] / "shared" / "schemas" / "mcp" 
 
 def build_mcp_schemas() -> dict[str, dict]:
     return {
+        "preview_context_merge": {
+            "input": PreviewContextMergeInput.model_json_schema(),
+            "output": PreviewContextMergeToolOutput.model_json_schema(),
+        },
+        "bring_in_context_version": {
+            "input": BringInContextVersionInput.model_json_schema(),
+            "output": BringInContextVersionToolOutput.model_json_schema(),
+        },
+        "publish_context_edit": {
+            "input": PublishContextEditInput.model_json_schema(),
+            "output": PublishContextEditToolOutput.model_json_schema(),
+        },
         "list_my_workspaces": {
             "input": ListMyWorkspacesInput.model_json_schema(),
             "output": ListMyWorkspacesOutput.model_json_schema(),

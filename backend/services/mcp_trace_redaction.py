@@ -32,6 +32,26 @@ _WRITE_BODY_FIELDS = {
 _DIGEST_ONLY_BODY_TOOLS = frozenset({"update_context_edit"})
 _SUBMIT_REVISION_TOOL = "submit_revision_for_review"
 _PATCH_CONTEXT_EDIT_TOOL = "patch_context_edit"
+_CONTEXT_MERGE_TOOLS = frozenset(
+    {"preview_context_merge", "bring_in_context_version", "publish_context_edit"}
+)
+_CONTEXT_MERGE_METADATA_FIELDS = frozenset(
+    {
+        "workspace_id",
+        "page_id",
+        "version_id",
+        "commit_version_id",
+        "expected_published_version_id",
+        "expected_editing_revision",
+        "result_hash",
+        "on_conflict",
+        "idempotency_key",
+        "conversation_token",
+    }
+)
+_CONTEXT_MERGE_CONTENT_FIELDS = frozenset(
+    {"body_md", "page_metadata", "result_body_md", "result_page_metadata", "reason"}
+)
 # patch_draft operations carry document content in several differently named
 # fields (old_text/new_text/content/title, plus anchor_text/context_before/
 # context_after when addressing by anchor) rather than one body field, so the
@@ -289,6 +309,8 @@ def redact_tool_arguments(
 
     if tool_name == "cite":
         return _redact_reference_arguments(arguments)
+    if tool_name in _CONTEXT_MERGE_TOOLS:
+        return _redact_context_merge_arguments(arguments)
 
     body_field = _WRITE_BODY_FIELDS.get(tool_name)
     if body_field is not None:
@@ -346,6 +368,66 @@ def redact_tool_arguments(
             if field in data:
                 summary[field] = copy.deepcopy(data[field])
     return summary
+
+
+def _redact_context_merge_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Capture merge controls without retaining authored result candidates.
+
+    Arrival capture precedes validation, so malformed metadata and unknown
+    fields must be digested too. In particular, a caller-supplied *_digest
+    field is content, not proof that redaction already ran.
+    """
+    summary = _RedactedToolArguments()
+    unknown = {}
+    for field, value in arguments.items():
+        if field in _CONTEXT_MERGE_METADATA_FIELDS:
+            if field == "page_id":
+                # The arrival sees the original UUID or /p/ locator, before
+                # router normalization. Keep only its bounded page identity.
+                from backend.services.context_links import parse_page_input
+
+                try:
+                    if not isinstance(value, (str, UUID)) or len(str(value)) > 512:
+                        raise ValueError("invalid page locator")
+                    locator = parse_page_input(value)
+                    if locator.page_id is None:
+                        raise ValueError("invalid page locator")
+                    summary[field] = str(locator.page_id)
+                except ValueError:
+                    summary[f"{field}_digest"] = _value_digest(value)
+            elif _valid_context_merge_metadata(field, value):
+                summary[field] = copy.deepcopy(value)
+            else:
+                summary[f"{field}_digest"] = _value_digest(value)
+        elif field in _CONTEXT_MERGE_CONTENT_FIELDS:
+            summary[f"{field}_digest"] = _value_digest(value)
+        else:
+            unknown[field] = value
+    if unknown:
+        summary["unknown_fields_digest"] = _canonical_value_digest(unknown)
+    return summary
+
+
+def _valid_context_merge_metadata(field: str, value: Any) -> bool:
+    if field in {"commit_version_id", "expected_published_version_id"}:
+        return value is None or _valid_patch_context_edit_top_level_metadata(
+            "version_id", value
+        )
+    if field == "result_hash":
+        return _valid_patch_operation_metadata("expected", value)
+    if field == "on_conflict":
+        return (
+            value is None or isinstance(value, str) and value in {"keep_both", "latest"}
+        )
+    if field == "idempotency_key":
+        return (
+            isinstance(value, str)
+            and 1 <= len(value) <= 160
+            and re.fullmatch(r"[A-Za-z0-9._:-]+", value) is not None
+        )
+    if field == "conversation_token":
+        return _valid_reference_metadata(field, value)
+    return _valid_patch_context_edit_top_level_metadata(field, value)
 
 
 _REFERENCE_ARGUMENT_FIELDS = frozenset(

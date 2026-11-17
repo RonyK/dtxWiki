@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from backend.schemas.common import MCPResultEnvelope
+from backend.schemas.common import WIRE_EXPLICIT_FIELD, MCPResultEnvelope
 from backend.schemas.context_edit import EditOperation
 from backend.schemas.context_write import (
     CiteResult as ReferenceCommandResult,
@@ -14,8 +14,10 @@ from backend.schemas.context_write import (
     SubmitFeedbackResult,
 )
 from backend.schemas.edit_receipt import EditReceipt
+from backend.schemas.input_policy import InputRequest
 from backend.schemas.mcp.page_input import MCPPageInput, validate_typed_target
 from backend.schemas.page import (
+    BODY_MD_MAX_LENGTH,
     CONTENT_HASH_PATTERN,
     CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD,
     PAGE_LIST_CURSOR_MAX_LENGTH,
@@ -27,6 +29,7 @@ from backend.schemas.page import (
     DiscardContextEditResult,
     DraftReviewReason,
     ListMyContextEditsResult,
+    PageMetadataPatch,
     PagePayload,
     SubmitContextEditCommand,
     UpdateContextEditRequest,
@@ -306,6 +309,109 @@ class PatchContextEditInput(BaseModel):
 
 
 class PatchContextEditToolOutput(BaseModel):
+    envelope: MCPResultEnvelope
+    data: ContextEditResult | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class _ContextMergeInput(InputRequest):
+    workspace_id: UUID
+    page_id: MCPPageInput
+    version_id: UUID
+    on_conflict: Literal["keep_both", "latest"] | None = None
+    conversation_token: str | None = CONVERSATION_TOKEN_FIELD
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PreviewContextMergeInput(_ContextMergeInput):
+    body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
+    page_metadata: PageMetadataPatch | None = None
+
+
+class ContextMergeMetadata(BaseModel):
+    title: str
+    page_type: str
+    tags: list[str]
+    aliases: list[str]
+    placement_parent_node_id: UUID | None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMergeConflict(BaseModel):
+    ours: str
+    theirs: str
+    keep_both_start: int
+    keep_both_end: int
+    latest_start: int
+    latest_end: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMergeCandidate(BaseModel):
+    body_md: str
+    page_metadata: ContextMergeMetadata
+    block_map: list[dict[str, Any]]
+    result_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
+    conflicts: list[ContextMergeConflict]
+    offset_unit: Literal["unicode_code_points"]
+    conflict_body_md: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PreviewContextMergeResult(BaseModel):
+    page_id: UUID
+    version_id: UUID
+    editing_revision: int
+    published_version_id: UUID | None = Field(json_schema_extra=WIRE_EXPLICIT_FIELD)
+    parent_version_ids: list[UUID]
+    kind: Literal["fast_forward", "automatic_merge", "conflict"]
+    result: ContextMergeCandidate | None = Field(json_schema_extra=WIRE_EXPLICIT_FIELD)
+    keep_both: ContextMergeCandidate
+    latest: ContextMergeCandidate
+    metadata_conflicts: list[str]
+    base_conflicted: bool
+    latest_side: Literal["ours", "theirs"]
+    offset_unit: Literal["unicode_code_points"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PreviewContextMergeToolOutput(BaseModel):
+    envelope: MCPResultEnvelope
+    data: PreviewContextMergeResult | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BringInContextVersionInput(_ContextMergeInput):
+    commit_version_id: UUID | None = None
+    expected_editing_revision: int = Field(ge=1)
+    idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
+
+
+class BringInContextVersionToolOutput(BaseModel):
+    envelope: MCPResultEnvelope
+    data: ContextEditResult | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PublishContextEditInput(_ContextMergeInput):
+    result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
+    result_page_metadata: PageMetadataPatch | None = None
+    expected_editing_revision: int = Field(ge=1)
+    expected_published_version_id: UUID | None
+    result_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
+    reason: str = Field(min_length=1)
+    idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
+
+
+class PublishContextEditToolOutput(BaseModel):
     envelope: MCPResultEnvelope
     data: ContextEditResult | None = None
 

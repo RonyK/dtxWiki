@@ -10,6 +10,9 @@ from backend.mcp.scopes import TOOL_REQUIRED_ROLES
 from backend.scripts.export_mcp_schemas import build_mcp_schemas
 
 EXPECTED_TOOLS = {
+    "preview_context_merge",
+    "bring_in_context_version",
+    "publish_context_edit",
     "build_agent_input_bundle",
     "cite",
     "fetch",
