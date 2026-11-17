@@ -318,8 +318,14 @@ class PatchContextEditToolOutput(BaseModel):
 class _ContextMergeInput(InputRequest):
     workspace_id: UUID
     page_id: MCPPageInput
-    version_id: UUID
-    on_conflict: Literal["keep_both", "latest"] | None = None
+    version_id: UUID = Field(description="The draft to preview, merge into or publish.")
+    on_conflict: Literal["keep_both", "latest"] | None = Field(
+        default=None,
+        description=(
+            "Needed only when the changes conflict: keep_both keeps both sides, "
+            "latest keeps the side saved last."
+        ),
+    )
     conversation_token: str | None = CONVERSATION_TOKEN_FIELD
 
     model_config = ConfigDict(extra="forbid")
@@ -327,7 +333,13 @@ class _ContextMergeInput(InputRequest):
 
 class PreviewContextMergeInput(_ContextMergeInput):
     body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
-    page_metadata: PageMetadataPatch | None = None
+    page_metadata: PageMetadataPatch | None = Field(
+        default=None,
+        description=(
+            "Edits to preview with body_md; publish both unchanged as "
+            "result_body_md and result_page_metadata."
+        ),
+    )
 
 
 class ContextMergeMetadata(BaseModel):
@@ -370,9 +382,12 @@ class PreviewContextMergeResult(BaseModel):
     published_version_id: UUID | None = Field(json_schema_extra=WIRE_EXPLICIT_FIELD)
     parent_version_ids: list[UUID]
     kind: Literal["fast_forward", "automatic_merge", "conflict"]
+    # What publish_context_edit publishes for the same on_conflict and edits;
+    # null only for a conflict without a choice.
     result: ContextMergeCandidate | None = Field(json_schema_extra=WIRE_EXPLICIT_FIELD)
-    keep_both: ContextMergeCandidate
-    latest: ContextMergeCandidate
+    # The two choices, sent only for a conflict.
+    keep_both: ContextMergeCandidate | None = None
+    latest: ContextMergeCandidate | None = None
     metadata_conflicts: list[str]
     base_conflicted: bool
     latest_side: Literal["ours", "theirs"]
@@ -389,8 +404,13 @@ class PreviewContextMergeToolOutput(BaseModel):
 
 
 class BringInContextVersionInput(_ContextMergeInput):
-    commit_version_id: UUID | None = None
-    expected_editing_revision: int = Field(ge=1)
+    commit_version_id: UUID | None = Field(
+        default=None,
+        description="A commit of this page; omit for the current published version.",
+    )
+    expected_editing_revision: int = Field(
+        ge=1, description="The draft's editing_revision from your last read or write."
+    )
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
 
 
@@ -403,10 +423,23 @@ class BringInContextVersionToolOutput(BaseModel):
 
 class PublishContextEditInput(_ContextMergeInput):
     result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
-    result_page_metadata: PageMetadataPatch | None = None
-    expected_editing_revision: int = Field(ge=1)
-    expected_published_version_id: UUID | None
-    result_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
+    result_page_metadata: PageMetadataPatch | None = Field(
+        default=None,
+        description="Send the result edits you previewed, unchanged.",
+    )
+    expected_editing_revision: int = Field(
+        ge=1, description="editing_revision from preview_context_merge."
+    )
+    expected_published_version_id: UUID | None = Field(
+        default=None,
+        description=(
+            "published_version_id from preview_context_merge; omit when it was null."
+        ),
+    )
+    result_hash: str = Field(
+        pattern=CONTENT_HASH_PATTERN,
+        description="result.result_hash from preview_context_merge.",
+    )
     reason: str = Field(min_length=1)
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
 

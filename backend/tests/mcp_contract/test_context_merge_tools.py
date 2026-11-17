@@ -109,7 +109,7 @@ def test_merge_tools_publish_and_recover_the_prepared_result(
         "version_id": str(draft.version_id),
     }
 
-    def call(tool, **arguments):
+    def call(tool, expect_error=None, **arguments):
         nonlocal token
 
         async def run():
@@ -132,12 +132,17 @@ def test_merge_tools_publish_and_recover_the_prepared_result(
         result = anyio.run(run)
         payload = result.structuredContent
         assert payload == json.loads(result.content[0].text)
+        if expect_error is not None:
+            assert payload["envelope"]["error_code"] == expect_error, payload
+            return None
         assert not result.isError, payload
         token = payload["envelope"]["conversation_token"]
         return payload["data"]
 
     preview = call("preview_context_merge")
     assert preview["kind"] == "automatic_merge"
+    # Both choices are sent only for a conflict.
+    assert "keep_both" not in preview and "latest" not in preview
     assert preview["page_id"] == str(initial.id)
     assert "Published contribution." in preview["result"]["body_md"]
     assert "Draft contribution." in preview["result"]["body_md"]
@@ -153,6 +158,27 @@ def test_merge_tools_publish_and_recover_the_prepared_result(
     assert brought["editing_revision"] == preview["editing_revision"] + 1
     assert replayed["editing_revision"] == brought["editing_revision"]
     assert replayed["replayed"] is True
+    # The draft now contains the published version: nothing to merge.
+    again = call(
+        "bring_in_context_version",
+        **{
+            **bring_arguments,
+            "expected_editing_revision": brought["editing_revision"],
+            "idempotency_key": "merge-again",
+        },
+    )
+    assert again["editing_revision"] == brought["editing_revision"]
+    # Another page's version is not in this page's history.
+    call(
+        "bring_in_context_version",
+        expect_error="not_found",
+        **{
+            **bring_arguments,
+            "expected_editing_revision": brought["editing_revision"],
+            "commit_version_id": str(reference.version_id),
+            "idempotency_key": "merge-foreign",
+        },
+    )
     final_body = preview["result"]["body_md"].replace(
         "Middle paragraph.", "Prepared final result."
     )
@@ -169,6 +195,18 @@ def test_merge_tools_publish_and_recover_the_prepared_result(
         "reason": "Publish the reviewed result",
         "idempotency_key": "merge-publish",
     }
+    # Omitting the published version means "none expected": with a head it
+    # is stale, never a blind overwrite.
+    call(
+        "publish_context_edit",
+        expect_error="stale_base_version",
+        **{
+            key: value
+            for key, value in publish_arguments.items()
+            if key != "expected_published_version_id"
+        }
+        | {"idempotency_key": "merge-publish-headless"},
+    )
     published = call("publish_context_edit", **publish_arguments)
     recovered = call("get_operation_status", idempotency_key="merge-publish")
     assert recovered["status"] == "committed"
@@ -210,15 +248,14 @@ def test_merge_tools_publish_and_recover_the_prepared_result(
             select(MCPToolCall).where(
                 MCPToolCall.tool_name.in_(
                     ["bring_in_context_version", "publish_context_edit"]
-                )
+                ),
+                MCPToolCall.result_status == "succeeded",
             )
         ).all()
         assert all(
             row.result_detail["version_id"] == published["version_id"] for row in writes
         )
         captured = json.dumps([row.input_summary for row in [*previews, *writes]])
-        assert final_body not in captured and "Prepared final result." not in captured
-        assert (
-            "merge-result" not in captured
-            and "Publish the reviewed result" not in captured
-        )
+        # Bodies are kept as digests only, as for the other edit tools.
+        assert "Prepared final result." not in captured
+        assert "result_body_md_digest" in captured and "body_md_digest" in captured

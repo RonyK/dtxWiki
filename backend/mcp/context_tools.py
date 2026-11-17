@@ -57,11 +57,7 @@ from backend.services.page_service import (
     PageService,
     PageServiceError,
 )
-from backend.services.read_errors import (
-    ReadServiceError,
-    RejectedByPolicyError,
-    StaleBaseVersionError,
-)
+from backend.services.read_errors import ReadServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +83,8 @@ def cite(payload: dict, ctx: ToolCallContext) -> CiteToolOutput:
                 actor, exc, allowed_fields=CiteInput.model_fields
             )
         )
-    except PageConflictError as exc:
-        return CiteToolOutput(envelope=_stale_base_envelope(actor, exc))
-    except (ReadServiceError, PageServiceError) as exc:
-        return CiteToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
+    except (PageServiceError, ReadServiceError) as exc:
+        return CiteToolOutput(envelope=_service_error_envelope(actor, exc))
     # The service returns the shared REST result. Project the narrower MCP
     # reference-metadata response explicitly.
     return CiteToolOutput(
@@ -123,8 +115,8 @@ def submit_feedback(payload: dict, ctx: ToolCallContext) -> SubmitFeedbackToolOu
                 actor, exc, allowed_fields=SubmitFeedbackInput.model_fields
             )
         )
-    except ReadServiceError as exc:
-        return SubmitFeedbackToolOutput(envelope=error_envelope(actor, exc.error_code))
+    except (PageServiceError, ReadServiceError) as exc:
+        return SubmitFeedbackToolOutput(envelope=_service_error_envelope(actor, exc))
     return SubmitFeedbackToolOutput(envelope=ok_envelope(actor), data=data)
 
 
@@ -300,10 +292,16 @@ def _edit_success_envelope(actor, data):
     return envelope
 
 
-def _read_error_envelope(actor, exc: ReadServiceError):
-    """A refused edit keeps the facts it found: which operation, where, and
-    how often the text really occurred -- dropping them forced a re-read."""
+def _service_error_envelope(actor, exc: PageServiceError | ReadServiceError):
+    """The one failure mapping of every tool here.
 
+    The error code decides status, retryability and guidance (envelope.py);
+    a refusal keeps the facts it found -- operation, place, occurrences --
+    because dropping them forced a re-read.
+    """
+
+    if isinstance(exc, PageConflictError):
+        return _stale_base_envelope(actor, exc)
     envelope = error_envelope(
         actor,
         exc.error_code,
@@ -348,12 +346,8 @@ def create_context_page(
                 actor, exc, allowed_fields=CreateContextPageInput.model_fields
             )
         )
-    except PageServiceError as exc:
-        return CreateContextPageToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
-    except ReadServiceError as exc:
-        return CreateContextPageToolOutput(envelope=_read_error_envelope(actor, exc))
+    except (PageServiceError, ReadServiceError) as exc:
+        return CreateContextPageToolOutput(envelope=_service_error_envelope(actor, exc))
     return CreateContextPageToolOutput(
         envelope=_edit_success_envelope(actor, data), data=data
     )
@@ -385,16 +379,8 @@ def begin_context_edit(
                 actor, exc, allowed_fields=BeginContextEditInput.model_fields
             )
         )
-    except PageConflictError as exc:
-        return BeginContextEditToolOutput(envelope=_stale_base_envelope(actor, exc))
-    except PageServiceError as exc:
-        return BeginContextEditToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
-    except ReadServiceError as exc:
-        return BeginContextEditToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
+    except (PageServiceError, ReadServiceError) as exc:
+        return BeginContextEditToolOutput(envelope=_service_error_envelope(actor, exc))
     data = _begin_edit_result(data)
     return BeginContextEditToolOutput(
         envelope=_edit_success_envelope(actor, data), data=data
@@ -434,16 +420,8 @@ def update_context_edit(
                 actor, exc, allowed_fields=UpdateContextEditInput.model_fields
             )
         )
-    except PageConflictError as exc:
-        return UpdateContextEditToolOutput(envelope=_stale_base_envelope(actor, exc))
-    except PageServiceError as exc:
-        return UpdateContextEditToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
-    except ReadServiceError as exc:
-        return UpdateContextEditToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
+    except (PageServiceError, ReadServiceError) as exc:
+        return UpdateContextEditToolOutput(envelope=_service_error_envelope(actor, exc))
     return UpdateContextEditToolOutput(
         envelope=_edit_success_envelope(actor, data), data=data
     )
@@ -478,17 +456,9 @@ def submit_context_edit_for_review(
                 allowed_fields=SubmitContextEditForReviewInput.model_fields,
             )
         )
-    except PageConflictError as exc:
+    except (PageServiceError, ReadServiceError) as exc:
         return SubmitContextEditForReviewToolOutput(
-            envelope=_stale_base_envelope(actor, exc)
-        )
-    except PageServiceError as exc:
-        return SubmitContextEditForReviewToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
-    except ReadServiceError as exc:
-        return SubmitContextEditForReviewToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
+            envelope=_service_error_envelope(actor, exc)
         )
     envelope = _edit_success_envelope(actor, data)
     try:
@@ -541,15 +511,9 @@ def discard_context_edit(
                 actor, exc, allowed_fields=DiscardContextEditInput.model_fields
             )
         )
-    except PageConflictError as exc:
-        return DiscardContextEditToolOutput(envelope=_stale_base_envelope(actor, exc))
-    except PageServiceError as exc:
+    except (PageServiceError, ReadServiceError) as exc:
         return DiscardContextEditToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
-    except ReadServiceError as exc:
-        return DiscardContextEditToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
+            envelope=_service_error_envelope(actor, exc)
         )
     return DiscardContextEditToolOutput(envelope=ok_envelope(actor), data=data)
 
@@ -574,9 +538,9 @@ def list_my_context_edits(
                 actor, exc, allowed_fields=ListMyContextEditsInput.model_fields
             )
         )
-    except PageServiceError as exc:
+    except (PageServiceError, ReadServiceError) as exc:
         return ListMyContextEditsToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
+            envelope=_service_error_envelope(actor, exc)
         )
     return ListMyContextEditsToolOutput(envelope=ok_envelope(actor), data=data)
 
@@ -607,63 +571,20 @@ def patch_context_edit(
                 actor, exc, allowed_fields=PatchContextEditInput.model_fields
             )
         )
-    except PageConflictError as exc:
-        return PatchContextEditToolOutput(envelope=_stale_base_envelope(actor, exc))
-    except PageServiceError as exc:
-        return PatchContextEditToolOutput(
-            envelope=error_envelope(actor, exc.error_code, message=str(exc) or None)
-        )
-    except ReadServiceError as exc:
-        return PatchContextEditToolOutput(envelope=_read_error_envelope(actor, exc))
+    except (PageServiceError, ReadServiceError) as exc:
+        return PatchContextEditToolOutput(envelope=_service_error_envelope(actor, exc))
     return PatchContextEditToolOutput(
         envelope=_edit_success_envelope(actor, data), data=data
     )
 
 
-def _merge_conflict_envelope(actor, exc: StaleBaseVersionError):
-    needs_choice = exc.error_code == "context_merge_conflict"
-    detail = MCPErrorDetail(
-        field="on_conflict" if needs_choice else "result_hash",
-        code=exc.error_code,
-        message=(
-            "The merge requires an explicit conflict choice."
-            if needs_choice
-            else "The draft, published version, or prepared result changed."
-        ),
-        fix=(
-            "Choose on_conflict='keep_both' or 'latest'. For publication, "
-            "call preview_context_merge and inspect the named keep_both/latest "
-            "candidate (or its explicitly edited result). Use its hash and "
-            "the same choice to publish. Send a new idempotency_key for the "
-            "changed request."
-            if needs_choice
-            else "Call preview_context_merge again for this page_id and "
-            "version_id, inspect the result, and publish with its "
-            "editing_revision, published_version_id and result_hash using "
-            "a new idempotency_key."
-        ),
-    )
-    return error_envelope(
-        actor,
-        exc.error_code,
-        "conflict",
-        message=str(exc) or None,
-        details=[detail],
-        retryable=False,
-    )
-
-
-def _context_merge_command(payload: dict, ctx: ToolCallContext, command: str):
-    input_model, output_model = {
-        "preview": (PreviewContextMergeInput, PreviewContextMergeToolOutput),
-        "bring_in": (BringInContextVersionInput, BringInContextVersionToolOutput),
-        "publish": (PublishContextEditInput, PublishContextEditToolOutput),
-    }[command]
+def preview_context_merge(
+    payload: dict, ctx: ToolCallContext
+) -> PreviewContextMergeToolOutput:
     actor = ctx.actor
     try:
-        request = input_model.model_validate(payload)
-        service = _context_edit_page_service(ctx)
-        common = dict(
+        request = PreviewContextMergeInput.model_validate(payload)
+        data = _context_edit_page_service(ctx).preview_context_merge(
             page_id=request.page_id,
             version_id=request.version_id,
             workspace_id=ctx.workspace_id,
@@ -671,86 +592,101 @@ def _context_merge_command(payload: dict, ctx: ToolCallContext, command: str):
             actor_kind=actor.actor_kind,
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,
+            body_md=request.body_md,
+            page_metadata=_metadata_patch(request.page_metadata),
         )
-        if command == "preview":
-            data = service.preview_context_merge(
-                **common,
-                body_md=request.body_md,
-                page_metadata=(
-                    request.page_metadata.model_dump(exclude_unset=True)
-                    if request.page_metadata is not None
-                    else None
-                ),
-            )
-            data = {"page_id": request.page_id, **data}
-        elif command == "bring_in":
-            data = _edit_result(
-                service.bring_in_context_version(
-                    **common,
-                    commit_version_id=request.commit_version_id,
-                    expected_editing_revision=request.expected_editing_revision,
-                    idempotency_key=request.idempotency_key,
-                )
-            )
-        else:
-            result = service.publish_draft(
-                **common,
-                reason=request.reason,
-                publish_despite_findings=False,
-                expected_editing_revision=request.expected_editing_revision,
-                expected_published_version_id=request.expected_published_version_id,
-                result_hash=request.result_hash,
-                result_body_md=request.result_body_md,
-                result_page_metadata=(
-                    request.result_page_metadata.model_dump(exclude_unset=True)
-                    if request.result_page_metadata is not None
-                    else None
-                ),
-                idempotency_key=request.idempotency_key,
-            )
-            data = _edit_result(result.page)
     except ValidationError as exc:
-        return output_model(
+        return PreviewContextMergeToolOutput(
             envelope=validation_error_envelope(
-                actor, exc, allowed_fields=input_model.model_fields
+                actor, exc, allowed_fields=PreviewContextMergeInput.model_fields
             )
         )
-    except PageConflictError as exc:
-        return output_model(envelope=_stale_base_envelope(actor, exc))
-    except StaleBaseVersionError as exc:
-        return output_model(envelope=_merge_conflict_envelope(actor, exc))
-    except RejectedByPolicyError as exc:
-        envelope = _read_error_envelope(actor, exc)
-        envelope.result_status = "rejected_by_policy"
-        envelope.retryable = False
-        return output_model(envelope=envelope)
-    except ReadServiceError as exc:
-        return output_model(envelope=_read_error_envelope(actor, exc))
-    except PageServiceError as exc:
-        envelope = error_envelope(
-            actor,
-            exc.error_code,
-            message=str(exc) or None,
-            details=list(getattr(exc, "details", []) or []),
+    except (PageServiceError, ReadServiceError) as exc:
+        return PreviewContextMergeToolOutput(
+            envelope=_service_error_envelope(actor, exc)
         )
-        envelope.warnings = list(getattr(exc, "warnings", []) or [])
-        return output_model(envelope=envelope)
-    return output_model(envelope=_edit_success_envelope(actor, data), data=data)
-
-
-def preview_context_merge(
-    payload: dict, ctx: ToolCallContext
-) -> PreviewContextMergeToolOutput:
-    return _context_merge_command(payload, ctx, "preview")
+    # Without a conflict both choices equal the result; send them only when
+    # there is something to choose between.
+    if data["kind"] != "conflict":
+        data["keep_both"] = data["latest"] = None
+    data = {"page_id": request.page_id, **data}
+    return PreviewContextMergeToolOutput(envelope=ok_envelope(actor), data=data)
 
 
 def bring_in_context_version(
     payload: dict, ctx: ToolCallContext
 ) -> BringInContextVersionToolOutput:
-    return _context_merge_command(payload, ctx, "bring_in")
+    actor = ctx.actor
+    try:
+        request = BringInContextVersionInput.model_validate(payload)
+        data = _edit_result(
+            _context_edit_page_service(ctx).bring_in_context_version(
+                page_id=request.page_id,
+                version_id=request.version_id,
+                workspace_id=ctx.workspace_id,
+                expected_editing_revision=request.expected_editing_revision,
+                idempotency_key=request.idempotency_key,
+                actor_kind=actor.actor_kind,
+                actor_id=actor.actor_id,
+                actor_provenance=actor.provenance,
+                commit_version_id=request.commit_version_id,
+                on_conflict=request.on_conflict,
+            )
+        )
+    except ValidationError as exc:
+        return BringInContextVersionToolOutput(
+            envelope=validation_error_envelope(
+                actor, exc, allowed_fields=BringInContextVersionInput.model_fields
+            )
+        )
+    except (PageServiceError, ReadServiceError) as exc:
+        return BringInContextVersionToolOutput(
+            envelope=_service_error_envelope(actor, exc)
+        )
+    return BringInContextVersionToolOutput(
+        envelope=_edit_success_envelope(actor, data), data=data
+    )
 
 
 def publish_context_edit(
     payload: dict, ctx: ToolCallContext
 ) -> PublishContextEditToolOutput:
-    return _context_merge_command(payload, ctx, "publish")
+    actor = ctx.actor
+    try:
+        request = PublishContextEditInput.model_validate(payload)
+        result = _context_edit_page_service(ctx).publish_draft(
+            page_id=request.page_id,
+            version_id=request.version_id,
+            workspace_id=ctx.workspace_id,
+            reason=request.reason,
+            publish_despite_findings=False,
+            actor_kind=actor.actor_kind,
+            actor_id=actor.actor_id,
+            actor_provenance=actor.provenance,
+            expected_editing_revision=request.expected_editing_revision,
+            expected_published_version_id=request.expected_published_version_id,
+            result_hash=request.result_hash,
+            on_conflict=request.on_conflict,
+            result_body_md=request.result_body_md,
+            result_page_metadata=_metadata_patch(request.result_page_metadata),
+            idempotency_key=request.idempotency_key,
+        )
+        data = _edit_result(result.page)
+    except ValidationError as exc:
+        return PublishContextEditToolOutput(
+            envelope=validation_error_envelope(
+                actor, exc, allowed_fields=PublishContextEditInput.model_fields
+            )
+        )
+    except (PageServiceError, ReadServiceError) as exc:
+        return PublishContextEditToolOutput(
+            envelope=_service_error_envelope(actor, exc)
+        )
+    return PublishContextEditToolOutput(
+        envelope=_edit_success_envelope(actor, data), data=data
+    )
+
+
+def _metadata_patch(patch) -> dict | None:
+    # The merge service reads None as "unchanged" for every field.
+    return patch.model_dump(exclude_none=True) if patch is not None else None

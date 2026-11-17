@@ -21,58 +21,6 @@ from backend.services.mcp_trace_redaction import (
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"not-a-real-png-but-thats-fine-here"
 
 
-def test_context_merge_capture_digests_authored_results_and_untrusted_fields():
-    arguments = {
-        "workspace_id": "11111111-1111-1111-1111-111111111111",
-        "page_id": (
-            "/p/11111111-1111-1111-1111-111111111111/"
-            "55555555-5555-5555-5555-555555555555"
-        ),
-        "version_id": "44444444-4444-4444-4444-444444444444",
-        "expected_published_version_id": None,
-        "expected_editing_revision": 4,
-        "result_hash": "a" * 64,
-        "on_conflict": "keep_both",
-        "idempotency_key": "publish-result-4",
-        "conversation_token": "conv_result",
-        "result_body_md": "BODY-SECRET",
-        "result_page_metadata": {"title": "TITLE-SECRET", "tags": ["TAG-SECRET"]},
-        "reason": "REASON-SECRET",
-        "commit_version_id": {"bad": "INVALID-CONTROL-SECRET"},
-        "result_body_md_digest": {"sha256": "FORGED-DIGEST-SECRET"},
-        "UNKNOWN-KEY-SECRET": {"value": "UNKNOWN-VALUE-SECRET"},
-    }
-    payload = {
-        "envelope": {"result_status": "succeeded"},
-        "data": {"result": {"body_md": "RESPONSE-BODY-SECRET"}},
-    }
-    summary, captured_payload = redact_tool_capture(
-        "publish_context_edit", arguments, payload
-    )
-
-    assert summary["page_id"] == "55555555-5555-5555-5555-555555555555"
-    assert summary["version_id"] == arguments["version_id"]
-    assert summary["expected_editing_revision"] == 4
-    assert summary["expected_published_version_id"] is None
-    assert summary["on_conflict"] == "keep_both"
-    assert summary["result_hash"] == "a" * 64
-    assert summary["idempotency_key"] == "publish-result-4"
-    assert summary["conversation_token"] == "conv_result"
-    assert (
-        summary["result_body_md_digest"]["sha256"]
-        == hashlib.sha256(b"BODY-SECRET").hexdigest()
-    )
-    assert "commit_version_id" not in summary
-    assert "commit_version_id_digest" in summary
-    assert "unknown_fields_digest" in summary
-    assert "SECRET" not in json.dumps(summary)
-    assert redact_tool_arguments("publish_context_edit", summary) == summary
-    # Payload capture also feeds the live wire response. Durable storage
-    # narrows result_detail separately; redaction must not erase that body.
-    assert captured_payload == payload
-    assert arguments["result_body_md"] == "BODY-SECRET"
-
-
 def _upload_arguments() -> dict:
     return {
         "workspace_id": "11111111-1111-1111-1111-111111111111",

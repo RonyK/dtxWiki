@@ -118,6 +118,7 @@
         "title": "Conversation Token"
       },
       "expected_editing_revision": {
+        "description": "editing_revision from preview_context_merge.",
         "minimum": 1,
         "title": "Expected Editing Revision",
         "type": "integer"
@@ -132,6 +133,8 @@
             "type": "null"
           }
         ],
+        "default": null,
+        "description": "published_version_id from preview_context_merge; omit when it was null.",
         "title": "Expected Published Version Id"
       },
       "idempotency_key": {
@@ -156,6 +159,7 @@
           }
         ],
         "default": null,
+        "description": "Needed only when the changes conflict: keep_both keeps both sides, latest keeps the side saved last.",
         "title": "On Conflict"
       },
       "page_id": {
@@ -183,9 +187,13 @@
           }
         ],
         "default": null,
-        "title": "Result Body Md"
+        "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
+        "maxLength": 1000000,
+        "title": "Result Body Md",
+        "x-final-maxLength": 1000000
       },
       "result_hash": {
+        "description": "result.result_hash from preview_context_merge.",
         "pattern": "^[a-f0-9]{64}$",
         "title": "Result Hash",
         "type": "string"
@@ -199,9 +207,11 @@
             "type": "null"
           }
         ],
-        "default": null
+        "default": null,
+        "description": "Send the result edits you previewed, unchanged."
       },
       "version_id": {
+        "description": "The draft to preview, merge into or publish.",
         "format": "uuid",
         "title": "Version Id",
         "type": "string"
@@ -217,7 +227,6 @@
       "page_id",
       "version_id",
       "expected_editing_revision",
-      "expected_published_version_id",
       "result_hash",
       "reason",
       "idempotency_key"

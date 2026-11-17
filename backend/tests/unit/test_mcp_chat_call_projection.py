@@ -770,7 +770,7 @@ def test_previews_follow_the_visibility_of_the_edited_version(session_factory):
 def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
     """When the reader cannot see the version a call wrote into, what remains
     of the call is built from a positive list of fields. A field nobody has
-    heard of yet -- here one a client smuggled into a publication -- is dropped,
+    heard of yet -- here one a client smuggled into an autosave -- is dropped,
     not passed through for want of a rule naming it."""
 
     receipt = redact_edit_receipt(
@@ -796,19 +796,18 @@ def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
         editing = _version(
             session,
             page,
-            status="closed",
+            status="draft",
             author=owner.id,
             number=2,
             parent=published,
         )
         chat = _Chat(session, workspace, client, owner)
         call = chat.call(
-            "publish_context_edit",
+            "update_context_edit",
             {
                 "workspace_id": str(workspace.id),
                 "page_id": str(page.id),
-                "version_id": str(editing.id),
-                "expected_published_version_id": str(published.id),
+                "base_version_id": str(editing.id),
                 "expected_editing_revision": 2,
                 "title": "HIDDEN-TITLE",
                 "tags": ["HIDDEN-TAG"],
@@ -817,17 +816,31 @@ def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
             },
             result_detail={
                 "page_id": str(page.id),
-                # A non-FF publication returns a readable published result,
-                # while its source draft is closed and still hidden.
-                "version_id": str(published.id),
+                "version_id": str(editing.id),
                 "edit_receipt": receipt,
             },
             links=(_page_link(page, McpChatArtifactVerb.EDITED),),
         )
-        other_view = _item(
-            chat.read(_human(uuid4(), workspace.id, role="viewer")), call
+        # A publication returns a visible commit while the draft it names in
+        # its input stays hidden; the input decides, as for a failed call.
+        publication = chat.call(
+            "publish_context_edit",
+            {
+                "workspace_id": str(workspace.id),
+                "page_id": str(page.id),
+                "version_id": str(editing.id),
+                "expected_editing_revision": 2,
+                "reason": "HIDDEN-REASON",
+            },
+            result_detail={"page_id": str(page.id), "version_id": str(published.id)},
+            links=(_page_link(page, McpChatArtifactVerb.EDITED),),
         )
+        viewer_read = chat.read(_human(uuid4(), workspace.id, role="viewer"))
+        other_view = _item(viewer_read, call)
         owner_view = _item(chat.read(_human(owner.id, workspace.id)), call)
+    publication_view = _item(viewer_read, publication).model_dump_json()
+    assert "HIDDEN-REASON" not in publication_view
+    assert str(editing.id) not in publication_view
 
     assert other_view.input_summary == {
         "workspace_id": str(workspace.id),
@@ -850,11 +863,9 @@ def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
     serialized = other_view.model_dump_json()
     for secret in ("HIDDEN", "FUTURE-FIELD-SECRET", "b_hidden"):
         assert secret not in serialized
-    assert str(editing.id) not in serialized
     assert other_view.headline == "Edited: Allowlist Page"
-    assert owner_view.input_summary["version_id"] == str(editing.id)
-    assert "unknown_fields_digest" in owner_view.input_summary
-    assert "HIDDEN-SECTION" in owner_view.model_dump_json()
+    assert "FUTURE-FIELD-SECRET" in owner_view.model_dump_json()
+    assert "HIDDEN-TITLE" in owner_view.model_dump_json()
 
 
 def test_context_edit_inputs_never_feed_chat_labels():

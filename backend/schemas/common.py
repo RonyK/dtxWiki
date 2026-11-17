@@ -252,8 +252,9 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        and ContextDraftInfo facts, grouped published-first. Refresh schemas; pass
 #        version_id to read the exact hit. Drafts remain non-citable.
 #  36 -- Preview, bring-in and publish shared Context drafts through MCP.
-#        Publication binds the preview revision, head and prepared result hash;
-#        keyed writes support operation-status recovery. Refresh cached tools.
+#        A preview's result is what publication publishes; publication binds
+#        its revision, head (omitted when none) and result hash. Registers
+#        context_merge_conflict and human_approval_required. Refresh cached tools.
 MCP_TOOL_CONTRACT_REVISION = 36
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
@@ -269,6 +270,8 @@ ERROR_CODES = (
     "operation_tracking_unavailable",
     "stale_base_version",
     "stale_context_draft",
+    # Merging two Context versions needs an explicit keep_both or latest choice.
+    "context_merge_conflict",
     # patch_draft push semantics (design doc section 5): `base` names
     # neither a version id nor a content_hash of this page.
     "base_not_found",
@@ -355,6 +358,8 @@ ERROR_CODES = (
     "conversation_token_unknown",
     "conversation_token_owner_mismatch",
     "human_session_required",
+    # Publishing needs a person's review decision under workspace policy.
+    "human_approval_required",
     "user_not_found",
     "chat_owner_unresolvable",
     "review_already_claimed",

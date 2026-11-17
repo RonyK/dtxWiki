@@ -147,6 +147,7 @@
           }
         ],
         "default": null,
+        "description": "Needed only when the changes conflict: keep_both keeps both sides, latest keeps the side saved last.",
         "title": "On Conflict"
       },
       "page_id": {
@@ -166,9 +167,11 @@
             "type": "null"
           }
         ],
-        "default": null
+        "default": null,
+        "description": "Edits to preview with body_md; publish both unchanged as result_body_md and result_page_metadata."
       },
       "version_id": {
+        "description": "The draft to preview, merge into or publish.",
         "format": "uuid",
         "title": "Version Id",
         "type": "string"
@@ -748,7 +751,15 @@
             "type": "integer"
           },
           "keep_both": {
-            "$ref": "#/$defs/ContextMergeCandidate"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextMergeCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "kind": {
             "enum": [
@@ -760,7 +771,15 @@
             "type": "string"
           },
           "latest": {
-            "$ref": "#/$defs/ContextMergeCandidate"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextMergeCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "latest_side": {
             "enum": [
@@ -833,8 +852,6 @@
           "parent_version_ids",
           "kind",
           "result",
-          "keep_both",
-          "latest",
           "metadata_conflicts",
           "base_conflicted",
           "latest_side",

@@ -13,6 +13,7 @@
           }
         ],
         "default": null,
+        "description": "A commit of this page; omit for the current published version.",
         "title": "Commit Version Id"
       },
       "conversation_token": {
@@ -31,6 +32,7 @@
         "title": "Conversation Token"
       },
       "expected_editing_revision": {
+        "description": "The draft's editing_revision from your last read or write.",
         "minimum": 1,
         "title": "Expected Editing Revision",
         "type": "integer"
@@ -57,6 +59,7 @@
           }
         ],
         "default": null,
+        "description": "Needed only when the changes conflict: keep_both keeps both sides, latest keeps the side saved last.",
         "title": "On Conflict"
       },
       "page_id": {
@@ -68,6 +71,7 @@
         "type": "string"
       },
       "version_id": {
+        "description": "The draft to preview, merge into or publish.",
         "format": "uuid",
         "title": "Version Id",
         "type": "string"

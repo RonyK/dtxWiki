@@ -25,7 +25,11 @@ from backend.repositories.workspace_scoped import (
     get_in_workspace,
     select_in_workspace,
 )
-from backend.services.read_errors import ReadValidationError, StaleBaseVersionError
+from backend.services.read_errors import (
+    ReadNotFoundError,
+    ReadValidationError,
+    StaleBaseVersionError,
+)
 from backend.utils.block_identity import compute_block_map_with_ids
 from backend.utils.content_hash import content_hash
 from backend.utils.uuid import parse_uuid_or_none
@@ -243,6 +247,10 @@ class DraftMergePreview:
 def preview_merge(session, page, version, *, commit_version_id=None, prepare=None):
     history, rows = history_for(session, page)
     target_id = commit_version_id or page.current_published_version_id
+    # Both sides must be versions in this page's history; any other id (a
+    # discarded row, another page's version, nothing at all) is not found.
+    if version.id not in rows or (target_id is not None and target_id not in rows):
+        raise ReadNotFoundError("context page version not found")
     metadata_conflicts = ()
     base_conflicted = False
     latest_side = "ours"
@@ -255,8 +263,8 @@ def preview_merge(session, page, version, *, commit_version_id=None, prepare=Non
         clean = both = latest = candidate
         kind = "fast_forward"
     else:
-        target = rows.get(target_id)
-        if target is None or not target.commit_oid:
+        target = rows[target_id]
+        if not target.commit_oid:
             raise ReadValidationError("Merge target must be a commit from this page")
         # Hydrate only this pair's ancestors, excluding unrelated history bodies.
         ancestors = set()

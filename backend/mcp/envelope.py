@@ -63,13 +63,21 @@ ERROR_CODE_GUIDANCE = {
     # and a blind resend overwrites exactly that work.
     "stale_base_version": (
         "What you based this on changed since you read it, so nothing was "
-        "saved. Re-read before retrying: the named shared draft with "
-        "read_structure_map or read_context_outline (version_id=<draft version_id>; "
-        "error_details name its current version_id and editing_revision), "
-        "otherwise the page or the latest_version_id this failure names. "
-        "Rebuild your change on what you read and send it with the values "
-        "from that read; do not resend the same content with only the "
-        "revision or base swapped in."
+        "saved. Re-read before retrying: a shared draft with read_structure_map "
+        "or read_context_outline (version_id=<draft version_id>), a publication "
+        "with preview_context_merge, otherwise the page or the latest_version_id "
+        "this failure names. Rebuild your change on what you read and send it "
+        "with the values from that read; do not resend the same content with "
+        "only the revision or base swapped in."
+    ),
+    "context_merge_conflict": (
+        "The changes conflict, so nothing was saved. Choose on_conflict "
+        "keep_both or latest (preview_context_merge shows both) and send a new "
+        "request with that choice."
+    ),
+    "human_approval_required": (
+        "A person must approve this publication under workspace policy. Leave "
+        "it for review; do not retry unchanged."
     ),
     "text_occurrence_mismatch": (
         "old_text matched a different number of times than expected_occurrences. "
@@ -323,6 +331,8 @@ RETRYABLE_BY_CODE = {
     # thing that is stale, so resending it loops forever. The guidance above
     # carries the recovery, which is a different request, not a retry.
     "stale_base_version": False,
+    "context_merge_conflict": False,
+    "human_approval_required": False,
     "text_occurrence_mismatch": False,
     "text_match_not_found": False,
     "text_match_ambiguous": False,
@@ -354,6 +364,7 @@ CONFLICT_ERROR_CODES = {
     "media_policy_changed",
     "media_state_changed",
     "stale_context_draft",
+    "context_merge_conflict",
 }
 
 POLICY_ERROR_CODES = {
@@ -362,6 +373,7 @@ POLICY_ERROR_CODES = {
     "mcp_client_disabled",
     "mcp_client_deleted",
     "rejected_by_policy",
+    "human_approval_required",
     "page_name_occupied",
     "scope_denied",
     "restricted_library_denied",

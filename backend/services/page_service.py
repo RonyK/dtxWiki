@@ -1205,34 +1205,35 @@ class PageService:
                     actor_provenance,
                 ),
             )
-            payload = preview.payload()
-            if body_md is not None or page_metadata is not None:
+            edited = body_md is not None or page_metadata is not None
+            if on_conflict is None and not edited:
+                return preview.payload()
+            # `result` is what publication would publish for the same choice
+            # and edits.
+            chosen = preview.choose(on_conflict)
+            if edited:
                 from backend.services.context_draft_workflow import (
                     edit_merge_candidate,
                 )
 
-                edited = edit_merge_candidate(
-                    preview.choose(on_conflict),
-                    body_md=body_md,
-                    page_metadata=page_metadata,
-                )
-                edited = self._prepare_merge_candidate(
+                chosen = self._prepare_merge_candidate(
                     session,
                     page,
                     version,
-                    edited,
+                    edit_merge_candidate(
+                        chosen, body_md=body_md, page_metadata=page_metadata
+                    ),
                     actor_kind,
                     actor_id,
                     actor_provenance,
                 )
-                conflict_bodies = dict(preview.conflict_bodies or {})
-                conflict_bodies["result"] = conflict_bodies.get(
-                    on_conflict or "result", preview.choose(on_conflict).body_md
-                )
-                payload = replace(
-                    preview, clean=edited, conflict_bodies=conflict_bodies
-                ).payload()
-            return payload
+            conflict_bodies = dict(preview.conflict_bodies or {})
+            conflict_bodies["result"] = conflict_bodies.get(
+                on_conflict or "result", chosen.body_md
+            )
+            return replace(
+                preview, clean=chosen, conflict_bodies=conflict_bodies
+            ).payload()
 
     def bring_in_context_version(
         self,
@@ -1277,8 +1278,6 @@ class PageService:
                         error_code="editing_revision_conflict",
                     )
                 target_id = commit_version_id or page.current_published_version_id
-                if target_id is None:
-                    return self._payload_from_page(session, page, version)
                 preview = preview_merge(
                     session,
                     page,
@@ -1294,6 +1293,10 @@ class PageService:
                         actor_provenance,
                     ),
                 )
+                # The draft already contains the target (or there is none):
+                # nothing to merge, so nothing is saved.
+                if preview.kind == "fast_forward":
+                    return self._payload_from_page(session, page, version)
                 candidate = preview.choose(on_conflict)
                 target = self._require_page_version(session, page, target_id)
                 version.body_md, version.block_map = (

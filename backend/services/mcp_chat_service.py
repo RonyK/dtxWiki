@@ -2131,27 +2131,15 @@ class _ReaderGate:
 
         if self.actor is None:
             return True
-        if row.tool_name in {
-            "preview_context_merge",
-            "bring_in_context_version",
-            "publish_context_edit",
-        }:
-            # Publication can return a visible merge commit while its source
-            # draft is closed and unreadable. Output provenance must follow
-            # that returned commit, but it cannot expose hidden input IDs or
-            # digests. The same rule covers a brought-in commit and preview.
-            if _parse_uuid_value(row.input_summary.get("version_id")) is None:
-                return False
-            if any(
-                self.visible_version(version_id) is None
-                for kind, version_id in _input_target_refs(
-                    row.tool_name, row.input_summary
-                )
-                if kind == "context_version"
-            ):
-                return False
-            if row.tool_name == "preview_context_merge":
-                return True
+        # Every Context version the input names must be readable, as for a
+        # failed call: a publication can return a visible commit while the
+        # draft it came from stays hidden.
+        if any(
+            self.visible_version(version_id) is None
+            for kind, version_id in _input_target_refs(row.tool_name, row.input_summary)
+            if kind == "context_version"
+        ):
+            return False
         if row.tool_name not in CONTEXT_EDIT_TOOLS:
             return True
         version_id = _edited_version_id(row)

@@ -1118,42 +1118,25 @@ recheck them under the page lock. The editor asks for confirmation of an
 automatically merged result before publishing it. Conflict choice controls are
 provided separately from this minimum editor integration.
 
-MCP `preview_context_merge` calculates a publication result without saving.
-It returns the draft's `editing_revision`, nullable `published_version_id`,
-and `result`, `keep_both` and `latest` candidates with their `result_hash`.
-For an unedited conflict preview, `kind` is `conflict` and `result` is null.
-Choose the hash from `keep_both` or `latest` and send the corresponding
-`on_conflict="keep_both"` or `on_conflict="latest"` before publication.
-Passing only `on_conflict` to preview does not move that candidate into `result`.
-An authorized `publish_context_edit` sends that revision as
-`expected_editing_revision`, that published ID as
-`expected_published_version_id` (including explicit null when absent), the
-chosen `result_hash`, a `reason`, and an `idempotency_key`. The existing
-publication and review policies still apply; MCP cannot bypass format findings.
-If the preview changed, nothing is published: request a new preview and use a
-new key for the revised request.
+MCP `preview_context_merge` shows, without saving, what `publish_context_edit`
+would publish for a draft: the draft merged with the current published version.
+Its `result` follows `on_conflict` and any `body_md`/`page_metadata` edits; it is
+null only for a conflict without a choice, and only a conflict also returns the
+`keep_both` and `latest` candidates. `publish_context_edit` sends the preview's
+`editing_revision`, `published_version_id` (omitted when null) and
+`result.result_hash` with the same choice and edits as `result_body_md` and
+`result_page_metadata`. Anything that moved since the preview fails with
+`stale_base_version`; workspace review policy decides publication, and an AI
+caller that needs a person gets `human_approval_required`. A merge publication
+returns a new `version_id`.
 
-To edit the publication result, call `preview_context_merge` again with
-`body_md` and/or `page_metadata` and the chosen `on_conflict` when needed.
-Use the edited candidate in `result` and its hash, even if `kind` remains
-`conflict`, then send those same edits as
-`result_body_md` and/or `result_page_metadata` to `publish_context_edit`, with
-the newly returned hash and the same `on_conflict` choice. The server computes
-the hash of the prepared result.
-The successful write returns the actual published `version_id`, which can
-differ from the source draft when publication creates a merge commit.
-
-`bring_in_context_version` merges an immutable `commit_version_id` into a
-named open draft; omitting that field brings in the current published version.
-It requires the draft's current `expected_editing_revision` and an
-`idempotency_key`. After a save, use the returned revision for further writes.
-Without a conflict choice, a conflicting merge saves nothing and reports the
-two allowed `on_conflict` values. `preview_context_merge` previews publication
-against the current published version, not an arbitrary bring-in target.
-Both merge writes require conversation continuity and support
-`get_operation_status` recovery. A same-key replay returns the original result
-without another save or publication. Preview calls count as references in
-Chats; bring-in and publication calls record the version they changed.
+`bring_in_context_version` merges a commit of the page (by default the current
+published version) into a draft with the draft's `expected_editing_revision`. A
+draft that already contains it is not saved; a conflict saves nothing until
+`on_conflict` is chosen. Both writes are keyed and recoverable through
+`get_operation_status`. Chats records a preview as a reference and each write
+against the version it produced; like the other edit tools, capture keeps a
+digest of a submitted body.
 
 Drafts remain in the database. Publication, rejection, withdrawal and restore
 close a draft into a Git commit with its existing ID and commit parents. The

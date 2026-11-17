@@ -6,7 +6,7 @@ from backend.mcp.protocol.tool_descriptors import (
     TOOL_META,
     list_dtxwiki_tools,
 )
-from backend.mcp.scopes import TOOL_REQUIRED_ROLES
+from backend.mcp.scopes import CONTENT_TOOLS, TOOL_REQUIRED_ROLES
 from backend.scripts.export_mcp_schemas import build_mcp_schemas
 
 EXPECTED_TOOLS = {
@@ -85,6 +85,10 @@ def test_tool_descriptor_roles_match_runtime_registry():
     assert set(tools) == set(TOOL_REQUIRED_ROLES)
     for tool_name, required_role in TOOL_REQUIRED_ROLES.items():
         assert tools[tool_name].meta["required_role"] == required_role
+    # The router refuses a content tool without a token, so its description
+    # must say so.
+    for tool_name in CONTENT_TOOLS:
+        assert "Requires conversation_token" in tools[tool_name].description, tool_name
 
 
 def test_search_descriptor_advertises_planner_and_optional_modes():
@@ -176,10 +180,30 @@ def test_every_advertised_input_schema_is_host_portable():
     from backend.mcp.protocol.schema_projection import (
         schema_uses_only_portable_keywords,
     )
+    from backend.scripts.export_mcp_schemas import build_mcp_schemas
 
     tools = {tool.name: tool for tool in list_dtxwiki_tools()}
     for name, tool in tools.items():
         assert schema_uses_only_portable_keywords(tool.inputSchema), name
+
+    # The projection advertises `X | None` as an optional `X` (omission means
+    # none), so a required field must never accept null: a host that obeys the
+    # advertised schema could not send it.
+    def required_nullable(node, path=""):
+        if isinstance(node, list):
+            for item in node:
+                yield from required_nullable(item, path)
+        if not isinstance(node, dict):
+            return
+        for field in node.get("required", ()):
+            variants = node.get("properties", {}).get(field, {}).get("anyOf", ())
+            if any(variant.get("type") == "null" for variant in variants):
+                yield f"{path}.{field}"
+        for key, child in node.items():
+            yield from required_nullable(child, f"{path}.{key}")
+
+    for name, schemas in build_mcp_schemas().items():
+        assert not list(required_nullable(schemas["input"], name)), name
 
     operations = tools["patch_context_edit"].inputSchema["properties"]["operations"]
     item = operations["items"]

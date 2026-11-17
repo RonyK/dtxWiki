@@ -291,6 +291,8 @@
       "base_version": "기준 버전",
       "editing_version": "편집 버전",
       "cited_version": "인용 버전",
+      "commit_version": "가져온 버전",
+      "expected_published_version": "미리보기 시 게시본",
       "search_query": "검색어",
       "query": "검색어",
       "context_page": "문서",

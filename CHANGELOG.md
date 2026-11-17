@@ -5,15 +5,18 @@
 ### MCP Context merge tools
 
 - Add `preview_context_merge`, `bring_in_context_version`, and
-  `publish_context_edit` for shared Context drafts. Preview publication without
-  saving, bring a commit into a draft, and publish the result under the existing
-  workspace and review policies.
-- Bind publication to the preview's editing revision, published version and
-  prepared result hash. Resolve conflicts explicitly with `keep_both` or
-  `latest`; preview edited results again before publishing them.
-- Recover both merge writes through `get_operation_status` or same-key replay.
-  Chats records previews as references and the writes against their result
-  versions, with authored merge inputs reduced to digests in durable traces.
+  `publish_context_edit` for shared Context drafts. A preview's `result` is what
+  publication publishes for the same conflict choice and edits; publication
+  checks the preview's revision, published version and result hash, and the
+  workspace review policy decides it. Bringing in a commit the draft already
+  contains saves nothing.
+- Register `context_merge_conflict` and `human_approval_required`. An AI
+  approval refusal now reports `human_approval_required` on every surface, and
+  a merge target outside the page's history reports `not_found`.
+- Every Context command shares one failure mapping, and result bodies follow
+  the same input checks as other bodies. The guide no longer reports
+  `actor_context.my_writes_stage_as_drafts`; use
+  `my_writes_wait_for_human_review`.
 - MCP contract revision 36 adds these three tools and typed merge-preview
   results. Refresh cached tool catalogs and result schemas before using them.
 

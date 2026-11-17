@@ -26,17 +26,15 @@ Never write against a base you did not read. `update_context_edit` and `patch_co
 5. Call `submit_context_edit_for_review` once, when the whole task is ready for human review ("Save draft"), not after each change. The requested draft stays editable at that same `version_id`; use its current revision for later saves. An unsubmitted draft remains readable as work in progress. Submission follows the workspace review and automatic-approval policy; inspect returned review/publication state and `data.publish_blocked_reasons`.
 6. Call `discard_context_edit` to withdraw the specified shared draft. It becomes a closed commit with its history preserved. A draft-only page follows the existing page lifecycle rules; a published page retains its published head.
 
-## Preview and publish an authorized result
+## Preview and publish
 
-Use this flow when the user requested publication and the caller's workspace permissions allow it. Saving or requesting review remains a separate action; do not turn an ordinary draft task into publication.
+Publish only when the user asked for publication; saving or requesting review is a separate action.
 
-1. Call `preview_context_merge` with the page and draft `version_id`. It calculates publication against the current published version without saving. Keep its `editing_revision`, `published_version_id`, and the intended candidate's `result_hash`.
-2. For a clean preview, use `result`. An unedited conflict preview has `kind` set to `conflict` and `result` set to null: inspect `keep_both` and `latest` and make an explicit choice within the user's instructions. Use the chosen candidate's hash and send that choice as `on_conflict`; there is no default conflict choice. Passing only `on_conflict` to preview does not move that candidate into `result`.
-3. To edit the result, preview again with `body_md` and/or `page_metadata`, and the chosen `on_conflict` when needed. Use the edited candidate in `result` and its server-computed hash, even if `kind` remains `conflict`; do not calculate a replacement hash yourself.
-4. Call `publish_context_edit` with `expected_editing_revision` from the preview, `expected_published_version_id` set to its published ID (explicit null when none), the candidate's `result_hash`, a `reason`, and a retained `idempotency_key`. If the result was edited, send those same edits as `result_body_md` and/or `result_page_metadata`. Preserve the chosen `on_conflict` for publication, including after an edited conflict preview. Publication still follows the existing workspace and review policies.
-5. If the preview is stale, request a new preview, reconsider the result, and use a new key for the revised request. If the response is lost, use `get_operation_status` with the original key and follow `next_action`; a resend keeps every original argument. Use the successful result's `version_id`, which can differ from the source draft after a merge publication.
+1. Call `preview_context_merge` with the page and draft `version_id`. Its `result` is what publication would publish. For `kind: conflict`, `result` is null and `keep_both` and `latest` show the two choices: preview again with the user's choice as `on_conflict`. To edit the result, preview again with `body_md` and/or `page_metadata`.
+2. Call `publish_context_edit` with the preview's `editing_revision`, `published_version_id` (omit it when null) and `result.result_hash`, the same `on_conflict` and edits (as `result_body_md` and `result_page_metadata`), a `reason` and a retained `idempotency_key`. The workspace review policy decides whether it publishes or waits for a person's approval.
+3. If the preview went stale, preview again and use a new key. Use the returned `version_id`; a merge publication creates a new one.
 
-Use `bring_in_context_version` to merge an immutable `commit_version_id` into an existing shared draft before further editing; omitting it uses the current published version. Send the draft's current `expected_editing_revision` and a retained `idempotency_key`, and use the returned revision afterward. A conflict without `on_conflict` saves nothing and offers `keep_both` and `latest`. This command does not accept a replacement body; use the existing update or patch tools for later edits. `preview_context_merge` previews publication against the current published version, not an arbitrary bring-in commit.
+`bring_in_context_version` merges a commit (by default the current published version) into a draft; send the draft's `expected_editing_revision` and use the returned revision. A draft that already contains the commit is not saved again.
 
 ## Register document references
 

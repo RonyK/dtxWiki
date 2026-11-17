@@ -13,6 +13,9 @@ from backend.domain.input_policy import (
 )
 from backend.utils.page_frontmatter import validate_frontmatter_input
 
+# Every authored Markdown body, whatever the request calls it.
+BODY_FIELDS = ("body_md", "body_markdown", "merged_body_markdown", "result_body_md")
+
 
 def validate_request_inputs(request):
     """Also callable at direct service entry points for constructed requests."""
@@ -26,7 +29,7 @@ def validate_request_inputs(request):
         value = getattr(request, key, None)
         if value is not None:
             setattr(request, key, validate_title(value, max_length=title_limit))
-    for key in ("body_md", "body_markdown", "merged_body_markdown"):
+    for key in BODY_FIELDS:
         value = getattr(request, key, None)
         if value is not None:
             validate_body(value)
@@ -140,7 +143,7 @@ class InputRequest(BaseModel):
                     f"Maximum {title_limit} Unicode code points after approved "
                     "edge-space normalization. Explicit input is never truncated."
                 )
-        for key in ("body_md", "body_markdown", "merged_body_markdown"):
+        for key in BODY_FIELDS:
             if key in properties:
                 properties[key]["maxLength"] = 1_000_000
                 if cls.__name__ != "LibrarySemanticMarkdownUpdateRequest":

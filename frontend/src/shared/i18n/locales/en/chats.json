@@ -291,6 +291,8 @@
       "base_version": "Base version",
       "editing_version": "Editing version",
       "cited_version": "Cited version",
+      "commit_version": "Merged-in version",
+      "expected_published_version": "Published version at preview",
       "search_query": "Search query",
       "query": "Search query",
       "context_page": "Document",
