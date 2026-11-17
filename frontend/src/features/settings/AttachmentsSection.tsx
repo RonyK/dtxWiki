@@ -21,6 +21,10 @@ import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { ImageViewerDialog } from "../../shared/components/ImageViewerDialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
+import {
+  ContextMediaUnreadableUsagePill,
+  ContextMediaUsageHistory,
+} from "../../shared/components/ContextMediaUsage";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
   SettingsEmptyState,
@@ -751,6 +755,9 @@ export function AttachmentsSection({
                             })}
                             tone={STATE_TONE[state]}
                           />
+                          {item.has_unreadable_usage ? (
+                            <ContextMediaUnreadableUsagePill />
+                          ) : null}
                           {item.is_mine ? (
                             <StatusPill
                               compact
@@ -825,6 +832,16 @@ export function AttachmentsSection({
                         <dd>{formatVersionTimestamp(item.created_at)}</dd>
                       </div>
                     </dl>
+
+                    {/* Server scope reads no workspace version, so it has no
+                        per-version history to offer. */}
+                    {!serverScope && item.usage_state !== "unused" ? (
+                      <ContextMediaUsageHistory
+                        assetId={item.asset_id}
+                        pageId={item.page_id}
+                        workspaceId={item.workspace_id}
+                      />
+                    ) : null}
 
                     {item.can_delete ? (
                       pendingDeleteId === attachmentKey(item) ? (
@@ -1073,7 +1090,7 @@ const STATE_FALLBACK: Record<AttachmentState, string> = {
 const STATE_HINT_FALLBACK: Record<AttachmentState, string> = {
   inUse: "Shown on the current published version of its page.",
   historyOnly: "Only referenced by older versions of its page.",
-  staging: "Uploaded into an edit nobody has saved yet, so it is held.",
+  staging: "An open draft retains this upload, which has not been inserted into the body yet.",
   unused:
     "No version of its page references it; the retention sweep will reclaim it.",
 };

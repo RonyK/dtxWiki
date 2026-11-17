@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from hashlib import sha256
-from typing import Annotated, Protocol
+from typing import Annotated, Literal, Protocol
 from urllib.parse import quote
 from uuid import UUID
 
@@ -40,7 +40,6 @@ from backend.context_media.domain import (
     MediaInUseError,
     MediaUsedInHistoryError,
     StaleUsageTokenError,
-    UsageState,
 )
 from backend.media.application import (
     DEFAULT_MAX_HTTP_RANGE_BYTES,
@@ -270,7 +269,7 @@ def create_context_media_router(
         actor: TargetResolvedRestActorDep,
         service: ServiceDep,
         access: AccessDep,
-        usage: Annotated[str, Query(pattern="^(used|unused)$")] = "used",
+        usage: Annotated[Literal["used", "unused"] | None, Query()] = None,
     ):
         try:
             true_workspace_id = access.require_page(
@@ -286,12 +285,10 @@ def create_context_media_router(
             actor = _target_scoped_route_actor(request, actor, workspace_id)
         except ContextMediaAccessError as exc:
             return _access_error_response(exc)
-        usage_filter = UsageState.UNUSED if usage == "unused" else UsageState.ACTIVE
         projections = service.list_page_assets(
             workspace_id=workspace_id,
             page_id=page_id,
-            usage=usage_filter,
-            viewer=_actor_identity(actor),
+            used=None if usage is None else usage == "used",
         )
         return {
             "data": [
@@ -613,11 +610,6 @@ def _asset_payload(
         "bytes": asset.logical_bytes,
         "association_state": asset.association_state.value,
         "usage_state": projection.usage_state.value,
-        "latest_draft_reference_count": projection.latest_draft_reference_count,
-        "current_published_reference_count": (
-            projection.current_published_reference_count
-        ),
-        "historical_reference_count": projection.historical_reference_count,
         "can_delete": projection.can_delete,
         "usage_token": projection.usage_token,
         "content_url": (

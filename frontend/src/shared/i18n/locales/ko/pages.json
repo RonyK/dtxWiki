@@ -525,8 +525,6 @@
     },
     "facts": {
       "size": "크기",
-      "references": "참조",
-      "referenceSummary": "초안 {{draftCount}}개, 게시본 {{publishedCount}}개, 이전 버전 {{historyCount}}개",
       "retained": "현재 또는 이전 페이지 버전에서 참조 중이므로 삭제할 수 없습니다."
     },
     "size": {
@@ -542,6 +540,20 @@
       "changed": "이 미디어가 변경되었습니다. 목록을 새로고침한 후 다시 시도하세요.",
       "inUse": "이 미디어는 현재 사용 중이므로 삭제할 수 없습니다.",
       "delete": "이 미디어를 삭제하지 못했습니다. 다시 시도하세요."
+    },
+    "usageDetails": {
+      "toggle": "사용 내역",
+      "unreadableBadge": "읽을 수 없는 버전 포함",
+      "unreadableHint": "읽을 수 없는 버전에서도 이 파일을 사용합니다. 삭제하면 그 버전의 이미지가 깨집니다.",
+      "loading": "사용 내역을 불러오는 중…",
+      "error": "사용 내역을 불러오지 못했습니다.",
+      "empty": "열람할 수 있는 버전에는 사용 내역이 없습니다.",
+      "unreadableEmpty": "열람할 수 있는 버전에는 사용 내역이 없습니다. 읽을 수 없는 버전에서 사용 중입니다.",
+      "unreadableNote": "읽을 수 없는 버전에서도 사용 중입니다.",
+      "openVersion": "버전 열기",
+      "more": "더 보기",
+      "references_one": "{{count}}회",
+      "references_other": "{{count}}회"
     }
   },
   "image": {

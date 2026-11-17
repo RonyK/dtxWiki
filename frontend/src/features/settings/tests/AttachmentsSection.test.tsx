@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000006";
@@ -14,6 +15,7 @@ vi.mock("../../../shared/api/contextMediaOrphans", () => ({
 }));
 vi.mock("../../../shared/api/contextMedia", () => ({
   deletePageContextMedia: vi.fn(),
+  getContextMediaAssetUsage: vi.fn(),
 }));
 vi.mock("../../../shared/api/workspace", () => ({
   getCurrentWorkspaceId: vi.fn(),
@@ -27,7 +29,7 @@ vi.mock("../../../shared/api/client", async (importOriginal) => ({
 }));
 
 import { ApiError, getApiBaseUrl } from "../../../shared/api/client";
-import { deletePageContextMedia } from "../../../shared/api/contextMedia";
+import { deletePageContextMedia, getContextMediaAssetUsage } from "../../../shared/api/contextMedia";
 import {
   listWorkspaceContextMediaAttachments,
   listAdminContextMediaAttachments,
@@ -51,9 +53,7 @@ const ATTACHMENT = {
   bytes: 2_400_000,
   association_state: "active" as const,
   usage_state: "unused" as const,
-  latest_draft_reference_count: 0,
-  current_published_reference_count: 0,
-  historical_reference_count: 0,
+  has_unreadable_usage: false,
   is_orphan: true,
   is_mine: true,
   can_delete: true,
@@ -75,7 +75,6 @@ const OTHERS_ATTACHMENT = {
   media_type: "image/jpeg",
   bytes: 900_000,
   usage_state: "active" as const,
-  current_published_reference_count: 1,
   is_orphan: false,
   is_mine: false,
   can_delete: false,
@@ -856,4 +855,74 @@ it("keeps identical asset IDs from separate workspaces independent during bulk c
     ["00000000-0000-4000-8000-000000000006", ATTACHMENT.asset_id, ATTACHMENT.usage_token],
     ["00000000-0000-4000-8000-000000000007", ATTACHMENT.asset_id, ATTACHMENT.usage_token],
   ]);
+});
+
+it("loads usage only on expansion, shows unreadable usage, and hides details in server scope", async () => {
+  vi.clearAllMocks();
+  const user = userEvent.setup();
+  const item = { ...OTHERS_ATTACHMENT, has_unreadable_usage: true };
+  vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(page([item]) as never);
+  vi.mocked(listAdminContextMediaAttachments).mockResolvedValue(page([item]) as never);
+  vi.mocked(getContextMediaAssetUsage).mockResolvedValue({
+    items: [], has_unreadable_usage: true, next_cursor: null,
+  });
+  const view = render(<AttachmentsSection workspaceId={WORKSPACE_ID} />);
+  await screen.findByText("Includes versions you can't read");
+  expect(getContextMediaAssetUsage).not.toHaveBeenCalled();
+  const toggle = screen.getByRole("button", { name: "Usage history" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(document.getElementById(toggle.getAttribute("aria-controls")!)).toBeVisible();
+  await screen.findByText("No usage in versions you can read. This file is used in versions you can't read.");
+  expect(getContextMediaAssetUsage).toHaveBeenCalledWith(WORKSPACE_ID, item.asset_id, undefined);
+  await user.click(toggle);
+  await user.click(toggle);
+  expect(getContextMediaAssetUsage).toHaveBeenCalledTimes(1);
+  view.rerender(<AttachmentsSection scope="server" workspaceId={WORKSPACE_ID} />);
+  await screen.findByText("Includes versions you can't read");
+  expect(screen.queryByRole("button", { name: "Usage history" })).not.toBeInTheDocument();
+});
+
+it("retries usage pagination and discards a response after switching workspaces", async () => {
+  vi.clearAllMocks();
+  const user = userEvent.setup();
+  const item = { ...OTHERS_ATTACHMENT, has_unreadable_usage: true };
+  vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(page([item]) as never);
+  const usage = {
+    version_id: "00000000-0000-0000-0000-000000000801",
+    version_no: 7,
+    history_status: "published_snapshot" as const,
+    reference_count: 2,
+    created_at: "2026-08-20T10:00:00Z",
+    last_saved_at: "2026-08-21T10:00:00Z",
+  };
+  let finish!: (result: { items: typeof usage[]; has_unreadable_usage: boolean; next_cursor: null }) => void;
+  vi.mocked(getContextMediaAssetUsage)
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce({ items: [usage], has_unreadable_usage: true, next_cursor: "next" })
+    .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  // The version link is a router Link.
+  const view = render(<MemoryRouter><AttachmentsSection workspaceId={WORKSPACE_ID} /></MemoryRouter>);
+  await user.click(await screen.findByRole("button", { name: "Usage history" }));
+  await screen.findByText("Could not load usage history.");
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByText("v7");
+  expect(screen.getByText("2 references")).toBeInTheDocument();
+  expect(screen.getByText("Also used in versions you can't read.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open version" })).toHaveAttribute(
+    "href", `/workspaces/${WORKSPACE_ID}/context/pages/${item.page_id}?version=${usage.version_id}`,
+  );
+  await user.click(screen.getByRole("button", { name: "Load more" }));
+  expect(getContextMediaAssetUsage).toHaveBeenLastCalledWith(WORKSPACE_ID, item.asset_id, "next");
+  expect(screen.getByText("Loading usage history…")).toBeInTheDocument();
+  const nextWorkspace = "00000000-0000-4000-8000-000000000007";
+  vi.mocked(listWorkspaceContextMediaAttachments).mockResolvedValue(page([
+    { ...item, workspace_id: nextWorkspace, original_filename: "next-workspace.png" },
+  ]) as never);
+  view.rerender(<MemoryRouter><AttachmentsSection workspaceId={nextWorkspace} /></MemoryRouter>);
+  await screen.findByText("next-workspace.png");
+  await act(async () => finish({ items: [{ ...usage, version_no: 99 }], has_unreadable_usage: true, next_cursor: null }));
+  expect(screen.queryByText("v99")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Usage history" })).toHaveAttribute("aria-expanded", "false");
 });

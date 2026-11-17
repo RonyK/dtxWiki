@@ -231,10 +231,16 @@ class AssetUsageSnapshot:
     latest_draft_reference_count: int
     current_published_reference_count: int
     historical_reference_count: int
+    has_unreadable_usage: bool = False
+    """Some referencing version is unreadable for the reader the snapshot was
+    built for. Reader-dependent, so deliberately not a ``usage_token`` input:
+    the token, ``state`` and every count above always cover every version."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.asset, ContextMediaAssetRecord):
             raise ValueError("asset must be a ContextMediaAssetRecord")
+        if not isinstance(self.has_unreadable_usage, bool):
+            raise ValueError("has_unreadable_usage must be a bool")
         for name in ("latest_draft_version_id", "current_published_version_id"):
             value = getattr(self, name)
             if value is not None:
@@ -277,20 +283,16 @@ class AssetUsageSnapshot:
 class ContextMediaAssetProjection:
     asset: ContextMediaAssetRecord
     usage_state: UsageState
-    latest_draft_reference_count: int
-    current_published_reference_count: int
-    historical_reference_count: int
     usage_token: str
+    has_unreadable_usage: bool = False
 
     @classmethod
     def from_snapshot(cls, snapshot: AssetUsageSnapshot) -> ContextMediaAssetProjection:
         return cls(
             asset=snapshot.asset,
             usage_state=snapshot.state,
-            latest_draft_reference_count=snapshot.latest_draft_reference_count,
-            current_published_reference_count=snapshot.current_published_reference_count,
-            historical_reference_count=snapshot.historical_reference_count,
             usage_token=snapshot.usage_token,
+            has_unreadable_usage=snapshot.has_unreadable_usage,
         )
 
     @property
@@ -327,38 +329,49 @@ class ContextMediaAttachmentSnapshot:
 class WorkspaceUsagePage:
     """What SQL actually saw for one `list_workspace_usage` call.
 
-    260912 review: the caller (``ListWorkspaceMedia.execute``) applies the
-    ``usage`` filter to ``snapshots`` in Python, on a value
-    (``usage_state``) that has no SQL column -- it is derived from masked
-    reference counts, so it cannot be pushed into the WHERE clause without a
-    separate design. If ``has_more``/``next_after`` were derived from the
-    FILTERED result instead of this page, a window where SQL saw more rows
-    than the filter kept would under-report ``has_more`` and truncate the
-    listing with no error and no indication anything was cut off -- exactly
-    the bug this type exists to make structurally impossible: the filter can
-    shrink ``snapshots``, but it can no longer touch ``has_more`` or
-    ``next_after``, because those are set here, before the caller ever sees
-    the rows.
+    Every filter, including ``usage``, runs in SQL before ``limit + 1``, so
+    ``snapshots`` is exactly the returned window.
 
     ``has_more``: true iff the adapter's internal ``limit + 1`` probe fetch
-    actually returned that extra row -- i.e. more rows exist beyond
-    ``snapshots``, regardless of how many of ``snapshots`` survive any filter
-    applied afterward.
+    actually returned that extra row.
 
     ``next_after``: the keyset cursor value `(created_at, id)` of the last
     row in ``snapshots`` -- the last row this page actually returned, not
     the probe row the adapter fetched and discarded to compute ``has_more``.
     Cursoring off the probe row would skip it entirely on the next page
     (`created_at < probe.created_at` excludes the probe row along with
-    everything after it). Not the last row that survives a caller's later
-    filter, either, and not computed at all when ``has_more`` is false, since
-    no cursor is issued for a genuinely final page. A row a Python filter
-    later discards still advances the cursor, which is what lets a page
-    contain zero filtered items and still carry a valid ``next_after`` for
-    the caller to continue from.
+    everything after it). ``None`` when ``has_more`` is false.
     """
 
     snapshots: tuple[ContextMediaAttachmentSnapshot, ...]
+    has_more: bool
+    next_after: tuple[datetime, UUID] | None
+
+
+@dataclass(frozen=True, slots=True)
+class AssetVersionUsage:
+    """One readable version that references an asset."""
+
+    version_id: UUID
+    version_no: int
+    version_status: str
+    reference_count: int
+    created_at: datetime
+    last_saved_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class AssetVersionUsagePage:
+    """One keyset page of an asset's readable version usage.
+
+    ``has_unreadable_usage`` covers the whole asset, not just this page, so a
+    caller can say "also used in versions you cannot read" even when
+    ``items`` is empty.
+    """
+
+    items: tuple[AssetVersionUsage, ...]
+    current_published_version_id: UUID | None
+    has_unreadable_usage: bool
     has_more: bool
     next_after: tuple[datetime, UUID] | None
 
@@ -368,7 +381,7 @@ class ContextMediaAttachmentProjection:
     """The display projection of :class:`ContextMediaAttachmentSnapshot`.
 
     Wraps :class:`ContextMediaAssetProjection` for the same reason the snapshot
-    wraps ``AssetUsageSnapshot``: usage counts and ``usage_token`` are shared
+    wraps ``AssetUsageSnapshot``: usage state and ``usage_token`` are shared
     with the page-level listing.
     """
 

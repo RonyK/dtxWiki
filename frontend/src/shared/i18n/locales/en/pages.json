@@ -525,8 +525,6 @@
     },
     "facts": {
       "size": "Size",
-      "references": "References",
-      "referenceSummary": "Draft {{draftCount}}, published {{publishedCount}}, history {{historyCount}}",
       "retained": "Retained by a current or historical page version and cannot be deleted."
     },
     "size": {
@@ -542,6 +540,20 @@
       "changed": "This media changed. Refresh the list and try again.",
       "inUse": "This media is now in use and cannot be deleted.",
       "delete": "Could not delete this media. Try again."
+    },
+    "usageDetails": {
+      "toggle": "Usage history",
+      "unreadableBadge": "Includes versions you can't read",
+      "unreadableHint": "This file is also used in versions you can't read. Deleting it will break images in those versions.",
+      "loading": "Loading usage history…",
+      "error": "Could not load usage history.",
+      "empty": "No usage in versions you can read.",
+      "unreadableEmpty": "No usage in versions you can read. This file is used in versions you can't read.",
+      "unreadableNote": "Also used in versions you can't read.",
+      "references_one": "{{count}} reference",
+      "references_other": "{{count}} references",
+      "openVersion": "Open version",
+      "more": "Load more"
     }
   },
   "image": {

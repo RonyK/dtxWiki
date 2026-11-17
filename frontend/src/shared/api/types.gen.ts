@@ -1592,6 +1592,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/context/media/assets/{asset_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Context Media Asset Usage */
+        get: operations["list_context_media_asset_usage_api_v1_workspaces__workspace_id__context_media_assets__asset_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/context/media/attachments": {
         parameters: {
             query?: never;
@@ -3897,10 +3914,8 @@ export interface components {
              * Format: uuid
              */
             created_for_version_id: string;
-            /** Current Published Reference Count */
-            current_published_reference_count: number;
-            /** Historical Reference Count */
-            historical_reference_count: number;
+            /** Has Unreadable Usage */
+            has_unreadable_usage: boolean;
             /** Is Mine */
             is_mine: boolean;
             /** Is Orphan */
@@ -3910,8 +3925,6 @@ export interface components {
              * @enum {string}
              */
             kind: "image" | "audio" | "video";
-            /** Latest Draft Reference Count */
-            latest_draft_reference_count: number;
             /** Logical Ref */
             logical_ref: string;
             /** Media Type */
@@ -5445,17 +5458,11 @@ export interface components {
             can_delete: boolean;
             /** Content Url */
             content_url: string;
-            /** Current Published Reference Count */
-            current_published_reference_count: number;
-            /** Historical Reference Count */
-            historical_reference_count: number;
             /**
              * Id
              * Format: uuid
              */
             id: string;
-            /** Latest Draft Reference Count */
-            latest_draft_reference_count: number;
             /** Logical Ref */
             logical_ref: string;
             media_type: components["schemas"]["ContextImageMediaType"];
@@ -5468,6 +5475,47 @@ export interface components {
             usage_state: "active" | "history_only" | "unused";
             /** Usage Token */
             usage_token: string;
+        };
+        /** ContextMediaAssetUsageData */
+        ContextMediaAssetUsageData: {
+            /** Has Unreadable Usage */
+            has_unreadable_usage: boolean;
+            /** Items */
+            items: components["schemas"]["ContextMediaAssetVersionUsagePayload"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** ContextMediaAssetUsageResponse */
+        ContextMediaAssetUsageResponse: {
+            data: components["schemas"]["ContextMediaAssetUsageData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /**
+         * ContextMediaAssetVersionUsagePayload
+         * @description One version, readable by the caller, that references the asset.
+         */
+        ContextMediaAssetVersionUsagePayload: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * History Status
+             * @enum {string}
+             */
+            history_status: "current_draft" | "published_snapshot" | "closed" | "discarded_draft" | "superseded_snapshot";
+            /** Last Saved At */
+            last_saved_at: string | null;
+            /** Reference Count */
+            reference_count: number;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version No */
+            version_no: number;
         };
         /** ContextMediaAttachmentListData */
         ContextMediaAttachmentListData: {
@@ -5503,9 +5551,15 @@ export interface components {
          *     asset would appear, and a ``Literal`` there turns that row into a 500 on
          *     response validation rather than a row the reader can act on.
          *
-         *     ``can_delete`` answers "may THIS caller delete this now", combining usage,
-         *     editing ownership and workspace role. Both listings respect editing
-         *     ownership; this workspace-wide listing is also readable by a viewer.
+         *     ``can_delete`` answers "may THIS caller delete this now", combining usage
+         *     across every version with the caller's workspace role. This
+         *     workspace-wide listing is also readable by a viewer.
+         *
+         *     ``usage_state`` counts every version, including versions the caller
+         *     cannot read: deleting a file such a version still references would break
+         *     that version. ``has_unreadable_usage`` says that some of that usage is in
+         *     versions the caller cannot read, without naming them or counting it.
+         *     Per-version counts come from the asset usage endpoint.
          */
         ContextMediaAttachmentPayload: {
             /**
@@ -5538,10 +5592,8 @@ export interface components {
              * Format: uuid
              */
             created_for_version_id: string;
-            /** Current Published Reference Count */
-            current_published_reference_count: number;
-            /** Historical Reference Count */
-            historical_reference_count: number;
+            /** Has Unreadable Usage */
+            has_unreadable_usage: boolean;
             /** Is Mine */
             is_mine: boolean;
             /** Is Orphan */
@@ -5551,8 +5603,6 @@ export interface components {
              * @enum {string}
              */
             kind: "image" | "audio" | "video";
-            /** Latest Draft Reference Count */
-            latest_draft_reference_count: number;
             /** Logical Ref */
             logical_ref: string;
             /** Media Type */
@@ -5641,10 +5691,9 @@ export interface components {
          * @description A page-owned media asset written into no version's Markdown -- either
          *     never (an upload abandoned mid-edit, the usual case) or no longer.
          *
-         *     An asset still protected by an open "editing" session (P3.4:
-         *     ``created_for_version_id`` names a version whose own status is
-         *     ``"editing"``) is never listed here at all -- that is an upload in
-         *     progress, not an orphan.
+         *     An asset still protected by an open draft (``created_for_version_id``
+         *     names a version whose own status is ``"draft"``) is never listed here at
+         *     all -- that is an upload in progress, not an orphan.
          *
          *     Not retention-gated -- every current orphan is listed regardless of
          *     age; only automatic removal (the ``context_media_orphan_sweep`` job) is
@@ -19674,6 +19723,77 @@ export interface operations {
             };
         };
     };
+    list_context_media_asset_usage_api_v1_workspaces__workspace_id__context_media_assets__asset_id__usage_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextMediaAssetUsageResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     list_workspace_context_media_attachments_api_v1_workspaces__workspace_id__context_media_attachments_get: {
         parameters: {
             query?: {
@@ -20977,7 +21097,7 @@ export interface operations {
     list_page_media_api_v1_workspaces__workspace_id__context_pages__page_id__media_get: {
         parameters: {
             query?: {
-                usage?: string;
+                usage?: ("used" | "unused") | null;
             };
             header?: never;
             path: {

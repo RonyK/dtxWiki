@@ -11,10 +11,15 @@ from __future__ import annotations
 import base64
 import binascii
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
-from backend.context_media.domain import ContextMediaAttachmentProjection
+from backend.context_media.domain import (
+    AssetVersionUsagePage,
+    ContextMediaAttachmentProjection,
+)
+from backend.services.context_lifecycle import project_context_version
 
 _CURSOR_PREFIX = "attach1:"
 
@@ -108,9 +113,7 @@ def attachment_read_projection(
         "bytes": record.logical_bytes,
         "association_state": record.association_state.value,
         "usage_state": asset.usage_state.value,
-        "latest_draft_reference_count": asset.latest_draft_reference_count,
-        "current_published_reference_count": (asset.current_published_reference_count),
-        "historical_reference_count": asset.historical_reference_count,
+        "has_unreadable_usage": asset.has_unreadable_usage,
         "is_orphan": projection.is_orphan,
         "is_mine": (
             record.created_by.kind == viewer_actor_kind
@@ -130,4 +133,42 @@ def attachment_read_projection(
         "created_by_actor_kind": record.created_by.kind,
         "created_by_actor_id": str(record.created_by.id),
         "created_at": projection.created_at,
+    }
+
+
+def asset_usage_read_projection(page: AssetVersionUsagePage) -> dict[str, Any]:
+    """The wire shape for one page of an asset's readable version usage.
+
+    ``history_status`` reuses the Context history labels. Every listed
+    version is readable by the caller, so draft state is always exposed.
+    """
+
+    published = SimpleNamespace(
+        current_published_version_id=page.current_published_version_id
+    )
+    return {
+        "items": [
+            {
+                "version_id": item.version_id,
+                "version_no": item.version_no,
+                "history_status": project_context_version(
+                    published,
+                    SimpleNamespace(
+                        id=item.version_id, version_status=item.version_status
+                    ),
+                    visible_version_id=None,
+                    expose_draft_state=True,
+                ).history_status,
+                "reference_count": item.reference_count,
+                "created_at": item.created_at,
+                "last_saved_at": item.last_saved_at,
+            }
+            for item in page.items
+        ],
+        "has_unreadable_usage": page.has_unreadable_usage,
+        "next_cursor": (
+            encode_attachment_cursor(*page.next_after)
+            if page.has_more and page.next_after is not None
+            else None
+        ),
     }

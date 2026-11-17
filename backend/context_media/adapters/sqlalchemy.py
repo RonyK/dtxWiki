@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, case, delete, false, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from backend.context_media.domain import (
     ActorIdentity,
     AssetUsageSnapshot,
+    AssetVersionUsage,
+    AssetVersionUsagePage,
     AssociationState,
     ContentCapability,
     ContextMediaAssetRecord,
@@ -50,6 +53,7 @@ from backend.repositories.context_media_orphans import (
     context_media_orphan_clause,
 )
 from backend.repositories.context_visibility import (
+    explicit_context_version_visible_expression,
     visible_context_page_expression,
 )
 from backend.repositories.media_blob_reference import (
@@ -58,8 +62,9 @@ from backend.repositories.media_blob_reference import (
 )
 from backend.repositories.workspace_scoped import (
     select_in_workspace,
+    select_in_workspace_by_ids,
 )
-from backend.services.actor_visible_read import context_version_is_visible
+from backend.services.actor_visible_read import context_media_version_is_readable
 from backend.services.db_write_intent import acquire_write_intent
 
 DEFAULT_CONTEXT_LOGICAL_QUOTA_BYTES = 10_000_000_000
@@ -414,37 +419,45 @@ class SqlAlchemyContextMediaRepository:
         workspace_id: UUID,
         page_id: UUID,
         *,
-        viewer: ActorIdentity | None = None,
+        used: bool | None = None,
     ) -> tuple[AssetUsageSnapshot, ...]:
+        """Every live asset of one page, oldest first.
+
+        ``used`` filters in SQL on whether any version references the asset.
+        Snapshots carry no reader, so their ``has_unreadable_usage`` is not
+        meaningful; this listing is editor-gated and does not expose it.
+        """
+
         page = self._page(workspace_id, page_id)
+        conditions = [
+            ContextMediaAsset.page_id == page_id,
+            ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
+        ]
+        if used is not None:
+            conditions.append(
+                _asset_is_referenced() if used else ~_asset_is_referenced()
+            )
         assets = tuple(
             self._session.scalars(
                 select_in_workspace(
                     ContextMediaAsset,
                     workspace_id=workspace_id,
-                    conditions=(ContextMediaAsset.page_id == page_id,),
+                    conditions=tuple(conditions),
                 ).order_by(ContextMediaAsset.created_at, ContextMediaAsset.id)
             ).all()
         )
-        usages = tuple(
-            self._session.scalars(
-                select_in_workspace(
-                    ContextMediaUsage,
-                    workspace_id=workspace_id,
-                    conditions=(ContextMediaUsage.page_id == page_id,),
-                )
-            ).all()
+        totals = _usage_totals(
+            self._session,
+            workspace_id=workspace_id,
+            asset_ids=(asset.id for asset in assets),
+            reader=None,
         )
-        grouped: dict[UUID, list[ContextMediaUsage]] = defaultdict(list)
-        for usage in usages:
-            grouped[usage.asset_id].append(usage)
         return tuple(
             _usage_snapshot(
-                self._session,
                 asset,
-                page,
-                grouped.get(asset.id, ()),
-                viewer=viewer,
+                latest_draft_version_id=page.latest_draft_version_id,
+                current_published_version_id=page.current_published_version_id,
+                totals=totals.get(asset.id),
             )
             for asset in assets
         )
@@ -458,35 +471,22 @@ class SqlAlchemyContextMediaRepository:
         created_by: ActorIdentity | None = None,
         page_id: UUID | None = None,
         orphan_only: bool = False,
+        used: bool | None = None,
         filename_contains: str | None = None,
         after: tuple[datetime, UUID] | None = None,
         limit: int = 50,
     ) -> WorkspaceUsagePage:
         """One page of a workspace's attachments, newest first.
 
-        The SQL asset window includes page visibility before limit + 1.
-        Pages, usage rows and preview versions are then read in batches for
-        the returned window. Preview authorization does not replace parent
-        page visibility, and never changes pagination after the SQL fetch.
+        Page visibility and every filter apply in SQL before ``limit + 1``.
+        Usage totals and preview candidates for the returned window are then
+        read in one batch each, so the statement count does not grow with
+        the window size.
         """
 
-        actor = (
-            ActorContext(
-                actor_kind=viewer.kind,
-                actor_id=str(viewer.id),
-                workspace_id=workspace_id,
-                workspace_role=viewer_role or "viewer",
-                role=viewer_role,
-            )
-            if viewer is not None
-            else None
-        )
+        actor = _reader(workspace_id, viewer, viewer_role)
         conditions = [
-            ContextPage.workspace_id == workspace_id,
-            (ContextPage.lifecycle_status != "archived")
-            if actor_can_read_drafts(actor)
-            else visible_context_page_expression(actor),
-            ContextMediaAsset.workspace_id == workspace_id,
+            _page_visible_to(actor),
             ContextMediaAsset.association_state != AssociationState.TOMBSTONED.value,
         ]
         if created_by is not None:
@@ -500,6 +500,10 @@ class SqlAlchemyContextMediaRepository:
             conditions.append(ContextMediaAsset.page_id == page_id)
         if orphan_only:
             conditions.append(context_media_orphan_clause())
+        if used is not None:
+            conditions.append(
+                _asset_is_referenced() if used else ~_asset_is_referenced()
+            )
         if filename_contains:
             # escape() so a user typing % or _ searches for those characters
             # rather than turning the box into a wildcard they cannot see.
@@ -526,20 +530,20 @@ class SqlAlchemyContextMediaRepository:
                 )
             )
 
-        # `limit + 1`: the probe row that used to be the caller's job (a
-        # route passing `limit + 1` down and computing paging state on
-        # whatever survived a Python filter applied afterward -- see
-        # `WorkspaceUsagePage`'s docstring for why that silently truncated a
-        # filtered listing). `has_more`/`next_after` below are fixed from
-        # this SQL-ordered fetch before any caller-side filtering runs.
         fetched = tuple(
             self._session.execute(
-                select(
+                select_in_workspace(
                     ContextMediaAsset,
-                    context_media_orphan_clause().label("is_orphan"),
+                    workspace_id=workspace_id,
+                    conditions=tuple(conditions),
                 )
-                .join(ContextPage, ContextPage.id == ContextMediaAsset.page_id)
-                .where(*conditions)
+                .join(ContextPage, _asset_page_join())
+                .add_columns(
+                    context_media_orphan_clause().label("is_orphan"),
+                    ContextPage.title,
+                    ContextPage.latest_draft_version_id,
+                    ContextPage.current_published_version_id,
+                )
                 .order_by(
                     ContextMediaAsset.created_at.desc(),
                     ContextMediaAsset.id.desc(),
@@ -549,18 +553,8 @@ class SqlAlchemyContextMediaRepository:
         )
         has_more = len(fetched) > limit
         rows = fetched[:limit]
-        # The last RETURNED row's key -- not the probe row's. The probe row
-        # (index `limit`, present only when `has_more`) is discarded here and
-        # never reaches a caller, so cursoring off its key would skip it on
-        # the next page: `created_at < probe.created_at` excludes the probe
-        # row itself along with everything after it. Cursoring off
-        # `rows[-1]` instead resumes exactly where the returned page ended.
-        # A filter applied below `rows` can shrink `snapshots`, but by
-        # construction cannot reach back and change `next_after`, because it
-        # is fixed here first. `None` whenever `has_more` is false: a
-        # genuinely final page issues no cursor, and fixing that here means
-        # every caller inherits it for free instead of each one having to
-        # remember to gate on `has_more` itself.
+        # The last RETURNED row's key, not the discarded probe row's: cursoring
+        # off the probe would skip it on the next page.
         next_after = (rows[-1][0].created_at, rows[-1][0].id) if has_more else None
         if not rows:
             return WorkspaceUsagePage(
@@ -568,91 +562,175 @@ class SqlAlchemyContextMediaRepository:
             )
 
         assets = [row[0] for row in rows]
-        page_ids = {asset.page_id for asset in assets}
-        pages = {
-            page.id: page
-            for page in self._session.scalars(
-                select(ContextPage).where(
-                    ContextPage.workspace_id == workspace_id,
-                    ContextPage.id.in_(page_ids),
-                )
-            ).all()
-        }
-        version_ids = {asset.created_for_version_id for asset in assets}
-        # Warms the identity map; the result is deliberately unused.
-        self._session.scalars(
-            select(ContextPageVersion).where(
-                ContextPageVersion.workspace_id == workspace_id,
-                ContextPageVersion.id.in_(version_ids),
+        totals = _usage_totals(
+            self._session,
+            workspace_id=workspace_id,
+            asset_ids=(asset.id for asset in assets),
+            reader=actor,
+        )
+        previews = _preview_version_ids(
+            self._session,
+            workspace_id=workspace_id,
+            assets=assets,
+            current_published_by_page={
+                asset.page_id: published_id for asset, _, _, _, published_id in rows
+            },
+            reader=actor,
+        )
+        snapshots = tuple(
+            ContextMediaAttachmentSnapshot(
+                usage=_usage_snapshot(
+                    asset,
+                    latest_draft_version_id=latest_draft_id,
+                    current_published_version_id=published_id,
+                    totals=totals.get(asset.id),
+                ),
+                page_title=page_title,
+                kind=asset.kind,
+                created_at=asset.created_at,
+                is_orphan=bool(is_orphan),
+                preview_version_id=previews.get(asset.id),
+            )
+            for asset, is_orphan, page_title, latest_draft_id, published_id in rows
+        )
+        return WorkspaceUsagePage(
+            snapshots=snapshots, has_more=has_more, next_after=next_after
+        )
+
+    def asset_usage_snapshots(
+        self, workspace_id: UUID, asset_ids: Iterable[UUID]
+    ) -> dict[UUID, AssetUsageSnapshot]:
+        """Usage snapshots for a known batch of assets, keyed by asset id.
+
+        For a caller holding no workspace read (the server-admin listing):
+        every referencing version counts as unreadable.
+        """
+
+        ids = list(dict.fromkeys(asset_ids))
+        if not ids:
+            return {}
+        rows = self._session.execute(
+            select_in_workspace(
+                ContextMediaAsset,
+                workspace_id=workspace_id,
+                conditions=(ContextMediaAsset.id.in_(ids),),
+            )
+            .join(ContextPage, _asset_page_join())
+            .add_columns(
+                ContextPage.latest_draft_version_id,
+                ContextPage.current_published_version_id,
             )
         ).all()
-        asset_ids = {asset.id for asset in assets}
-        grouped: dict[UUID, list[ContextMediaUsage]] = defaultdict(list)
-        for usage in self._session.scalars(
-            select(ContextMediaUsage).where(
-                ContextMediaUsage.workspace_id == workspace_id,
-                ContextMediaUsage.asset_id.in_(asset_ids),
+        totals = _usage_totals(
+            self._session,
+            workspace_id=workspace_id,
+            asset_ids=ids,
+            reader=None,
+        )
+        return {
+            asset.id: _usage_snapshot(
+                asset,
+                latest_draft_version_id=latest_draft_id,
+                current_published_version_id=published_id,
+                totals=totals.get(asset.id),
             )
-        ).all():
-            grouped[usage.asset_id].append(usage)
-
-        preview_versions = {
-            version.id: version
-            for version in self._session.scalars(
-                select(ContextPageVersion).where(
-                    ContextPageVersion.workspace_id == workspace_id,
-                    ContextPageVersion.id.in_(
-                        version_ids
-                        | {u.page_version_id for uses in grouped.values() for u in uses}
-                    ),
-                )
-            ).all()
+            for asset, latest_draft_id, published_id in rows
         }
-        snapshots = []
-        for asset, is_orphan in rows:
-            page = pages.get(asset.page_id)
-            if page is None:
-                # The asset's page FK is NOT NULL and workspace-scoped, so a
-                # STABLE snapshot can't reach this; it takes a concurrent
-                # delete of the page between the asset query above and this
-                # one -- a separate SELECT, not a transaction boundary this
-                # session enforces (260912 review: this comment used to claim
-                # "unreachable through the API," which overstated it). Skip
-                # rather than raise, so one bad row can't take out the whole
-                # listing -- and skipping here changes only `snapshots`, never
-                # `has_more`/`next_after`, which were already fixed above from
-                # the raw SQL fetch (`WorkspaceUsagePage`'s docstring).
-                continue
-            # Preview uses a readable reference or the exact creating version.
-            candidates = [u.page_version_id for u in grouped.get(asset.id, ())]
-            candidates.append(asset.created_for_version_id)
-            preview_version_id = next(
-                (
-                    version_id
-                    for version_id in candidates
-                    if version_id in preview_versions
-                    and context_version_is_visible(preview_versions[version_id], actor)
+
+    def list_asset_version_usage(
+        self,
+        workspace_id: UUID,
+        asset_id: UUID,
+        *,
+        viewer: ActorIdentity,
+        viewer_role: str,
+        after: tuple[datetime, UUID] | None = None,
+        limit: int = 25,
+    ) -> AssetVersionUsagePage | None:
+        """Readable versions that reference one asset, newest first.
+
+        ``None`` when the asset is missing, tombstoned, or on a page the
+        reader cannot see -- the same parent-page rule as the workspace
+        listing. Unreadable versions are filtered in SQL before
+        ``limit + 1`` and only ever surface as ``has_unreadable_usage``.
+        """
+
+        reader = _reader(workspace_id, viewer, viewer_role)
+        target = self._session.execute(
+            select_in_workspace(
+                ContextMediaAsset,
+                workspace_id=workspace_id,
+                conditions=(
+                    ContextMediaAsset.id == asset_id,
+                    ContextMediaAsset.association_state
+                    != AssociationState.TOMBSTONED.value,
+                    _page_visible_to(reader),
                 ),
-                None,
             )
-            snapshots.append(
-                ContextMediaAttachmentSnapshot(
-                    usage=_usage_snapshot(
-                        self._session,
-                        asset,
-                        page,
-                        grouped.get(asset.id, ()),
-                        viewer=viewer,
+            .join(ContextPage, _asset_page_join())
+            .with_only_columns(ContextPage.current_published_version_id)
+        ).one_or_none()
+        if target is None:
+            return None
+        version = aliased(ContextPageVersion)
+        usage = ContextMediaUsage
+        conditions = [
+            usage.asset_id == asset_id,
+            explicit_context_version_visible_expression(version, reader),
+        ]
+        if after is not None:
+            cursor_created_at, cursor_version_id = after
+            conditions.append(
+                or_(
+                    version.created_at < cursor_created_at,
+                    and_(
+                        version.created_at == cursor_created_at,
+                        version.id < cursor_version_id,
                     ),
-                    page_title=page.title,
-                    kind=asset.kind,
-                    created_at=asset.created_at,
-                    is_orphan=bool(is_orphan),
-                    preview_version_id=preview_version_id,
                 )
             )
-        return WorkspaceUsagePage(
-            snapshots=tuple(snapshots), has_more=has_more, next_after=next_after
+        fetched = self._session.execute(
+            select_in_workspace(
+                usage, workspace_id=workspace_id, conditions=tuple(conditions)
+            )
+            .join(version, _usage_version_join(version))
+            .with_only_columns(
+                version.id,
+                version.version_no,
+                version.version_status,
+                usage.reference_count,
+                version.created_at,
+                version.last_saved_at,
+            )
+            .order_by(version.created_at.desc(), version.id.desc())
+            .limit(limit + 1)
+        ).all()
+        has_more = len(fetched) > limit
+        rows = fetched[:limit]
+        totals = _usage_totals(
+            self._session,
+            workspace_id=workspace_id,
+            asset_ids=(asset_id,),
+            reader=reader,
+        )
+        return AssetVersionUsagePage(
+            items=tuple(
+                AssetVersionUsage(
+                    version_id=row.id,
+                    version_no=row.version_no,
+                    version_status=row.version_status,
+                    reference_count=row.reference_count,
+                    created_at=row.created_at,
+                    last_saved_at=row.last_saved_at,
+                )
+                for row in rows
+            ),
+            current_published_version_id=target.current_published_version_id,
+            has_unreadable_usage=(
+                asset_id in totals and totals[asset_id].has_unreadable
+            ),
+            has_more=has_more,
+            next_after=(rows[-1].created_at, rows[-1].id) if has_more else None,
         )
 
     def get_page_asset_usage(
@@ -665,16 +743,18 @@ class SqlAlchemyContextMediaRepository:
         )
         if asset is None or asset.page_id != page_id:
             return None
-        usages = tuple(
-            self._session.scalars(
-                select(ContextMediaUsage).where(
-                    ContextMediaUsage.workspace_id == workspace_id,
-                    ContextMediaUsage.page_id == page_id,
-                    ContextMediaUsage.asset_id == asset_id,
-                )
-            ).all()
+        totals = _usage_totals(
+            self._session,
+            workspace_id=workspace_id,
+            asset_ids=(asset_id,),
+            reader=None,
         )
-        return _usage_snapshot(self._session, asset, page, usages)
+        return _usage_snapshot(
+            asset,
+            latest_draft_version_id=page.latest_draft_version_id,
+            current_published_version_id=page.current_published_version_id,
+            totals=totals.get(asset_id),
+        )
 
     def tombstone_and_enqueue_gc(self, snapshot: AssetUsageSnapshot) -> None:
         workspace_id = snapshot.asset.workspace_id
@@ -700,20 +780,32 @@ class SqlAlchemyContextMediaRepository:
         )
         if row is None or row.association_state == AssociationState.TOMBSTONED.value:
             raise ContextMediaNotFoundError("Context media asset was not found")
-        usages = tuple(
-            self._session.scalars(
-                select(ContextMediaUsage)
-                .where(
-                    ContextMediaUsage.workspace_id == workspace_id,
+        # Lock the usage rows, then recount them under that lock with the
+        # same aggregator every listing uses.
+        self._session.execute(
+            select_in_workspace(
+                ContextMediaUsage,
+                workspace_id=workspace_id,
+                conditions=(
                     ContextMediaUsage.page_id == page_id,
                     ContextMediaUsage.asset_id == row.id,
-                )
-                .order_by(ContextMediaUsage.page_version_id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            ).all()
+                ),
+            )
+            .with_only_columns(ContextMediaUsage.page_version_id)
+            .order_by(ContextMediaUsage.page_version_id)
+            .with_for_update()
+        ).all()
+        locked_snapshot = _usage_snapshot(
+            row,
+            latest_draft_version_id=page.latest_draft_version_id,
+            current_published_version_id=page.current_published_version_id,
+            totals=_usage_totals(
+                self._session,
+                workspace_id=workspace_id,
+                asset_ids=(row.id,),
+                reader=None,
+            ).get(row.id),
         )
-        locked_snapshot = _usage_snapshot(self._session, row, page, usages)
         if locked_snapshot.usage_token != snapshot.usage_token:
             raise StaleUsageTokenError("usage token is stale")
         if (
@@ -1043,49 +1135,266 @@ def _asset_record(row: ContextMediaAsset) -> ContextMediaAssetRecord:
     )
 
 
-def _usage_snapshot(
-    session: Session,
-    asset: ContextMediaAsset,
-    page: ContextPage,
-    usages: tuple[ContextMediaUsage, ...] | list[ContextMediaUsage],
-    *,
-    viewer: ActorIdentity | None = None,
-) -> AssetUsageSnapshot:
-    latest_count = 0
-    published_count = 0
-    historical_count = 0
-    draft_ids = set(
-        session.scalars(
-            select_in_workspace(
-                ContextPageVersion,
-                workspace_id=page.workspace_id,
-                conditions=(
-                    ContextPageVersion.page_id == page.id,
-                    ContextPageVersion.version_status == "draft",
-                ),
-            ).with_only_columns(ContextPageVersion.id)
+# Bounded IN lists: SQLite builds without a raised variable limit cap a
+# statement at 999 bound parameters.
+_IN_BATCH = 400
+
+
+@dataclass(frozen=True, slots=True)
+class _UsageTotals:
+    draft: int = 0
+    published: int = 0
+    retained: int = 0
+    has_unreadable: bool = False
+
+
+def _usage_version_join(version):
+    return and_(
+        version.workspace_id == ContextMediaUsage.workspace_id,
+        version.page_id == ContextMediaUsage.page_id,
+        version.id == ContextMediaUsage.page_version_id,
+    )
+
+
+def _asset_page_join():
+    return and_(
+        ContextPage.workspace_id == ContextMediaAsset.workspace_id,
+        ContextPage.id == ContextMediaAsset.page_id,
+    )
+
+
+def _asset_is_referenced():
+    """Correlated EXISTS: some version references the outer asset row."""
+
+    return (
+        select_in_workspace(
+            ContextMediaUsage,
+            workspace_id=ContextMediaAsset.workspace_id,
+            conditions=(
+                ContextMediaUsage.page_id == ContextMediaAsset.page_id,
+                ContextMediaUsage.asset_id == ContextMediaAsset.id,
+            ),
         )
+        .with_only_columns(ContextMediaUsage.asset_id)
+        .correlate_except(ContextMediaUsage)
+        .exists()
     )
-    active_ids = draft_ids | (
-        {page.current_published_version_id}
-        if page.current_published_version_id
-        else set()
+
+
+def _reader(
+    workspace_id: UUID, viewer: ActorIdentity | None, viewer_role: str | None
+) -> ActorContext | None:
+    if viewer is None:
+        return None
+    return ActorContext(
+        actor_kind=viewer.kind,
+        actor_id=str(viewer.id),
+        workspace_id=workspace_id,
+        workspace_role=viewer_role or "viewer",
+        role=viewer_role,
     )
-    for usage in usages:
-        if usage.page_version_id in draft_ids:
-            latest_count += usage.reference_count
-        if usage.page_version_id == page.current_published_version_id:
-            published_count += usage.reference_count
-        if usage.page_version_id not in active_ids:
-            historical_count += usage.reference_count
+
+
+def _page_visible_to(actor: ActorContext | None):
+    """The attachment listings' parent-page rule for a joined ContextPage."""
+
+    if actor_can_read_drafts(actor):
+        return ContextPage.lifecycle_status != "archived"
+    return visible_context_page_expression(actor)
+
+
+def _usage_totals(
+    session: Session,
+    *,
+    workspace_id: UUID,
+    asset_ids: Iterable[UUID],
+    reader: ActorContext | None,
+) -> dict[UUID, _UsageTotals]:
+    """Every referencing version's usage, summed per asset in one statement.
+
+    The sums classify exactly as deletion does: versions whose status is
+    ``draft``, the page's current published version, and every other
+    retained version. ``reader`` decides only ``has_unreadable``, by the
+    canonical version read rule; ``None`` is a caller holding no workspace
+    read at all (the server-admin listing), for whom every referencing
+    version is unreadable. It never changes a sum, so it never changes a
+    ``usage_token``. Assets without usage are absent from the result.
+    """
+
+    ids = list(dict.fromkeys(asset_ids))
+    if not ids:
+        return {}
+    version = aliased(ContextPageVersion)
+    page = aliased(ContextPage)
+    usage = ContextMediaUsage
+    is_draft = version.version_status == "draft"
+    is_published = and_(
+        page.current_published_version_id.is_not(None),
+        usage.page_version_id == page.current_published_version_id,
+    )
+    readable = (
+        explicit_context_version_visible_expression(version, reader)
+        if reader is not None
+        else false()
+    )
+    totals: dict[UUID, _UsageTotals] = {}
+    for start in range(0, len(ids), _IN_BATCH):
+        rows = session.execute(
+            select_in_workspace(
+                usage,
+                workspace_id=workspace_id,
+                conditions=(usage.asset_id.in_(ids[start : start + _IN_BATCH]),),
+            )
+            .join(version, _usage_version_join(version))
+            .join(
+                page,
+                and_(
+                    page.workspace_id == usage.workspace_id,
+                    page.id == usage.page_id,
+                ),
+            )
+            .with_only_columns(
+                usage.asset_id,
+                func.sum(case((is_draft, usage.reference_count), else_=0)),
+                func.sum(case((is_published, usage.reference_count), else_=0)),
+                func.sum(
+                    case(
+                        (or_(is_draft, is_published), 0),
+                        else_=usage.reference_count,
+                    )
+                ),
+                func.max(case((readable, 0), else_=1)),
+            )
+            .group_by(usage.asset_id)
+        ).all()
+        for asset_id, draft, published, retained, unreadable in rows:
+            totals[asset_id] = _UsageTotals(
+                draft=int(draft),
+                published=int(published),
+                retained=int(retained),
+                has_unreadable=bool(unreadable),
+            )
+    return totals
+
+
+def _usage_snapshot(
+    asset: ContextMediaAsset,
+    *,
+    latest_draft_version_id: UUID | None,
+    current_published_version_id: UUID | None,
+    totals: _UsageTotals | None,
+) -> AssetUsageSnapshot:
+    totals = totals or _UsageTotals()
     return AssetUsageSnapshot(
         asset=_asset_record(asset),
-        latest_draft_version_id=page.latest_draft_version_id,
-        current_published_version_id=page.current_published_version_id,
-        latest_draft_reference_count=latest_count,
-        current_published_reference_count=published_count,
-        historical_reference_count=historical_count,
+        latest_draft_version_id=latest_draft_version_id,
+        current_published_version_id=current_published_version_id,
+        latest_draft_reference_count=totals.draft,
+        current_published_reference_count=totals.published,
+        historical_reference_count=totals.retained,
+        has_unreadable_usage=totals.has_unreadable,
     )
+
+
+def _preview_version_ids(
+    session: Session,
+    *,
+    workspace_id: UUID,
+    assets: list[ContextMediaAsset],
+    current_published_by_page: Mapping[UUID, UUID | None],
+    reader: ActorContext | None,
+) -> dict[UUID, UUID]:
+    """The version each asset's preview is served through, when one exists.
+
+    Candidates are exactly what the content route accepts: a version that
+    references the asset, or the version it was uploaded for. Readability is
+    the content route's own check (``context_media_version_is_readable``).
+    Preference: current published, then the most recently saved referencing
+    draft, then the upload's own version, then the newest other reference.
+    A caller without a workspace read gets no preview.
+    """
+
+    if reader is None or not assets:
+        return {}
+    version = aliased(ContextPageVersion)
+    asset_ids = [asset.id for asset in assets]
+    referenced: dict[UUID, list] = defaultdict(list)
+    for start in range(0, len(asset_ids), _IN_BATCH):
+        for row in session.execute(
+            select_in_workspace(
+                ContextMediaUsage,
+                workspace_id=workspace_id,
+                conditions=(
+                    ContextMediaUsage.asset_id.in_(
+                        asset_ids[start : start + _IN_BATCH]
+                    ),
+                ),
+            )
+            .join(version, _usage_version_join(version))
+            .with_only_columns(
+                ContextMediaUsage.asset_id,
+                version.id,
+                version.version_status,
+                version.created_at,
+                version.last_saved_at,
+            )
+        ).all():
+            referenced[row.asset_id].append(row)
+    created_ids = list({asset.created_for_version_id for asset in assets})
+    created = {}
+    for start in range(0, len(created_ids), _IN_BATCH):
+        for row in session.execute(
+            select_in_workspace_by_ids(
+                ContextPageVersion,
+                workspace_id=workspace_id,
+                resource_ids=created_ids[start : start + _IN_BATCH],
+            ).with_only_columns(
+                ContextPageVersion.id,
+                ContextPageVersion.version_status,
+                ContextPageVersion.created_at,
+                ContextPageVersion.last_saved_at,
+            )
+        ).all():
+            created[row.id] = row
+
+    previews: dict[UUID, UUID] = {}
+    for asset in assets:
+        published_id = current_published_by_page.get(asset.page_id)
+        candidates = {row.id: row for row in referenced.get(asset.id, ())}
+        referencing = set(candidates)
+        own = created.get(asset.created_for_version_id)
+        if own is not None:
+            candidates.setdefault(own.id, own)
+
+        def rank(
+            row, *, asset=asset, published_id=published_id, referencing=referencing
+        ):
+            saved = row.last_saved_at or row.created_at
+            if row.id == published_id:
+                bucket = 0
+            elif row.version_status == "draft" and row.id in referencing:
+                bucket = 1
+            elif row.id == asset.created_for_version_id:
+                bucket = 2
+            else:
+                bucket = 3
+            return (bucket, -saved.timestamp(), str(row.id))
+
+        chosen = next(
+            (
+                row
+                for row in sorted(candidates.values(), key=rank)
+                if context_media_version_is_readable(
+                    row,
+                    current_published_version_id=published_id,
+                    actor=reader,
+                )
+            ),
+            None,
+        )
+        if chosen is not None:
+            previews[asset.id] = chosen.id
+    return previews
 
 
 def _lock_context_workspace(

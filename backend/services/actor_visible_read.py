@@ -175,6 +175,25 @@ def context_version_is_visible(
     return actor_can_read_drafts(actor)
 
 
+def context_media_version_is_readable(
+    version: ContextPageVersion,
+    *,
+    current_published_version_id: UUID | None,
+    actor: ActorContext | None,
+) -> bool:
+    """Whether ``actor`` may read attachment bytes through this exact version.
+
+    Stricter than ``context_version_is_visible``: below the draft-read role,
+    attachment bytes are served only through the page's current published
+    version, even though older published bodies stay readable. The content
+    route and every listing preview share this one check.
+    """
+
+    if not context_version_is_visible(version, actor):
+        return False
+    return actor_can_read_drafts(actor) or version.id == current_published_version_id
+
+
 def context_parent_projection(
     version: ContextPageVersion,
     parent: ContextPageVersion | None,

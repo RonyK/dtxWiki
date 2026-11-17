@@ -120,9 +120,6 @@ type ContextMediaAsset = {
   id: string;
   logical_ref: string;
   usage_state: "active" | "history_only" | "unused";
-  latest_draft_reference_count: number;
-  current_published_reference_count: number;
-  historical_reference_count: number;
   can_delete: boolean;
   usage_token: string;
 };
@@ -849,14 +846,8 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       expect(activeMedia.map((asset) => asset.id).sort()).toEqual(
         [...assetIds].sort(),
       );
-      expect(
-        activeMedia.map((asset) => ({
-          current: asset.current_published_reference_count,
-          draft: asset.latest_draft_reference_count,
-          state: asset.usage_state,
-        })),
-      ).toEqual(
-        assetIds.map(() => ({ current: 1, draft: 0, state: "active" })),
+      expect(activeMedia.map((asset) => asset.usage_state)).toEqual(
+        assetIds.map(() => "active"),
       );
       await expectDirectStatuses(page.request, exactVersionUrls, 200);
       await expectDirectStatuses(viewerContext.request, exactVersionUrls, 200);
@@ -987,9 +978,6 @@ test("preserves a five-image batch through retry, publication, revocation, and r
       );
       for (const asset of historyMedia) {
         expect(asset.usage_state).toBe("history_only");
-        expect(asset.latest_draft_reference_count).toBe(0);
-        expect(asset.current_published_reference_count).toBe(0);
-        expect(asset.historical_reference_count).toBeGreaterThanOrEqual(1);
         expect(asset.can_delete).toBe(false);
         const deletion = await page.request.delete(
           `${backendBaseUrl}/api/v1/workspaces/${workspace.id}/context/media/assets/${asset.id}`,

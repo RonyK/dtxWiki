@@ -184,6 +184,13 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "DELETE",
         "/api/v1/workspaces/{workspace_id}/context/media/assets/{asset_id}",
     ): ("draft-write",),
+    # Per-version usage of one asset: only versions the caller can already
+    # read, with no filename or uploader identity, so the same tier as the
+    # page media list above rather than the attachment listing's audit-read.
+    (
+        "GET",
+        "/api/v1/workspaces/{workspace_id}/context/media/assets/{asset_id}/usage",
+    ): ("read",),
     (
         "GET",
         "/api/v1/workspaces/{workspace_id}/context/pages/{page_id}"

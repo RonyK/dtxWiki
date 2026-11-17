@@ -48,7 +48,7 @@ from backend.api.middleware.security_headers import (
 from backend.app.errors import build_rest_error_response
 from backend.app.settings import Settings
 from backend.app.state import get_container_from_app
-from backend.context_media.domain import ActorIdentity, UsageState
+from backend.context_media.domain import ActorIdentity
 from backend.library_media.ports import LibraryLogicalQuotaExceededError
 from backend.mcp.envelope import advisory_warnings
 from backend.media.application import if_none_match_matches
@@ -101,6 +101,7 @@ from backend.schemas.context_ingress import (
     ContextIngressRejectRequest,
 )
 from backend.schemas.context_media import (
+    ContextMediaAssetUsageResponse,
     ContextMediaAttachmentListResponse,
     ContextMediaOrphanListResponse,
 )
@@ -187,6 +188,7 @@ from backend.services.actor_visible_read import context_page_id_visible
 from backend.services.ask_service import InvalidUserMessageError
 from backend.services.context_link_targets import markdown_link_targets
 from backend.services.context_media_attachments import (
+    asset_usage_read_projection,
     attachment_read_projection,
     decode_attachment_cursor,
     encode_attachment_cursor,
@@ -4281,13 +4283,7 @@ def list_workspace_context_media_attachments(
     cursor: str | None = None,
 ):
     # Kept as a comment, not a docstring: FastAPI publishes a route docstring
-    # as this route's `description` in the unauthenticated /openapi.json, and
-    # the P8.4 mask this comment describes is exactly the kind of internal a
-    # public schema should not carry. (260912 review: the earlier version of
-    # this comment claimed to keep the text out of the docstring and then
-    # wrote one anyway two lines below -- the third route in this file with
-    # that same "comment, then docstring" contradiction, all three publishing
-    # confirmed in openapi.json before this fix.)
+    # as this route's `description` in the unauthenticated /openapi.json.
     #
     # Context attachments in one workspace, newest first.
     #
@@ -4300,8 +4296,11 @@ def list_workspace_context_media_attachments(
     # An owner's "every attachment" is every attachment on a page they can
     # read -- see ``list_workspace_usage``.
     #
+    # ``usage`` counts every version, including ones the caller cannot read;
+    # ``has_unreadable_usage`` marks rows where some of that usage is hidden.
+    #
     # ``orphan_only`` is not ``usage=unused``: unused still contains assets an
-    # open editing version protects, while orphan_only applies the sweep's own
+    # open draft protects, while orphan_only applies the sweep's own
     # predicate, so what this filter shows is exactly what the sweep reclaims.
 
     if scope == "workspace" and not role_allows(access.role, "owner"):
@@ -4311,18 +4310,8 @@ def list_workspace_context_media_attachments(
             status_code=403,
         )
     viewer = ActorIdentity(actor.actor_kind, str(actor.actor_id))
-    usage_state = None
-    if usage == "used":
-        usage_state = UsageState.ACTIVE
-    elif usage == "unused":
-        usage_state = UsageState.UNUSED
-    # `has_more`/`next_cursor` come from what SQL saw, not from `len(page)`:
-    # the `usage` filter above runs in Python (`usage_state` has no SQL
-    # column, see list_workspace_usage's WorkspaceUsagePage), so a page whose
-    # filter kept few or zero rows can still have more unseen rows behind it.
-    # Computing paging state from the filtered length here silently truncated
-    # a filtered listing (260912 review) -- this route no longer computes it
-    # at all, only forwards what the use case already fixed.
+    # `has_more`/`next_cursor` come from the repository's SQL window; every
+    # filter, `usage` included, runs before that window is cut.
     page, has_more, next_after = svc.context_media.list_workspace_assets(
         workspace_id=workspace_id,
         viewer=viewer,
@@ -4330,16 +4319,11 @@ def list_workspace_context_media_attachments(
         created_by=viewer if scope == "mine" else None,
         page_id=page_id,
         orphan_only=orphan_only,
+        used=None if usage == "all" else usage == "used",
         filename_contains=q,
         after=decode_attachment_cursor(cursor),
         limit=limit,
-        usage=usage_state,
     )
-    # A page can be empty while `next_cursor` is non-null -- the window SQL
-    # fetched was entirely filtered out by `usage`, but rows remain beyond
-    # it. That is correct here, not a bug: see the WorkspaceUsagePage/
-    # ListWorkspaceMedia docstrings for why the old "no cursor for an empty
-    # page" invariant is exactly what caused the truncation.
     next_cursor = (
         encode_attachment_cursor(next_after[0], next_after[1])
         if has_more and next_after is not None
@@ -4386,6 +4370,42 @@ def list_workspace_context_media_attachments(
             "retention_policy": retention_policy.metadata(),
         }
     }
+
+
+@router.get(
+    "/{workspace_id}/context/media/assets/{asset_id}/usage",
+    response_model=ContextMediaAssetUsageResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def list_context_media_asset_usage(
+    svc: ServicesDep,
+    workspace_id: UUID,
+    asset_id: UUID,
+    actor: RestActorDep,
+    access: WorkspaceViewerAccessDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    cursor: str | None = None,
+):
+    # Versions the caller can read that reference one attachment, newest
+    # first. Membership plus the parent page's visibility gate the asset;
+    # every listed version passes the ordinary version read rule. Versions
+    # the caller cannot read are never listed -- only `has_unreadable_usage`
+    # says they exist.
+    page = svc.context_media.list_asset_version_usage(
+        workspace_id=workspace_id,
+        asset_id=asset_id,
+        viewer=ActorIdentity(actor.actor_kind, str(actor.actor_id)),
+        viewer_role=access.role,
+        after=decode_attachment_cursor(cursor),
+        limit=limit,
+    )
+    if page is None:
+        return build_rest_error_response(
+            error_code="not_found",
+            message="media not found",
+            status_code=404,
+        )
+    return {"data": asset_usage_read_projection(page)}
 
 
 @router.get(

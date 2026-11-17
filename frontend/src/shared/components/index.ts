@@ -17,6 +17,7 @@ export * from "./ChipInput";
 export * from "./CodeBlockWrapper";
 export * from "./ConfirmDialog";
 export * from "./ContentInspectorPanels";
+export * from "./ContextMediaUsage";
 export * from "./CountChip";
 export * from "./Dialog";
 export * from "./DiffViewer";

@@ -1383,7 +1383,7 @@
     "stateHint": {
       "inUse": "Shown on the current published version of its page.",
       "historyOnly": "Only referenced by older versions of its page.",
-      "staging": "Uploaded into an edit nobody has saved yet, so it is held.",
+      "staging": "An open draft retains this upload, which has not been inserted into the body yet.",
       "unused": "No version of its page references it; the retention sweep will reclaim it."
     },
     "previewPrivate": "Preview unavailable for this version.",

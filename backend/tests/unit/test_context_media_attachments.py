@@ -119,6 +119,29 @@ def test_composing_the_attachment_snapshot_leaves_usage_token_alone():
     )
 
 
+def test_unreadable_usage_is_reported_without_changing_state_or_token():
+    """Usage the caller cannot read still counts: the reader-dependent flag
+    neither changes the deletion CAS token nor lets the row look deletable,
+    and the wire row carries the flag instead of any per-version count."""
+
+    readable = _snapshot(latest_draft_reference_count=2)
+    hidden = _snapshot(latest_draft_reference_count=2, has_unreadable_usage=True)
+    assert hidden.usage_token == readable.usage_token
+
+    row = attachment_read_projection(
+        _attachment(usage=hidden, is_orphan=False),
+        workspace_id=WORKSPACE_ID,
+        uploaded_by_display_name="Ada",
+        viewer_actor_kind="human",
+        viewer_actor_id=str(UPLOADER),
+        caller_may_delete=True,
+    )
+    assert row["usage_state"] == "active"
+    assert row["has_unreadable_usage"] is True
+    assert row["can_delete"] is False
+    assert not {key for key in row if key.endswith("_reference_count")}
+
+
 def test_projection_narrows_can_delete_by_the_callers_role():
     unused = _attachment()
     assert unused.asset.can_delete is True
