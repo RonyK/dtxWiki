@@ -194,6 +194,29 @@
   one metadata resolver. Distinguish missing edits, revision conflicts and
   content hash mismatches; trust successful receipts without a confirmation read.
 
+### MCP OAuth client compatibility
+
+- Accept the client metadata documents and dynamic registrations that hosted
+  and desktop MCP clients publish. Register the supported part of each list:
+  unknown grant and response types and redirect URIs on schemes dtxWiki does
+  not redirect to are ignored instead of failing the client.
+- Let a client metadata document that offers `none` among several token
+  endpoint authentication methods register as a public client.
+- Allow port-less loopback redirect registrations; a request may use any port.
+- A client that registers no scope, or an empty one, may request every
+  offered scope. A client that registers fewer scopes can request additional
+  supported scopes through fresh user consent. Existing tokens and refresh
+  tokens keep their original scopes. Consent, the allowed workspaces and the
+  account's workspace role still decide what it can do; an authorization
+  request without a scope stays read-only.
+- Validate supplied scope values before applying registration defaults, so
+  malformed or oversized blank values cannot become all-scope registrations.
+- The `/mcp` 401 challenge names `/.well-known/oauth-protected-resource/mcp`
+  and the offered scopes, and an unauthenticated `HEAD /mcp` returns the same
+  challenge. The root metadata URL keeps working.
+- Authorization server metadata advertises RFC 9207 issuer responses and
+  lists the registration endpoint only while dynamic registration is enabled.
+
 ## 0.2.4 — 2026-11-11
 
 Beta update improving Context graph navigation, history layout, and shared

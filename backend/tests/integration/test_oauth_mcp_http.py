@@ -231,22 +231,6 @@ def register_oauth_client(client: TestClient, *, name: str = "Test MCP Client") 
     return registered.json()["client_id"]
 
 
-def register_oauth_client_without_scope(
-    client: TestClient,
-    *,
-    name: str = "Test MCP Client",
-) -> dict:
-    registered = client.post(
-        "/oauth/register",
-        json={
-            "client_name": name,
-            "redirect_uris": ["http://127.0.0.1:53682/callback"],
-        },
-    )
-    assert registered.status_code == 201, registered.text
-    return registered.json()
-
-
 def oauth_state(label: str) -> str:
     if len(label) >= 22:
         return label
@@ -697,29 +681,51 @@ def test_oauth_dcr_pkce_token_and_mcp_call(page_service):
     }.issubset(actions)
 
 
-def test_oauth_dcr_without_scope_defaults_to_read_only(page_service):
-    """DCR with an omitted scope registers least-privilege (mcp:read), NOT every
-    scope (Codex #2). A client that needs write/agent must request it explicitly
-    at registration; the user still approves it at /oauth/authorize.
+def test_oauth_dcr_accepts_what_mcp_clients_register(page_service):
+    """DCR registers the part of a client's metadata this server supports.
+
+    MCP clients describe themselves for every server: extra grant types,
+    callbacks on schemes this server does not redirect to, and an omitted or
+    empty scope. Unsupported entries are dropped instead of failing the
+    registration, and an unnamed scope limits nothing, so the client can
+    request the scopes the 401 challenge names and the user approves them at
+    consent.
     """
 
     client = make_client(page_service)
-    registered = register_oauth_client_without_scope(
-        client, name="Scope Omitted Client"
+    offered = "mcp:read mcp:write mcp:agent offline_access"
+    registered = client.post(
+        "/oauth/register",
+        json={
+            "client_name": "Multi Platform Client",
+            "redirect_uris": [
+                "app.example.client:/oauth/callback",
+                "http://localhost/callback",
+            ],
+            "grant_types": [
+                "authorization_code",
+                "refresh_token",
+                "urn:ietf:params:oauth:grant-type:device_code",
+            ],
+            "scope": "",
+        },
     )
-    assert registered["scope"] == "mcp:read"
+    assert registered.status_code == 201, registered.text
+    registered = registered.json()
+    assert registered["redirect_uris"] == ["http://localhost/callback"]
+    assert registered["grant_types"] == ["authorization_code", "refresh_token"]
+    assert registered["scope"] == offered
 
-    # The read-only client can authorize for its registered scope.
     verifier = "v" * 64
     response = client.get(
         "/oauth/authorize",
         params={
             "response_type": "code",
             "client_id": registered["client_id"],
-            "redirect_uri": "http://127.0.0.1:53682/callback",
+            "redirect_uri": "http://localhost:53682/callback",
             "code_challenge": challenge_s256(verifier),
             "code_challenge_method": "S256",
-            "scope": "mcp:read",
+            "scope": offered,
             "state": oauth_state("scope-omitted"),
         },
     )
@@ -745,7 +751,7 @@ def test_oauth_authorize_browser_errors_render_html(page_service):
             "redirect_uri": "http://127.0.0.1:53682/callback",
             "code_challenge": challenge_s256(verifier),
             "code_challenge_method": "S256",
-            "scope": "mcp:agent",
+            "scope": "mcp:unknown",
             "state": oauth_state("browser-error"),
         },
         headers={"accept": "text/html"},
@@ -754,7 +760,7 @@ def test_oauth_authorize_browser_errors_render_html(page_service):
     assert response.status_code == 400
     assert response.headers["content-type"].startswith("text/html")
     assert "OAuth request could not continue" in response.text
-    assert "requested scope is not registered" in response.text
+    assert "unsupported scope: mcp:unknown" in response.text
 
 
 def test_oauth_rejects_invalid_pkce_and_state_parameters(page_service):

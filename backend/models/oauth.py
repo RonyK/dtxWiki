@@ -53,6 +53,8 @@ class OAuthClient(CreatedAtMixin, Base):
         nullable=False,
         default="native",
     )
+    # Initial registration metadata, also part of the stable DCR identity.
+    # Granted scopes live on consents and tokens; this is not their ceiling.
     scope: Mapped[str] = mapped_column(Text, nullable=False)
     created_via: Mapped[str] = mapped_column(Text, nullable=False, default="dcr")
     registration_identity: Mapped[str | None] = mapped_column(Text)
