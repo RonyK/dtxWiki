@@ -8,8 +8,10 @@
   grouped by page and ordered by published, review-requested draft, then other
   drafts. Keyword, semantic and hybrid retrieval deduplicate each version.
 - Show each result's publication state and open the exact matching version.
-  Ask citation evidence continues to use published results.
-- MCP contract revision 35 adds `version_status` and `draft` search fields.
+  Ask uses only published Context evidence for every role, including editors;
+  matching drafts are excluded from answer grounding.
+- MCP contract revision 35 adds enumerated `version_status` and typed `draft`
+  search fields, shared with Context reads.
   Refresh cached tool catalogs and result schemas, and use `version_id` to read
   the matching version.
 - REST and retriever/SPI results carry the same optional version-state fields.

@@ -652,7 +652,10 @@ class AskService:
                 "match_reason": result.match_reason or "",
                 "stable_url": result.stable_url or "",
             }
-            if result.version_id is not None:
+            if (
+                result.type in {"context_page", "context_claim"}
+                and result.version_id is not None
+            ):
                 evidence_trace["version_id"] = str(result.version_id)
                 evidence_trace["version_status"] = result.version_status or ""
                 evidence_trace["citation_available"] = str(

@@ -61,3 +61,19 @@ def ranked_result_key(result: RankedResult) -> str:
         if version_id is not None:
             return f"{document_key}:{version_id}"
     return document_key
+
+
+def ranked_result_item_key(result: RankedResult) -> str:
+    """Identify a search item without merging independently authored claims.
+
+    Hybrid fusion intentionally groups claims with their document. Presentation
+    and reranking instead retain claim identities and collapse document/chunk
+    representatives only within the same document version.
+    """
+    if result.type not in {"context_page", "library_item", "agent_page"}:
+        return f"{result.type}:{result.id}"
+    from backend.services.entity_ref import ranked_result_entity_ref
+
+    ref = ranked_result_entity_ref(result)
+    key = f"{ref.kind}:{ref.id or result.id}"
+    return f"{key}:{ref.version_id}" if ref.version_id is not None else key

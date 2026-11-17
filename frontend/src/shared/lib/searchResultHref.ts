@@ -1,4 +1,4 @@
-import { contextPageHref as canonicalContextHref, workspacePath, workspaceTargetHref } from "./workspaceRoutes";
+import { contextPageHref as canonicalContextHref, VERSION_QUERY_PARAM, workspacePath, workspaceTargetHref } from "./workspaceRoutes";
 import { isWorkspaceUuid } from "./workspaceIdentity";
 export type SearchResultLinkInput = {
   id: string;
@@ -110,7 +110,7 @@ function contextVersionHref(href: string, result: SearchResultLinkInput): string
   const versionId = result.version_id ?? result.source_ref?.version_id;
   if (!versionId || !isWorkspaceUuid(versionId)) return href;
   const url = new URL(href, "https://dtxwiki.invalid");
-  url.searchParams.set("version_id", versionId);
+  url.searchParams.set(VERSION_QUERY_PARAM, versionId);
   return url.pathname + url.search + url.hash;
 }
 

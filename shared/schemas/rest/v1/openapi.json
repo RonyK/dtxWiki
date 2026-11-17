@@ -19342,14 +19342,12 @@
           "draft": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/ContextDraftInfo"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Draft"
+            ]
           },
           "entity_ref": {
             "anyOf": [
@@ -19536,6 +19534,10 @@
           "version_status": {
             "anyOf": [
               {
+                "enum": [
+                  "draft",
+                  "published_snapshot"
+                ],
                 "type": "string"
               },
               {

@@ -241,8 +241,8 @@ def test_search_without_reranker_keeps_fusion_order():
         k=2,
         actor=None,
     ) == [f"context_page:{target_id}"]
-    # Resolver/fallback composition must use the same versioned document key
-    # when a claim, rather than a page or chunk, represents the matching body.
+    # Result composition keeps claims as distinct items while deduplicating
+    # page/chunk representatives of the same document version.
     from backend.services.search_service import _merge_ranked_results
 
     claim = chunks[0].model_copy(
@@ -255,6 +255,7 @@ def test_search_without_reranker_keeps_fusion_order():
     merged = _merge_ranked_results(primary=[versions[0]], fallback=[claim, *chunks])
     assert [(result.id, result.version_id) for result in merged] == [
         (target_id, published_id),
+        (claim.id, published_id),
         (chunks[1].id, draft_id),
     ]
 

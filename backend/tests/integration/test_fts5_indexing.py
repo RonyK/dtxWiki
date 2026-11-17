@@ -186,7 +186,7 @@ def test_bm25_prefers_header_and_pushes_limit_into_fts_sql(session_factory):
     selects = [
         statement
         for statement in statements
-        if statement.lstrip().upper().startswith("SELECT")
+        if statement.lstrip().upper().startswith(("SELECT", "WITH"))
     ]
     assert selects
     assert all("LIMIT" in statement.upper() for statement in selects)

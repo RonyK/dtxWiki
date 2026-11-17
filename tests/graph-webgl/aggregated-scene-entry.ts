@@ -30,6 +30,15 @@ let hovered: string | null = null, selected: string | null = null, runtimeError:
 const observed: { graph: Graph | null } = { graph: null };
 const nativeRender = Graph.prototype.render;
 Graph.prototype.render = function (...args) { observed.graph = this; return nativeRender.apply(this, args); };
+const drawnSizes = new WeakMap<Graph, Float32Array>();
+const nativeSetPointSizes = Graph.prototype.setPointSizes;
+Graph.prototype.setPointSizes = function (sizes) {
+  // The adapter measures count text with the browser's actual font. Observe
+  // its public upload instead of rebuilding a differently sized estimate.
+  if (sizes) drawnSizes.set(this, Float32Array.from(sizes));
+  else drawnSizes.delete(this);
+  return nativeSetPointSizes.call(this, sizes);
+};
 
 const adapter = createWorkspaceCosmosAdapter(stage, columns, {
   budget, forcedColors: false, reducedMotion: true,
@@ -43,7 +52,7 @@ const adapter = createWorkspaceCosmosAdapter(stage, columns, {
 
 declare global {
   interface Window { __aggregatedScene: {
-    /** The 17,499-document cluster's size as the scene builder gives it to the renderer and the picker, and its relation-based one. */
+    /** The 17,499-document cluster's uploaded draw size and its relation-based size. */
     hubSizes(): { draw: number; relation: number };
     /** CSS pixels, top-left origin, where the node is drawn now. */
     screen(id: string): [number, number];
@@ -78,8 +87,9 @@ void adapter.whenSettled().then(async () => {
   window.__aggregatedScene = {
     hubSizes() {
       const built = buildCosmosSceneBuffers(columns, tokens, budget);
-      // A scene builder from before the cluster emphasis has no separate draw array: it drew the relation sizes.
-      return { draw: (built.drawPointSizes ?? built.pointSizes)[clusterRows[0]], relation: built.pointSizes[clusterRows[0]] };
+      const uploaded = drawnSizes.get(graph);
+      if (!uploaded) throw new Error("The adapter has not uploaded its point sizes");
+      return { draw: uploaded[clusterRows[0]], relation: built.pointSizes[clusterRows[0]] };
     },
     screen,
     async zoomOn(id, factor) {

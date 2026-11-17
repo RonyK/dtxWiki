@@ -7,6 +7,7 @@ import type { TreeNodePayload } from "../api/workspace";
 import { formatCanonicalContextUrl, formatStableContextUrl, isWorkspaceUuid } from "./workspaceIdentity";
 
 export type WorkspaceSection = typeof WORKSPACE_SECTIONS[number];
+export const VERSION_QUERY_PARAM = "version";
 export type WorkspaceRoute = {
   workspaceId: string;
   section: WorkspaceSection;

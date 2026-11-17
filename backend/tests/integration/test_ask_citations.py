@@ -312,18 +312,15 @@ def test_ask_cites_page_id_for_semantic_chunk_result(session_factory):
                 "snippet": "Unpublished draft evidence must not be cited",
             }
         )
+
         class PaginatedSearch(FakeSemanticSearch):
             def __init__(self):
                 # All first-page slots are occupied by different open drafts.
                 super().__init__(
                     context=[
                         draft,
-                        draft.model_copy(
-                            update={"id": uuid4(), "version_id": uuid4()}
-                        ),
-                        draft.model_copy(
-                            update={"id": uuid4(), "version_id": uuid4()}
-                        ),
+                        draft.model_copy(update={"id": uuid4(), "version_id": uuid4()}),
+                        draft.model_copy(update={"id": uuid4(), "version_id": uuid4()}),
                     ]
                 )
                 self.calls = []
@@ -544,7 +541,11 @@ def test_ask_resolves_library_item_result_to_artifact_id(session_factory):
         item, artifact = _seed_library(session, workspace.id)
         service = AskService(
             search_service=FakeSemanticSearch(
-                library=[_semantic_library_result(item.id)]
+                library=[
+                    _semantic_library_result(item.id).model_copy(
+                        update={"version_id": artifact.library_item_version_id}
+                    )
+                ]
             )
         )
         turn, detail = _create_turn(
@@ -558,6 +559,9 @@ def test_ask_resolves_library_item_result_to_artifact_id(session_factory):
         ).all()
     assert cited_artifacts == [artifact.id]
     assert detail.retrieval_trace[0]["id"] == str(artifact.id)
+    assert not {"version_id", "version_status", "citation_available"} & (
+        detail.retrieval_trace[0].keys()
+    )
     assert detail.fallback_disclosure is True
 
 

@@ -190,7 +190,7 @@ def _last_savers(session, workspace_id, versions):
     }
 
 
-def project_context_drafts(session, pages, versions, actor):
+def project_context_drafts(session, pages, versions, actor, *, review_states=None):
     """Batch selected draft facts, parents and last-saver identities."""
     if not actor_can_read_drafts(actor):
         return {}
@@ -204,7 +204,11 @@ def project_context_drafts(session, pages, versions, actor):
     for start in range(0, len(drafts), 350):
         selected = drafts[start : start + 350]
         workspace_id = selected[0].workspace_id
-        reviews = _reviews_for_versions(session, workspace_id, selected)
+        reviews = (
+            _reviews_for_versions(session, workspace_id, selected)
+            if review_states is None
+            else {}
+        )
         parents = _topology(
             session, workspace_id, {version.page_id for version in selected}
         )
@@ -227,13 +231,40 @@ def project_context_drafts(session, pages, versions, actor):
                 ),
                 parent_version_ids=list(parents.get(version.id, (None, []))[1]),
                 last_saved_at=version.last_saved_at,
-                is_editing=not any(
+                is_editing=review_states[version.id][0]
+                if review_states is not None
+                else not any(
                     review.status in _OPEN_REVIEW_STATUSES
                     for review in reviews.get(version.id, [])
                 ),
-                review=_review_info(reviews.get(version.id, [])),
+                review=review_states[version.id][1]
+                if review_states is not None
+                else _review_info(reviews.get(version.id, [])),
                 is_behind=_behind(page, version.id, parents),
             )
+    return result
+
+
+def context_draft_review_states(session, workspace_id, versions):
+    """Read only the review facts required to order candidate draft versions."""
+    result = {}
+    drafts = [version for version in versions if version.version_status == "draft"]
+    for start in range(0, len(drafts), 350):
+        selected = drafts[start : start + 350]
+        reviews = _reviews_for_versions(session, workspace_id, selected)
+        result.update(
+            (
+                version.id,
+                (
+                    not any(
+                        review.status in _OPEN_REVIEW_STATUSES
+                        for review in reviews.get(version.id, [])
+                    ),
+                    _review_info(reviews.get(version.id, [])),
+                ),
+            )
+            for version in selected
+        )
     return result
 
 

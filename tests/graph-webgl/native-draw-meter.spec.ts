@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "./fixtures";
 import { createContext, runInContext } from "node:vm";
 
 import { captureNativeLongCalls, installNativeDrawMeter, NATIVE_LONG_CALL_PREFIX } from "../e2e/workspace_graph_native_draw";

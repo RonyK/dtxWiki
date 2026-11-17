@@ -26,6 +26,7 @@ from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
 )
 from backend.schemas.read import RankedResult, SearchFilters
+from backend.services.context_draft_workflow import metadata_for
 from backend.services.context_links import format_stable_url
 from backend.services.context_visibility import visible_search_version_ids
 from backend.services.entity_ref import (
@@ -257,9 +258,9 @@ class SemanticRetriever:
             version = session.get(ContextPageVersion, chunk.source_version_id)
             if version is None or version.page_id != page.id:
                 return None
-            metadata = version.page_metadata or {}
-            title = metadata.get("title") or page.title
-            concept_type = metadata.get("page_type") or page.page_type
+            metadata = metadata_for(page, version)
+            title = metadata.title
+            concept_type = metadata.page_type
             citation_available = version.id == page.current_published_version_id
             if filters.context_type and concept_type not in filters.context_type:
                 return None

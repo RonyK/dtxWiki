@@ -102,6 +102,15 @@ def test_borrowed_rerank_preview_round_trip_reorders_signed_candidates(
     results[-1].version_id = uuid4()
     results[-1].version_status = "draft"
     results[-1].citation_available = False
+    claim_page_id, claim_version_id = uuid4(), uuid4()
+    for result in results[-4:-2]:
+        result.type = "context_claim"
+        result.version_id = claim_version_id
+        result.source_ref = {"kind": "context_page", "id": str(claim_page_id)}
+    # UUID uniqueness is table-scoped. Item kind must also participate in the
+    # signed identity when an artifact and claim happen to share a UUID.
+    results[-5].type = "library_artifact"
+    results[-5].id = results[-4].id
     service = FakeSearchService(results)
     ctx = _context(session_factory, service, workspace_id)
     monkeypatch.setattr(
@@ -132,12 +141,16 @@ def test_borrowed_rerank_preview_round_trip_reorders_signed_candidates(
     assert len(set(candidate_ids)) == len(results)
     ranking = [*reversed(candidate_ids), str(uuid4())]
 
-    # RRF may choose a claim rather than the page as the representative on
-    # resumption; its signed identity still names the same document/version.
+    # A document may resume with a chunk representative. Its identity stays
+    # stable, while distinct claims from one version retain their own IDs.
     page_id = results[-2].id
-    results[-2].type = "context_claim"
     results[-2].id = uuid4()
-    results[-2].source_ref = {"kind": "context_page", "id": str(page_id)}
+    results[-2].source_ref = {
+        "kind": "content_chunk",
+        "document_kind": "context_page",
+        "document_id": str(page_id),
+        "version_id": str(results[-2].version_id),
+    }
 
     second = read_tools.search(
         {
@@ -153,10 +166,22 @@ def test_borrowed_rerank_preview_round_trip_reorders_signed_candidates(
     actual_versions = [
         (result.id, result.version_id) for result in second.data.ranked_results
     ]
-    assert actual_versions == [
-        (result.id, result.version_id)
-        for result in [results[-2], results[-1], *reversed(results[:-2])]
-    ][:8]
+    assert (
+        actual_versions
+        == [
+            (result.id, result.version_id)
+            for result in [
+                results[-2],
+                results[-1],
+                results[-4],
+                results[-3],
+                *reversed(results[:-4]),
+            ]
+        ][:8]
+    )
+    assert {result.id for result in results[-4:-2]} <= {
+        result.id for result in second.data.ranked_results
+    }
     assert "borrowed_rerank_applied" in second.data.warnings
     assert second.input_required is None
     assert second.data.total_count == 8

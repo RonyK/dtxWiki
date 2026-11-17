@@ -345,13 +345,20 @@ describe("SearchScreen", () => {
             result(pageId, "context_page", "Embedding policy review", "Review candidate", 0.9, {
               stable_url: `/p/${WORKSPACE_ID}/${pageId}`,
               version_id: reviewedVersionId, version_status: "draft", citation_available: false,
-              draft: { review: { id: "review-1", status: "pending" } },
+              draft: {
+                author: { actor_kind: "human", actor_id: "user-1" }, parent_version_ids: [],
+                last_saved_at: "2026-11-16T00:00:00Z", is_editing: false,
+                review: { id: "00000000-0000-4000-8000-000000000501", status: "pending" },
+              },
             }),
             result("00000000-0000-4000-8000-000000000401", "context_claim", "Embedding policy draft", "Draft candidate", 0.85, {
               source_ref: { kind: "context_page", id: pageId },
               stable_url: `/p/${WORKSPACE_ID}/${pageId}`,
               version_id: writingVersionId, version_status: "draft", citation_available: false,
-              draft: { review: null },
+              draft: {
+                author: { actor_kind: "human", actor_id: "user-1" }, parent_version_ids: [],
+                last_saved_at: "2026-11-16T00:00:00Z", is_editing: true, review: null,
+              },
             }),
             result("00000000-0000-4000-8000-000000000109", "context_page", "Search handbook", "A **clean** `snippet`. model_name and model_version. Keep x < 10 and y > 2. `a*b*c` and _emphasis_. vector<T>.", 0.8, {
               stable_url: `/p/${WORKSPACE_ID}/00000000-0000-4000-8000-000000000109`, match_reason: "keyword",
@@ -377,14 +384,14 @@ describe("SearchScreen", () => {
     );
 
     const row = await screen.findByRole("link", { name: "Open Embedding policy" });
-    expect(row).toHaveAttribute("href", `/p/${WORKSPACE_ID}/${pageId}?version_id=${publishedVersionId}`);
+    expect(row).toHaveAttribute("href", `/p/${WORKSPACE_ID}/${pageId}?version=${publishedVersionId}`);
     expect(within(row).getByText("Published", { exact: true })).toBeInTheDocument();
     const reviewed = screen.getByRole("link", { name: "Open Embedding policy review" });
-    expect(reviewed).toHaveAttribute("href", `/p/${WORKSPACE_ID}/${pageId}?version_id=${reviewedVersionId}`);
+    expect(reviewed).toHaveAttribute("href", `/p/${WORKSPACE_ID}/${pageId}?version=${reviewedVersionId}`);
     expect(within(reviewed).getByText("Draft in review", { selector: ".status-pill" })).toBeVisible();
     expect(reviewed).toHaveAccessibleDescription("Draft in review");
     const writing = screen.getByRole("link", { name: "Open Embedding policy draft" });
-    expect(writing).toHaveAttribute("href", `/p/${WORKSPACE_ID}/${pageId}?version_id=${writingVersionId}`);
+    expect(writing).toHaveAttribute("href", `/p/${WORKSPACE_ID}/${pageId}?version=${writingVersionId}`);
     expect(within(writing).getByText("Draft", { selector: ".status-pill" })).toBeVisible();
     expect(writing).toHaveAccessibleDescription("Draft");
     expect(row.querySelector(".search-result-kind")).toHaveAttribute("data-identity", "context");

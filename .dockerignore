@@ -1,3 +1,8 @@
+# Keep the frontend's public cross-language fixtures, then apply all global
+# secret, cache and build-output exclusions below to that subtree as well.
+shared/*
+!shared/fixtures/
+
 .git
 .agents
 .claude
@@ -33,7 +38,6 @@ frontend/dist
 backend/static
 test-results
 
-shared
 tests/e2e
 tests/static
 tests/acceptance

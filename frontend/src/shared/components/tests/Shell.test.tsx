@@ -270,8 +270,22 @@ describe("Shell", () => {
           snippet: "Requires trusted sources.",
           score: 0.91,
           citation_available: true,
+          version_id: "00000000-0000-4000-8000-000000000201",
+          version_status: "published_snapshot",
           stale: false,
           archived: false,
+        },
+        {
+          id: "33333333-3333-4333-8333-333333333333", type: "context_page",
+          title: "Citation policy", snippet: "Review candidate.", score: 0.9,
+          citation_available: false, version_id: "00000000-0000-4000-8000-000000000202",
+          version_status: "draft", draft: { is_editing: false, review: { status: "pending" } },
+        },
+        {
+          id: "33333333-3333-4333-8333-333333333333", type: "context_page",
+          title: "Citation policy", snippet: "Writing candidate.", score: 0.8,
+          citation_available: false, version_id: "00000000-0000-4000-8000-000000000203",
+          version_status: "draft", draft: { is_editing: true, review: null },
         },
       ],
     );
@@ -283,7 +297,7 @@ describe("Shell", () => {
     await user.type(searchbox, "policy");
 
     const result = await screen.findByRole("option", {
-      name: /Citation policy/,
+      name: /Citation policy.*Published/,
     });
     expect(result).toHaveTextContent("Requires trusted sources.");
     // Palette chrome comes from shell.json, not hardcoded English.
@@ -292,11 +306,14 @@ describe("Shell", () => {
     // "Context" label, never the raw "context_page".
     expect(result).toHaveTextContent("Context");
     expect(result).not.toHaveTextContent("context_page");
+    const reviewed = screen.getByRole("option", { name: /Citation policy.*Draft in review/ });
+    expect(reviewed).toHaveTextContent("Review candidate.");
+    expect(screen.getByRole("option", { name: /Citation policy.*Draft.*Writing/ })).toHaveTextContent("Writing candidate.");
 
-    await user.click(result);
+    await user.click(reviewed);
 
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333",
+      "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/33333333-3333-4333-8333-333333333333?version=00000000-0000-4000-8000-000000000202",
     );
   });
 

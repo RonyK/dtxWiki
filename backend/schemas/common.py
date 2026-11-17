@@ -248,8 +248,8 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        Exact-version reads replace private-edit selectors; review requests
 #        stay editable. Retire submit_revision_for_review and the legacy
 #        diverged-branch warning. Refresh cached tool catalogs and schemas.
-#  35 -- Search retains matching Context versions with version_status and draft
-#        facts, grouped published-first. Refresh cached result schemas; pass
+#  35 -- Search retains matching Context versions with enumerated version_status
+#        and ContextDraftInfo facts, grouped published-first. Refresh schemas; pass
 #        version_id to read the exact hit. Drafts remain non-citable.
 MCP_TOOL_CONTRACT_REVISION = 35
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their

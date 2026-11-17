@@ -418,7 +418,17 @@ describe("PageEditor", () => {
     let referenceAttempts = 0;
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
-      if (url.endsWith("/search")) return jsonResponse({ data: { ranked_results: [{ type: "context_page", id: targetId, title: "Research source", location: ["Plan"] }] } });
+      if (url.endsWith("/search")) {
+        const cursor = JSON.parse(String(init?.body ?? "{}")).cursor;
+        return jsonResponse({ data: {
+          ranked_results: [{ type: "context_page", id: targetId,
+            title: cursor ? "Later draft source" : "Research source", location: [cursor ? "Draft" : "Plan"],
+            version_id: cursor ? "00000000-0000-4000-8000-000000000202" : "00000000-0000-4000-8000-000000000201",
+          }, ...cursor ? [] : [{ type: "context_page", id: targetId, title: "Earlier draft source", location: ["Draft"],
+            version_id: "00000000-0000-4000-8000-000000000203",
+          }]], has_more: !cursor, next_cursor: cursor ? null : "next-page",
+        } });
+      }
       if (url.endsWith("/autosave")) return jsonResponse({ data: { ...page, version_id: "v2", version_status: "draft", editing_revision: 2 } });
       if (url.endsWith("/references")) return new Promise<Response>((_resolve, reject) => {
         referenceAttempts += 1;
@@ -433,6 +443,11 @@ describe("PageEditor", () => {
     await typist().click(screen.getByRole("button", { name: "Add reference" }));
     const picker = await screen.findByRole("dialog", { name: "Choose a reference" });
     fireEvent.change(within(picker).getByLabelText("Search documents"), { target: { value: "Research" } });
+    await within(picker).findByRole("option", { name: /Research source/ });
+    await typist().click(within(picker).getByRole("button", { name: "Load more documents" }));
+    await waitFor(() => expect(within(picker).queryByRole("button", { name: "Load more documents" })).not.toBeInTheDocument());
+    expect(within(picker).queryByRole("option", { name: /Later draft source/ })).not.toBeInTheDocument();
+    expect(within(picker).queryByRole("option", { name: /Earlier draft source/ })).not.toBeInTheDocument();
     await typist().click(await within(picker).findByRole("option", { name: /Research source/ }));
     fireEvent.change(within(picker).getByLabelText("Note (optional)"), { target: { value: "Background" } });
     await typist().click(within(picker).getByRole("button", { name: "Add to references only" }));

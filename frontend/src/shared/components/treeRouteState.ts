@@ -1,8 +1,9 @@
 import type { TreeNodePayload } from "../api/workspace";
+import { VERSION_QUERY_PARAM } from "../lib/workspaceRoutes";
 
 export const TREE_TARGET_PARAM = "target";
 export const TREE_EXPANDED_PARAM = "expanded";
-export const TREE_VERSION_PARAM = "version";
+export const TREE_VERSION_PARAM = VERSION_QUERY_PARAM;
 export const TREE_NEW_FOLDER_PARAM = "newFolder";
 
 type ExpandedDefaultMode = "all" | "active-path" | "roots" | "none";

@@ -1,4 +1,5 @@
-import { expect, test, type CDPSession } from "@playwright/test";
+import { expect, type CDPSession } from "@playwright/test";
+import { test } from "./fixtures";
 
 import { createDenseCpuProfile, DENSE_CPU_PROFILE_LIMIT_BYTES, DENSE_CPU_PROFILE_WINDOW_MS,
   sanitizeCpuProfileUrl, serializeDenseCpuProfile } from "../e2e/workspace_graph_cpu_profile";

@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { test } from "./fixtures";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
@@ -775,13 +776,14 @@ async function dragFirstNativeNode(page: Page): Promise<void> {
   for (let attempt = 0; attempt < 12; attempt += 1) {
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     point = await page.evaluate(() => window.__workspaceScreenFocus.pointScreen(0));
+    const answered = await page.evaluate(() => window.__workspaceScreenFocus.nativePointer().answers);
     await page.mouse.move(5, 5);
     await page.mouse.move(point[0], point[1]);
-    // Cosmos defers native picking across several frames and asynchronous GPU
-    // readback. Two RAFs do not establish a valid hit even on a paused scene.
-    await page.waitForFunction(() => window.__workspaceScreenFocus.snapshot().hoveredIndex !== null,
-      null, { timeout: 1000 }).catch(() => undefined);
-    if (await page.evaluate(() => window.__workspaceScreenFocus.snapshot().hoveredIndex) === 0) break;
+    // Wait for the actual GPU answer before treating it as a miss. Advancing
+    // Zoom while its readback is pending clears a valid late hover result.
+    await expect.poll(() => page.evaluate(() => window.__workspaceScreenFocus.nativePointer().answers))
+      .toBeGreaterThan(answered);
+    if (await page.evaluate(() => window.__workspaceScreenFocus.nativePointer().index) === 0) break;
     await page.getByRole("button", { name: "Zoom in", exact: true }).click();
   }
   // Dense overview geometry is not a reliable pick. Require the original ID's

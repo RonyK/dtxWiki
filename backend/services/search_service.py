@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy.orm import Session, load_only
@@ -19,12 +20,16 @@ from backend.repositories.search_projection import (
     PageNameTrigramHit,
     WorkspaceFts5ProjectionRepository,
 )
-from backend.repositories.workspace_scoped import select_in_workspace_by_ids
+from backend.repositories.workspace_scoped import (
+    join_in_workspace,
+    select_in_workspace_by_ids,
+)
 from backend.schemas.read import (
     RankedResult,
     SearchFilters,
     SearchPayload,
 )
+from backend.services.context_draft_workflow import metadata_for
 from backend.services.context_links import format_stable_url
 from backend.services.context_visibility import searchable_context_version_id
 from backend.services.entity_ref import (
@@ -41,6 +46,7 @@ from backend.services.page_name_lookup import (
     visible_page_name_matches,
 )
 from backend.services.read_errors import UnsupportedRetrievalModeError
+from backend.services.retrieval.fusion import ranked_result_item_key
 from backend.services.retrieval.keyword import (
     EXCLUDED_LIBRARY_LIFECYCLE_STATUSES,
     RESTRICTED_LIBRARY_TRUST_LEVELS,
@@ -123,7 +129,11 @@ def _context_result_version_id(result: RankedResult) -> UUID | None:
         return result.version_id
 
 
-def group_context_version_results(ranked: Sequence[RankedResult]) -> list[RankedResult]:
+def group_context_version_results(
+    ranked: Sequence[RankedResult],
+    *,
+    editing_states: dict[UUID, bool] | None = None,
+) -> list[RankedResult]:
     """Keep document rank, ordering its matching versions by publication state."""
     groups: dict[tuple[str, UUID], list[RankedResult]] = {}
     for result in ranked:
@@ -134,12 +144,15 @@ def group_context_version_results(ranked: Sequence[RankedResult]) -> list[Ranked
         groups.setdefault(key, []).append(result)
 
     def priority(result: RankedResult):
-        review = (result.draft or {}).get("review") or {}
+        is_editing = (editing_states or {}).get(
+            result.version_id,
+            result.draft.is_editing if result.draft is not None else True,
+        )
         state_rank = (
             0
             if result.version_id is not None and result.citation_available
             else 1
-            if review.get("status") in {"pending", "changes_requested"}
+            if result.version_status == "draft" and not is_editing
             else 2
             if result.version_status == "draft"
             else 3
@@ -153,6 +166,24 @@ def group_context_version_results(ranked: Sequence[RankedResult]) -> list[Ranked
             sorted(variants, key=priority) if kind == "context_page" else variants
         )
     ]
+
+
+def _best_name_matches_per_version(matches):
+    selected = {}
+    for match in matches:
+        key = (match.page.id, match.version.id)
+        current = selected.get(key)
+        if current is None or NAME_KIND_PRIORITY.get(match.index.name_kind, 9) < (
+            NAME_KIND_PRIORITY.get(current.index.name_kind, 9)
+        ):
+            selected[key] = match
+    return list(selected.values())
+
+
+@dataclass(slots=True)
+class _ContextSearchCandidates:
+    ranked: list[RankedResult]
+    review_states: dict
 
 
 class SearchService:
@@ -181,93 +212,147 @@ class SearchService:
     @staticmethod
     def _group_context_versions(session, workspace_id, ranked, actor):
         if session is None:
-            return ranked
-        from backend.services.context_drafts import project_context_drafts
+            return _ContextSearchCandidates(list(ranked), {})
+        from backend.services.context_drafts import context_draft_review_states
 
-        groups = {}
+        wanted_versions, unversioned_pages = set(), set()
         for result in ranked:
             page_id = _context_result_page_id(result)
             if page_id is not None:
                 result.version_id = _context_result_version_id(result)
-            key = ("context_page", page_id) if page_id else (result.type, result.id)
-            groups.setdefault(key, []).append(result)
-        wanted_pages = [page_id for kind, page_id in groups if kind == "context_page"]
-        wanted_versions = list(
-            {
-                result.version_id
-                for result in ranked
-                if _context_result_page_id(result) is not None
-                and result.version_id is not None
-            }
+                if result.version_id is not None:
+                    wanted_versions.add(result.version_id)
+                else:
+                    unversioned_pages.add(page_id)
+        wanted_versions, unversioned_pages = (
+            list(wanted_versions),
+            list(unversioned_pages),
         )
         pages, versions = {}, {}
-        for start in range(0, len(wanted_pages), 350):
+        for start in range(0, len(wanted_versions), 350):
+            statement = (
+                join_in_workspace(
+                    select_in_workspace_by_ids(
+                        ContextPageVersion,
+                        workspace_id=workspace_id,
+                        resource_ids=wanted_versions[start : start + 350],
+                    ),
+                    ContextPageVersion,
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    on=ContextPageVersion.page_id == ContextPage.id,
+                )
+                .with_only_columns(ContextPageVersion, ContextPage)
+                .options(
+                    load_only(
+                        ContextPageVersion.id,
+                        ContextPageVersion.workspace_id,
+                        ContextPageVersion.page_id,
+                        ContextPageVersion.version_status,
+                    )
+                )
+            )
+            for version, page in session.execute(statement):
+                versions[version.id], pages[page.id] = version, page
+        for start in range(0, len(unversioned_pages), 350):
             pages.update(
                 (page.id, page)
                 for page in session.scalars(
                     select_in_workspace_by_ids(
                         ContextPage,
                         workspace_id=workspace_id,
-                        resource_ids=wanted_pages[start : start + 350],
+                        resource_ids=unversioned_pages[start : start + 350],
                     )
                 )
             )
-        for start in range(0, len(wanted_versions), 350):
-            versions.update(
-                (version.id, version)
-                for version in session.scalars(
-                    select_in_workspace_by_ids(
-                        ContextPageVersion,
-                        workspace_id=workspace_id,
-                        resource_ids=wanted_versions[start : start + 350],
-                    ).options(
-                        load_only(
-                            ContextPageVersion.id,
-                            ContextPageVersion.workspace_id,
-                            ContextPageVersion.page_id,
-                            ContextPageVersion.version_status,
-                            ContextPageVersion.actor_type,
-                            ContextPageVersion.actor_id,
-                            ContextPageVersion.actor_display_name,
-                            ContextPageVersion.created_by_actor_kind,
-                            ContextPageVersion.created_by_actor_id,
-                            ContextPageVersion.last_saved_at,
-                        )
-                    )
-                )
-            )
-        drafts = project_context_drafts(
-            session, list(pages.values()), list(versions.values()), actor
-        )
         output = []
-        for (kind, page_id), results in groups.items():
-            if kind != "context_page":
-                output.extend(results)
+        for result in ranked:
+            page_id = _context_result_page_id(result)
+            if page_id is None:
+                output.append(result)
                 continue
             page = pages.get(page_id)
             if page is None:
                 continue
-            for result in results:
-                version = versions.get(result.version_id)
-                if version is None:
-                    if result.version_id is None:
-                        output.append(result)
-                    continue
-                if version.page_id != page.id:
-                    continue
-                if version.id != page.current_published_version_id and not (
-                    actor_can_read_drafts(actor) and version.version_status == "draft"
-                ):
-                    continue
-                result.version_status = version.version_status
-                info = drafts.get(version.id)
-                result.draft = info.model_dump(mode="json") if info else None
-                result.citation_available = (
-                    version.id == page.current_published_version_id
-                )
-                output.append(result)
+            version = versions.get(result.version_id)
+            if version is None:
+                if result.version_id is None:
+                    output.append(result)
+                continue
+            if version.page_id != page.id:
+                continue
+            if version.id != page.current_published_version_id and not (
+                actor_can_read_drafts(actor) and version.version_status == "draft"
+            ):
+                continue
+            result.version_status = version.version_status
+            result.citation_available = version.id == page.current_published_version_id
+            output.append(result)
+        review_states = (
+            context_draft_review_states(session, workspace_id, list(versions.values()))
+            if actor_can_read_drafts(actor)
+            else {}
+        )
+        return _ContextSearchCandidates(
+            group_context_version_results(
+                output,
+                editing_states={key: value[0] for key, value in review_states.items()},
+            ),
+            review_states,
+        )
 
-        return group_context_version_results(output)
+    @staticmethod
+    def _enrich_context_drafts(session, workspace_id, ranked, actor, review_states):
+        """Compute author and ancestry facts only for the returned window."""
+        if not actor_can_read_drafts(actor):
+            return
+        from backend.services.context_drafts import project_context_drafts
+
+        wanted_versions = list(
+            {
+                result.version_id
+                for result in ranked
+                if result.version_status == "draft" and result.version_id is not None
+            }
+        )
+        pages, versions = {}, []
+        for start in range(0, len(wanted_versions), 350):
+            statement = (
+                join_in_workspace(
+                    select_in_workspace_by_ids(
+                        ContextPageVersion,
+                        workspace_id=workspace_id,
+                        resource_ids=wanted_versions[start : start + 350],
+                    ),
+                    ContextPageVersion,
+                    ContextPage,
+                    workspace_id=workspace_id,
+                    on=ContextPageVersion.page_id == ContextPage.id,
+                )
+                .with_only_columns(ContextPageVersion, ContextPage)
+                .options(
+                    load_only(
+                        ContextPageVersion.id,
+                        ContextPageVersion.workspace_id,
+                        ContextPageVersion.page_id,
+                        ContextPageVersion.version_status,
+                        ContextPageVersion.actor_type,
+                        ContextPageVersion.actor_id,
+                        ContextPageVersion.actor_display_name,
+                        ContextPageVersion.created_by_actor_kind,
+                        ContextPageVersion.created_by_actor_id,
+                        ContextPageVersion.last_saved_at,
+                    )
+                )
+            )
+            for version, page in session.execute(statement):
+                versions.append(version)
+                pages[page.id] = page
+        drafts = project_context_drafts(
+            session, list(pages.values()), versions, actor, review_states=review_states
+        )
+        for result in ranked:
+            result.draft = drafts.get(result.version_id)
 
     def _supported_modes(self) -> set[str]:
         modes: set[str] = set()
@@ -475,7 +560,10 @@ class SearchService:
                     primary=[*ranked[:insertion], *associative],
                     fallback=ranked[insertion:],
                 )
-        ranked = self._group_context_versions(session, workspace_id, ranked, actor)
+        context_candidates = self._group_context_versions(
+            session, workspace_id, ranked, actor
+        )
+        ranked = context_candidates.ranked
         if not active_filters.include_agents:
             # Apply the request policy to custom retrievers too, before counts,
             # pagination, and metadata enrichment use the ranked candidate set.
@@ -506,6 +594,9 @@ class SearchService:
         offset = _decode_search_cursor(cursor)
         window = ranked[offset : offset + limit]
         if session is not None:
+            self._enrich_context_drafts(
+                session, workspace_id, window, actor, context_candidates.review_states
+            )
             enrich_search_result_metadata(session, workspace_id, window, actor)
         next_offset = offset + limit
         has_more = len(ranked) > next_offset
@@ -621,7 +712,7 @@ class SearchService:
                 matched_name=match.index.name,
                 score=_entity_score(match.index.name_kind),
             )
-            for match in best_match_per_page(matches)
+            for match in _best_name_matches_per_version(matches)
         ]
         return results
 
@@ -710,7 +801,7 @@ class SearchService:
                 matched_name=match.index.name,
                 score=10010.0,
             )
-            for match in best_match_per_page(matches)
+            for match in _best_name_matches_per_version(matches)
         ]
         return results
 
@@ -758,7 +849,9 @@ class SearchService:
             page_ids={hit.page_id for hit in hits},
             statuses=filters.status,
         )
-        best_by_page: dict[UUID, tuple[float, VisiblePageNameMatch]] = {}
+        best_by_version: dict[
+            tuple[UUID, UUID], tuple[float, VisiblePageNameMatch]
+        ] = {}
         for match in matches:
             if not _page_matches_context_filters(
                 match.page, filters, version=match.version
@@ -780,7 +873,8 @@ class SearchService:
             )
             if similarity < min_similarity:
                 continue
-            current = best_by_page.get(match.page.id)
+            key = (match.page.id, match.version.id)
+            current = best_by_version.get(key)
             candidate_order = (
                 -similarity,
                 NAME_KIND_PRIORITY.get(match.index.name_kind, 9),
@@ -788,7 +882,7 @@ class SearchService:
                 hit.rowid,
             )
             if current is None:
-                best_by_page[match.page.id] = (similarity, match)
+                best_by_version[key] = (similarity, match)
                 continue
             current_similarity, current_match = current
             current_hit = hits_by_key[
@@ -806,7 +900,7 @@ class SearchService:
                 current_hit.rowid,
             )
             if candidate_order < current_order:
-                best_by_page[match.page.id] = (similarity, match)
+                best_by_version[key] = (similarity, match)
         results = [
             _ranked_context_match(
                 match,
@@ -814,12 +908,14 @@ class SearchService:
                 matched_name=match.index.name,
                 score=9000.0 + similarity * 100.0,
             )
-            for similarity, match in best_by_page.values()
+            for similarity, match in best_by_version.values()
         ]
-        return sorted(
+        ordered = sorted(
             results,
             key=lambda result: (-result.score, str(result.id)),
-        )[:limit]
+        )
+        selected_pages = list(dict.fromkeys(result.id for result in ordered))[:limit]
+        return [result for result in ordered if result.id in selected_pages]
 
     def _maybe_rerank(
         self, *, query: str, ranked: list[RankedResult]
@@ -958,7 +1054,7 @@ def _ranked_context_page(
     matched_name: str | None,
     score: float,
 ) -> RankedResult:
-    metadata = version.page_metadata or {}
+    metadata = metadata_for(page, version)
     entity_ref = context_page_entity_ref(
         workspace_id=page.workspace_id,
         page_id=page.id,
@@ -968,14 +1064,14 @@ def _ranked_context_page(
     result = RankedResult(
         id=page.id,
         type=EntityKind.CONTEXT_PAGE.value,
-        title=metadata.get("title") or page.title,
+        title=metadata.title,
         snippet="",
         matched_name=matched_name,
         score=score,
         citation_available=version.id == page.current_published_version_id,
         archived=False,
         stable_url=format_stable_url(page.workspace_id, page.id),
-        concept_type=metadata.get("page_type") or page.page_type,
+        concept_type=metadata.page_type,
         version_id=version.id,
         source_ref={"kind": EntityKind.CONTEXT_PAGE.value, "id": str(page.id)},
         match_reason=match_reason,
@@ -991,8 +1087,7 @@ def _page_matches_context_filters(
     *,
     version: ContextPageVersion | None = None,
 ) -> bool:
-    metadata = version.page_metadata if version is not None else {}
-    page_type = (metadata or {}).get("page_type") or page.page_type
+    page_type = metadata_for(page, version).page_type
     if filters.context_type and page_type not in filters.context_type:
         return False
     return not (filters.status and page.lifecycle_status not in filters.status)
@@ -1004,23 +1099,9 @@ def _merge_ranked_results(
     fallback: list[RankedResult],
 ) -> list[RankedResult]:
     merged: list[RankedResult] = []
-    seen: set[tuple[str, UUID, UUID | None]] = set()
+    seen: set[str] = set()
     for result in [*primary, *fallback]:
-        page_id = _context_result_page_id(result)
-        key = (result.type, result.id, None)
-        if page_id is not None:
-            key = ("context_page", page_id, _context_result_version_id(result))
-        elif result.source_ref and result.source_ref.get("kind") == "content_chunk":
-            try:
-                ref = ranked_result_entity_ref(result)
-            except ValueError:
-                pass
-            else:
-                key = (
-                    ref.kind.value,
-                    ref.id or result.id,
-                    result.version_id if ref.kind == EntityKind.CONTEXT_PAGE else None,
-                )
+        key = ranked_result_item_key(result)
         if key in seen:
             continue
         seen.add(key)

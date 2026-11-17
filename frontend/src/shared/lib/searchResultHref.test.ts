@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RankedSearchResult } from "../api/operations";
+import { TREE_VERSION_PARAM } from "../components/treeRouteState";
 import { searchResultHref, searchResultLink } from "./searchResultHref";
 
 describe("searchResultHref", () => {
@@ -18,7 +19,14 @@ describe("searchResultHref", () => {
       document_id: "00000000-0000-4000-8000-000000000101",
       version_id: "00000000-0000-4000-8000-000000000201",
     }), "00000000-0000-4000-8000-000000000001"))
-      .toBe("/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000101?version_id=00000000-0000-4000-8000-000000000201");
+      .toBe("/workspaces/00000000-0000-4000-8000-000000000001/context/pages/00000000-0000-4000-8000-000000000101?version=00000000-0000-4000-8000-000000000201");
+    const permalink = searchResultHref({
+      id: "00000000-0000-4000-8000-000000000101", type: "context_page",
+      stable_url: "/p/00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000101",
+      version_id: "00000000-0000-4000-8000-000000000201",
+    }, "00000000-0000-4000-8000-000000000001");
+    expect(new URL(permalink!, "https://dtxwiki.invalid").searchParams.get(TREE_VERSION_PARAM))
+      .toBe("00000000-0000-4000-8000-000000000201");
   });
 
   it("opens library artifact hits with their canonical document URL", () => {

@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "./fixtures";
 import { createServer, type ViteDevServer } from "vite";
 
 import { fixtureServerConfig } from "./vite-fixture";

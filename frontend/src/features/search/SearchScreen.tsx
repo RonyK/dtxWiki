@@ -25,6 +25,7 @@ import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { SEARCH_QUERY_MAX_LENGTH } from "../../shared/lib/searchLimits";
 import { searchResultLink } from "../../shared/lib/searchResultHref";
+import { searchResultKey, searchResultVersionState } from "../../shared/lib/searchResultPresentation";
 import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { normalizedText, presentLocation, resultLocation, searchPreview } from "./searchResultText";
 
@@ -599,7 +600,7 @@ function SearchResults({
         <div className="operations-list">
           {payload.ranked_results.map((result) => (
             <SearchResultRow
-              key={`${result.type}-${result.id}-${result.version_id ?? ""}`}
+              key={searchResultKey(result)}
               result={result}
               workspaceId={workspaceId}
               query={query}
@@ -668,14 +669,7 @@ function SearchResultRow({
   const location = resultLocation(result);
   const locationParts = presentLocation(location);
   const fullPath = location.join(" › ");
-  const review = result.draft?.review;
-  const reviewStatus = review && typeof review === "object" && "status" in review
-    ? review.status : null;
-  const versionState = result.type !== "context_page" && result.type !== "context_claim" ? null
-    : result.version_status === "published_snapshot" ? "published"
-    : result.version_status === "draft"
-      ? reviewStatus === "pending" || reviewStatus === "changes_requested" ? "reviewing" : "draft"
-      : null;
+  const versionState = searchResultVersionState(result);
   const versionLabel = versionState ? t(`results.versions.${versionState}`) : null;
   const unavailable = !link ? t(
     result.type === "change_set" ? "results.reviewLinkMissing" : "results.linkMissing",

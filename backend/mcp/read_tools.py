@@ -679,17 +679,10 @@ def _borrowed_rewrite_query(responses: dict[str, dict] | None) -> str | None:
 
 
 def _borrowed_candidate_id(result: RankedResult) -> UUID:
-    if result.type not in {"context_page", "context_claim"}:
-        return result.id
-    from backend.services.entity_ref import EntityKind, ranked_result_entity_ref
+    from backend.services.retrieval.fusion import ranked_result_item_key
 
-    ref = ranked_result_entity_ref(result)
-    if ref.kind != EntityKind.CONTEXT_PAGE or ref.version_id is None:
-        return result.id
-    return uuid5(
-        NAMESPACE_URL,
-        f"dtxwiki:search:{ref.kind}:{ref.id or result.id}:{ref.version_id}",
-    )
+    identity = ranked_result_item_key(result)
+    return uuid5(NAMESPACE_URL, f"dtxwiki:search:{identity}")
 
 
 def _borrowed_rerank_request(
