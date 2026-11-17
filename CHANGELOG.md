@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Agent review switch
+
+- With "Review what agents write" turned off, an agent's
+  `submit_context_edit_for_review` (MCP, or REST with a token) completes the
+  write like a token write through REST: the review policy approves and
+  publishes it, or leaves it for a person (for example a risk at or above
+  "Manual review from", or a conflict with the published version). A person's
+  review request still waits for a reviewer.
+
 ### MCP Context merge tools
 
 - Add `preview_context_merge`, `bring_in_context_version`, and

@@ -136,6 +136,7 @@ from backend.services.read_errors import (
     ReadNotFoundError,
     ReadServiceError,
     ReadValidationError,
+    StaleBaseVersionError,
 )
 from backend.services.review_risk_policy import ai_writes_require_human_review
 from backend.services.review_supersession import supersede_review_with_lineage
@@ -2445,6 +2446,9 @@ class PageService:
     ) -> PagePayload:
         """Request review of the named shared draft and keep it editable.
 
+        A person's request always waits for a reviewer. An agent's submission
+        completes its write like any other agent write: the workspace review
+        policy publishes it or leaves it for a person.
         The draft ID remains stable through later saves. An existing pending
         or changes-requested request is returned instead of creating another.
         The idempotency ledger preserves retry receipts for this command.
@@ -2466,6 +2470,7 @@ class PageService:
                 reason=reason,
                 retry_only=retry_only,
                 needs_review=False,
+                complete=actor_provenance in AI_PROVENANCES,
                 chat_session_id=chat_session_id,
                 feedback_id=feedback_id,
             )
@@ -2485,12 +2490,18 @@ class PageService:
         reason: str,
         needs_review: bool,
         force_pending_review: bool = True,
+        complete: bool = False,
+        prepared: PreparedBody | None = None,
         retry_only: bool = False,
         risk_signals: dict[str, bool] | None = None,
         chat_session_id: UUID | None = None,
         feedback_id: UUID | None = None,
     ) -> PagePayload:
-        """Submit in the caller's transaction with its explicit review intent."""
+        """Submit in the caller's transaction with its explicit review intent.
+
+        ``complete`` finishes a write instead: the review waits only when
+        _completion_requires_review says so, and an approved one is published.
+        """
         if reason is not None:
             validate_text(reason, field="reason", max_length=2000)
 
@@ -2574,6 +2585,18 @@ class PageService:
             )
             if has_reference_change:
                 effective_risk_signals["manual_citation"] = True
+            pending = (
+                self._completion_requires_review(
+                    session,
+                    page,
+                    version,
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    actor_provenance=actor_provenance,
+                )
+                if complete
+                else force_pending_review
+            )
             result = self.change_audit_recorder.record_context_page_write(
                 session=session,
                 workspace_id=page.workspace_id,
@@ -2586,7 +2609,7 @@ class PageService:
                 actor_provenance=actor_provenance,
                 body=version.body_md,
                 needs_review=needs_review,
-                force_pending_review=force_pending_review,
+                force_pending_review=pending,
                 risk_signals=effective_risk_signals,
                 origin_chat_session_id=chat_session_id,
             )
@@ -2599,6 +2622,48 @@ class PageService:
                 )
             link_feedback(result.change_set_id)
             self._refresh_page_links(session, page=page, version=version)
+            review = get_in_workspace(
+                session,
+                ReviewItem,
+                workspace_id=page.workspace_id,
+                resource_id=result.review_item_id,
+            )
+            if complete and review is not None and review.status == "approved":
+                from backend.schemas.context_write import PublishContextPageRequest
+                from backend.services.context_write_service import ContextWriteService
+
+                published = ContextWriteService(
+                    context_version_writer=self.context_version_writer,
+                    body_preparer=self.body_preparer,
+                    actor_context=self.actor_context,
+                    context_media_repository_factory=(
+                        self.context_media_repository_factory
+                    ),
+                ).publish_draft(
+                    session=session,
+                    workspace_id=page.workspace_id,
+                    page_id=page.id,
+                    request=PublishContextPageRequest(
+                        version_id=version.id, reason=reason
+                    ),
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                )
+                final = self._require_page_version(
+                    session, page, published.published_version_id
+                )
+                return self._payload_from_page(
+                    session,
+                    page,
+                    final,
+                    review_item_id=result.review_item_id,
+                    change_set_id=result.change_set_id,
+                    prepared=(
+                        prepared
+                        if prepared is not None and final.body_md == prepared.body
+                        else None
+                    ),
+                )
             return self._payload_from_page(
                 session,
                 page,
@@ -3440,12 +3505,7 @@ class PageService:
         aliases: list[str] | None = None,
         destination_node_id: UUID | None = None,
     ) -> PagePayload:
-        from backend.services.context_draft_workflow import (
-            direct_publication_risk,
-            metadata_for,
-            preview_merge,
-            publication_candidate,
-        )
+        from backend.services.context_draft_workflow import metadata_for, preview_merge
 
         with self.session_factory.begin() as session:
             acquire_write_intent(session)
@@ -3531,55 +3591,16 @@ class PageService:
                 actor_id=actor_id,
                 metadata_patch=patch,
             )
-            if stale or (
-                preserve and preview_merge(session, page, version).clean is None
-            ):
+            merge = None if stale else preview_merge(session, page, version)
+            if stale or (preserve and merge.clean is None):
                 payload.alternative_draft_id = version.id
                 return payload
-            # The same completion for every writer, judged on the prepared
-            # result the publication would store: a write that must wait for a
-            # person opens a review, any other write is published.
-            from backend.schemas.context_write import PublishContextPageRequest
-
-            publish_request = PublishContextPageRequest(
-                version_id=version.id, reason="page.update"
-            )
-            _, candidate = publication_candidate(
-                session,
-                page,
-                version,
-                publish_request,
-                prepare=lambda merged: self._prepare_merge_candidate(
-                    session,
-                    page,
-                    version,
-                    merged,
-                    actor_kind,
-                    actor_id,
-                    actor_provenance,
-                ),
-            )
-            workspace = self._workspace_for(session, page.workspace_id)
-            requires_review = self._stages_as_draft(
-                workspace=workspace,
-                actor_provenance=actor_provenance,
-                body_md=candidate.body_md,
-            ) or (
-                actor_provenance in AI_PROVENANCES
-                and direct_publication_risk(
-                    session,
-                    page,
-                    candidate,
-                    workspace=workspace,
-                    reviews=[],
-                    actor_provenance=actor_provenance,
-                    risk_resolver=self.change_audit_recorder.risk_resolver,
-                    lint_registry=self.lint_registry,
-                ).review_required
-            )
-            # The write is recorded like a submission: the review policy either
-            # approves it on the record or leaves it pending for a person.
-            submitted = self._submit_context_edit_in_session(
+            # A direct write that does not merge with the published version is
+            # refused, not queued: its caller resolves the conflict.
+            merge.choose(None)
+            # The write is recorded like a submission and completed by the one
+            # rule every writer shares (_completion_requires_review).
+            return self._submit_context_edit_in_session(
                 session=session,
                 page_id=page.id,
                 version_id=version.id,
@@ -3591,43 +3612,8 @@ class PageService:
                 idempotency_key=f"page-update:{version.id}:{version.editing_revision}",
                 reason="page.update",
                 needs_review=False,
-                force_pending_review=requires_review,
-            )
-            review = (
-                get_in_workspace(
-                    session,
-                    ReviewItem,
-                    workspace_id=page.workspace_id,
-                    resource_id=submitted.review_item_id,
-                )
-                if submitted.review_item_id
-                else None
-            )
-            if review is not None and review.status != "approved":
-                return submitted
-            from backend.services.context_write_service import ContextWriteService
-
-            published = ContextWriteService(
-                context_version_writer=self.context_version_writer,
-                body_preparer=self.body_preparer,
-                actor_context=self.actor_context,
-                context_media_repository_factory=self.context_media_repository_factory,
-            ).publish_draft(
-                session=session,
-                workspace_id=page.workspace_id,
-                page_id=page.id,
-                request=publish_request,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-            )
-            final_version = self._require_page_version(
-                session, page, published.published_version_id
-            )
-            return self._payload_from_page(
-                session,
-                page,
-                final_version,
-                prepared=prepared if final_version.body_md == prepared.body else None,
+                complete=True,
+                prepared=prepared,
             )
 
     def _refresh_page_links(
@@ -4628,6 +4614,70 @@ class PageService:
         """
         return bool(body_md) and bool(
             publish_floor_findings(body_md, registry=self.lint_registry)
+        )
+
+    def _completion_requires_review(
+        self,
+        session: Session,
+        page: ContextPage,
+        version: ContextPageVersion,
+        *,
+        actor_kind: str,
+        actor_id: str,
+        actor_provenance: str,
+    ) -> bool:
+        """Whether finishing this write waits for a person.
+
+        Judged on the prepared result the publication would store: the
+        objective floor and the workspace switch (_stages_as_draft), then the
+        review policy for an agent. A result that cannot merge on its own
+        waits too.
+        """
+        from backend.schemas.context_write import PublishContextPageRequest
+        from backend.services.context_draft_workflow import (
+            direct_publication_risk,
+            publication_candidate,
+        )
+
+        try:
+            _, candidate = publication_candidate(
+                session,
+                page,
+                version,
+                PublishContextPageRequest(version_id=version.id, reason="complete"),
+                prepare=lambda merged: self._prepare_merge_candidate(
+                    session,
+                    page,
+                    version,
+                    merged,
+                    actor_kind,
+                    actor_id,
+                    actor_provenance,
+                ),
+            )
+        except StaleBaseVersionError as exc:
+            # Only a merge conflict can surface here (the request pins no
+            # preview); a person chooses how it resolves.
+            if exc.error_code != "context_merge_conflict":
+                raise
+            return True
+        workspace = self._workspace_for(session, page.workspace_id)
+        return self._stages_as_draft(
+            workspace=workspace,
+            actor_provenance=actor_provenance,
+            body_md=candidate.body_md,
+        ) or (
+            actor_provenance in AI_PROVENANCES
+            and direct_publication_risk(
+                session,
+                page,
+                candidate,
+                workspace=workspace,
+                reviews=[],
+                actor_provenance=actor_provenance,
+                risk_resolver=self.change_audit_recorder.risk_resolver,
+                lint_registry=self.lint_registry,
+            ).review_required
         )
 
     def _stages_as_draft(
