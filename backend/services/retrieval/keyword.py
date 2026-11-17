@@ -172,7 +172,7 @@ class KeywordRetriever:
         if not match_query:
             return []
         visibility_scopes = ["published"]
-        if actor_can_read_drafts(actor):
+        if actor_can_read_drafts(actor) and not filters._context_published_only:
             visibility_scopes.append("draft")
         batch_size = min(256, max(32, limit * 2))
         scan_budget = min(_MAX_FTS_SCAN, max(128, limit * 8))
@@ -285,7 +285,7 @@ class KeywordRetriever:
             (ContextPageVersion.id == ContextPage.current_published_version_id)
             | (
                 (ContextPageVersion.version_status == "draft")
-                if actor_can_read_drafts(actor)
+                if actor_can_read_drafts(actor) and not filters._context_published_only
                 else False
             ),
         ]
@@ -402,7 +402,9 @@ class KeywordRetriever:
         results: list[tuple[FtsDocumentHit, RankedResult]] = []
         for claim, version, page in rows:
             if version.id != page.current_published_version_id and not (
-                actor_can_read_drafts(actor) and version.version_status == "draft"
+                not filters._context_published_only
+                and actor_can_read_drafts(actor)
+                and version.version_status == "draft"
             ):
                 continue
             chosen = min(grouped[claim.id], key=lambda hit: (hit.rank, hit.rowid))

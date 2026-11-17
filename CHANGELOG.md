@@ -30,6 +30,10 @@
   Refresh cached tool catalogs and result schemas, and use `version_id` to read
   the matching version.
 - REST and retriever/SPI results carry the same optional version-state fields.
+- Apply Ask's published Context eligibility before retrieval candidate limits,
+  so draft-only matches cannot crowd out published evidence for editors.
+- Evaluate document rankings from a single retrieval per query, removing
+  duplicate versions and claims before the document budget is applied.
 
 ### Shared Context drafts
 

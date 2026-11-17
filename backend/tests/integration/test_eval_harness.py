@@ -11,7 +11,12 @@ from backend.app.settings import Settings
 from backend.cli.commands.eval_cmd import _golden_page_samples
 from backend.cli.main import app
 from backend.models.base import Base
-from backend.models.context import ContextCitation
+from backend.models.context import (
+    ContextCitation,
+    ContextClaim,
+    ContextPage,
+    ContextPageVersion,
+)
 from backend.models.delegated_task import ClientDelegatedTask
 from backend.models.workspace import Workspace
 from backend.schemas.context_write import (
@@ -34,7 +39,7 @@ from backend.services.eval.metrics import (
     recall_at_k,
     reciprocal_rank,
 )
-from backend.services.page_service import PageService
+from backend.services.page_service import PageService, sync_page_projections
 from backend.services.review_service import ReviewService
 from backend.services.search_service import build_search_service
 
@@ -157,29 +162,29 @@ class _StubSearchService:
     def __init__(self, by_query: dict[str, list[str]]) -> None:
         self._by_query = by_query
 
-    def search(self, *, query, limit, cursor=None, **_ignored) -> SearchPayload:
+    def search_documents(
+        self, *, query, limit, result_filter=None, **_ignored
+    ) -> SearchPayload:
         identifiers = self._by_query.get(query, [])
-        offset = int(cursor or 0)
-        # Keep the existing inputs on separate pages, including two versions
-        # of one document, to verify the document-level evaluation budget.
-        page = identifiers[offset : offset + min(limit, 1)]
-        results = [
+        # The service contract selects documents from the ranking once,
+        # including multiple matching versions of the same document.
+        candidates = [
             _ranked(identifier, 1.0 - index * 0.01).model_copy(
                 update={
                     "version_id": uuid5(NAMESPACE_URL, f"{identifier}:{index}"),
                 }
             )
-            for index, identifier in enumerate(page, start=offset)
+            for index, identifier in enumerate(identifiers)
         ]
+        results = {}
+        for result in candidates:
+            if result_filter is None or result_filter(result):
+                results.setdefault(result_identifier(result), result)
         return SearchPayload(
-            ranked_results=results,
+            ranked_results=list(results.values())[:limit],
             supported_retrieval_modes=["keyword"],
             permission_note=None,
-            next_cursor=(
-                str(offset + len(results))
-                if offset + len(results) < len(identifiers)
-                else None
-            ),
+            next_cursor=None,
         )
 
 
@@ -209,7 +214,7 @@ def test_evaluate_aggregates_metrics_across_queries():
 
 def test_evaluate_lanes_separates_match_reason_families():
     class LaneStub:
-        def search(self, *, query, cursor=None, **_ignored):
+        def search_documents(self, *, query, limit, result_filter=None, **_ignored):
             expected_reason = {
                 "entity query": "exact_title",
                 "trigram query": "trigram",
@@ -229,12 +234,15 @@ def test_evaluate_lanes_separates_match_reason_families():
                 ),
                 _ranked("/wrong-lane", 0.5, match_reason="semantic"),
             ]
-            offset = int(cursor or 0)
+            selected = {}
+            for result in candidates:
+                if result_filter is None or result_filter(result):
+                    selected.setdefault(result_identifier(result), result)
             return SearchPayload(
-                ranked_results=candidates[offset : offset + 1],
+                ranked_results=list(selected.values())[:limit],
                 supported_retrieval_modes=["keyword"],
                 permission_note=None,
-                next_cursor=str(offset + 1) if offset + 1 < len(candidates) else None,
+                next_cursor=None,
             )
 
     golden = [
@@ -269,7 +277,7 @@ def test_ranked_result_rejects_unknown_match_reason():
 # --- real keyword retrieval end-to-end --------------------------------------
 
 
-def test_evaluate_keyword_mode_over_published_page(session_factory):
+def test_evaluate_keyword_mode_over_published_page(session_factory, monkeypatch):
     service = build_search_service(Settings())
     assert "keyword" in service.supported_modes()
 
@@ -313,6 +321,24 @@ def test_evaluate_keyword_mode_over_published_page(session_factory):
             actor_kind="human",
             actor_id=ACTOR_ID,
         )
+        page = session.get(ContextPage, created.page_id)
+        version = session.get(ContextPageVersion, created.draft_version_id)
+        # Expand the same published-document case with matching claims: row
+        # windows must not turn one document prediction into repeated FTS work.
+        session.add_all(
+            ContextClaim(
+                workspace_id=workspace_id,
+                page_version_id=version.id,
+                claim_text=f"Vector retrieval claim {index}.",
+                claim_type="fact",
+                status="active",
+                confidence="unknown",
+                created_by_actor_type="human",
+            )
+            for index in range(403)
+        )
+        session.flush()
+        sync_page_projections(session, page=page, version=version)
 
     # Discover the identifier the keyword retriever assigns to the page, so the
     # golden set is independent of the concept_path format.
@@ -327,6 +353,16 @@ def test_evaluate_keyword_mode_over_published_page(session_factory):
         assert payload.ranked_results
         identifier = result_identifier(payload.ranked_results[0])
 
+    retrieval_calls = []
+    keyword_retriever = service._retriever_for("keyword")
+    retrieve = keyword_retriever.retrieve
+
+    def counted_retrieve(**kwargs):
+        retrieval_calls.append(kwargs["query"])
+        return retrieve(**kwargs)
+
+    monkeypatch.setattr(keyword_retriever, "retrieve", counted_retrieve)
+
     with session_factory() as session:
         [metrics] = evaluate(
             service,
@@ -339,6 +375,7 @@ def test_evaluate_keyword_mode_over_published_page(session_factory):
     assert metrics.recall_at_k == 1.0
     assert metrics.hit_rate == 1.0
     assert metrics.mrr > 0.0
+    assert len(retrieval_calls) == 1
 
     # Negative control: an expected document that is never retrieved scores 0.
     with session_factory() as session:
@@ -352,6 +389,7 @@ def test_evaluate_keyword_mode_over_published_page(session_factory):
         )
     assert miss.recall_at_k == 0.0
     assert miss.hit_rate == 0.0
+    assert len(retrieval_calls) == 2
 
 
 def test_eval_cli_prints_mode_and_lane_tables(tmp_path):

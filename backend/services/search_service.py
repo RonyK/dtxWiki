@@ -3,7 +3,7 @@
 import base64
 import json
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -46,7 +46,10 @@ from backend.services.page_name_lookup import (
     visible_page_name_matches,
 )
 from backend.services.read_errors import UnsupportedRetrievalModeError
-from backend.services.retrieval.fusion import ranked_result_item_key
+from backend.services.retrieval.fusion import (
+    ranked_result_document_key,
+    ranked_result_item_key,
+)
 from backend.services.retrieval.identity import ranked_result_document_id
 from backend.services.retrieval.keyword import (
     EXCLUDED_LIBRARY_LIFECYCLE_STATUSES,
@@ -401,7 +404,64 @@ class SearchService:
         *,
         citable_only: bool = False,
     ) -> SearchPayload:
-        """``citable_only`` keeps one published row per document before paging."""
+        """Return matching versions; citations narrow eligibility before retrieval."""
+        return self._search(
+            session,
+            workspace_id,
+            query,
+            scope,
+            filters,
+            retrieval_mode,
+            limit,
+            cursor,
+            actor,
+            citable_only=citable_only,
+        )
+
+    def search_documents(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        query: str,
+        retrieval_mode: str = "keyword",
+        limit: int = 20,
+        actor: ActorContext | None = None,
+        *,
+        result_filter: Callable[[RankedResult], bool] | None = None,
+    ) -> SearchPayload:
+        """Rank once and select documents after an optional consumer predicate.
+
+        The retriever receives the same bounded candidate budget as search.
+        Filtering and document identity deduplication precede the result slice,
+        so consumers never replay retrieval to skip matching versions or claims.
+        """
+        return self._search(
+            session,
+            workspace_id,
+            query,
+            retrieval_mode=retrieval_mode,
+            limit=limit,
+            actor=actor,
+            document_results=True,
+            result_filter=result_filter,
+        )
+
+    def _search(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        query: str,
+        scope: str = "all",
+        filters: SearchFilters | dict[str, object] | None = None,
+        retrieval_mode: str = "keyword",
+        limit: int = 20,
+        cursor: str | None = None,
+        actor: ActorContext | None = None,
+        *,
+        citable_only: bool = False,
+        document_results: bool = False,
+        result_filter: Callable[[RankedResult], bool] | None = None,
+    ) -> SearchPayload:
         retriever = self._retriever_for(retrieval_mode)
         if retriever is None:
             raise UnsupportedRetrievalModeError(
@@ -415,6 +475,9 @@ class SearchService:
             if isinstance(filters, dict)
             else filters or SearchFilters()
         )
+        if citable_only:
+            active_filters = active_filters.model_copy()
+            active_filters._context_published_only = True
         warnings = [
             *_unsupported_filter_warnings(active_filters),
             *self.runtime_warnings(session),
@@ -605,13 +668,19 @@ class SearchService:
                     seen_documents.add(document_id)
                     citable.append(result)
             ranked = citable
+        if document_results:
+            selected = {}
+            for result in ranked:
+                if result_filter is None or result_filter(result):
+                    selected.setdefault(ranked_result_document_key(result), result)
+            ranked = list(selected.values())
         # Ranking is deterministic within the bounded planner candidate set, so
         # paging is a stable offset slice. total_count below is the size of this
         # set (especially for semantic mode), never a full-corpus COUNT.
         offset = _decode_search_cursor(cursor)
         window = ranked[offset : offset + limit]
         if session is not None:
-            if not citable_only:
+            if not citable_only and not document_results:
                 self._enrich_context_drafts(
                     session,
                     workspace_id,
@@ -844,7 +913,7 @@ class SearchService:
         if not match_query:
             return []
         visibility_scopes = ["published"]
-        if actor_can_read_drafts(actor):
+        if actor_can_read_drafts(actor) and not filters._context_published_only:
             visibility_scopes.append("draft")
         hits: list[PageNameTrigramHit] = WorkspaceFts5ProjectionRepository(
             session, workspace_id
@@ -1109,6 +1178,10 @@ def _page_matches_context_filters(
     *,
     version: ContextPageVersion | None = None,
 ) -> bool:
+    if filters._context_published_only and (
+        version is None or version.id != page.current_published_version_id
+    ):
+        return False
     page_type = metadata_for(page, version).page_type
     if filters.context_type and page_type not in filters.context_type:
         return False

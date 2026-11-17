@@ -133,8 +133,8 @@ def test_eval_regression_gate_detects_a_live_search_drop(session_factory):
         workspace_id = _seed(session)
 
     class DroppingSearch:
-        def search(self, *args, **kwargs):
-            payload = service.search(*args, **kwargs)
+        def search_documents(self, *args, **kwargs):
+            payload = service.search_documents(*args, **kwargs)
             if kwargs.get("query") == "Gate Exact Guide":
                 return payload.model_copy(update={"ranked_results": []})
             return payload

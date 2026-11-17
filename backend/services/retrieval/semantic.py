@@ -91,7 +91,7 @@ class SemanticRetriever:
         query_vector = response.embeddings[0]
 
         scopes = {"published"}
-        if actor_can_read_drafts(actor):
+        if actor_can_read_drafts(actor) and not filters._context_published_only:
             scopes.add("draft")
         kinds = _document_kinds_for_scope(scope)
         allow_restricted = actor_can_read_restricted_library(actor)
@@ -241,6 +241,11 @@ class SemanticRetriever:
             # archive or an old version. Match the same lifecycle/head set as
             # keyword search before exposing the chunk (F-1/R-14).
             if page.lifecycle_status == "archived":
+                return None
+            if (
+                filters._context_published_only
+                and chunk.source_version_id != page.current_published_version_id
+            ):
                 return None
             if chunk.source_version_id not in visible_search_version_ids(page, actor):
                 return None
