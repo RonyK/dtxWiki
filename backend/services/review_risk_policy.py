@@ -115,10 +115,9 @@ def _preset_policy(preset: str) -> dict[str, Any]:
             # person. True keeps a new workspace safe: anything arriving over
             # MCP, OAuth or a PAT waits for a human. Turning it off is how a
             # workspace says "I trust what my agents write" -- those writes then
-            # publish the way a person's do, still carrying a ChangeSet, an
-            # approved ReviewItem with this policy snapshot, and an audit event.
-            # Nothing else in the resolution keys on provenance, so this is the
-            # only place that decision lives.
+            # follow exactly the rule a person's do, still carrying a ChangeSet,
+            # an approved ReviewItem with this policy snapshot, and an audit
+            # event. ReviewRiskResolver.resolve reads it in that one place.
             "always_for_ai_authored": True,
         },
         "automation": {
@@ -322,14 +321,20 @@ class ReviewRiskResolver:
         ):
             review_required = True
             reason_codes.append("author:ai_requires_human")
-        if actor_provenance not in AI_PROVENANCES and actor_provenance != "internal":
-            # A person writing in the browser is not sent to review merely by a
-            # risk threshold. An explicit request for another person to review
-            # the change is different and must remain effective. Objective lint
-            # failures still hold the body back through publication invariants;
-            # they do not create a review on the author's behalf.
+        trusted_agent = actor_provenance in AI_PROVENANCES and not policy[
+            "review_required"
+        ].get("always_for_ai_authored", True)
+        if trusted_agent or (
+            actor_provenance not in AI_PROVENANCES and actor_provenance != "internal"
+        ):
+            # A person -- or an agent the workspace trusts like one -- is not
+            # sent to review merely by a risk threshold. An explicit request
+            # for another person to review the change is different and must
+            # remain effective. Objective lint failures still hold the body
+            # back through publication invariants; they do not create a review
+            # on the author's behalf.
             review_required = bool(signals.get("caller_needs_review"))
-            reason_codes.append("author:human_direct_write")
+            reason_codes.append("author:direct_write")
         # `human_review_required` marks the reviews a person MUST decide, which
         # is narrower than the reviews that get created. Callers used to set it
         # from provenance, making it a second name for `ai_authored`; the expiry

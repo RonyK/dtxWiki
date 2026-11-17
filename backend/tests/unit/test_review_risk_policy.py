@@ -171,9 +171,7 @@ def test_review_policy_accepts_high_auto_approve_when_opted_in():
 
     validated = validate_review_policy(policy)
 
-    assert (
-        validated["automation"]["auto_approve_by_risk"]["high"]["allowed"] is True
-    )
+    assert validated["automation"]["auto_approve_by_risk"]["high"]["allowed"] is True
     assert {"risk_level": "high"} in [
         {"risk_level": entry["risk_level"]}
         for entry in auto_approve_by_risk_entries(validated)
@@ -188,9 +186,7 @@ def test_review_policy_accepts_zero_delay_auto_approve():
 
     validated = validate_review_policy(policy)
 
-    assert (
-        validated["automation"]["auto_approve_by_risk"]["low"]["delay_days"] == 0
-    )
+    assert validated["automation"]["auto_approve_by_risk"]["low"]["delay_days"] == 0
 
 
 def test_human_checkbox_is_honored_but_ai_policy_gate_remains():
@@ -220,10 +216,22 @@ def test_human_checkbox_is_honored_but_ai_policy_gate_remains():
         actor_provenance="mcp_client",
     )
 
+    # Turning the switch off makes an agent's write follow the person rule:
+    # neither the risk threshold nor the page type sends it to review.
+    trusted_policy = default_review_policy()
+    trusted_policy["review_required"]["always_for_ai_authored"] = False
+    trusted = resolver.resolve(
+        workspace=_workspace(trusted_policy),
+        event="context_ingress_auto",
+        signals={**unchecked_signals, "ai_authored": True},
+        actor_provenance="mcp_client",
+    )
+
     assert human_unchecked.review_required is False
     assert human_checked.review_required is True
     assert human_checked.signals["human_review_required"] is True
     assert ai.review_required is True
+    assert trusted.review_required is False
 
 
 def test_objective_lint_error_is_high_risk_but_not_a_human_review_request():
@@ -244,7 +252,7 @@ def test_objective_lint_error_is_high_risk_but_not_a_human_review_request():
 
     assert resolution.review_required is False
     assert resolution.risk_level == "high"
-    assert "author:human_direct_write" in resolution.reason_codes
+    assert "author:direct_write" in resolution.reason_codes
     assert resolution.signals["human_review_required"] is True
 
 
