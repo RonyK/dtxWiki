@@ -25,6 +25,8 @@ class SettingsMcpClientData(BaseModel):
     status: Literal["active", "disabled"]
     connection_state: Literal["active", "expired", "revoked", "disabled", "unknown"]
     credential_kind: Literal["pat", "oauth", "unknown"] = "unknown"
+    # The access key id or OAuth grant id this client calls with.
+    credential_id: UUID | None = None
     oauth_client_id: str | None = None
     last_used_at: datetime | None = None
     next_expiry: datetime | None = None

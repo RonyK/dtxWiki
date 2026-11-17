@@ -3149,34 +3149,186 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   margin-bottom: 12px;
 }
 
-.mcp-key-row {
-  align-items: start;
-  grid-template-columns: 18px minmax(0, 1fr) minmax(150px, auto);
-}
-
-.mcp-key-main,
-.mcp-key-title,
-.mcp-key-meta,
-.scope-chip-row,
-.mcp-key-actions,
-.mcp-key-rename {
+/* MCP credential lists (access keys, connected MCP clients) ----------------
+   One continuous bordered list and one row rule for both. When the list is
+   wide it is a column table under one visual header; when it is narrow each
+   row stacks: title + actions, app / credential line, then inline-labelled
+   facts with the dates on their own line. Sized by the list's own width, not
+   the viewport, so the settings rail and phone widths need no extra rules.
+   Rarely needed facts (created date, ids, type) fold into a details strip. */
+.mcp-cred-list {
+  container: mcp-cred / inline-size;
   min-width: 0;
 }
-
-.mcp-key-title {
+.mcp-cred-table {
+  display: grid;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.mcp-cred-head { display: none; }
+.mcp-cred-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "title actions" "sub sub" "facts facts" "detail detail";
+  align-items: start;
+  gap: 6px 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  word-break: keep-all;
+}
+.mcp-cred-row + .mcp-cred-row { border-top: 1px solid var(--border); }
+/* Rows round the table's corners themselves so a tinted row does not square
+   them off; the first row only while the header is hidden. */
+.mcp-cred-head + .mcp-cred-row {
+  border-top-left-radius: var(--radius-card);
+  border-top-right-radius: var(--radius-card);
+}
+.mcp-cred-row:last-child {
+  border-bottom-left-radius: var(--radius-card);
+  border-bottom-right-radius: var(--radius-card);
+}
+.mcp-cred-row.is-disabled { background: var(--surface-subtle); }
+.mcp-cred-row.is-disabled .mcp-cred-title strong { color: var(--ink-soft); }
+.mcp-cred-name { display: contents; }
+.mcp-cred-title {
+  grid-area: title;
+  align-self: center;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
+  min-width: 0;
 }
-
-.mcp-key-title code {
+.mcp-cred-title strong { min-width: 0; overflow-wrap: anywhere; }
+.mcp-cred-sub {
+  grid-area: sub;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: -2px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.mcp-cred-sub code {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-subtle);
-  color: var(--ink-soft);
   font-size: 11px;
-  padding: 2px 7px;
+  padding: 1px 6px;
+}
+.mcp-cred-facts {
+  grid-area: facts;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  min-width: 0;
+}
+/* Forces the dates onto their own line in the stacked layout. */
+.mcp-cred-facts::after { content: ""; order: 1; flex-basis: 100%; height: 0; }
+.mcp-cred-fact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.mcp-cred-label {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+/* Chips flow right after their inline label instead of dropping as a block. */
+.mcp-cred-fact .scope-chip-row,
+.mcp-cred-fact .workspace-chip-row { display: contents; }
+.mcp-cred-fact .workspace-chip { max-width: 100%; }
+.mcp-cred-time {
+  order: 2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mcp-cred-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.mcp-cred-actions .icon-button { white-space: nowrap; }
+.mcp-cred-detail {
+  grid-area: detail;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  font-size: 12px;
+}
+.mcp-cred-detail > div { display: flex; gap: 6px; min-width: 0; }
+.mcp-cred-detail dt { color: var(--ink-muted); font-weight: 700; white-space: nowrap; }
+.mcp-cred-detail dd { margin: 0; overflow-wrap: anywhere; }
+.mcp-cred-detail code { word-break: break-all; }
+.mcp-cred-row.is-editing .mcp-key-rename { grid-column: 1 / -1; }
+
+@container mcp-cred (min-width: 760px) {
+  .mcp-cred-table--keys {
+    --mcp-cred-cols: minmax(190px, 2fr) minmax(88px, 0.9fr) minmax(130px, 1.3fr) 92px 92px 124px;
+  }
+  .mcp-cred-table--clients {
+    --mcp-cred-cols: minmax(190px, 2fr) minmax(96px, 0.8fr) minmax(110px, 1fr) 92px 92px 172px;
+  }
+  .mcp-cred-head {
+    display: grid;
+    grid-template-columns: var(--mcp-cred-cols);
+    gap: 0 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
+    background: var(--surface-subtle);
+    color: var(--ink-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .mcp-cred-row {
+    grid-template-columns: var(--mcp-cred-cols);
+    grid-template-areas: none;
+    align-items: center;
+    gap: 8px 12px;
+  }
+  .mcp-cred-head + .mcp-cred-row {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+  .mcp-cred-name { display: block; min-width: 0; }
+  .mcp-cred-title,
+  .mcp-cred-sub,
+  .mcp-cred-actions { grid-area: auto; }
+  .mcp-cred-sub { margin-top: 2px; }
+  .mcp-cred-facts { display: contents; }
+  .mcp-cred-facts::after { content: none; }
+  /* The header names the columns; each cell keeps its label for screen readers. */
+  .mcp-cred-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+  }
+  .mcp-cred-time { order: 0; white-space: normal; }
+  .mcp-cred-detail { grid-column: 1 / -1; }
+}
+
+.scope-chip-row,
+.mcp-key-rename {
+  min-width: 0;
 }
 
 .mcp-key-preview,
@@ -3201,20 +3353,6 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   padding: 1px 6px;
 }
 
-.mcp-key-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 4px;
-  color: var(--ink-soft);
-  font-size: 12px;
-}
-
-.mcp-key-internal-id {
-  color: var(--ink-faint);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
 .scope-chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -3230,20 +3368,6 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   font-size: 12px;
   font-weight: 700;
   padding: 3px 8px;
-}
-
-/* .mcp-key-actions / .mcp-client-actions carry the shared `.row-actions`
-   grid; only the row's own column sizing lives here. */
-
-.mcp-client-details {
-  margin-top: 8px;
-}
-
-.mcp-client-details summary {
-  color: var(--ink-muted);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .mcp-key-rename {
@@ -3288,10 +3412,6 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   border-color: var(--context);
   background: var(--surface-hover);
   color: var(--ink);
-}
-
-.mcp-client-row {
-  grid-template-columns: 18px minmax(0, 1fr) auto;
 }
 
 .mcp-connection-controls {
@@ -3636,16 +3756,6 @@ body:has(.tree-node-menu) .tree-row-tooltip {
   .credential-list-controls .segmented-control button,
   .credential-list-page-actions .icon-button {
     flex: 1 1 0;
-  }
-
-  .mcp-key-row,
-  .mcp-client-row {
-    grid-template-columns: 18px minmax(0, 1fr);
-  }
-
-  .mcp-key-actions,
-  .mcp-client-actions {
-    grid-column: 2;
   }
 
   /* Stacked rows put the action column under the copy, where it reads
@@ -4831,31 +4941,21 @@ details.advanced-section summary {
   }
 }
 
-.mcp-key-row,
-.oauth-consent-row,
-.mcp-client-row { grid-template-columns: 20px minmax(0, 1fr); align-items: start; }
-.mcp-key-row > .row-actions,
-.oauth-consent-row > .row-actions,
-.mcp-client-row > .row-actions {
+.oauth-consent-row { grid-template-columns: 20px minmax(0, 1fr); align-items: start; }
+.oauth-consent-row > .row-actions {
   grid-column: 2 / -1;
   border-top: 1px solid var(--border);
   padding-top: 10px;
   width: 100%;
 }
-.mcp-key-row .row-actions-buttons,
-.oauth-consent-row .row-actions-buttons,
-.mcp-client-row .row-actions-buttons { justify-content: flex-end; flex-wrap: wrap; }
+.oauth-consent-row .row-actions-buttons { justify-content: flex-end; flex-wrap: wrap; }
 .mcp-credential-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .mcp-credential-heading > strong { min-width: 0; overflow-wrap: anywhere; }
 .mcp-credential-heading > .status-pill { flex-shrink: 0; }
-.mcp-key-title { display: block; }
-.mcp-key-identity { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 6px 12px; color: var(--ink-soft); }
 .mcp-field-label { display: block; margin-block: 10px 4px; font-size: 12px; font-weight: 700; color: var(--ink-muted); }
 .mcp-card-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-block: 12px; padding-block: 12px; border-block: 1px solid var(--border); }
 .mcp-card-times dt { font-size: 12px; color: var(--ink-muted); }
 .mcp-card-times dd { margin: 4px 0 0; overflow-wrap: anywhere; }
-.mcp-key-details { margin-block: 10px; }
-.mcp-key-details code { overflow-wrap: anywhere; }
 .mcp-connection-controls { margin-block: 16px 0; padding-top: 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
 @media (max-width: 640px) {
   .mcp-card-times { grid-template-columns: minmax(0, 1fr); }

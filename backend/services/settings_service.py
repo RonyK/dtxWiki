@@ -62,7 +62,11 @@ from backend.services.library_policy import (
     get_default_library_family_policy_service,
 )
 from backend.services.lint import LintPolicy, LintRegistry, LintStage
-from backend.services.mcp_credential_health import binding_key_for_client
+from backend.services.mcp_client_service import mcp_client_display_name
+from backend.services.mcp_credential_health import (
+    binding_key_for_client,
+    credential_id_for_binding,
+)
 from backend.services.oauth_service import (
     WorkspaceOAuthHealth,
     attach_name_matched_oauth_client_ids,
@@ -2201,9 +2205,16 @@ def _settings_mcp_client_payload(
                 else "oauth"
                 if credential.oauth_client_id
                 else "pat",
+                "credential_id": credential_id_for_binding(
+                    binding_key_for_client(client)
+                ),
                 "id": client.id,
                 "name": client.name,
-                "client_name": oauth_client_name or client.name,
+                # The name people read: the OAuth app's registered name, else
+                # the client name without its credential suffix -- the same
+                # rule Chats and Graph use.
+                "client_name": oauth_client_name
+                or mcp_client_display_name(client.name),
                 "client_type": client.client_type,
                 "scopes": client.scopes,
                 "status": client.status,

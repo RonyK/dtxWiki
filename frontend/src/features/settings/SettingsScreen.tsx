@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Copy,
   FlaskConical,
+  Info,
   KeyRound,
   ListChecks,
   LockKeyhole,
@@ -105,6 +106,7 @@ import {
   setDefaultWorkspace,
   type WorkspaceSummary,
 } from "../../shared/api/workspace";
+import { ActionMenu } from "../../shared/components/ActionMenu";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
@@ -3502,7 +3504,17 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
           })}
           searchValue={accessKeySearchDraft}
         >
-          <div className="operations-list">
+          <div className="mcp-cred-list">
+          <div className="mcp-cred-table mcp-cred-table--keys">
+            <McpCredentialTableHead
+              labels={[
+                t("credentialTable.key", { defaultValue: "Key" }),
+                t("mcpCard.permissions"),
+                t("mcpCard.workspaces"),
+                t("mcpCard.lastUsed"),
+                t("mcpCard.expires"),
+              ]}
+            />
             {tokens.map((token) => (
               <McpKeyRow
                 busy={tokenBusy || accessKeyPages.loading}
@@ -3530,6 +3542,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
                 token={token}
               />
             ))}
+          </div>
           </div>
         </PaginatedCredentialList>
       </div>
@@ -5068,12 +5081,12 @@ function McpKeyRow({
   const { t } = useTranslation("settings");
   const status = apiTokenStatus(token);
   const inactive = status === "expired" || status === "revoked";
-  const never = t("keyRow.never", { defaultValue: "never" });
-  // The Rename button is replaced by the editor, and the editor is replaced by
-  // the button again -- so without these two refs focus falls to <body> at
-  // both ends and a keyboard reader has to walk the whole key list back.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  // Rename is a menu item and the editor replaces the row, so without these
+  // two refs focus falls to <body> at both ends and a keyboard reader has to
+  // walk the whole key list back.
   const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const renameTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
   const wasRenamingRef = useRef(isRenaming);
   useEffect(() => {
     const wasRenaming = wasRenamingRef.current;
@@ -5082,200 +5095,409 @@ function McpKeyRow({
       renameInputRef.current?.focus();
       renameInputRef.current?.select();
     } else if (wasRenaming) {
-      renameTriggerRef.current?.focus();
+      actionsRef.current
+        ?.querySelector<HTMLButtonElement>(".action-menu__trigger")
+        ?.focus();
     }
   }, [isRenaming]);
-  return (
-    <div
-      className={`operations-row compact mcp-key-row ${inactive ? "is-disabled" : ""}`}
-    >
-      <KeyRound size={16} aria-hidden="true" />
-      <div className="mcp-key-main">
-        {isRenaming ? (
-          <div className="mcp-key-rename">
-            <label className="field-stack mcp-key-rename-field">
-              {t("keyRow.keyName", { defaultValue: "Key name" })}
-              <input
-                aria-label={t("keyRow.renameAria", {
-                  defaultValue: "Rename {{name}}",
-                  name: token.name,
-                })}
-                className="mcp-key-rename-input"
-                {...textInputLimit(128)}
-                onChange={(event) => onRenameDraftChange(event.target.value)}
-                ref={renameInputRef}
-                value={renameDraft}
-              />
-            </label>
-            <button aria-label={t("keyRow.saveName", { defaultValue: "Save name" })}
-              className="icon-button primary"
-              disabled={busy || !renameDraft.trim()}
-              onClick={onSaveRename}
-              type="button"
-            >
-              {t("shell:actions.save")}
-            </button>
-            <button
-              className="icon-button"
-              disabled={busy}
-              onClick={onCancelRename}
-              type="button"
-            >
-              {t("keyRow.cancel", { defaultValue: "Cancel" })}
-            </button>
-          </div>
-        ) : (
-          <div className="mcp-key-title">
-            <div className="mcp-credential-heading">
-              <strong>{token.name}</strong>
-              <StatusPill status={status} compact />
-            </div>
-            <div className="mcp-key-identity">
-              <span>{mcpTokenClientLabel(token)}</span>
-              {token.token_preview ? (
-                <code
-                  className="mcp-key-preview"
-                  title={t("keyRow.previewTitle", {
-                    defaultValue:
-                      "Starts with {{prefix}}. Match this with the access key copied when it was created.",
-                    prefix: token.token_preview,
-                  })}
-                >
-                  {tokenPreviewLabel(token)}
-                </code>
-              ) : (
-                <span
-                  className="mcp-key-preview-unavailable"
-                  title={t("keyRow.prefixNotSavedTitle", {
-                    defaultValue:
-                      "This key was created before prefix previews were stored.",
-                  })}
-                >
-                  {t("keyRow.prefixNotSaved", {
-                    defaultValue: "Prefix not saved",
-                  })}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-        <span className="mcp-field-label">
-          {t("mcpCard.permissions")}
-        </span>
-        <div className="scope-chip-row">
-          {token.scopes.map((scope) => (
-            <span className="scope-chip" key={scope}>
-              {scopeLabel(scope, t)}
-            </span>
-          ))}
+  if (isRenaming) {
+    return (
+      <div className="mcp-cred-row mcp-key-row is-editing">
+        <div className="mcp-key-rename">
+          <label className="field-stack mcp-key-rename-field">
+            {t("keyRow.keyName", { defaultValue: "Key name" })}
+            <input
+              aria-label={t("keyRow.renameAria", {
+                defaultValue: "Rename {{name}}",
+                name: token.name,
+              })}
+              className="mcp-key-rename-input"
+              {...textInputLimit(128)}
+              onChange={(event) => onRenameDraftChange(event.target.value)}
+              ref={renameInputRef}
+              value={renameDraft}
+            />
+          </label>
+          <button aria-label={t("keyRow.saveName", { defaultValue: "Save name" })}
+            className="icon-button primary"
+            disabled={busy || !renameDraft.trim()}
+            onClick={onSaveRename}
+            type="button"
+          >
+            {t("shell:actions.save")}
+          </button>
+          <button
+            className="icon-button"
+            disabled={busy}
+            onClick={onCancelRename}
+            type="button"
+          >
+            {t("keyRow.cancel", { defaultValue: "Cancel" })}
+          </button>
         </div>
-        <span className="mcp-field-label">
-          {t("mcpCard.workspaces")}
-        </span>
-        <WorkspaceScopeChips
-          labels={chipLabels}
-          roleLabel={roleLabel}
-          workspaces={(token.workspaces ?? []).map((workspace) => ({
-            id: workspace.id,
-            title: workspace.title,
-            slug: workspace.slug,
-            role: workspace.membership_role,
-            scopes: workspace.granted_scopes,
-            syncState: workspace.sync_state,
-          }))}
+      </div>
+    );
+  }
+  return (
+    <div className={`mcp-cred-row mcp-key-row ${inactive ? "is-disabled" : ""}`}>
+      <div className="mcp-cred-name">
+        <div className="mcp-cred-title">
+          <strong>{token.name}</strong>
+          <StatusPill status={status} compact />
+        </div>
+        <div className="mcp-cred-sub">
+          <span>{mcpTokenClientLabel(token)}</span>
+          {token.token_preview ? (
+            <code
+              className="mcp-key-preview"
+              title={t("keyRow.previewTitle", {
+                defaultValue:
+                  "Starts with {{prefix}}. Match this with the access key copied when it was created.",
+                prefix: token.token_preview,
+              })}
+            >
+              {tokenPreviewLabel(token)}
+            </code>
+          ) : (
+            <span
+              className="mcp-key-preview-unavailable"
+              title={t("keyRow.prefixNotSavedTitle", {
+                defaultValue:
+                  "This key was created before prefix previews were stored.",
+              })}
+            >
+              {t("keyRow.prefixNotSaved", { defaultValue: "Prefix not saved" })}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="mcp-cred-facts">
+        <div className="mcp-cred-fact">
+          <span className="mcp-cred-label">{t("mcpCard.permissions")}</span>
+          <ScopeChips scopes={token.scopes} />
+        </div>
+        <div className="mcp-cred-fact">
+          <span className="mcp-cred-label">{t("mcpCard.workspaces")}</span>
+          <WorkspaceScopeChips
+            labels={chipLabels}
+            roleLabel={roleLabel}
+            workspaces={(token.workspaces ?? []).map((workspace) => ({
+              id: workspace.id,
+              title: workspace.title,
+              slug: workspace.slug,
+              role: workspace.membership_role,
+              scopes: workspace.granted_scopes,
+              syncState: workspace.sync_state,
+            }))}
+          />
+        </div>
+        <div className="mcp-cred-fact mcp-cred-time">
+          <span className="mcp-cred-label">{t("mcpCard.lastUsed")}</span>
+          <span>
+            {token.last_used_at
+              ? formatDateTime(token.last_used_at)
+              : t("keyRow.never", { defaultValue: "never" })}
+          </span>
+        </div>
+        <div className="mcp-cred-fact mcp-cred-time">
+          <span className="mcp-cred-label">{t("mcpCard.expires")}</span>
+          <span>
+            {credentialExpiryText("pat", status, token.expires_at, t)}
+          </span>
+        </div>
+      </div>
+      <div className="mcp-cred-actions" ref={actionsRef}>
+        {inactive ? (
+          <button
+            aria-label={t("keyRow.deleteNamed", {
+              defaultValue: "Delete key {{name}}",
+              name: token.name,
+            })}
+            className="icon-button text-button danger"
+            disabled={busy}
+            onClick={onRequestDelete}
+            type="button"
+          >
+            <Trash2 size={15} aria-hidden="true" />
+            <span>{t("shell:actions.delete")}</span>
+          </button>
+        ) : (
+          <button
+            aria-label={t("keyRow.revokeNamed", {
+              defaultValue: "Revoke key {{name}}",
+              name: token.name,
+            })}
+            className="icon-button text-button danger"
+            disabled={busy}
+            onClick={onRequestDisable}
+            type="button"
+          >
+            <Ban size={15} aria-hidden="true" />
+            <span>{t("shell:actions.revoke")}</span>
+          </button>
+        )}
+        <ActionMenu
+          disabled={busy}
+          label={t("credentialTable.moreActions", {
+            defaultValue: "More actions for {{name}}",
+            name: token.name,
+          })}
+          items={[
+            ...(inactive
+              ? []
+              : [
+                  {
+                    key: "workspaces",
+                    label: t("keyRow.editWorkspaces", {
+                      defaultValue: "Edit workspaces",
+                    }),
+                    icon: <Building2 size={15} aria-hidden="true" />,
+                    onSelect: onEditWorkspaces,
+                  },
+                ]),
+            {
+              key: "rename",
+              label: t("keyRow.rename", { defaultValue: "Rename" }),
+              icon: <Pencil size={15} aria-hidden="true" />,
+              onSelect: onStartRename,
+            },
+            detailsMenuItem(detailsOpen, setDetailsOpen, t),
+          ]}
         />
-        <dl className="mcp-card-times">
+      </div>
+      {detailsOpen ? (
+        <dl className="mcp-cred-detail">
           <div>
             <dt>{t("mcpCard.created")}</dt>
             <dd>{formatDateTime(token.created_at)}</dd>
           </div>
           <div>
-            <dt>{t("mcpCard.lastUsed")}</dt>
+            <dt>{t("credentialTable.keyId", { defaultValue: "Key ID" })}</dt>
             <dd>
-              {token.last_used_at ? formatDateTime(token.last_used_at) : never}
-            </dd>
-          </div>
-          <div>
-            <dt>{t("mcpCard.expires")}</dt>
-            <dd>
-              {token.expires_at
-                ? formatDateTime(token.expires_at)
-                : t("mcpCard.noExpiry")}
+              <code>{token.id}</code>
             </dd>
           </div>
         </dl>
-        <details className="mcp-key-details">
-          <summary>{t("mcpCard.details")}</summary>
-          <p>
-            UUID <code>{token.id}</code>
-          </p>
-        </details>
+      ) : null}
+    </div>
+  );
+}
+
+/** Column header for the MCP credential lists; each row repeats the labels
+    for assistive tech and for the stacked layout, so this one is visual. */
+function McpCredentialTableHead({ labels }: { labels: string[] }) {
+  return (
+    <div aria-hidden="true" className="mcp-cred-head">
+      {labels.map((label) => (
+        <span key={label}>{label}</span>
+      ))}
+    </div>
+  );
+}
+
+function ScopeChips({ scopes }: { scopes: string[] }) {
+  const { t } = useTranslation("settings");
+  return (
+    <div className="scope-chip-row">
+      {scopes.map((scope) => (
+        <span className="scope-chip" key={scope}>
+          {scopeLabel(scope, t)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function detailsMenuItem(
+  open: boolean,
+  setOpen: (update: (open: boolean) => boolean) => void,
+  t: TFunction<"settings">,
+) {
+  return {
+    key: "details",
+    label: open
+      ? t("credentialTable.hideDetails", { defaultValue: "Hide details" })
+      : t("credentialTable.showDetails", { defaultValue: "View details" }),
+    icon: <Info size={15} aria-hidden="true" />,
+    onSelect: () => setOpen((current) => !current),
+  };
+}
+
+function McpClientRow({
+  busy,
+  canManage,
+  client,
+  index,
+  listBusy,
+  onDelete,
+  onDisable,
+  onReactivate,
+}: {
+  busy: boolean;
+  canManage: boolean;
+  client: McpClientRecord;
+  index: number;
+  listBusy: boolean;
+  onDelete: () => void;
+  onDisable: () => void;
+  onReactivate: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const id = mcpClientId(client);
+  const active = mcpClientStatus(client) === "active";
+  const connectionState = mcpClientConnectionState(client);
+  const kind =
+    client.credential_kind === "pat" || client.credential_kind === "oauth"
+      ? client.credential_kind
+      : "unknown";
+  const credentialId =
+    typeof client.credential_id === "string" ? client.credential_id : null;
+  const name = clientName(client, index);
+  const actionsDisabled = listBusy || id === null;
+  const scopes = Array.isArray(client.scopes) ? client.scopes.map(String) : [];
+  return (
+    <div className={`mcp-cred-row mcp-client-row ${active ? "" : "is-disabled"}`}>
+      <div className="mcp-cred-name">
+        <div className="mcp-cred-title">
+          <strong>{name}</strong>
+        </div>
+        {kind !== "unknown" ? (
+          <div className="mcp-cred-sub">
+            <span>
+              {kind === "pat"
+                ? t("appHub.accessKey", { defaultValue: "Access Key" })
+                : t("appHub.oauth", { defaultValue: "OAuth" })}
+            </span>
+            {credentialId ? (
+              <code className="mcp-key-preview" title={credentialId}>
+                {credentialId.slice(0, 8)}…
+              </code>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-      <div className="row-actions mcp-key-actions">
-        <div className="row-actions-buttons">
-          {!inactive ? (
-            <button
-              aria-label={t("keyRow.editWorkspacesNamed", {
-                defaultValue: "Edit workspaces for {{name}}",
-                name: token.name,
-              })}
-              className="icon-button text-button"
-              disabled={busy || isRenaming}
-              onClick={onEditWorkspaces}
-              type="button"
-            >
-              <Building2 size={15} aria-hidden="true" />
-              <span>
-                {t("keyRow.editWorkspaces", {
-                  defaultValue: "Edit workspaces",
-                })}
-              </span>
-            </button>
-          ) : null}
-          <button
-            className="icon-button text-button"
-            disabled={busy || isRenaming}
-            onClick={onStartRename}
-            ref={renameTriggerRef}
-            type="button"
-          >
-            <Pencil size={15} aria-hidden="true" />
-            <span>{t("keyRow.rename", { defaultValue: "Rename" })}</span>
-          </button>
-          {!inactive ? (
-            <button
-              aria-label={t("keyRow.revokeNamed", {
-                defaultValue: "Revoke key {{name}}",
-                name: token.name,
-              })}
-              className="icon-button text-button danger"
-              disabled={busy || isRenaming}
-              onClick={onRequestDisable}
-              type="button"
-            >
-              <Ban size={15} aria-hidden="true" />
-              <span>{t("shell:actions.revoke")}</span>
-            </button>
-          ) : null}
-          {inactive ? (
-            <button
-              aria-label={t("keyRow.deleteNamed", {
-                defaultValue: "Delete key {{name}}",
-                name: token.name,
-              })}
-              className="icon-button text-button danger"
-              disabled={busy || isRenaming}
-              onClick={onRequestDelete}
-              type="button"
-            >
-              <Trash2 size={15} aria-hidden="true" />
-              <span>
-                {t("shell:actions.delete")}
-              </span>
-            </button>
-          ) : null}
+      <div className="mcp-cred-facts">
+        <div className="mcp-cred-fact">
+          <span className="mcp-cred-label">{t("clientRow.status")}</span>
+          <StatusPill
+            compact
+            label={clientConnectionStateLabel(connectionState, t)}
+            status={connectionState}
+          />
+        </div>
+        <div className="mcp-cred-fact">
+          <span className="mcp-cred-label">{t("mcpCard.permissions")}</span>
+          <ScopeChips scopes={scopes} />
+        </div>
+        <div className="mcp-cred-fact mcp-cred-time">
+          <span className="mcp-cred-label">{t("mcpCard.lastUsed")}</span>
+          <span>
+            {client.last_used_at
+              ? formatDateTime(String(client.last_used_at))
+              : t("clientRow.never")}
+          </span>
+        </div>
+        <div className="mcp-cred-fact mcp-cred-time">
+          <span className="mcp-cred-label">{t("mcpCard.expiry")}</span>
+          <span>
+            {credentialExpiryText(kind, connectionState, client.next_expiry, t)}
+          </span>
         </div>
       </div>
+      <div className="mcp-cred-actions">
+        {canManage && active ? (
+          <button
+            aria-label={t("clientRow.disableNamed", {
+              defaultValue: "Disable {{name}}",
+              name,
+            })}
+            className="icon-button text-button warning"
+            disabled={actionsDisabled}
+            onClick={onDisable}
+            type="button"
+          >
+            <Ban size={15} aria-hidden="true" />
+            <span>
+              {busy
+                ? t("clientRow.updating", { defaultValue: "Updating…" })
+                : t("shell:actions.disable")}
+            </span>
+          </button>
+        ) : null}
+        {canManage && !active ? (
+          <button
+            aria-label={t("clientRow.reactivateNamed", {
+              defaultValue: "Reactivate {{name}}",
+              name,
+            })}
+            className="icon-button text-button"
+            disabled={actionsDisabled}
+            onClick={onReactivate}
+            type="button"
+          >
+            <CheckCircle2 size={15} aria-hidden="true" />
+            <span>
+              {busy
+                ? t("clientRow.updating", { defaultValue: "Updating…" })
+                : t("clientRow.reactivate", { defaultValue: "Reactivate" })}
+            </span>
+          </button>
+        ) : null}
+        <ActionMenu
+          label={t("credentialTable.moreActions", {
+            defaultValue: "More actions for {{name}}",
+            name,
+          })}
+          items={[
+            detailsMenuItem(detailsOpen, setDetailsOpen, t),
+            ...(canManage && !active
+              ? [
+                  {
+                    key: "delete",
+                    label: t("shell:actions.delete"),
+                    icon: <Trash2 size={15} aria-hidden="true" />,
+                    tone: "danger" as const,
+                    disabled: actionsDisabled,
+                    onSelect: onDelete,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      </div>
+      {detailsOpen ? (
+        <dl className="mcp-cred-detail">
+          <div>
+            <dt>{t("clientRow.clientId", { defaultValue: "Client ID" })}</dt>
+            <dd>
+              <code>{id ?? t("clientRow.notSet", { defaultValue: "not set" })}</code>
+            </dd>
+          </div>
+          {credentialId ? (
+            <div>
+              <dt>
+                {t("credentialTable.credentialId", {
+                  defaultValue: "Credential ID",
+                })}
+              </dt>
+              <dd>
+                <code>{credentialId}</code>
+              </dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>{t("credentialTable.type", { defaultValue: "Type" })}</dt>
+            <dd>{clientTypeLabel(client, t)}</dd>
+          </div>
+          <div>
+            <dt>
+              {t("clientRow.lifecycle", { defaultValue: "Management lifecycle" })}
+            </dt>
+            <dd>{t(active ? "mcpCard.allowed" : "mcpCard.blocked")}</dd>
+          </div>
+        </dl>
+      ) : null}
     </div>
   );
 }
@@ -5417,131 +5639,34 @@ function McpClientList({
         })}
         searchValue={searchValue}
       >
-        <div className="operations-list">
-          {clients.map((client, index) => {
-            const id = mcpClientId(client);
-            const status = mcpClientStatus(client);
-            const connectionState = mcpClientConnectionState(client);
-            const active = status === "active";
-            const disabled = status === "disabled";
-            const busy = id !== null && busyClientId === id;
-            const actionsDisabled = listBusy || id === null;
-            return (
-              <div className="operations-row compact mcp-client-row" key={clientKey(client, index)}>
-                <KeyRound size={16} aria-hidden="true" />
-                <div>
-                  <div className="mcp-credential-heading"><strong>{clientName(client, index)}</strong><StatusPill status={connectionState} compact label={clientConnectionStateLabel(connectionState, t)} /></div>
-                  <p className="meta-line">{t(status === "active" ? "mcpCard.allowed" : "mcpCard.blocked")}</p>
-                  <p>
-                    {t("clientRow.scopes", {
-                      defaultValue: "{{type}} · Scopes {{scopes}}",
-                      type: clientTypeLabel(client, t),
-                      scopes: clientScopesLabel(client, t),
-                    })}
-                  </p>
-                  <McpCredentialTimes kind={client.credential_kind === "pat" || client.credential_kind === "oauth" ? client.credential_kind : "unknown"} state={connectionState} lastUsed={client.last_used_at} expiry={client.next_expiry} />
-                  <details className="mcp-client-details">
-                    <summary>
-                      {t("clientRow.viewDetails", { defaultValue: "View details" })}
-                    </summary>
-                    <dl className="detail-list compact">
-                      <div>
-                        <dt>{t("clientRow.clientId", { defaultValue: "Client ID" })}</dt>
-                        <dd>
-                          {id ?? t("clientRow.notSet", { defaultValue: "not set" })}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>
-                          {t("clientRow.lifecycle", {
-                            defaultValue: "Management lifecycle",
-                          })}
-                        </dt>
-                        <dd>
-                          {status === "active"
-                            ? t("mcpCard.allowed") : t("mcpCard.blocked")}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>
-                          {t("clientRow.connectionHealth", {
-                            defaultValue: "Connection health",
-                          })}
-                        </dt>
-                        <dd>{clientConnectionStateLabel(connectionState, t)}</dd>
-                      </div>
-                      <div>
-                        <dt>
-                          {t("clientRow.scopesLabel", { defaultValue: "Scopes" })}
-                        </dt>
-                        <dd>{clientScopesLabel(client, t)}</dd>
-                      </div>
-                    </dl>
-                  </details>
-                </div>
-                <div className="row-actions mcp-client-actions">
-
-                  <div className="row-actions-buttons">
-                  {canManage && active ? (
-                    <button
-                      aria-label={t("clientRow.disableNamed", {
-                        defaultValue: "Disable {{name}}",
-                        name: clientName(client, index),
-                      })}
-                      className="icon-button text-button warning"
-                      disabled={actionsDisabled}
-                      onClick={() => setDisableTarget(client)}
-                      type="button"
-                    >
-                      <Ban size={15} aria-hidden="true" />
-                      <span>
-                        {busy
-                          ? t("clientRow.updating", { defaultValue: "Updating…" })
-                          : t("shell:actions.disable")}
-                      </span>
-                    </button>
-                  ) : null}
-                  {canManage && disabled ? (
-                    <button
-                      aria-label={t("clientRow.reactivateNamed", {
-                        defaultValue: "Reactivate {{name}}",
-                        name: clientName(client, index),
-                      })}
-                      className="icon-button text-button"
-                      disabled={actionsDisabled}
-                      onClick={() => void onStatusChange(client, "active")}
-                      type="button"
-                    >
-                      <CheckCircle2 size={15} aria-hidden="true" />
-                      <span>
-                        {busy
-                          ? t("clientRow.updating", { defaultValue: "Updating…" })
-                          : t("clientRow.reactivate", { defaultValue: "Reactivate" })}
-                      </span>
-                    </button>
-                  ) : null}
-                  {canManage && disabled ? (
-                    <button
-                      aria-label={t("clientRow.deleteNamed", {
-                        defaultValue: "Delete client {{name}}",
-                        name: clientName(client, index),
-                      })}
-                      className="icon-button text-button danger"
-                      disabled={actionsDisabled}
-                      onClick={() => setDeleteTarget(client)}
-                      type="button"
-                    >
-                      <Trash2 size={15} aria-hidden="true" />
-                      <span>
-                        {t("shell:actions.delete")}
-                      </span>
-                    </button>
-                  ) : null}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+        <div className="mcp-cred-list">
+          <div className="mcp-cred-table mcp-cred-table--clients">
+            <McpCredentialTableHead
+              labels={[
+                t("credentialTable.client", { defaultValue: "Client" }),
+                t("clientRow.status"),
+                t("mcpCard.permissions"),
+                t("mcpCard.lastUsed"),
+                t("mcpCard.expiry"),
+              ]}
+            />
+            {clients.map((client, index) => {
+              const id = mcpClientId(client);
+              return (
+                <McpClientRow
+                  busy={id !== null && busyClientId === id}
+                  canManage={canManage}
+                  client={client}
+                  index={index}
+                  key={clientKey(client, index)}
+                  listBusy={listBusy}
+                  onDelete={() => setDeleteTarget(client)}
+                  onDisable={() => setDisableTarget(client)}
+                  onReactivate={() => void onStatusChange(client, "active")}
+                />
+              );
+            })}
+          </div>
         </div>
       </PaginatedCredentialList>
       {disableTarget ? (
@@ -10456,12 +10581,6 @@ function McpCredentialTimes({
       : kind === "oauth"
         ? "mcpCard.sessionExpiry"
         : "mcpCard.expiry";
-  const noExpiry =
-    kind === "pat"
-      ? t("mcpCard.noExpiry")
-      : kind === "unknown" || state === "unknown"
-        ? t("mcpCard.expiryUnknown")
-        : t("mcpCard.reapprove");
   return (
     <dl className="mcp-card-times">
       {grantedAt ? (
@@ -10478,10 +10597,24 @@ function McpCredentialTimes({
       </div>
       <div>
         <dt>{t(expiryLabel)}</dt>
-        <dd>{expiry ? formatDateTime(String(expiry)) : noExpiry}</dd>
+        <dd>{credentialExpiryText(kind, state, expiry, t)}</dd>
       </div>
     </dl>
   );
+}
+
+/** A credential's expiry, or what its absence means for this credential kind. */
+function credentialExpiryText(
+  kind: "pat" | "oauth" | "unknown",
+  state: string,
+  expiry: unknown,
+  t: TFunction<"settings">,
+) {
+  if (expiry) return formatDateTime(String(expiry));
+  if (kind === "pat") return t("mcpCard.noExpiry");
+  return kind === "unknown" || state === "unknown"
+    ? t("mcpCard.expiryUnknown")
+    : t("mcpCard.reapprove");
 }
 
 function mcpClientId(client: McpClientRecord) {
@@ -10874,7 +11007,9 @@ function isSystemMcpClient(client: McpClientRecord) {
 }
 
 function clientName(client: McpClientRecord, index: number) {
-  return String(client.name ?? client.client_id ?? `Client ${index + 1}`);
+  return String(
+    client.client_name ?? client.name ?? client.client_id ?? `Client ${index + 1}`,
+  );
 }
 
 function clientTypeLabel(
@@ -10892,21 +11027,6 @@ function mcpClientStatus(client: McpClientRecord): McpClientStatus {
   return String(client.status ?? "active").toLowerCase() === "active"
     ? "active"
     : "disabled";
-}
-
-function clientScopesLabel(
-  client: McpClientRecord,
-  t: TFunction<"settings">,
-) {
-  const scopes = client.scopes;
-  if (Array.isArray(scopes)) {
-    return scopes.length
-      ? scopes.map(String).join(", ")
-      : t("clientRow.noScopes", { defaultValue: "none" });
-  }
-  return client.auth_scope != null || client.scope != null
-    ? String(client.auth_scope ?? client.scope)
-    : t("clientRow.notSet", { defaultValue: "not set" });
 }
 
 function apiErrorStatus(error: unknown) {

@@ -37,15 +37,27 @@ def binding_key_for_client(client: MCPClient) -> str | None:
     return None
 
 
-def _binding_ids(bindings: Collection[str], prefix: str) -> set[UUID]:
-    ids = set()
-    for binding in bindings:
+def credential_id_for_binding(binding: str | None) -> UUID | None:
+    """The access key id or OAuth grant id a binding key names, if any."""
+
+    if binding is None:
+        return None
+    for prefix in (PAT_BINDING_PREFIX, OAUTH_BINDING_PREFIX):
         if binding.startswith(prefix):
             try:
-                ids.add(UUID(binding[len(prefix) :]))
+                return UUID(binding[len(prefix) :])
             except ValueError:
-                continue
-    return ids
+                return None
+    return None
+
+
+def _binding_ids(bindings: Collection[str], prefix: str) -> set[UUID]:
+    return {
+        credential_id
+        for binding in bindings
+        if binding.startswith(prefix)
+        and (credential_id := credential_id_for_binding(binding)) is not None
+    }
 
 
 def load_credential_health(

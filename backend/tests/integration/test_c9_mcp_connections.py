@@ -540,7 +540,8 @@ def _seed_manageable_client_facets(page_service):
             user_id, binding = _pat_binding(session, workspace.id)
             row = MCPClient(
                 workspace_id=workspace.id,
-                name=name,
+                # Named the way the MCP trace names a PAT client.
+                name=f"{name} ({binding.removeprefix('api_token:')})",
                 client_type="generic",
                 scopes=["mcp:read"],
                 status=status,
@@ -574,6 +575,10 @@ def test_mcp_client_list_filters_counts_and_binds_cursor_to_query(page_service):
     assert first.status_code == 200, first.text
     first_payload = first.json()
     assert [row["id"] for row in first_payload["data"]] == [str(row_ids[0])]
+    # The row carries its credential id and is named without that suffix.
+    first_row = first_payload["data"][0]
+    assert first_row["client_name"] == "Active alpha"
+    assert first_row["name"] == f"Active alpha ({first_row['credential_id']})"
     assert first_payload["total_count"] == 4
     assert first_payload["filtered_count"] == 2
     assert first_payload["status_counts"] == {"active": 2, "disabled": 2}

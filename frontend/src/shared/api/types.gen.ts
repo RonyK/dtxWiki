@@ -11594,6 +11594,8 @@ export interface components {
              * @enum {string}
              */
             connection_state: "active" | "expired" | "revoked" | "disabled" | "unknown";
+            /** Credential Id */
+            credential_id?: string | null;
             /**
              * Credential Kind
              * @default unknown

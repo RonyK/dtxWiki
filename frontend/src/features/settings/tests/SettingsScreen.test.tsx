@@ -432,11 +432,14 @@ describe("SettingsScreen", () => {
       </MemoryRouter>,
     );
     await screen.findByText("Local MCP");
-    await user.click(screen.getByText("View details"));
+    expect(screen.queryByText("Client ID")).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "More actions for Local MCP" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "View details" }));
     expect(screen.getByText("Client ID")).toBeInTheDocument();
     expect(screen.getByText("mcp-1")).toBeInTheDocument();
     expect(screen.getByText("Management lifecycle")).toBeInTheDocument();
-    expect(screen.getByText("Connection health")).toBeInTheDocument();
     expect(screen.getAllByText("Access keys")).not.toHaveLength(0);
     expect(screen.queryByText(/mcpServers/)).not.toBeInTheDocument();
     expect(
@@ -444,6 +447,10 @@ describe("SettingsScreen", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("CI token")).toBeInTheDocument();
     expect(screen.getByText("Prefix not saved")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "More actions for CI token" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "View details" }));
     expect(screen.getByText("token-1")).toBeInTheDocument();
     expect(
       screen.getByText(/Read - view sources and pages/),
@@ -732,11 +739,9 @@ describe("SettingsScreen", () => {
         selector: "strong",
       }),
     ).toBeInTheDocument();
+    // Delete sits in each row's More actions menu; the tombstone test opens it.
     expect(
       within(clientSection).getAllByRole("button", { name: /^Reactivate / }),
-    ).toHaveLength(2);
-    expect(
-      within(clientSection).getAllByRole("button", { name: /^Delete client / }),
     ).toHaveLength(2);
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/mcp-clients?status=disabled&limit=20`,
@@ -820,9 +825,10 @@ describe("SettingsScreen", () => {
     ).toBeInTheDocument();
     await user.click(
       within(clientSection).getByRole("button", {
-        name: "Delete client retired-client",
+        name: "More actions for retired-client",
       }),
     );
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
     const dialog = screen.getByRole("dialog", {
       name: "Delete deactivated MCP client",
     });
@@ -1029,9 +1035,13 @@ describe("SettingsScreen", () => {
     expect(
       within(clientSection).queryByRole("button", { name: /^Reactivate / }),
     ).not.toBeInTheDocument();
-    expect(
-      within(clientSection).queryByRole("button", { name: /^Delete client / }),
-    ).not.toBeInTheDocument();
+    await user.click(
+      within(clientSection).getByRole("button", {
+        name: "More actions for viewer-client",
+      }),
+    );
+    expect(screen.getByRole("menuitem", { name: "View details" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
   });
 
   // MCP-06, reshaped by D-01v2 (T5): "Load more" is gone. The consent list now
@@ -5985,7 +5995,7 @@ describe("SettingsScreen", () => {
     expect(screen.getByText(/Authorization: Bearer/)).toBeInTheDocument();
     expect(screen.queryByText(/pipx install dtxwiki/)).not.toBeInTheDocument();
     expect(screen.queryByText(/pipx run dtxwiki/)).not.toBeInTheDocument();
-    expect(document.querySelector(".mcp-key-identity")).toHaveTextContent("Claude Code");
+    expect(document.querySelector(".mcp-key-row .mcp-cred-sub")).toHaveTextContent("Claude Code");
     await user.click(
       screen.getByRole("button", { name: "Revoke key Claude Code access key" }),
     );
@@ -6305,8 +6315,9 @@ describe("SettingsScreen", () => {
 
     await screen.findByText("Editable key");
     await user.click(
-      screen.getByRole("button", { name: "Edit workspaces for Editable key" }),
+      screen.getByRole("button", { name: "More actions for Editable key" }),
     );
+    await user.click(screen.getByRole("menuitem", { name: "Edit workspaces" }));
     const dialog = screen.getByRole("dialog");
     expect(
       within(dialog).getByText("Workspaces for Editable key"),
@@ -7722,8 +7733,10 @@ describe("SettingsScreen", () => {
 
     expect(await screen.findByText("Laptop")).toBeInTheDocument();
     expect(screen.getByText("dtxw_lapt...")).toBeInTheDocument();
-    expect(screen.getByText("token-rename")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Rename" }));
+    await user.click(
+      screen.getByRole("button", { name: "More actions for Laptop" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const renameInput = screen.getByRole("textbox", { name: "Rename Laptop" });
     expect(renameInput).toHaveClass("mcp-key-rename-input");
     expect(renameInput.closest("label")).toHaveClass("mcp-key-rename-field");
@@ -7737,6 +7750,10 @@ describe("SettingsScreen", () => {
     await user.click(screen.getByRole("button", { name: "Save name" }));
 
     expect(await screen.findByText("Research laptop")).toBeInTheDocument();
+    // The editor replaced the row, so focus returns to the row's menu button.
+    expect(
+      screen.getByRole("button", { name: "More actions for Research laptop" }),
+    ).toHaveFocus();
     expect(
       lastJsonBody(
         fetchMock,
@@ -10868,7 +10885,7 @@ function settingsMcpClient(id: string, status: "active" | "disabled") {
   return {
     id,
     name: id,
-    client_name: "Claude Code",
+    client_name: id,
     client_type: "oauth",
     scopes: ["mcp:read"],
     status,
