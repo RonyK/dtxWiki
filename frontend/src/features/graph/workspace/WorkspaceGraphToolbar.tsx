@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { workspaceGraphNodeDocuments, type WorkspaceGraphAvailableLens, type WorkspaceGraphScene } from "../../../shared/api/workspaceGraph";
-import type { WorkspaceGraphRestorableState } from "../workspaceGraphModel";
+import type { WorkspaceGraphRestorableState } from "./workspaceGraphState";
 import type { WorkspaceMapDeviceProfile, WorkspaceMapScale } from "../shared/workspaceMapBudget";
 import { GraphViewMenu } from "../shared/GraphViewMenu";
 

@@ -80,14 +80,20 @@ import { visibleWorkspaceGraphDocumentCount, WorkspaceGraphToolbar, workspaceGra
 import type { GraphCanvasHandle, GraphRenderScene, GraphViewport } from "./shared/rendererTypes";
 import {
   DEFAULT_WORKSPACE_GRAPH_FILTERS,
-  countPendingRefineFilters,
-  clearWorkspaceGraphState,
+  cloneWorkspaceGraphFilters,
   freshWorkspaceGraphState,
+  type WorkspaceGraphRestorableState,
+} from "./workspace/workspaceGraphState";
+import {
+  clearWorkspaceGraphState,
+  loadWorkspaceGraphState,
+  saveWorkspaceGraphState,
+} from "./workspace/workspaceGraphPersistence";
+import {
+  countPendingRefineFilters,
   estimateWorkspaceGraphImpact,
   workspaceGraphOrphanIds,
-  loadWorkspaceGraphState,
   refineFiltersDiffer,
-  saveWorkspaceGraphState,
   searchWorkspaceGraphItems,
   WORKSPACE_GRAPH_RELATION_GROUPS,
   workspaceGraphDisplayItems,
@@ -98,7 +104,6 @@ import {
   type WorkspaceGraphDisplayItems,
   type WorkspaceGraphNodeRelations,
   type WorkspaceGraphRelationGroup,
-  type WorkspaceGraphRestorableState,
 } from "./workspaceGraphModel";
 
 type WorkspaceGraphRefineTarget = "folder" | "time" | "overview";
@@ -185,7 +190,7 @@ export function WorkspaceGraphScreen() {
   useEffect(() => { selectedIdRef.current = state.selectedId; }, [state.selectedId]);
   const pendingListCenterRef = useRef<string | null>(null);
   const [draftFilters, setDraftFilters] = useState<WorkspaceGraphDataFilters>(() =>
-    cloneFilters(state.dataFilters),
+    cloneWorkspaceGraphFilters(state.dataFilters),
   );
   const [receivedScene, setScene] = useState<WorkspaceGraphScene | null>(null);
   const [sceneOwner, setSceneOwner] = useState<{ scope: WorkspaceGraphAuthorityScope; storageEpoch: number;
@@ -292,7 +297,7 @@ export function WorkspaceGraphScreen() {
     setStateOwner(authorityScope);
     setScaleOwner({ scope: authorityScope, scale: "2k" });
     setState(next);
-    setDraftFilters(cloneFilters(next.dataFilters));
+    setDraftFilters(cloneWorkspaceGraphFilters(next.dataFilters));
     setScene(null);
     setSceneOwner(null);
     setListFocus(null);
@@ -415,7 +420,7 @@ export function WorkspaceGraphScreen() {
           else clearWorkspaceGraphState(workspaceId, actorId);
           const fresh = freshWorkspaceGraphState();
           setState(fresh);
-          setDraftFilters(cloneFilters(fresh.dataFilters));
+          setDraftFilters(cloneWorkspaceGraphFilters(fresh.dataFilters));
           setVisibleSearch("");
           setModal(null);
           pendingViewportRef.current = null;
@@ -748,7 +753,7 @@ export function WorkspaceGraphScreen() {
           if (clearButtonFocused) requestAnimationFrame(() => mobileCanvasCloseRef.current?.focus({ preventScroll: true }));
           return;
         }
-        if (modal.kind === "refine") setDraftFilters(cloneFilters(state.dataFilters));
+        if (modal.kind === "refine") setDraftFilters(cloneWorkspaceGraphFilters(state.dataFilters));
         setModal(null);
         return;
       }
@@ -820,19 +825,19 @@ export function WorkspaceGraphScreen() {
     clearFocusNavigation();
     setState((current) => ({
       ...current,
-      dataFilters: cloneFilters(draftFilters),
+      dataFilters: cloneWorkspaceGraphFilters(draftFilters),
       selectedId: null,
     }));
     setModal(null);
   };
 
   const closeRefine = () => {
-    setDraftFilters(cloneFilters(state.dataFilters));
+    setDraftFilters(cloneWorkspaceGraphFilters(state.dataFilters));
     setModal(null);
   };
 
   const openRefine = (target: WorkspaceGraphRefineTarget, trigger: HTMLButtonElement) => {
-    setDraftFilters(cloneFilters(state.dataFilters));
+    setDraftFilters(cloneWorkspaceGraphFilters(state.dataFilters));
     modalOpenerRef.current = trigger;
     setModal({ kind: "refine", target });
   };
@@ -843,7 +848,7 @@ export function WorkspaceGraphScreen() {
     const fresh = freshWorkspaceGraphState();
     setScaleOwner({ scope: authorityScope, scale: "2k" });
     setState(fresh);
-    setDraftFilters(cloneFilters(fresh.dataFilters));
+    setDraftFilters(cloneWorkspaceGraphFilters(fresh.dataFilters));
     setVisibleSearch("");
     setScene(null);
     resetExpansionState();
@@ -989,7 +994,7 @@ export function WorkspaceGraphScreen() {
           else clearWorkspaceGraphState(workspaceId, actorId);
           const fresh = freshWorkspaceGraphState();
           setState(fresh);
-          setDraftFilters(cloneFilters(fresh.dataFilters));
+          setDraftFilters(cloneWorkspaceGraphFilters(fresh.dataFilters));
           setVisibleSearch("");
           setScene(null);
           setSceneOwner(null);
@@ -1522,7 +1527,7 @@ export function WorkspaceGraphScreen() {
                   onClick={() => {
                     const fresh = freshWorkspaceGraphState();
                     setState(fresh);
-                    setDraftFilters(cloneFilters(fresh.dataFilters));
+                    setDraftFilters(cloneWorkspaceGraphFilters(fresh.dataFilters));
                     setVisibleSearch("");
                   }}
                   type="button"
@@ -1642,7 +1647,7 @@ function WorkspaceGraphFilterChoices({
   const toggleKind = (kind: "context" | "library" | "agent") => {
     const selected = draftFilters.document_kinds.includes(kind);
     onDraftFilters({
-      ...cloneFilters(draftFilters),
+      ...cloneWorkspaceGraphFilters(draftFilters),
       document_kinds: selected
         ? draftFilters.document_kinds.filter((value) => value !== kind)
         : [...draftFilters.document_kinds, kind],
@@ -1651,7 +1656,7 @@ function WorkspaceGraphFilterChoices({
   const toggleQuickFilter = (value: WorkspaceGraphQuickFilter) => {
     const selected = draftFilters.quick_filters.includes(value);
     onDraftFilters({
-      ...cloneFilters(draftFilters),
+      ...cloneWorkspaceGraphFilters(draftFilters),
       quick_filters: selected
         ? draftFilters.quick_filters.filter((filter) => filter !== value)
         : [...draftFilters.quick_filters, value],
@@ -1803,7 +1808,7 @@ function WorkspaceGraphRefineDrawer({
             id="workspace-graph-server-search"
             maxLength={200}
             onChange={(event) => onDraftFilters({
-              ...cloneFilters(draftFilters),
+              ...cloneWorkspaceGraphFilters(draftFilters),
               search: event.currentTarget.value,
             })}
             placeholder={t("workspaceGraph.controls.searchPlaceholder")}
@@ -1835,7 +1840,7 @@ function WorkspaceGraphRefineDrawer({
             <span>{t("workspaceGraph.drawer.basis")}</span>
             <select
               onChange={(event) => onDraftFilters({
-                ...cloneFilters(draftFilters),
+                ...cloneWorkspaceGraphFilters(draftFilters),
                 time_basis: event.currentTarget.value as WorkspaceGraphDataFilters["time_basis"],
               })}
               ref={timeControlRef}
@@ -1851,7 +1856,7 @@ function WorkspaceGraphRefineDrawer({
               <input
                 max={isoToDateInput(draftFilters.time_to)}
                 onChange={(event) => onDraftFilters({
-                  ...cloneFilters(draftFilters),
+                  ...cloneWorkspaceGraphFilters(draftFilters),
                   time_from: dateInputToIso(event.currentTarget.value, false),
                 })}
                 type="date"
@@ -1863,7 +1868,7 @@ function WorkspaceGraphRefineDrawer({
               <input
                 min={isoToDateInput(draftFilters.time_from)}
                 onChange={(event) => onDraftFilters({
-                  ...cloneFilters(draftFilters),
+                  ...cloneWorkspaceGraphFilters(draftFilters),
                   time_to: dateInputToIso(event.currentTarget.value, true),
                 })}
                 type="date"
@@ -2478,15 +2483,6 @@ function exportWorkspaceGraph(scene: WorkspaceGraphScene, renderScene: GraphRend
   anchor.download = `dtxwiki-knowledge-map-${shortRevision(scene.graph_revision)}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
-}
-
-function cloneFilters(filters: WorkspaceGraphDataFilters): WorkspaceGraphDataFilters {
-  return {
-    ...filters,
-    document_kinds: [...filters.document_kinds],
-    quick_filters: [...filters.quick_filters],
-    facet_rules: filters.facet_rules.map((rule) => ({ ...rule })),
-  };
 }
 
 function workspaceGraphErrorMessage(error: unknown, fallback: string) {
