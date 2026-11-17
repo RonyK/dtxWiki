@@ -33,6 +33,7 @@ export * from "./HistoryGraphList";
 export * from "./ImageViewerDialog";
 export * from "./KeyboardShortcutsModal";
 export * from "./ListPanelHeader";
+export * from "./MediaPreviewPlaceholder";
 export * from "./MobileDrawer";
 export * from "./NewFolderDialog";
 export * from "./NewItemDialog";

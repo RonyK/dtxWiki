@@ -7613,3 +7613,49 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
     grid-column: 1 / -1;
   }
 }
+
+/* Thumbnail stand-in shared by the attachment cards and the page media
+   dialog: the file's kind as an icon, its extension as plain text, and a
+   corner badge naming why there is no preview. The caller's thumbnail class
+   supplies the box, so the tile is exactly the size of a real preview. A
+   placeholder beats the browser's broken-image glyph, which reads as "this
+   file is corrupt". */
+.media-preview-placeholder {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--surface-subtle);
+  color: var(--ink-soft);
+}
+
+.media-preview-placeholder-extension {
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-preview-placeholder-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+

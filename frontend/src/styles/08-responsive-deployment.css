@@ -1383,8 +1383,6 @@
   object-fit: contain;
 }
 
-/* Audio and video have no still to show; a glyph beats the broken-image icon,
-   which reads as "this file is corrupt". */
 /* The thumbnail opens the enlargement, so it is a button -- but a bare one.
    .icon-button would wrap it in a bordered 34px padding box and pull it into
    the 44px touch floor, which is for controls you tap, not for the image
@@ -1402,13 +1400,6 @@
   border-radius: 8px;
   outline: 2px solid var(--info);
   outline-offset: 2px;
-}
-
-.attachments-preview-kind {
-  display: grid;
-  place-items: center;
-  color: var(--ink-muted);
-  font-size: 24px;
 }
 
 .attachments-controls {

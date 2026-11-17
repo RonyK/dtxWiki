@@ -12,6 +12,8 @@ import {
 } from "../../shared/api/contextMedia";
 import { ContextMediaUsageHistory } from "../../shared/components/ContextMediaUsage";
 import { Dialog } from "../../shared/components/Dialog";
+import { MediaPreviewPlaceholder } from "../../shared/components/MediaPreviewPlaceholder";
+import { mediaFileCategory } from "../../shared/lib/mediaFile";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 
 type ContextMediaManagerDialogProps = {
@@ -259,6 +261,9 @@ function MediaGroup({
 }) {
   const { i18n, t } = useTranslation("pages");
   const heading = t(`mediaManager.groups.${group}.heading`);
+  const [failedPreviews, setFailedPreviews] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   return (
     <section aria-labelledby={headingId} className="context-media-group">
       <div className="context-media-group-heading">
@@ -282,12 +287,25 @@ function MediaGroup({
         >
           {assets.map((asset) => (
             <li className="context-media-item" key={asset.id}>
-              <img
-                alt=""
-                className="context-media-preview"
-                loading="lazy"
-                src={asset.content_url}
-              />
+              {mediaFileCategory(asset.media_type) === "image" &&
+              !failedPreviews.has(asset.id) ? (
+                <img
+                  alt=""
+                  className="context-media-preview"
+                  loading="lazy"
+                  onError={() =>
+                    setFailedPreviews((current) => new Set(current).add(asset.id))
+                  }
+                  src={asset.content_url}
+                />
+              ) : (
+                <MediaPreviewPlaceholder
+                  className="context-media-preview"
+                  filename={asset.original_filename}
+                  mediaType={asset.media_type}
+                  reason={failedPreviews.has(asset.id) ? "failed" : undefined}
+                />
+              )}
               <div className="context-media-item-body">
                 <div className="context-media-item-title">
                   <strong>{asset.original_filename}</strong>

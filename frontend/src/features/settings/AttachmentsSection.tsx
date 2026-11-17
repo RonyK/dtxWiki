@@ -20,6 +20,10 @@ import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { ImageViewerDialog } from "../../shared/components/ImageViewerDialog";
+import {
+  MediaPreviewPlaceholder,
+  type MediaPreviewUnavailableReason,
+} from "../../shared/components/MediaPreviewPlaceholder";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import {
   ContextMediaUnreadableUsagePill,
@@ -705,13 +709,16 @@ export function AttachmentsSection({
                       />
                     </button>
                   ) : (
-                    <span
-                      aria-hidden="true"
-                      className="attachments-preview attachments-preview-kind"
-                      title={previewPlaceholderHint(item, t)}
-                    >
-                      {placeholderGlyph(item)}
-                    </span>
+                    <MediaPreviewPlaceholder
+                      className="attachments-preview"
+                      filename={item.original_filename}
+                      mediaType={item.media_type}
+                      reason={previewUnavailableReason(
+                        item,
+                        serverScope,
+                        unpreviewable,
+                      )}
+                    />
                   )}
                   <div className="attachments-card-main">
                     <div className="attachments-identity">
@@ -990,22 +997,19 @@ function previewable(
   return true;
 }
 
-function placeholderGlyph(item: ContextMediaAttachment): string {
-  if (item.kind === "audio") return "♪";
-  if (item.kind === "video") return "▶";
-  return "□";
-}
-
-function previewPlaceholderHint(item: ContextMediaAttachment, t: Translate) {
-  if (item.kind === "image") {
-    return t("attachments.previewPrivate", {
-      defaultValue:
-        "Preview unavailable for this version.",
-    });
-  }
-  return t("attachments.previewNotAnImage", {
-    defaultValue: "No preview for this file type.",
-  });
+// Why a row shows a placeholder instead of its thumbnail. No reason means
+// the file type simply has no still image.
+function previewUnavailableReason(
+  item: ContextMediaAttachment,
+  serverScope: boolean,
+  unpreviewable: ReadonlySet<string>,
+): MediaPreviewUnavailableReason | undefined {
+  if (serverScope) return "serverScope";
+  // Outside server scope the API omits content_url only when no version the
+  // viewer can read serves the file.
+  if (!item.content_url) return "unreadable";
+  if (unpreviewable.has(attachmentKey(item))) return "failed";
+  return undefined;
 }
 
 // One generic "nothing here" cannot tell an operator whether the workspace is

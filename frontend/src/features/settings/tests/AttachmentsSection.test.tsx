@@ -247,7 +247,7 @@ describe("AttachmentsSection", () => {
     await screen.findByText("diagram.png");
 
     expect(document.querySelectorAll("img.attachments-preview")).toHaveLength(2);
-    expect(document.querySelectorAll("span.attachments-preview-kind")).toHaveLength(0);
+    expect(document.querySelectorAll(".media-preview-placeholder")).toHaveLength(0);
   });
 
   it("reports a small asset in bytes rather than rounding it up to a kilobyte", async () => {
@@ -275,7 +275,8 @@ describe("AttachmentsSection", () => {
     expect(listAdminContextMediaOrphans).not.toHaveBeenCalled();
     expect(listWorkspaceContextMediaAttachments).not.toHaveBeenCalled();
     expect(screen.queryByText("Change settings")).not.toBeInTheDocument();
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    // No file bytes are fetched here; the labelled placeholder is not an <img>.
+    expect(document.querySelector("img")).toBeNull();
     await userEvent.click(
       screen.getByRole("button", { name: "Delete" }),
     );
@@ -304,6 +305,11 @@ describe("AttachmentsSection", () => {
     );
 
     expect(await screen.findByText("Workspace: Other team")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", {
+        name: "Image PNG. The server admin view does not show file contents.",
+      }),
+    ).toBeInTheDocument();
     expect(listAdminContextMediaAttachments).toHaveBeenCalledTimes(1);
     expect(listWorkspaceContextMediaAttachments).not.toHaveBeenCalled();
     expect(screen.queryByRole("radiogroup", { name: /attachment scope/i })).toBeNull();
@@ -549,9 +555,12 @@ describe("AttachmentsSection", () => {
     // Both directions in one case: asserting only the absence would pass
     // even if the feature had never been built. The readable row must offer the
     // enlargement, and the row without a content URL must not.
+    // The stand-in names the file and why it has no preview.
     expect(
-      document.querySelectorAll("span.attachments-preview-kind"),
-    ).toHaveLength(1);
+      screen.getByRole("img", {
+        name: "Image PNG. Not used in any version you can read, so there is no preview.",
+      }),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Expand/ })).toHaveLength(1);
     expect(
       screen.queryByRole("button", { name: "Expand diagram.png" }),
