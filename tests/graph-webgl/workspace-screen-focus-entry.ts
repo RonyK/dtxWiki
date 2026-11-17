@@ -7,7 +7,8 @@ import { WorkspaceGraphScreen } from "../../frontend/src/features/graph/Workspac
 import { isWorkspaceGraphContainment, isWorkspaceGraphResponse, workspaceGraphAdmissionCounts,
   type WorkspaceGraphOverviewRequest, type WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { initI18n } from "../../frontend/src/shared/i18n";
-import { freshWorkspaceGraphState, saveWorkspaceGraphState } from "../../frontend/src/features/graph/workspaceGraphModel";
+import { freshWorkspaceGraphState } from "../../frontend/src/features/graph/workspace/workspaceGraphState";
+import { saveWorkspaceGraphState } from "../../frontend/src/features/graph/workspace/workspaceGraphPersistence";
 import "../../frontend/src/styles/index.css";
 
 type NativeGraphObservation = {

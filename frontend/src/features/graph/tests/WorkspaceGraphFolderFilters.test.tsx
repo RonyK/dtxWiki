@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceGraphDataFilters, WorkspaceGraphFacetOption } from "../../../shared/api/workspaceGraph";
 import { i18n } from "../../../shared/i18n";
 import { WorkspaceGraphFolderFilters } from "../WorkspaceGraphFolderFilters";
-import { freshWorkspaceGraphState } from "../workspaceGraphModel";
+import { freshWorkspaceGraphState } from "../workspace/workspaceGraphState";
 
 const folders = Array.from({ length: 300 }, (_, index) => ({
   value: `folder-${index}`, label: `Folder ${String(index).padStart(3, "0")}`, count: index + 1,

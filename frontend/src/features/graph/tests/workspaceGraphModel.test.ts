@@ -4,13 +4,17 @@ import type { WorkspaceGraphDataFilters, WorkspaceGraphScene } from "../../../sh
 import { workspaceGraphStorageScope } from "../../../shared/lib/workspaceGraphStorage";
 import {
   DEFAULT_WORKSPACE_GRAPH_FILTERS,
-  clearWorkspaceGraphState,
-  countPendingRefineFilters,
   freshWorkspaceGraphState,
+} from "../workspace/workspaceGraphState";
+import {
+  clearWorkspaceGraphState,
   loadWorkspaceGraphState,
+  saveWorkspaceGraphState,
+} from "../workspace/workspaceGraphPersistence";
+import {
+  countPendingRefineFilters,
   refineFiltersDiffer,
   removeFacetRule,
-  saveWorkspaceGraphState,
   searchWorkspaceGraphItems,
   updateFacetRule,
   workspaceGraphDisplayItems,

@@ -6,7 +6,7 @@ import {
 } from "../../shared/api/workspaceGraph";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
-import { clearWorkspaceGraphState } from "./workspaceGraphModel";
+import { clearWorkspaceGraphState } from "./workspace/workspaceGraphPersistence";
 
 // One capability request per observed workspace authority, shared by navigation, the /graph
 // route, and Context's "open in Knowledge Map" link. The server decides; this

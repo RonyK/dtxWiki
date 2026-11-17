@@ -15,7 +15,8 @@ import { clearLegacyWorkspaceGraphStorage, clearWorkspaceGraphStorage, workspace
 import { WorkspaceGraphScreen } from "../WorkspaceGraphScreen";
 import { WorkspaceGraphGate } from "../WorkspaceGraphGate";
 import { invalidateWorkspaceGraphCapability } from "../useWorkspaceGraphCapability";
-import { clearWorkspaceGraphState, freshWorkspaceGraphState, saveWorkspaceGraphState } from "../workspaceGraphModel";
+import { freshWorkspaceGraphState } from "../workspace/workspaceGraphState";
+import { clearWorkspaceGraphState, saveWorkspaceGraphState } from "../workspace/workspaceGraphPersistence";
 import type { WorkspaceMapColumns } from "../map/sceneColumns";
 import * as mapBudgetPolicy from "../shared/workspaceMapBudget";
 import { visibleWorkspaceGraphDocumentCount } from "../workspace/WorkspaceGraphToolbar";

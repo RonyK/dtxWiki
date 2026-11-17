@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { workspaceGraphStorageScope } from "../../../shared/lib/workspaceGraphStorage";
 import {
   freshWorkspaceGraphState,
+  type WorkspaceGraphRestorableState,
+} from "../workspace/workspaceGraphState";
+import {
   loadWorkspaceGraphState,
   saveWorkspaceGraphState,
-  type WorkspaceGraphRestorableState,
-} from "../workspaceGraphModel";
+} from "../workspace/workspaceGraphPersistence";
 
 const WORKSPACE = "workspace-one";
 const ACTOR = "actor-one";
