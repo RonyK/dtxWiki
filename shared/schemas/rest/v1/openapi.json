@@ -22734,6 +22734,18 @@
             "title": "Connection State",
             "type": "string"
           },
+          "credential_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Id"
+          },
           "credential_kind": {
             "default": "unknown",
             "enum": [

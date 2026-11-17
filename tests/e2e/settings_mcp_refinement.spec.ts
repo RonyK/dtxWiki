@@ -251,9 +251,10 @@ for (const [language, width] of LAYOUTS) {
     await evidenceScreenshot(page, testInfo, `workspace-${language}-${width}-readonly`);
     await page.keyboard.press("Escape");
     await expect(row.locator(".workspace-chip-more")).toBeFocused();
-    await row.locator(".row-actions-buttons")
-      .getByRole("button", {
-        name: language === "en" ? /Edit workspaces/ : /워크스페이스/,
+    await row.locator(".action-menu__trigger").click();
+    await page
+      .getByRole("menuitem", {
+        name: language === "en" ? "Edit workspaces" : "워크스페이스 편집",
       })
       .click();
     await expect(modal.getByRole("option")).toHaveCount(8);

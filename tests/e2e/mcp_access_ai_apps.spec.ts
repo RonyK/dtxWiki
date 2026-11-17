@@ -36,10 +36,12 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
       name: "MCP client state",
     });
     await filters.getByRole("radio", { name: "Other states 25" }).click();
-    await expect(section.getByText("Disabled UI client 01")).toBeVisible();
-    await expect(section.getByRole("button", { name: /^Reactivate / }).first())
-      .toBeVisible();
-    await expect(section.getByRole("button", { name: "Delete client" }).first())
+    // The deactivated fixtures are OAuth-bound, so each row reads as the
+    // registered app; their fixture names only reach the server search.
+    await expect(section.locator(".mcp-client-row").first()).toContainText(
+      "Seed app",
+    );
+    await expect(section.getByRole("button", { name: /^Enable / }).first())
       .toBeVisible();
 
     const search = section.getByRole("searchbox", { name: "Search MCP clients" });
@@ -52,14 +54,21 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
       .click();
     await expect(section.locator(".mcp-client-row")).toHaveCount(20);
 
-    const reactivateRow = clientRow(section, "Disabled UI client 01");
-    await reactivateRow.getByRole("button", { name: /^Reactivate / }).click();
-    await expect(reactivateRow).toHaveCount(0);
+    const rows = section.locator(".mcp-client-row");
+    await search.fill("Disabled UI client 01");
+    await section.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(rows).toHaveCount(1);
+    await rows.getByRole("button", { name: /^Enable / }).click();
+    await expect(rows).toHaveCount(0);
+    await section.getByRole("button", { name: "Clear client search" }).click();
     await expect(filters.getByRole("radio", { name: "Other states 24" }))
       .toBeVisible();
 
-    const deleteRow = clientRow(section, "Disabled UI client 02");
-    await deleteRow.getByRole("button", { name: "Delete client" }).click();
+    await search.fill("Disabled UI client 02");
+    await section.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(rows).toHaveCount(1);
+    await rows.getByRole("button", { name: /^More actions for / }).click();
+    await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
     const deleteDialog = page.getByRole("dialog", {
       name: "Delete deactivated MCP client",
     });
@@ -68,7 +77,8 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     );
     await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(deleteDialog).toBeHidden();
-    await expect(deleteRow).toHaveCount(0);
+    await expect(rows).toHaveCount(0);
+    await section.getByRole("button", { name: "Clear client search" }).click();
     await expect(filters.getByRole("radio", { name: "Other states 23" }))
       .toBeVisible();
 
@@ -484,7 +494,8 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
 
     // Shrinking is the case that must never be silent: the dialog states
     // what is being removed and that access stops immediately.
-    await issuedRow.getByRole("button", { name: /^Edit workspaces/ }).click();
+    await issuedRow.getByRole("button", { name: /^More actions for / }).click();
+    await page.getByRole("menuitem", { name: "Edit workspaces" }).click();
     const editDialog = page.getByRole("dialog", {
       name: /Workspaces for E2E two-workspace key/,
     });
@@ -505,10 +516,6 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await attachScreenshot(page, testInfo, "access-key-workspace-set-edited");
   });
 });
-
-function clientRow(section: Locator, name: string) {
-  return section.locator(".mcp-client-row").filter({ hasText: name });
-}
 
 function keyRow(section: Locator, name: string) {
   return section.locator(".mcp-key-row").filter({ hasText: name });
