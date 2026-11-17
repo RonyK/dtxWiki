@@ -39,6 +39,7 @@ declare global {
       pointClick(index: number): void;
       pointScreen(index: number): number[];
       observeNativePointer(): void;
+      nativePointer(): { index: number | null; answers: number };
       simulationLifecycle(): NativeGraphObservation[];
       snapshot(): {
         points: number[] | null;
@@ -231,6 +232,29 @@ let topologyUploads = 0;
 let linkAlphas: number[] = [];
 const pinsByGraph = new WeakMap<Graph, number[]>();
 let hoveredIndex: number | null = null;
+const pointPickAnswers = new WeakMap<Graph, number>();
+const attachPointPicker = Graph.prototype.attachPointPicker;
+Graph.prototype.attachPointPicker = function (picker) {
+  if (!picker) return attachPointPicker.call(this, picker);
+  const instance = this;
+  pointPickAnswers.set(instance, 0);
+  // Observe completed native answers, including a real miss. A pending GPU
+  // readback is not a miss and must finish before the test changes its camera.
+  return attachPointPicker.call(instance, {
+    get hasPending() { return picker.hasPending; },
+    pickSync: (frame) => picker.pickSync(frame),
+    request: (frame) => picker.request(frame),
+    take(frame) {
+      const answer = picker.take(frame);
+      if (answer !== undefined) {
+        pointPickAnswers.set(instance, (pointPickAnswers.get(instance) ?? 0) + 1);
+      }
+      return answer;
+    },
+    discard: () => picker.discard(),
+    destroy: () => picker.destroy(),
+  });
+};
 const pointerObservedGraphs = new WeakSet<Graph>();
 function setObservedGraph(instance: Graph): void { graph = instance; }
 const graphObservations: NativeGraphObservation[] = [];
@@ -362,6 +386,7 @@ window.__workspaceScreenFocus = {
       onPointMouseOut(...args) { hoveredIndex = null; out?.(...args); },
     });
   },
+  nativePointer: () => ({ index: hoveredIndex, answers: graph ? pointPickAnswers.get(graph) ?? 0 : 0 }),
   simulationLifecycle: () => graphObservations.map((observation) => ({ ...observation })),
   snapshot: () => {
     const canvas = document.querySelector<HTMLCanvasElement>(".graph-canvas canvas");

@@ -10491,6 +10491,7 @@ export interface components {
             citation_available: boolean;
             /** Concept Type */
             concept_type?: string | null;
+            draft?: components["schemas"]["ContextDraftInfo"] | null;
             /** Entity Ref */
             entity_ref?: {
                 [key: string]: string;
@@ -10539,6 +10540,8 @@ export interface components {
             type: "context_page" | "context_claim" | "library_item" | "library_artifact" | "feedback" | "change_set" | "agent_page" | "source";
             /** Version Id */
             version_id?: string | null;
+            /** Version Status */
+            version_status?: ("draft" | "published_snapshot") | null;
         };
         /** ReauthenticationData */
         ReauthenticationData: {

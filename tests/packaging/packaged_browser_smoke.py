@@ -285,7 +285,9 @@ for (let index = 0; index < 8; index++) {
   const previous = documents[index - 1];
   const created = await requestData('POST', `${workspacePath}/context/pages`, {
     title: `Packaged smoke document ${index}`,
-    body_md: previous ? `Connected to [[${previous.slug}]].` : 'Packaged Worker root.',
+    body_md: previous
+      ? `Connected to [Previous document](/p/${workspace.id}/${previous.id}).`
+      : 'Packaged Worker root.',
   });
   const submitted = await requestData('POST',
     `${workspacePath}/context/pages/${created.id}/submit-for-review`, {
@@ -293,15 +295,21 @@ for (let index = 0; index < 8; index++) {
       expected_editing_revision: created.editing_revision,
       idempotency_key: randomUUID(),
     });
-  await requestData('POST',
-    `${workspacePath}/reviews/${submitted.review_item_id}/decision`,
-    { decision_type: 'approve' });
-  const versionPath = `${workspacePath}/context/pages/${created.id}/versions`;
-  await requestData('POST',
-    `${versionPath}/${submitted.version_id}/publish`, {
-      reason: 'Packaged browser Worker smoke fixture',
-      expected_content_hash: submitted.content_hash,
+  const preview = await requestData('POST',
+    `${workspacePath}/context/pages/${created.id}/merge-preview`, {
+      version_id: submitted.version_id,
     });
+  expect(preview.result, 'The smoke fixture must have a clean merge result')
+    .not.toBeNull();
+  const approved = await requestData('POST',
+    `${workspacePath}/reviews/${submitted.review_item_id}/decision`, {
+      decision_type: 'approve',
+      expected_editing_revision: preview.editing_revision,
+      expected_published_version_id: preview.published_version_id,
+      result_hash: preview.result.result_hash,
+    });
+  expect(approved.status).toBe('approved');
+  expect(approved.published_version_id).toBeTruthy();
   documents.push(created);
 }
 // Navigate with the authored workspace identity; the unscoped /graph alias

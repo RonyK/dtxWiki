@@ -25,6 +25,7 @@ import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { domainLabel } from "../../shared/lib/domainLabel";
 import { SEARCH_QUERY_MAX_LENGTH } from "../../shared/lib/searchLimits";
 import { searchResultLink } from "../../shared/lib/searchResultHref";
+import { searchResultKey, searchResultVersionState } from "../../shared/lib/searchResultPresentation";
 import { useRouteWorkspaceId, workspacePath } from "../../shared/lib/workspaceRoutes";
 import { normalizedText, presentLocation, resultLocation, searchPreview } from "./searchResultText";
 
@@ -599,7 +600,7 @@ function SearchResults({
         <div className="operations-list">
           {payload.ranked_results.map((result) => (
             <SearchResultRow
-              key={`${result.type}-${result.id}`}
+              key={searchResultKey(result)}
               result={result}
               workspaceId={workspaceId}
               query={query}
@@ -668,13 +669,15 @@ function SearchResultRow({
   const location = resultLocation(result);
   const locationParts = presentLocation(location);
   const fullPath = location.join(" › ");
+  const versionState = searchResultVersionState(result);
+  const versionLabel = versionState ? t(`results.versions.${versionState}`) : null;
   const unavailable = !link ? t(
     result.type === "change_set" ? "results.reviewLinkMissing" : "results.linkMissing",
     { defaultValue: result.type === "change_set"
       ? "Cannot open directly from search · Review link information unavailable"
       : "Cannot open directly from search · Link information unavailable" },
   ) : null;
-  const description = [fullPath, matchReason, unavailable].filter(Boolean).join(". ");
+  const description = [versionLabel, fullPath, matchReason, unavailable].filter(Boolean).join(". ");
   const content = (
     <>
       <div className="search-result-body">
@@ -683,6 +686,7 @@ function SearchResultRow({
             {typeLabel}
           </span>
           <span className="search-result-title-text">{result.title}</span>
+          {versionState && versionLabel ? <StatusPill status={versionState} label={versionLabel} title={versionLabel} compact /> : null}
           {result.archived ? <StatusPill status="archived" compact /> : null}
         </p>
         {preview ? (

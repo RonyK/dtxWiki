@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { test } from "./fixtures";
 import { movedPointCount, readWorkspacePointFrame, readWorkspacePointFrameOnPage, visibleOrdinaryTitleCount,
   visibleOrdinaryTitleCountOnPage, WORKSPACE_GRAPH_HOST_SELECTOR } from "../e2e/workspace_graph_point_frame";
 

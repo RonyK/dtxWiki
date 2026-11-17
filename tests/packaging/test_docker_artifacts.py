@@ -539,6 +539,7 @@ def test_dockerignore_keeps_local_secrets_out_of_the_build_context(tmp_path: Pat
         "infra/prod/.env",
         "infra/prod/.env.local",
         "frontend/.env.production.local",
+        "shared/fixtures/.env",
         "infra/prod/backups/dtxwiki-2026-01-01.tgz",
         "dtxwiki.sqlite",
         "backend/data/dtxwiki.sqlite-wal",
@@ -552,6 +553,7 @@ def test_dockerignore_keeps_local_secrets_out_of_the_build_context(tmp_path: Pat
         "doc/plan",
         "docs/design",
         "frontend/node_modules/x/index.js",
+        "shared/schemas/rest/v1/openapi.json",
     ]
     kept = [
         "infra/prod/.env.example",
@@ -560,6 +562,7 @@ def test_dockerignore_keeps_local_secrets_out_of_the_build_context(tmp_path: Pat
         "infra/prod/docker-entrypoint.sh",
         "backend/app/main.py",
         "tests/packaging/production_smoke.sh",
+        "shared/fixtures/context_link_rewrite_vectors.json",
     ]
     for relative in (*planted, *kept):
         path = context / relative

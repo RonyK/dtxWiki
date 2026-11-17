@@ -1,4 +1,5 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, type Browser, type Page } from "@playwright/test";
+import { test } from "./fixtures";
 import { build } from "esbuild";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -36,7 +37,9 @@ function assertSharedCosmosPresentation(result: SharedCosmosProbe): void {
   expect(glyph.library.cornerInk).toBe(true);
   expect(glyph.conversation).toMatchObject({ topInk: true, cornerInk: false });
   expect(glyph.folder).toMatchObject({ centerInk: false, bandInk: true });
-  expect(glyph.cluster).toMatchObject({ centerInk: false, bodyInk: true });
+  expect(glyph.cluster.bodyInk).toBe(true);
+  expect(glyph.cluster.countGlyphPixels, "The cluster's count must be visible inside its disc").toBeGreaterThan(0);
+  expect(glyph.cluster.countDiscPixels, "Count ink must retain the surrounding disc body").toBeGreaterThan(glyph.cluster.countGlyphPixels);
   expect(glyph.version.diameter / glyph.context.diameter).toBeCloseTo(1.35, 6);
   expect(result.originalNodeIds).toHaveLength(10);
   expect(result.originalRelationIds).toEqual(["original:relation:link"]);
@@ -49,6 +52,7 @@ function assertSharedCosmosPresentation(result: SharedCosmosProbe): void {
 // GPU sprite, SDF atlas, real pointer picking or camera/pin retention together.
 // One collected case: 2 DPRs × 2 zooms = 4 visual inputs, plus 2 metadata updates.
 test("shared Cosmos glyphs keep forced-color cues and reader state through metadata repaint", async ({ browser }, testInfo) => {
+  const probes: Array<{ dpr: number; zoom: number; result: SharedCosmosProbe }> = [];
   for (const dpr of [1, 2]) {
     // Exercise glyphs through the shared core at two DPRs and zoom levels.
     // Keep the pin and metadata repaint checks on the actual GPU path.
@@ -59,6 +63,7 @@ test("shared Cosmos glyphs keep forced-color cues and reader state through metad
       for (const zoom of [.75, 1.25]) {
         const result = await shared.evaluate(zoom => window.__sharedCosmosPreparation.probe(zoom), zoom);
         last = result;
+        probes.push({ dpr, zoom, result });
         try { assertSharedCosmosPresentation(result); }
         catch (error) {
           const artifact = testInfo.outputPath(`shared-cosmos-dpr-${dpr}-zoom-${zoom}.json`);
@@ -67,6 +72,7 @@ test("shared Cosmos glyphs keep forced-color cues and reader state through metad
           throw error;
         }
       }
+      await testInfo.attach(`shared-cosmos-glyphs-dpr-${dpr}`, { body: await shared.screenshot(), contentType: "image/png" });
       const updated = await shared.evaluate(() => window.__sharedCosmosPreparation.updateMetadata());
       expect(updated.positionsAfter).toEqual(updated.positionsBefore);
       expect(updated.cameraAfter).toEqual(updated.cameraBefore);
@@ -84,4 +90,5 @@ test("shared Cosmos glyphs keep forced-color cues and reader state through metad
       await shared.context().close();
     }
   }
+  await testInfo.attach("shared-cosmos-probes", { body: JSON.stringify(probes, null, 2), contentType: "application/json" });
 });

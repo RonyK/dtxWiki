@@ -143,7 +143,10 @@ def test_browser_script_keeps_real_rest_and_d3_worker_runtime_oracles(
     script = command[3]
     assert "page.request.fetch" in script
     assert "/submit-for-review" in script
-    assert "expected_content_hash: submitted.content_hash" in script
+    assert "/merge-preview" in script
+    assert "result_hash: preview.result.result_hash" in script
+    assert "approved.published_version_id" in script
+    assert "Connected to [Previous document](/p/" in script
     assert "`${workspacePath}/settings/policies/batch`" in script
     assert "response.request().postDataJSON()?.group === group" in script
     assert "edge.relation_count === 1" in script

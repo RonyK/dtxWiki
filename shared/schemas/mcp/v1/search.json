@@ -253,6 +253,114 @@
   },
   "output": {
     "$defs": {
+      "ContextDraftAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Display Name"
+          }
+        },
+        "required": [
+          "actor_kind",
+          "actor_id"
+        ],
+        "title": "ContextDraftAuthor",
+        "type": "object"
+      },
+      "ContextDraftInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/ContextDraftAuthor"
+          },
+          "is_behind": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the current published version is absent from this draft's ancestry; null for incomplete or cyclic ancestry.",
+            "title": "Is Behind",
+            "x-wire-explicit": true
+          },
+          "is_editing": {
+            "title": "Is Editing",
+            "type": "boolean"
+          },
+          "last_saved_at": {
+            "format": "date-time",
+            "title": "Last Saved At",
+            "type": "string"
+          },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "author",
+          "last_saved_at",
+          "is_editing"
+        ],
+        "title": "ContextDraftInfo",
+        "type": "object"
+      },
+      "ContextDraftReview": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "ContextDraftReview",
+        "type": "object"
+      },
       "EnvelopeWarning": {
         "additionalProperties": false,
         "description": "Structured warning attached to MCP/REST envelope responses.\n\nHotfix-2 renamed this model to avoid shadowing Python's builtin warning\nbase class. Wire shape (``code`` + ``message``) is unchanged; only the\nPython class name and JSON Schema title move.",
@@ -429,6 +537,17 @@
             ],
             "default": null,
             "title": "Concept Type"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContextDraftInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "entity_ref": {
             "anyOf": [
@@ -622,6 +741,22 @@
             ],
             "default": null,
             "title": "Version Id"
+          },
+          "version_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "published_snapshot"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Status"
           }
         },
         "required": [

@@ -1,9 +1,10 @@
-import { contextPageHref as canonicalContextHref, workspacePath, workspaceTargetHref } from "./workspaceRoutes";
+import { contextPageHref as canonicalContextHref, VERSION_QUERY_PARAM, workspacePath, workspaceTargetHref } from "./workspaceRoutes";
 import { isWorkspaceUuid } from "./workspaceIdentity";
 export type SearchResultLinkInput = {
   id: string;
   type: string;
   stable_url?: string | null;
+  version_id?: string | null;
   source_ref?: Record<string, string> | null;
 };
 
@@ -35,7 +36,7 @@ export function searchResultLink<T extends SearchResultLinkInput>(
     }
     if ((result.type === "context_page" || result.type === "context_claim") &&
         result.stable_url.startsWith(`/p/${workspaceId}/`)) {
-      return { href: result.stable_url, destination: "context" };
+      return { href: contextVersionHref(result.stable_url, result), destination: "context" };
     }
   }
   if (result.type === "feedback") {
@@ -52,7 +53,8 @@ export function searchResultLink<T extends SearchResultLinkInput>(
     (result.type === "context_page" || result.type === "context_claim") &&
     targetId
   ) {
-    return contextPageHref(targetId, workspaceId);
+    const link = contextPageHref(targetId, workspaceId);
+    return link ? { ...link, href: contextVersionHref(link.href, result) } : null;
   }
   if (result.type === "agent_page" && targetId) {
     return { href: workspaceTargetHref(workspaceId, "agent", targetId), destination: "agent" };
@@ -102,6 +104,14 @@ function sourceRefHref(
 function contextPageHref(pageId: string, workspaceId: string): SearchResultLink | null {
   if (!isWorkspaceUuid(workspaceId) || !isWorkspaceUuid(pageId)) return null;
   return { href: canonicalContextHref(workspaceId, pageId), destination: "context" };
+}
+
+function contextVersionHref(href: string, result: SearchResultLinkInput): string {
+  const versionId = result.version_id ?? result.source_ref?.version_id;
+  if (!versionId || !isWorkspaceUuid(versionId)) return href;
+  const url = new URL(href, "https://dtxwiki.invalid");
+  url.searchParams.set(VERSION_QUERY_PARAM, versionId);
+  return url.pathname + url.search + url.hash;
 }
 
 function reviewItemHref(sourceRef: Record<string, string>, workspaceId: string): SearchResultLink | null {

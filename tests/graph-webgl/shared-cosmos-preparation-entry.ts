@@ -82,7 +82,8 @@ export type SharedCosmosProbe = {
   repaintInk: number;
   glyphs: Array<{ kind: GraphNodeVisualKind; center: [number, number]; diameter: number;
     centerInk: boolean; topInk: boolean; bottomInk: boolean; cornerInk: boolean; farCornerInk: boolean;
-    cutoutInk: boolean; bandInk: boolean; bodyInk: boolean }>;
+    cutoutInk: boolean; bandInk: boolean; bodyInk: boolean;
+    countGlyphPixels: number; countDiscPixels: number }>;
   glError: number; runtimeError: string | null;
   originalNodeIds: string[]; originalRelationIds: string[];
 };
@@ -127,9 +128,21 @@ void adapter.whenSettled().then(async () => {
         const center = screen(row), diameter = 32 * nativeGlyphDiameterScale(GRAPH_NODE_VISUALS[kind].shape)
           * (graph.config.pointSizeScale ?? 1) * Math.min(5, Math.max(1, graph.getZoomLevel() * .01));
         const ink = (dx: number, dy: number) => coverage(center[0] + dx * diameter, center[1] + dy * diameter) >= 96;
+        // A count disc's narrow digit can sit either side of its exact centre
+        // pixel. Observe the count's dark ink and its light surrounding body
+        // across the interior, clear of the native disc's antialiased edge.
+        let countGlyphPixels = 0, countDiscPixels = 0;
+        if (kind === "cluster") {
+          const radius = Math.floor(diameter * .2);
+          for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
+            if (coverage(center[0] + dx, center[1] + dy) < 96) countGlyphPixels++;
+            else countDiscPixels++;
+          }
+        }
         return { kind, center, diameter, centerInk: ink(0, 0), topInk: ink(0, -.4), bottomInk: ink(0, .4),
           cornerInk: ink(.35, .35), farCornerInk: ink(.4, .4), bodyInk: ink(-.3, 0),
-          cutoutInk: kind === "agentVersion" ? ink(0, -.285) : ink(.34, 0), bandInk: ink(.46, 0) };
+          cutoutInk: kind === "agentVersion" ? ink(0, -.285) : ink(.34, 0), bandInk: ink(.46, 0),
+          countGlyphPixels, countDiscPixels };
       });
       const saved = adapter.captureCoordinates();
       return { repaintInk, glyphs, glError: gl.getError(), runtimeError,

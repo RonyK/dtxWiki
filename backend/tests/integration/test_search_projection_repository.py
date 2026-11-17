@@ -169,7 +169,7 @@ def test_search_and_idempotent_purge_are_workspace_scoped(session_factory):
             ],
         )
 
-        local_documents, local_scanned = repository.search_documents(
+        local_documents, local_group_count = repository.search_document_groups(
             match_query="projectionrepositorymarker",
             source_kinds=["context_page"],
             visibility_scopes=["published"],
@@ -185,7 +185,7 @@ def test_search_and_idempotent_purge_are_workspace_scoped(session_factory):
         )
         repository.purge_all()
         repository.purge_all()
-        purged_documents, _ = repository.search_documents(
+        purged_documents, _ = repository.search_document_groups(
             match_query="projectionrepositorymarker",
             source_kinds=["context_page"],
             visibility_scopes=["published"],
@@ -194,14 +194,16 @@ def test_search_and_idempotent_purge_are_workspace_scoped(session_factory):
             take=10,
             offset=0,
         )
-        foreign_documents, foreign_scanned = foreign_repository.search_documents(
-            match_query="projectionrepositorymarker",
-            source_kinds=["context_page"],
-            visibility_scopes=["published"],
-            allow_sensitive=False,
-            sensitive_categories=[],
-            take=10,
-            offset=0,
+        foreign_documents, foreign_group_count = (
+            foreign_repository.search_document_groups(
+                match_query="projectionrepositorymarker",
+                source_kinds=["context_page"],
+                visibility_scopes=["published"],
+                allow_sensitive=False,
+                sensitive_categories=[],
+                take=10,
+                offset=0,
+            )
         )
         foreign_names = foreign_repository.search_page_names(
             match_query='"pro"',
@@ -209,15 +211,16 @@ def test_search_and_idempotent_purge_are_workspace_scoped(session_factory):
             take=10,
         )
 
-    assert local_scanned == 1
+    assert local_group_count == 1
     assert len(local_documents) == 1
     assert isinstance(local_documents[0], FtsDocumentHit)
     assert local_documents[0].entity_id == local_page_id
+    assert local_documents[0].snippet == "projectionrepositorymarker"
     assert len(local_names) == 1
     assert isinstance(local_names[0], PageNameTrigramHit)
     assert local_names[0].page_id == local_page_id
     assert purged_documents == []
-    assert foreign_scanned == 1
+    assert foreign_group_count == 1
     assert [hit.entity_id for hit in foreign_documents] == [foreign_page_id]
     assert [hit.page_id for hit in foreign_names] == [foreign_page_id]
 
@@ -326,7 +329,7 @@ def test_orphan_cleanup_does_not_accept_matching_source_ids_from_other_workspace
 
         repository.delete_orphan_claim_documents()
         repository.delete_orphan_artifact_documents()
-        local_claim_hits, _ = repository.search_documents(
+        local_claim_hits, _ = repository.search_document_groups(
             match_query="crossworkspaceclaimmarker",
             source_kinds=["context_claim"],
             visibility_scopes=["published"],
@@ -335,7 +338,7 @@ def test_orphan_cleanup_does_not_accept_matching_source_ids_from_other_workspace
             take=10,
             offset=0,
         )
-        local_artifact_hits, _ = repository.search_documents(
+        local_artifact_hits, _ = repository.search_document_groups(
             match_query="crossworkspaceartifactmarker",
             source_kinds=["library_artifact"],
             visibility_scopes=["published"],
@@ -344,7 +347,7 @@ def test_orphan_cleanup_does_not_accept_matching_source_ids_from_other_workspace
             take=10,
             offset=0,
         )
-        foreign_claim_hits, _ = foreign_repository.search_documents(
+        foreign_claim_hits, _ = foreign_repository.search_document_groups(
             match_query="crossworkspaceclaimmarker",
             source_kinds=["context_claim"],
             visibility_scopes=["published"],
@@ -353,7 +356,7 @@ def test_orphan_cleanup_does_not_accept_matching_source_ids_from_other_workspace
             take=10,
             offset=0,
         )
-        foreign_artifact_hits, _ = foreign_repository.search_documents(
+        foreign_artifact_hits, _ = foreign_repository.search_document_groups(
             match_query="crossworkspaceartifactmarker",
             source_kinds=["library_artifact"],
             visibility_scopes=["published"],
@@ -420,7 +423,7 @@ def test_indexer_direct_ids_cannot_cross_the_workspace_boundary(session_factory)
             source_id=uuid4(),
         )
         local_repository = WorkspaceFts5ProjectionRepository(session, workspace_id)
-        local_hits, _ = local_repository.search_documents(
+        local_hits, _ = local_repository.search_document_groups(
             match_query=marker,
             source_kinds=["context_page"],
             visibility_scopes=["published"],
@@ -451,7 +454,7 @@ def test_indexer_direct_ids_cannot_cross_the_workspace_boundary(session_factory)
             source_kind="context_page",
             source_id=foreign_page.id,
         )
-        foreign_hits, _ = foreign_repository.search_documents(
+        foreign_hits, _ = foreign_repository.search_document_groups(
             match_query=marker,
             source_kinds=["context_page"],
             visibility_scopes=["published"],

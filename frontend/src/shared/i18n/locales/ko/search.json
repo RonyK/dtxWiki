@@ -67,7 +67,12 @@
     "activity": "활동",
     "review": "리뷰",
     "reviewLinkMissing": "검색에서 바로 열 수 없음 · 리뷰 연결 정보 없음",
-    "linkMissing": "검색에서 바로 열 수 없음 · 연결 정보 없음"
+    "linkMissing": "검색에서 바로 열 수 없음 · 연결 정보 없음",
+    "versions": {
+      "published": "게시본",
+      "reviewing": "리뷰 중 초안",
+      "draft": "초안"
+    }
   },
   "examples": {
     "label": "검색 예시",

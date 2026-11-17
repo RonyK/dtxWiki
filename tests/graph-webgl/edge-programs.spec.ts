@@ -1,4 +1,5 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, type Browser, type Page } from "@playwright/test";
+import { test } from "./fixtures";
 import { build } from "esbuild";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";

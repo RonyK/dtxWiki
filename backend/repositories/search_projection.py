@@ -71,23 +71,56 @@ _PURGE_DOCUMENTS = text("DELETE FROM search_doc_fts WHERE workspace_id = :worksp
 _PURGE_PAGE_NAMES = text(
     "DELETE FROM page_name_trgm WHERE workspace_id = :workspace_id"
 )
-_SEARCH_DOCUMENTS = text(
+_SEARCH_DOCUMENT_GROUPS = text(
     """
-    SELECT rowid, source_kind, entity_id, version_id, visibility_scope,
-           category, bm25(search_doc_fts, 5.0, 1.0) AS rank,
-           snippet(search_doc_fts, 1, '', '', ' ... ', 40) AS snippet
-      FROM search_doc_fts
+    WITH matches AS MATERIALIZED (
+        SELECT rowid, source_kind, entity_id, version_id, visibility_scope,
+               category, bm25(search_doc_fts, 5.0, 1.0) AS rank
+          FROM search_doc_fts
+         WHERE search_doc_fts MATCH :match_query
+           AND workspace_id = :workspace_id
+           AND source_kind IN :source_kinds
+           AND visibility_scope IN :visibility_scopes
+           AND (:allow_sensitive = 1 OR source_kind != 'agent_page'
+                OR category NOT IN :sensitive_categories)
+    ), documents AS MATERIALIZED (
+        SELECT matches.*,
+               CASE source_kind WHEN 'context_claim' THEN 'context_page'
+                                WHEN 'library_artifact' THEN 'library_item'
+                                ELSE source_kind END AS document_kind,
+               COALESCE(
+                   CASE source_kind
+                       WHEN 'context_claim' THEN (
+                           SELECT page_id FROM context_page_version
+                            WHERE workspace_id = replace(:workspace_id, '-', '')
+                              AND id = replace(matches.version_id, '-', '')
+                       )
+                       WHEN 'library_artifact' THEN (
+                           SELECT library_item_id FROM library_item_version
+                            WHERE workspace_id = replace(:workspace_id, '-', '')
+                              AND id = replace(matches.version_id, '-', '')
+                       )
+                   END, replace(entity_id, '-', '')
+               ) AS document_id
+          FROM matches
+    ), selected AS (
+        SELECT document_kind, document_id, MIN(rank) AS best_rank,
+               MIN(rowid) AS first_rowid
+          FROM documents
+         GROUP BY document_kind, document_id
+         ORDER BY best_rank, first_rowid, document_kind, document_id
+         LIMIT :take OFFSET :offset
+    )
+    SELECT documents.rowid, documents.source_kind, documents.entity_id,
+           documents.version_id, documents.visibility_scope, documents.category,
+           documents.rank,
+           snippet(search_doc_fts, 1, '', '', ' ... ', 40) AS snippet,
+           documents.document_kind, documents.document_id
+      FROM documents JOIN selected USING (document_kind, document_id)
+      JOIN search_doc_fts ON search_doc_fts.rowid = documents.rowid
      WHERE search_doc_fts MATCH :match_query
-       AND workspace_id = :workspace_id
-       AND source_kind IN :source_kinds
-       AND visibility_scope IN :visibility_scopes
-       AND (
-            :allow_sensitive = 1
-            OR source_kind != 'agent_page'
-            OR category NOT IN :sensitive_categories
-       )
-     ORDER BY rank ASC, rowid ASC
-     LIMIT :take OFFSET :offset
+     ORDER BY selected.best_rank, selected.first_rowid,
+              documents.rank, documents.rowid
     """
 ).bindparams(
     bindparam("source_kinds", expanding=True),
@@ -96,14 +129,23 @@ _SEARCH_DOCUMENTS = text(
 )
 _SEARCH_PAGE_NAMES = text(
     """
-    SELECT rowid, page_id, source_version_id, visibility_scope,
-           name_kind, name_norm, name, bm25(page_name_trgm) AS rank
-      FROM page_name_trgm
-     WHERE page_name_trgm MATCH :match_query
-       AND workspace_id = :workspace_id
-       AND visibility_scope IN :visibility_scopes
-     ORDER BY rank ASC, rowid ASC
-     LIMIT :take
+    WITH matches AS MATERIALIZED (
+        SELECT rowid, page_id, source_version_id, visibility_scope,
+               name_kind, name_norm, name, bm25(page_name_trgm) AS rank
+          FROM page_name_trgm
+         WHERE page_name_trgm MATCH :match_query
+           AND workspace_id = :workspace_id
+           AND visibility_scope IN :visibility_scopes
+    ), selected AS (
+        SELECT page_id, MIN(rank) AS best_rank, MIN(rowid) AS first_rowid
+          FROM matches
+         GROUP BY page_id
+         ORDER BY best_rank, first_rowid, page_id
+         LIMIT :take
+    )
+    SELECT matches.* FROM matches JOIN selected USING (page_id)
+     ORDER BY selected.best_rank, selected.first_rowid,
+              matches.rank, matches.rowid
     """
 ).bindparams(bindparam("visibility_scopes", expanding=True))
 
@@ -176,6 +218,29 @@ class FtsDocumentHit:
     category: str
     rank: float
     snippet: str
+
+
+def _document_hits(rows) -> list[FtsDocumentHit]:
+    hits: list[FtsDocumentHit] = []
+    for row in rows:
+        entity_id = parse_uuid_or_none(str(row["entity_id"]))
+        if entity_id is None:
+            continue
+        hits.append(
+            FtsDocumentHit(
+                rowid=int(row["rowid"]),
+                source_kind=str(row["source_kind"]),
+                entity_id=entity_id,
+                version_id=parse_uuid_or_none(str(row["version_id"] or "")),
+                visibility_scope=str(row["visibility_scope"]),
+                category=str(row["category"] or ""),
+                rank=float(row["rank"]),
+                snippet=" ".join(
+                    _plain_text_snippet(str(row["snippet"] or "")).split()
+                )[:240],
+            )
+        )
+    return hits
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,7 +366,7 @@ class WorkspaceFts5ProjectionRepository:
         self._session.execute(_PURGE_DOCUMENTS, parameters)
         self._session.execute(_PURGE_PAGE_NAMES, parameters)
 
-    def search_documents(
+    def search_document_groups(
         self,
         *,
         match_query: str,
@@ -312,9 +377,21 @@ class WorkspaceFts5ProjectionRepository:
         take: int,
         offset: int,
     ) -> tuple[list[FtsDocumentHit], int]:
+        """Page matching documents and expand all their matching versions.
+
+        Both the candidate budget and offset count canonical document groups;
+        claims/artifacts keep their own source identities in the expanded rows.
+        MATCH ranks matching projection rows inside SQLite; only rows from the
+        selected groups receive snippets and reach Python. Expansion grows with
+        those documents' matching versions, without a version-row cap. Projection
+        ACL predicates run inside the MATCH CTE, before group selection; the
+        caller still validates each selected source-of-truth row. A document's
+        many drafts therefore consume one candidate slot, and cannot hide its
+        own published match or the next document behind a row scan limit.
+        """
         rows = (
             self._session.execute(
-                _SEARCH_DOCUMENTS,
+                _SEARCH_DOCUMENT_GROUPS,
                 {
                     "match_query": match_query,
                     "workspace_id": str(self._workspace_id),
@@ -329,26 +406,8 @@ class WorkspaceFts5ProjectionRepository:
             .mappings()
             .all()
         )
-        hits: list[FtsDocumentHit] = []
-        for row in rows:
-            entity_id = parse_uuid_or_none(str(row["entity_id"]))
-            if entity_id is None:
-                continue
-            hits.append(
-                FtsDocumentHit(
-                    rowid=int(row["rowid"]),
-                    source_kind=str(row["source_kind"]),
-                    entity_id=entity_id,
-                    version_id=parse_uuid_or_none(str(row["version_id"] or "")),
-                    visibility_scope=str(row["visibility_scope"]),
-                    category=str(row["category"] or ""),
-                    rank=float(row["rank"]),
-                    snippet=" ".join(
-                        _plain_text_snippet(str(row["snippet"] or "")).split()
-                    )[:240],
-                )
-            )
-        return hits, len(rows)
+        hits = _document_hits(rows)
+        return hits, len({(row["document_kind"], row["document_id"]) for row in rows})
 
     def search_page_names(
         self,

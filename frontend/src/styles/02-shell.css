@@ -242,6 +242,16 @@
   font-size: 12px;
 }
 
+.command-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.command-preview-title .status-pill {
+  flex-shrink: 0;
+}
+
 .command-empty {
   border-radius: 6px;
   color: var(--ink-soft);

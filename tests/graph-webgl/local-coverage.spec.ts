@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { test } from "./fixtures";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
@@ -339,7 +340,7 @@ for (const { locale, mode, viewport } of LOCAL_LAYOUT_CASES) {
     await expect(graph.getByRole("dialog")).toHaveCount(0);
     await expect(graph.locator("[aria-modal='true'], [inert]")).toHaveCount(0);
     const actions = details.locator(".graph-detail-actions");
-    await expect(actions.getByRole("link", { name: locale === "en" ? "Open" : "열기", exact: true })).toHaveAttribute("href", `/workspaces/${fixtureWorkspaceId}/context/pages/${seedEntityId}`);
+    await expect(actions.getByRole("link", { name: locale === "en" ? "Open" : "열기", exact: true })).toHaveAttribute("href", `/p/${fixtureWorkspaceId}/${seedEntityId}`);
     if (viewport.width === 390) {
       const targets = await actions.locator(":scope > a,:scope > button").evaluateAll((elements) => elements.map((element) => {
         const bounds = element.getBoundingClientRect();

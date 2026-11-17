@@ -9,6 +9,8 @@ FROM node:22-slim AS frontend
 WORKDIR /build
 COPY package.json package-lock.json ./
 COPY frontend ./frontend
+# The frontend typecheck also compiles tests that import cross-language fixtures.
+COPY shared/fixtures ./shared/fixtures
 # `npm ci` runs the frontend postinstall (the generator below) and the build's
 # pretypecheck runs it again. Copy it and every script it imports, one line
 # each, and nothing else: a scripts/cosmos-*.mjs glob would pull in the

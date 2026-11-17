@@ -3,7 +3,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import sessionmaker
 
 from backend.models.agent import AgentPage, AgentPageVersion
@@ -939,7 +939,8 @@ def test_keyword_search_uses_shared_visibility_for_pending_drafts():
         workspace_slug="default",
         slug="draft-needle-page",
         title="Draft Needle Page",
-        body_md="# Draft Needle Page\n\nLegacyNeedle published body.",
+        page_type="concept",
+        body_md="# Draft Needle Page\n\nSharedNeedle LegacyNeedle published body.",
         actor_kind="human",
         actor_id="00000000-0000-0000-0000-000000000010",
         actor_provenance="browser_session",
@@ -970,12 +971,62 @@ def test_keyword_search_uses_shared_visibility_for_pending_drafts():
             created_by_actor_kind="human",
             created_by_actor_id="00000000-0000-0000-0000-000000000010",
             version_status="draft",
+            page_metadata={"title": "Reviewed draft title", "page_type": "guide"},
         )
         session.add(draft_version)
         session.flush()
-        page.latest_draft_version_id = draft_version.id
+        # One page needs a published version, a reviewed draft and a stronger
+        # unreviewed match to expose page-only dedup and score-only ordering.
+        other_body = "# Independent draft\n\n" + "SharedNeedle " * 12
+        other_draft = ContextPageVersion(
+            workspace_id=page.workspace_id,
+            page_id=page.id,
+            parent_version_id=drafted.version_id,
+            version_no=3,
+            body_md=other_body,
+            content_hash=calculate_content_hash(other_body),
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="00000000-0000-0000-0000-000000000010",
+            version_status="draft",
+            page_metadata={"title": "Independent draft title", "page_type": "decision"},
+        )
+        session.add(other_draft)
+        change_set = ChangeSet(
+            workspace_id=workspace.id,
+            reason="Review one of the independent shared drafts",
+            trigger_type="context_update",
+            actor_type="human",
+            status="review_required",
+            risk_level="medium",
+        )
+        session.add(change_set)
+        session.flush()
+        session.add(
+            ChangeOperation(
+                workspace_id=workspace.id,
+                change_set_id=change_set.id,
+                target_type="context_page",
+                target_id=page.id,
+                operation="update",
+                diff_summary="Reviewed draft",
+                diff_ref=f"context_page_version:{draft_version.id}",
+            )
+        )
+        review = ReviewItem(
+            workspace_id=workspace.id,
+            change_set_id=change_set.id,
+            review_type="context_update",
+            status="pending",
+            risk_level="medium",
+        )
+        session.add(review)
+        session.flush()
         sync_page_projections(session, page=page, version=draft_version)
+        sync_page_projections(session, page=page, version=other_draft)
         draft_version_id = draft_version.id
+        other_version_id = other_draft.id
+        review_id = review.id
         editor = ActorContext(
             actor_kind="human",
             actor_id="editor",
@@ -1001,7 +1052,7 @@ def test_keyword_search_uses_shared_visibility_for_pending_drafts():
         viewer_results = search_service.search(
             session=session,
             workspace_id=workspace.id,
-            query="legacyneedle",
+            query="sharedneedle",
             scope="context_page",
             actor=viewer,
         )
@@ -1013,19 +1064,281 @@ def test_keyword_search_uses_shared_visibility_for_pending_drafts():
             actor=editor,
         )
 
-    editor_hits = {hit.id: hit for hit in editor_results.ranked_results}
-    assert set(editor_hits) == {drafted.id, published.id}
-    assert editor_hits[drafted.id].version_id == draft_version_id
-    assert editor_hits[published.id].version_id == published.version_id
+    assert {hit.id for hit in editor_results.ranked_results} == {
+        drafted.id,
+        published.id,
+    }
+    page_hits = [hit for hit in editor_results.ranked_results if hit.id == drafted.id]
+    assert [hit.version_id for hit in page_hits] == [
+        drafted.version_id,
+        draft_version_id,
+        other_version_id,
+    ]
+    assert [hit.citation_available for hit in page_hits] == [True, False, False]
+    assert [hit.version_status for hit in page_hits] == [
+        "published_snapshot",
+        "draft",
+        "draft",
+    ]
+    assert [hit.title for hit in page_hits] == [
+        "Draft Needle Page",
+        "Reviewed draft title",
+        "Independent draft title",
+    ]
+    assert [hit.concept_type for hit in page_hits] == ["concept", "guide", "decision"]
+    assert page_hits[0].draft is None
+    assert page_hits[1].draft.review.model_dump(mode="json") == {
+        "id": str(review_id),
+        "status": "pending",
+    }
+    assert page_hits[2].draft.review is None
+    assert page_hits[2].score > page_hits[1].score
+    [published_hit] = [
+        hit for hit in editor_results.ranked_results if hit.id == published.id
+    ]
+    assert published_hit.version_id == published.version_id
 
     # The published body of the drafted page stays searchable for both roles
     # while the draft is pending (union semantics; viewer never saw the draft).
-    [viewer_hit] = viewer_results.ranked_results
-    assert viewer_hit.id == drafted.id
-    assert viewer_hit.version_id == drafted.version_id
+    assert {(hit.id, hit.version_id) for hit in viewer_results.ranked_results} == {
+        (drafted.id, drafted.version_id),
+        (published.id, published.version_id),
+    }
+    assert all(
+        hit.citation_available and hit.draft is None
+        for hit in viewer_results.ranked_results
+    )
     [union_hit] = editor_union.ranked_results
     assert union_hit.id == drafted.id
     assert union_hit.version_id == drafted.version_id
+
+    # Resolver aliases and a plain slug must retain all matching versions,
+    # while two independently extracted claims keep their own result identity.
+    # Budget exception: title, plain-slug and trigram take independent lookup
+    # paths; claim hydration and duplicate FTS rows add distinct projection
+    # regressions. Pure mocks cannot verify name resync, actor visibility and
+    # FTS ranking together. Reuse KW-1's database for these five logical probes
+    # instead of adding five database fixtures.
+    with session_factory.begin() as session:
+        page = session.get(ContextPage, drafted.id)
+        for version_id in (draft_version_id, other_version_id):
+            version = session.get(ContextPageVersion, version_id)
+            version.page_metadata = {
+                **version.page_metadata,
+                "title": "Draft Needle Page",
+            }
+        claims = [
+            ContextClaim(
+                workspace_id=page.workspace_id,
+                page_version_id=drafted.version_id,
+                claim_text=f"SharedClaimNeedle assertion {index}",
+                location_in_page={"kind": "whole_page"},
+                claim_type="summary",
+                confidence="unknown",
+                status="active",
+                created_by_actor_type="human",
+            )
+            for index in range(2)
+        ]
+        session.add_all(claims)
+        session.flush()
+        sync_page_projections(session, page=page)
+        expected_versions = {drafted.version_id, draft_version_id, other_version_id}
+        for query, reason in (
+            ("Draft Needle Page", "exact_title"),
+            ("draft-needle-page", "exact_slug"),
+            ("Draft Needle Pagf", "trigram"),
+        ):
+            matches = search_service.search(
+                session=session,
+                workspace_id=page.workspace_id,
+                query=query,
+                scope="context_page",
+                actor=editor,
+            )
+            page_matches = [hit for hit in matches.ranked_results if hit.id == page.id]
+            assert {hit.version_id for hit in page_matches} == expected_versions
+            assert {hit.match_reason for hit in page_matches} == {reason}
+        claim_hits = search_service.search(
+            session=session,
+            workspace_id=page.workspace_id,
+            query="SharedClaimNeedle",
+            scope="context_claim",
+            actor=editor,
+        )
+        assert {hit.id for hit in claim_hits.ranked_results} == {
+            claim.id for claim in claims
+        }
+        # Duplicate projection rows can survive a prior interrupted rebuild.
+        # The worse long row must not replace the original matching snippet.
+        session.execute(
+            text(
+                "INSERT INTO search_doc_fts "
+                "(context_header,body,workspace_id,source_kind,entity_id,version_id,"
+                "visibility_scope,category) VALUES "
+                "('',:body,:workspace,'context_page',:page,:version,'published','')"
+            ),
+            {
+                "body": "LegacyNeedle weakduplicate " + "filler " * 300,
+                "workspace": str(page.workspace_id),
+                "page": str(page.id),
+                "version": str(drafted.version_id),
+            },
+        )
+        [best_hit] = search_service.search(
+            session=session,
+            workspace_id=page.workspace_id,
+            query="LegacyNeedle",
+            scope="context_page",
+            actor=editor,
+        ).ranked_results
+        assert "published body" in best_hit.snippet
+        assert "weakduplicate" not in best_hit.snippet
+
+
+def test_keyword_candidate_limit_counts_documents_and_keeps_their_versions():
+    """Many better-ranked drafts must not evict published evidence or documents."""
+    import sqlite3
+
+    from backend.schemas.read import SearchFilters
+    from backend.services.retrieval.keyword import KeywordRetriever
+
+    factory = make_session_factory()
+    service = SearchService()
+    with factory.begin() as session:
+        workspace = seed_default_workspace(session)
+        actor = ActorContext(
+            actor_kind="human",
+            actor_id="editor",
+            workspace_role="editor",
+            role="editor",
+            workspace_id=workspace.id,
+        )
+        page, published = _metadata_page(
+            session,
+            workspace.id,
+            slug="candidate-alpha",
+            title="Candidate Alpha",
+            body="CandidateNeedle " + "ordinary filler " * 300,
+        )
+        published_heads = {page.id: published.id}
+        expected = {published.id}
+        expected_items = {("context_page", page.id, published.id)}
+        # More variants than both the old row budget and the deliberately
+        # lowered bind limit below exercise document selection and hydration
+        # batching without requiring SQLite's usual 32K variables as fixtures.
+        for number in range(2, 405):
+            body = "CandidateNeedle " * 20
+            draft = ContextPageVersion(
+                workspace_id=workspace.id,
+                page_id=page.id,
+                parent_version_id=published.id,
+                version_no=number,
+                body_md=body,
+                content_hash=calculate_content_hash(body),
+                actor_type="human",
+                created_by_actor_kind="human",
+                created_by_actor_id="editor",
+                version_status="draft",
+            )
+            session.add(draft)
+            session.flush()
+            expected.add(draft.id)
+            expected_items.add(("context_page", page.id, draft.id))
+        claims = [
+            ContextClaim(
+                workspace_id=workspace.id,
+                page_version_id=published.id,
+                claim_text="CandidateNeedle " * 20,
+                location_in_page={"kind": "whole_page"},
+                claim_type="summary",
+                confidence="unknown",
+                status="active",
+                created_by_actor_type="human",
+            )
+            for _ in range(403)
+        ]
+        session.add_all(claims)
+        session.flush()
+        expected_items.update(
+            ("context_claim", claim.id, published.id) for claim in claims
+        )
+        sync_page_projections(session, page=page)
+        expected_pages = {page.id}
+        for title in ("Beta", "Gamma"):
+            _other, version = _metadata_page(
+                session,
+                workspace.id,
+                slug="candidate-" + title.lower(),
+                title="Candidate " + title,
+                body="CandidateNeedle " + "ordinary filler " * 300,
+            )
+            published_heads[_other.id] = version.id
+            expected.add(version.id)
+            expected_pages.add(_other.id)
+            expected_items.add(("context_page", _other.id, version.id))
+        connection = session.connection().connection.driver_connection
+        original_limit = connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 400)
+        try:
+            candidates = KeywordRetriever().retrieve(
+                session=session,
+                workspace_id=workspace.id,
+                query="CandidateNeedle",
+                scope="all",
+                filters=SearchFilters(),
+                limit=3,
+                actor=actor,
+            )
+            assert {hit.version_id for hit in candidates} == expected
+            assert {
+                hit.id for hit in candidates if hit.type == "context_page"
+            } == expected_pages
+            assert {hit.id for hit in candidates if hit.type == "context_claim"} == {
+                claim.id for claim in claims
+            }
+            citable = service.search(
+                session=session,
+                workspace_id=workspace.id,
+                query="CandidateNeedle",
+                scope="context_page",
+                limit=3,
+                citable_only=True,
+                actor=actor,
+            )
+            assert len(citable.ranked_results) == 3
+            assert {
+                hit.id: hit.version_id for hit in citable.ranked_results
+            } == published_heads
+            assert all(
+                hit.citation_available and hit.version_status == "published_snapshot"
+                for hit in citable.ranked_results
+            )
+            collected, cursor = [], None
+            while True:
+                result = service.search(
+                    session=session,
+                    workspace_id=workspace.id,
+                    query="CandidateNeedle",
+                    scope="all",
+                    # Preserve the small first-page reproduction, then consume
+                    # the public cursor in larger windows to avoid rerunning
+                    # hundreds of full retrievals just for the bind-limit fixture.
+                    limit=3 if cursor is None else 100,
+                    cursor=cursor,
+                    actor=actor,
+                )
+                assert result.total_count == len(expected_items)
+                collected.extend(
+                    (hit.type, hit.id, hit.version_id) for hit in result.ranked_results
+                )
+                if not result.has_more:
+                    break
+                assert result.next_cursor is not None and result.next_cursor != cursor
+                cursor = result.next_cursor
+            assert len(collected) == len(expected_items)
+            assert set(collected) == expected_items
+        finally:
+            connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, original_limit)
 
 
 def test_name_index_resyncs_on_rename_and_title_only_update():
@@ -1946,6 +2259,23 @@ def test_search_metadata_query_count_is_bounded_for_cold_one_and_twenty_results(
             _metadata_node(
                 session, workspace_id, page.title, parent=document, page=page
             )
+            # Exercise grouping of shared drafts over published history as
+            # well as metadata enrichment; checking only enrichment missed
+            # per-hit draft and full-history queries.
+            version = ContextPageVersion(
+                workspace_id=workspace_id,
+                page_id=page.id,
+                version_no=2,
+                parent_version_id=version.id,
+                body_md=body,
+                content_hash=calculate_content_hash(body),
+                actor_type="human",
+                created_by_actor_kind="human",
+                created_by_actor_id="author",
+                version_status="draft",
+            )
+            session.add(version)
+            session.flush()
             result = RankedResult(
                 id=page.id,
                 type="context_page",
@@ -1957,8 +2287,8 @@ def test_search_metadata_query_count_is_bounded_for_cold_one_and_twenty_results(
             )
             result._summary_markdown = body
             results.append(result)
-    viewer = ActorContext(
-        actor_kind="human", actor_id="reader", workspace_role="viewer"
+    editor = ActorContext(
+        actor_kind="human", actor_id="reader", workspace_role="editor"
     )
     counts = []
     engine = session_factory.kw["bind"]
@@ -1980,9 +2310,15 @@ def test_search_metadata_query_count_is_bounded_for_cold_one_and_twenty_results(
         try:
             with session_factory() as session:
                 assert not session.identity_map
-                enrich_search_result_metadata(
-                    session, workspace_id, results[:size], viewer
+                candidates = SearchService._group_context_versions(
+                    session, workspace_id, results[:size], editor
                 )
+                grouped = candidates.ranked
+                SearchService._enrich_context_drafts(
+                    session, workspace_id, grouped, editor, candidates.review_states
+                )
+                assert all(result.draft.parent_version_ids for result in grouped)
+                enrich_search_result_metadata(session, workspace_id, grouped, editor)
         finally:
             event.remove(engine, "before_cursor_execute", record)
         counts.append(len(statements))
@@ -1993,9 +2329,10 @@ def test_search_metadata_query_count_is_bounded_for_cold_one_and_twenty_results(
             result.summary == f"Subject {index}."
             for index, result in enumerate(results[:size])
         )
-    # One leaf query, two ancestor levels, one batched document visibility query.
-    # Counting the whole stage also catches accidental body reads in summaries.
-    assert counts == [4, 4]
+    # Grouping and metadata enrichment must both remain bounded when the
+    # result set grows; draft ancestry is read as IDs in the same batch.
+    assert counts[0] == counts[1]
+    assert counts[1] <= 10
 
 
 def test_search_metadata_hides_unreadable_ancestor_and_repairs_legacy_summary():

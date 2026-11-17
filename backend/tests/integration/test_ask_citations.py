@@ -32,6 +32,7 @@ from backend.schemas.ask import AskSessionCreate, AskTurnCreate
 from backend.schemas.read import RankedResult, SearchPayload
 from backend.services.ask_service import AskService
 from backend.services.graph_service import GraphService
+from backend.services.search_service import SearchService
 
 pytestmark = pytest.mark.integration
 
@@ -295,13 +296,78 @@ def test_ask_cites_page_id_for_semantic_chunk_result(session_factory):
     with session_factory.begin() as session:
         workspace = _ws(session)
         page = _seed_page(session, workspace.id)
-        service = AskService(
-            search_service=FakeSemanticSearch(
-                context=[_semantic_context_result(page.id)]
-            )
+        published_version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            version_no=1,
+            body_md="Rollout guidance",
+            content_hash="ask-published",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id=ACTOR_ID,
+            version_status="published_snapshot",
         )
+        session.add(published_version)
+        session.flush()
+        draft_version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            parent_version_id=published_version.id,
+            version_no=2,
+            body_md="Unpublished draft evidence must not be cited",
+            content_hash="ask-draft",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id=ACTOR_ID,
+            version_status="draft",
+        )
+        session.add(draft_version)
+        session.flush()
+        page.current_published_version_id = published_version.id
+        page.current_version_id = published_version.id
+        page.latest_draft_version_id = draft_version.id
+        session.flush()
+        published = _semantic_context_result(page.id).model_copy(
+            update={
+                "version_id": published_version.id,
+                "version_status": "published_snapshot",
+            }
+        )
+        draft = published.model_copy(
+            update={
+                "id": uuid4(),
+                "version_id": draft_version.id,
+                "version_status": "draft",
+                "citation_available": False,
+                "snippet": draft_version.body_md,
+                "score": 2.0,
+            }
+        )
+
+        class SemanticRetriever:
+            def supported_modes(self):
+                return {"keyword", "semantic", "hybrid"}
+
+            def retrieve(self, **kwargs):
+                return [draft, published]
+
+        class RecordingSearch(SearchService):
+            def __init__(self):
+                super().__init__(retrievers=[SemanticRetriever()])
+                self.calls = []
+
+            def search(self, **kwargs):
+                self.calls.append((kwargs["scope"], kwargs.get("citable_only")))
+                return super().search(**kwargs)
+
+        search = RecordingSearch()
+        service = AskService(search_service=search)
         turn, detail = _create_turn(
-            service, session, workspace.id, "how do we roll out?"
+            service,
+            session,
+            workspace.id,
+            "how do we roll out?",
+            actor=_actor("owner"),
         )
         cited = session.scalars(
             select(AskTurnCitation.target_id)
@@ -310,7 +376,11 @@ def test_ask_cites_page_id_for_semantic_chunk_result(session_factory):
             .order_by(AskTurnCitation.rank)
         ).all()
     assert cited == [page.id]
+    assert search.calls == [("context_page", True)]
+    assert len(detail.retrieval_trace) == 1
     assert detail.retrieval_trace[0]["id"] == str(page.id)
+    assert detail.retrieval_trace[0]["version_id"] == str(published.version_id)
+    assert "Unpublished draft evidence" not in detail.assistant_message
 
 
 def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
@@ -500,7 +570,11 @@ def test_ask_resolves_library_item_result_to_artifact_id(session_factory):
         item, artifact = _seed_library(session, workspace.id)
         service = AskService(
             search_service=FakeSemanticSearch(
-                library=[_semantic_library_result(item.id)]
+                library=[
+                    _semantic_library_result(item.id).model_copy(
+                        update={"version_id": artifact.library_item_version_id}
+                    )
+                ]
             )
         )
         turn, detail = _create_turn(
@@ -514,6 +588,9 @@ def test_ask_resolves_library_item_result_to_artifact_id(session_factory):
         ).all()
     assert cited_artifacts == [artifact.id]
     assert detail.retrieval_trace[0]["id"] == str(artifact.id)
+    assert not {"version_id", "version_status", "citation_available"} & (
+        detail.retrieval_trace[0].keys()
+    )
     assert detail.fallback_disclosure is True
 
 

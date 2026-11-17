@@ -523,12 +523,40 @@ def test_hybrid_fuses_keyword_and_semantic(session_factory):
             "Needle",
             "# Needle\n\nfindable needle keyword and semantic content",
         )
+        published_id = page.current_published_version_id
+        # The existing two-lane fixture also needs a second version of the
+        # same document: page-only fusion would silently discard that draft.
+        draft = ContextPageVersion(
+            workspace_id=wsid,
+            page_id=page.id,
+            parent_version_id=published_id,
+            version_no=2,
+            body_md="# Needle draft\n\nfindable needle shared draft content",
+            content_hash=f"h{uuid4().hex[:8]}",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id="t",
+            version_status="draft",
+            page_metadata={"title": "Needle draft title", "page_type": "guide"},
+        )
+        session.add(draft)
+        session.flush()
+        sync_page_projections(session, page=page, version=draft)
+        draft_id = draft.id
         indexer.index(session=session, source_kind="context_page", source_id=page.id)
         results = _retrieve(hybrid, session, wsid, "needle", _actor())
-    # The page is found by both lanes and collapses to one boosted concept hit.
-    paths = [r.id for r in results]
-    assert page.id in paths
-    assert paths.count(page.id) == 1
+    # Each version is found by both lanes and collapses to one hit of its own.
+    assert len(results) == 2
+    assert {(hit.id, hit.version_id) for hit in results} == {
+        (page.id, published_id),
+        (page.id, draft_id),
+    }
+    [draft_hit] = [hit for hit in results if hit.version_id == draft_id]
+    assert draft_hit.title == "Needle draft title"
+    assert draft_hit.concept_type == "guide"
+    assert not draft_hit.citation_available
+    [published_hit] = [hit for hit in results if hit.version_id == published_id]
+    assert published_hit.citation_available
 
 
 def test_keyword_result_carries_outline_location_identity(session_factory):

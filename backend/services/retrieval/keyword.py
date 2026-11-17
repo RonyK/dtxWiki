@@ -32,6 +32,11 @@ from backend.repositories.search_projection import (
     FtsDocumentHit,
     WorkspaceFts5ProjectionRepository,
 )
+from backend.repositories.workspace_scoped import (
+    join_in_workspace,
+    select_in_workspace,
+    where_in_workspace,
+)
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 from backend.schemas.read import RankedResult, SearchFilters
 from backend.services.actor_visible_read import (
@@ -40,8 +45,8 @@ from backend.services.actor_visible_read import (
     actor_can_read_feedback,
     change_set_visible,
 )
+from backend.services.context_draft_workflow import metadata_for
 from backend.services.context_links import format_stable_url
-from backend.services.context_visibility import visible_search_version_ids
 from backend.services.library_canonical import (
     get_canonical_library_version,
     get_canonical_markdown_artifact,
@@ -49,6 +54,7 @@ from backend.services.library_canonical import (
     list_canonical_library_artifacts,
 )
 from backend.services.okf import library_stable_url
+from backend.services.retrieval.fusion import ranked_result_document_key
 from backend.services.retrieval.outline_location import (
     heading_location_for_query,
     public_heading_path,
@@ -170,15 +176,15 @@ class KeywordRetriever:
             visibility_scopes.append("draft")
         batch_size = min(256, max(32, limit * 2))
         scan_budget = min(_MAX_FTS_SCAN, max(128, limit * 8))
-        hits_by_key: dict[tuple[str, UUID], list[FtsDocumentHit]] = {}
         hydrated_by_key: dict[
-            tuple[str, UUID], tuple[FtsDocumentHit, RankedResult]
+            tuple[str, UUID, UUID | None], tuple[FtsDocumentHit, RankedResult]
         ] = {}
+        hydrated_documents: set[str] = set()
         repository = WorkspaceFts5ProjectionRepository(session, workspace_id)
         offset = 0
-        while offset < scan_budget and len(hydrated_by_key) < limit:
+        while offset < scan_budget and len(hydrated_documents) < limit:
             take = min(batch_size, scan_budget - offset)
-            batch_hits, scanned_count = repository.search_documents(
+            batch_hits, scanned_count = repository.search_document_groups(
                 match_query=match_query,
                 source_kinds=sorted(source_kinds),
                 visibility_scopes=visibility_scopes,
@@ -190,28 +196,38 @@ class KeywordRetriever:
             if scanned_count == 0:
                 break
             offset += scanned_count
-            impacted_keys = {(hit.source_kind, hit.entity_id) for hit in batch_hits}
-            for hit in batch_hits:
-                hits_by_key.setdefault((hit.source_kind, hit.entity_id), []).append(hit)
-            impacted_hits = [hit for key in impacted_keys for hit in hits_by_key[key]]
-            for key in impacted_keys:
-                hydrated_by_key.pop(key, None)
             for hit, result in self._hydrate_hit_pairs(
                 session=session,
                 workspace_id=workspace_id,
                 query=query,
-                hits=impacted_hits,
+                hits=batch_hits,
                 filters=filters,
                 actor=actor,
             ):
-                hydrated_by_key[(hit.source_kind, hit.entity_id)] = (hit, result)
+                key = (hit.source_kind, hit.entity_id, hit.version_id)
+                current = hydrated_by_key.get(key)
+                if current is None or (hit.rank, hit.rowid) < (
+                    current[0].rank,
+                    current[0].rowid,
+                ):
+                    hydrated_by_key[key] = (hit, result)
+                hydrated_documents.add(ranked_result_document_key(result))
             if scanned_count < take:
                 break
         hydrated = sorted(
             hydrated_by_key.values(),
             key=lambda pair: (pair[0].rank, pair[0].rowid),
         )
-        return [result for _hit, result in hydrated[:limit]]
+        selected_documents = set()
+        output = []
+        for _hit, result in hydrated:
+            key = ranked_result_document_key(result)
+            if key not in selected_documents:
+                if len(selected_documents) >= limit:
+                    continue
+                selected_documents.add(key)
+            output.append(result)
+        return output
 
     def _hydrate_hit_pairs(
         self,
@@ -256,52 +272,83 @@ class KeywordRetriever:
         grouped = _hits_by_entity(hits, "context_page")
         if not grouped:
             return []
-        statement = select(ContextPage).where(
-            ContextPage.workspace_id == workspace_id,
-            ContextPage.id.in_(grouped),
-            ContextPage.lifecycle_status != "archived",
+        wanted_versions = list(
+            {
+                hit.version_id
+                for page_hits in grouped.values()
+                for hit in page_hits
+                if hit.version_id is not None
+            }
         )
+        conditions = [
+            ContextPage.lifecycle_status != "archived",
+            (ContextPageVersion.id == ContextPage.current_published_version_id)
+            | (
+                (ContextPageVersion.version_status == "draft")
+                if actor_can_read_drafts(actor)
+                else False
+            ),
+        ]
         if filters.context_type:
-            statement = statement.where(ContextPage.page_type.in_(filters.context_type))
+            conditions.append(
+                func.coalesce(
+                    ContextPageVersion.page_metadata["page_type"].as_string(),
+                    ContextPage.page_type,
+                ).in_(filters.context_type)
+            )
         if filters.status:
-            statement = statement.where(
-                ContextPage.lifecycle_status.in_(filters.status)
-            )
-        results: list[tuple[FtsDocumentHit, RankedResult]] = []
-        for page in session.scalars(statement).all():
-            chosen = _choose_visible_hit(
-                grouped[page.id], visible_search_version_ids(page, actor)
-            )
-            if chosen is None:
-                continue
-            version = session.get(ContextPageVersion, chosen.version_id)
-            if version is None or version.page_id != page.id:
-                continue
-            location = heading_location_for_query(version.body_md, query)
-            results.append(
-                (
-                    chosen,
-                    _ranked(
-                        chosen,
-                        result_id=page.id,
-                        result_type="context_page",
-                        title=page.title,
-                        citation_available=True,
-                        summary_markdown=version.body_md,
-                        archived=page.lifecycle_status == "archived",
-                        stable_url=format_stable_url(page.workspace_id, page.id),
-                        concept_type=page.page_type,
-                        heading_path=public_heading_path(location),
-                        section_id=(
-                            location.section_id if location is not None else None
-                        ),
-                        source_ref={
-                            "kind": "context_page_version",
-                            "id": str(chosen.version_id),
-                        },
-                    ),
+            conditions.append(ContextPage.lifecycle_status.in_(filters.status))
+        statement = join_in_workspace(
+            select_in_workspace(
+                ContextPageVersion, workspace_id=workspace_id, conditions=conditions
+            ),
+            ContextPageVersion,
+            ContextPage,
+            workspace_id=workspace_id,
+            on=ContextPageVersion.page_id == ContextPage.id,
+        ).with_only_columns(ContextPageVersion, ContextPage)
+        rows = {}
+        for start in range(0, len(wanted_versions), 350):
+            for version, page in session.execute(
+                statement.where(
+                    ContextPageVersion.id.in_(wanted_versions[start : start + 350])
                 )
-            )
+            ):
+                rows[version.id] = (version, page)
+        results: list[tuple[FtsDocumentHit, RankedResult]] = []
+        for page_hits in grouped.values():
+            for chosen in page_hits:
+                selected = rows.get(chosen.version_id)
+                if selected is None or selected[0].page_id != chosen.entity_id:
+                    continue
+                version, page = selected
+                metadata = metadata_for(page, version)
+                location = heading_location_for_query(version.body_md, query)
+                results.append(
+                    (
+                        chosen,
+                        _ranked(
+                            chosen,
+                            result_id=page.id,
+                            result_type="context_page",
+                            title=metadata.title,
+                            citation_available=version.id
+                            == page.current_published_version_id,
+                            summary_markdown=version.body_md,
+                            archived=page.lifecycle_status == "archived",
+                            stable_url=format_stable_url(page.workspace_id, page.id),
+                            concept_type=metadata.page_type,
+                            heading_path=public_heading_path(location),
+                            section_id=location.section_id
+                            if location is not None
+                            else None,
+                            source_ref={
+                                "kind": "context_page_version",
+                                "id": str(chosen.version_id),
+                            },
+                        ),
+                    )
+                )
         return results
 
     @staticmethod
@@ -325,20 +372,38 @@ class KeywordRetriever:
             .join(ContextPage, ContextPageVersion.page_id == ContextPage.id)
             .where(
                 ContextPage.workspace_id == workspace_id,
-                ContextClaim.id.in_(grouped),
                 ContextPage.lifecycle_status != "archived",
             )
         )
         if filters.context_type:
-            statement = statement.where(ContextPage.page_type.in_(filters.context_type))
+            statement = where_in_workspace(
+                statement,
+                ContextPageVersion,
+                workspace_id=workspace_id,
+                conditions=(
+                    func.coalesce(
+                        ContextPageVersion.page_metadata["page_type"].as_string(),
+                        ContextPage.page_type,
+                    ).in_(filters.context_type),
+                ),
+            )
         if filters.status:
             statement = statement.where(
                 ContextPage.lifecycle_status.in_(filters.status)
             )
+        claim_ids = list(grouped)
+        rows = []
+        for start in range(0, len(claim_ids), 350):
+            rows.extend(
+                session.execute(
+                    statement.where(ContextClaim.id.in_(claim_ids[start : start + 350]))
+                ).all()
+            )
         results: list[tuple[FtsDocumentHit, RankedResult]] = []
-        for claim, version, page in session.execute(statement).all():
-            visible_ids = visible_search_version_ids(page, actor)
-            if version.id not in visible_ids:
+        for claim, version, page in rows:
+            if version.id != page.current_published_version_id and not (
+                actor_can_read_drafts(actor) and version.version_status == "draft"
+            ):
                 continue
             chosen = min(grouped[claim.id], key=lambda hit: (hit.rank, hit.rowid))
             if chosen.version_id != version.id:
@@ -353,10 +418,11 @@ class KeywordRetriever:
                         result_type="context_claim",
                         title="Context claim",
                         summary_markdown=version.body_md,
-                        citation_available=True,
+                        citation_available=version.id
+                        == page.current_published_version_id,
                         archived=claim.status != "active",
                         stable_url=format_stable_url(page.workspace_id, page.id),
-                        concept_type=page.page_type,
+                        concept_type=metadata_for(page, version).page_type,
                         heading_path=public_heading_path(location),
                         section_id=(
                             location.section_id if location is not None else None
@@ -460,7 +526,6 @@ class KeywordRetriever:
             .join(LibraryItem, LibraryItemVersion.library_item_id == LibraryItem.id)
             .where(
                 LibraryItem.workspace_id == workspace_id,
-                LibraryArtifact.id.in_(grouped),
                 LibraryItem.lifecycle_status.notin_(
                     EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
                 ),
@@ -471,8 +536,18 @@ class KeywordRetriever:
                 LibraryItem.trust_level.notin_(RESTRICTED_LIBRARY_TRUST_LEVELS)
             )
         statement = _apply_library_filters(statement, filters)
+        artifact_ids = list(grouped)
+        rows = []
+        for start in range(0, len(artifact_ids), 350):
+            rows.extend(
+                session.execute(
+                    statement.where(
+                        LibraryArtifact.id.in_(artifact_ids[start : start + 350])
+                    )
+                ).all()
+            )
         results: list[tuple[FtsDocumentHit, RankedResult]] = []
-        for artifact, version, item in session.execute(statement).all():
+        for artifact, version, item in rows:
             chosen = min(grouped[artifact.id], key=lambda hit: (hit.rank, hit.rowid))
             canonical_version = get_canonical_library_version(session, item)
             if canonical_version is None or canonical_version.id != version.id:
@@ -497,10 +572,7 @@ class KeywordRetriever:
                         chosen,
                         result_id=artifact.id,
                         result_type="library_artifact",
-                        title=(
-                            item.title
-                            or artifact.kind.replace("_", " ").title()
-                        ),
+                        title=(item.title or artifact.kind.replace("_", " ").title()),
                         citation_available=True,
                         summary_markdown=artifact.conversion_detail.index_text,
                         location_fallback=("library_item", item.id),

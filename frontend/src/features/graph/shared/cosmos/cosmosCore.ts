@@ -1654,7 +1654,7 @@ export function createCosmosRenderer(
         ? { clearance: renderedPointDiameter(node) / 2 + 3 } : {},
       priority: label.dataset.labelPriority === "active" ? "active"
         : label.dataset.labelPriority === "explicit" ? "explicit" : "ordinary",
-    })), bounds, { freeze: dragGesture
+    })), bounds, { pixelRatio: window.devicePixelRatio || 1, freeze: dragGesture
       || zoomGesture && performance.now() - lastGestureZoom < LABEL_GESTURE_LAPSE_MS });
     const fades = !reducedMotion;
     placedLabelNodes = new Set();
@@ -1683,10 +1683,10 @@ export function createCosmosRenderer(
   function showLabel(label: HTMLSpanElement, x: number, y: number, fades: boolean, fadeIn: boolean) {
     setLabelStyle(label, "display", "block");
     setLabelStyle(label, "visibility", "visible");
-    // Each title is its own compositor layer. Whole device pixels keep its
-    // text sharp while it moves; the anchor itself stays exact in data-point-*.
-    const ratio = window.devicePixelRatio || 1;
-    setLabelStyle(label, "transform", `translate(${Math.round(x * ratio) / ratio}px, ${Math.round(y * ratio) / ratio}px)`);
+    // Placement already aligns to device pixels before checking viewport and
+    // collision bounds. Rounding again here could move a fractional-width
+    // title outside the accepted rectangle. Anchors stay exact in data-point-*.
+    setLabelStyle(label, "transform", `translate(${x}px, ${y}px)`);
     const fade = labelFades.get(label);
     if (!fades) stopLabelFade(label);
     // A leaving title turns back from its current opacity; an entering one

@@ -26,6 +26,7 @@ from backend.policy.trust_boundaries import (
     actor_can_read_restricted_library,
 )
 from backend.schemas.read import RankedResult, SearchFilters
+from backend.services.context_draft_workflow import metadata_for
 from backend.services.context_links import format_stable_url
 from backend.services.context_visibility import visible_search_version_ids
 from backend.services.entity_ref import (
@@ -212,6 +213,7 @@ class SemanticRetriever:
                 return None
             title = item.title or item.uri
             concept_type = "library_item"
+            citation_available = True
             stable_url = library_stable_url(item.workspace_id, item.id)
             result_id = item.id
             result_kind = EntityKind.LIBRARY_ITEM
@@ -242,13 +244,8 @@ class SemanticRetriever:
                 return None
             if chunk.source_version_id not in visible_search_version_ids(page, actor):
                 return None
-            # User SearchFilters parity with keyword.py (_search_context_pages).
-            if filters.context_type and page.page_type not in filters.context_type:
-                return None
             if filters.status and page.lifecycle_status not in filters.status:
                 return None
-            title = page.title
-            concept_type = page.page_type
             stable_url = format_stable_url(page.workspace_id, page.id)
             result_id = page.id
             result_kind = EntityKind.CONTEXT_PAGE
@@ -260,6 +257,12 @@ class SemanticRetriever:
             )
             version = session.get(ContextPageVersion, chunk.source_version_id)
             if version is None or version.page_id != page.id:
+                return None
+            metadata = metadata_for(page, version)
+            title = metadata.title
+            concept_type = metadata.page_type
+            citation_available = version.id == page.current_published_version_id
+            if filters.context_type and concept_type not in filters.context_type:
                 return None
             body_md = version.body_md
         location = (
@@ -276,7 +279,7 @@ class SemanticRetriever:
             title=title,
             snippet=" ".join(chunk.chunk_text.split())[:_SNIPPET_CHARS],
             score=similarity,
-            citation_available=True,
+            citation_available=citation_available,
             stable_url=stable_url,
             concept_type=concept_type,
             version_id=chunk.source_version_id,

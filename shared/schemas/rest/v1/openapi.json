@@ -19339,6 +19339,16 @@
             ],
             "title": "Concept Type"
           },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextDraftInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "entity_ref": {
             "anyOf": [
               {
@@ -19520,6 +19530,21 @@
               }
             ],
             "title": "Version Id"
+          },
+          "version_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "published_snapshot"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Status"
           }
         },
         "required": [

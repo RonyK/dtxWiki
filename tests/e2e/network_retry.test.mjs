@@ -536,6 +536,159 @@ const cases = [
   },
 ];
 
+
+const { EventEmitter } = await import("node:events");
+const { installGraphFixtureBootstrap } = await import("../graph-webgl/fixtures.ts");
+
+function graphBootstrapPage(run) {
+  const page = new EventEmitter();
+  page.location = `${APP_ORIGIN}/fixture`;
+  page.entryLoaded = false;
+  page.calls = 0;
+  page.url = () => page.location;
+  page.addInitScript = async () => {};
+  page.evaluate = async (operation) => operation.name === "observeFixtureEntry" ? undefined : page.entryLoaded;
+  page.content = async () => "<main id='fixture'></main>";
+  page.setContent = async () => {};
+  page.goto = async (url) => {
+    page.location = url; page.entryLoaded = false; page.calls += 1;
+    return run(page, "goto");
+  };
+  page.addScriptTag = async () => run(page, "script");
+  const report = { annotations: [], attachments: [], async attach(name, options) { this.attachments.push({ name, ...options }); } };
+  installGraphFixtureBootstrap(page, () => report);
+  return { page, report };
+}
+
+function emitGraphTransport(page, url = `${APP_ORIGIN}/src/fixture-dependency.ts`) {
+  const request = {
+    ...failedRequest(url, "GET", "net::ERR_NETWORK_CHANGED"),
+    resourceType: () => "script", isNavigationRequest: () => false,
+  };
+  page.emit("request", request);
+  page.emit("requestfailed", request);
+  page.emit("console", { type: () => "error", text: () => "Failed to load resource: net::ERR_NETWORK_CHANGED", location: () => ({ url }) });
+  return request;
+}
+
+cases.push(
+  {
+    label: "Graph bootstrap retries one matched initial module failure and preserves later errors",
+    async run() {
+      const { page, report } = graphBootstrapPage((page) => {
+        if (page.calls === 1) emitGraphTransport(page);
+        else page.entryLoaded = true;
+        return "loaded";
+      });
+      const errors = [];
+      page.on("console", message => errors.push(message.text()));
+      assert.equal(await page.goto(`${APP_ORIGIN}/fixture`), "loaded");
+      assert.equal(page.calls, 2);
+      assert.deepEqual(errors, []);
+      assert.equal(report.attachments.length, 1);
+      assert.equal(report.annotations.length, 1);
+      page.emit("console", { type: () => "error", text: () => "real runtime error" });
+      assert.deepEqual(errors, ["real runtime error"]);
+      await page.goto(`${APP_ORIGIN}/another-fixture`);
+      assert.equal(page.calls, 3, "a mounted page cannot recover another navigation");
+      assert.equal(report.attachments.length, 1);
+      const mounted = graphBootstrapPage((page) => {
+        if (page.calls === 1) { page.entryLoaded = true; return "loaded"; }
+        emitGraphTransport(page);
+        throw new Error("post-entry transport failure");
+      });
+      await mounted.page.goto(`${APP_ORIGIN}/fixture`);
+      await assert.rejects(mounted.page.goto(`${APP_ORIGIN}/next`), /post-entry transport/);
+      assert.equal(mounted.page.calls, 2);
+      assert.equal(mounted.report.attachments.length, 0);
+      let scriptCalls = 0;
+      const script = graphBootstrapPage((page, kind) => {
+        if (kind === "goto") return { status: () => 200 };
+        scriptCalls += 1;
+        if (scriptCalls === 1) { emitGraphTransport(page); throw new Error("module load failed"); }
+        return "entry loaded";
+      });
+      assert.equal(await script.page.addScriptTag({ type: "module", url: `${APP_ORIGIN}/fixture-entry.ts` }), "entry loaded");
+      assert.equal(scriptCalls, 2);
+      assert.equal(script.page.calls, 1, "ESM failure must reset its document before reloading");
+      assert.equal(script.report.attachments.length, 1);
+    },
+  },
+  {
+    label: "Graph bootstrap retains repeated, permanent, unrelated and assertion failures",
+    async run() {
+      for (const kind of ["repeated", "http", "syntax", "unrelated", "assertion", "entry"]) {
+        const verdict = assertionError("expect(locator).toBeVisible() failed");
+        const entryError = new Error("transport failure after entry evaluation");
+        const { page, report } = graphBootstrapPage((page) => {
+          const request = emitGraphTransport(page, kind === "unrelated" ? `${OTHER_ORIGIN}/module.ts` : undefined);
+          if (kind === "http") page.emit("response", { request: () => request, status: () => 500 });
+          if (kind === "syntax") page.emit("pageerror", new SyntaxError("invalid fixture module"));
+          if (kind === "assertion") throw verdict;
+          if (kind === "entry") { page.entryLoaded = true; throw entryError; }
+          return "unmounted";
+        });
+        const errors = [];
+        page.on("console", message => errors.push(message.text()));
+        page.on("pageerror", error => errors.push(error.message));
+        if (kind === "assertion") {
+          await assert.rejects(page.goto(`${APP_ORIGIN}/fixture`), error => error === verdict);
+        } else if (kind === "entry") {
+          await assert.rejects(page.goto(`${APP_ORIGIN}/fixture`), error => error === entryError);
+        } else await page.goto(`${APP_ORIGIN}/fixture`);
+        assert.equal(page.calls, kind === "repeated" ? 2 : 1, kind);
+        assert.ok(errors.length > 0, `${kind} must retain errors`);
+        assert.equal(report.attachments.length, kind === "repeated" ? 1 : 0, kind);
+      }
+      for (const kind of ["syntax", "console"]) {
+        const isolated = graphBootstrapPage((page) => {
+          emitGraphTransport(page);
+          if (kind === "syntax") page.emit("pageerror", new SyntaxError("permanent syntax error"));
+          else page.emit("console", { type: () => "error", text: () => "permanent console error" });
+          return "unmounted";
+        });
+        await isolated.page.goto(`${APP_ORIGIN}/fixture`);
+        assert.equal(isolated.page.calls, 1, `${kind} must block recovery without caller subscribers`);
+        assert.equal(isolated.report.attachments.length, 0);
+        assert.equal(isolated.page.listenerCount("console"), 0);
+        assert.equal(isolated.page.listenerCount("pageerror"), 0);
+      }
+      for (const resetKind of ["http", "syntax"]) {
+        let scriptCalls = 0, restored = 0;
+        const resetError = new SyntaxError("permanent reset syntax error");
+        const reset = graphBootstrapPage((page, kind) => {
+          if (kind === "goto") {
+            const request = { method: () => "GET", url: () => `${APP_ORIGIN}/fixture`, resourceType: () => "document", isNavigationRequest: () => true };
+            page.emit("request", request);
+            page.emit("response", { request: () => request, status: () => resetKind === "http" ? 500 : 200 });
+            if (resetKind === "syntax") page.emit("pageerror", resetError);
+            return { status: () => resetKind === "http" ? 500 : 200 };
+          }
+          scriptCalls += 1;
+          if (scriptCalls === 1) { emitGraphTransport(page); throw new Error("module load failed"); }
+          return "entry loaded";
+        });
+        reset.page.setContent = async () => { restored += 1; };
+        await assert.rejects(reset.page.addScriptTag({ url: `${APP_ORIGIN}/fixture-entry.ts` }),
+          error => resetKind === "http" ? error.message.includes("HTTP 500") : error === resetError);
+        assert.equal(scriptCalls, 1, `${resetKind} reset must stop before executing the entry again`);
+        assert.equal(restored, 0, `${resetKind} reset must not be hidden by saved HTML`);
+        assert.equal(reset.page.listenerCount("console"), 0);
+        assert.equal(reset.page.listenerCount("pageerror"), 0);
+      }
+      let inlineCalls = 0;
+      const inline = graphBootstrapPage((page) => {
+        inlineCalls += 1;
+        emitGraphTransport(page);
+        throw new Error("inline fixture error");
+      });
+      await assert.rejects(inline.page.addScriptTag({ content: "prebundled fixture" }), /inline fixture error/);
+      assert.equal(inlineCalls, 1, "inline bundles cannot acquire unrelated network recovery");
+      assert.equal(inline.report.attachments.length, 0);
+    },
+  },
+);
+
 let failed = 0;
 for (const testCase of cases) {
   try {

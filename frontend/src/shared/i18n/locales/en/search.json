@@ -67,7 +67,12 @@
     "activity": "Activity",
     "review": "Review",
     "reviewLinkMissing": "Cannot open directly from search · Review link information unavailable",
-    "linkMissing": "Cannot open directly from search · Link information unavailable"
+    "linkMissing": "Cannot open directly from search · Link information unavailable",
+    "versions": {
+      "published": "Published",
+      "reviewing": "Draft in review",
+      "draft": "Draft"
+    }
   },
   "examples": {
     "label": "Search examples",

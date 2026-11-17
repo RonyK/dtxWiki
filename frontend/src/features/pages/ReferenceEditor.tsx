@@ -336,7 +336,14 @@ export function ReferencePicker({ workspaceId, references, mode, onClose, onSele
     try {
       const data = await searchWorkspace(workspaceId, { query: trimmed, scope, limit: 30, cursor: nextCursor }, { signal: controller.signal });
       if (controller.signal.aborted || generation !== searchGeneration.current) return;
-      setResults((previous) => [...new Map([...previous, ...data.ranked_results.filter((item) => CITABLE.has(item.type))].map((item) => [`${item.type}:${item.id}`, item])).values()]);
+      setResults((previous) => {
+        const merged = new Map<string, RankedSearchResult>();
+        for (const item of [...previous, ...data.ranked_results]) {
+          const key = `${item.type}:${item.id}`;
+          if (CITABLE.has(item.type) && !merged.has(key)) merged.set(key, item);
+        }
+        return [...merged.values()];
+      });
       setNextCursor(data.has_more ? data.next_cursor ?? null : null);
     } catch (cause) {
       if (!controller.signal.aborted && generation === searchGeneration.current) setError(apiErrorMessage(cause, t("references.searchFailed")));

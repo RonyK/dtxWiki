@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "./fixtures";
 import { sameWorkspaceRemountCamera } from "../e2e/workspace_graph_camera";
 
 // Pure Node-side oracle cases: no browser, GPU, app server or database fixture.

@@ -26,6 +26,8 @@ export type WorkspaceMapLabelPlacementOptions = {
    * set: none appears, and a shown one yields only to a mandatory title.
    */
   freeze?: boolean;
+  /** Align final painted origins before checking containment and collisions. */
+  pixelRatio?: number;
 };
 
 type Rectangle = { x: number; y: number; width: number; height: number };
@@ -48,6 +50,9 @@ export function placeWorkspaceMapLabels(
   if (candidates.length > WORKSPACE_MAP_LABEL_LIMIT) throw new RangeError("Workspace Map label limit exceeded");
   const placements = candidates.map((): WorkspaceMapLabelPlacement => ({ x: 0, y: 0, visible: false, reason: "invalid" }));
   if (![viewport.width, viewport.height].every((value) => Number.isFinite(value) && value > 0)) return placements;
+  const requestedRatio = options.pixelRatio ?? 1;
+  const ratio = Number.isFinite(requestedRatio) && requestedRatio > 0 ? requestedRatio : 1;
+  const snap = (value: number) => Math.round(value * ratio) / ratio;
   const occupied: Rectangle[] = [];
   const explicit: Rectangle[] = [];
   const rank = { active: 0, explicit: 1, ordinary: 2 };
@@ -74,9 +79,10 @@ export function placeWorkspaceMapLabels(
       continue;
     }
     const clamp = ([x, y]: readonly number[]): [number, number] => [
-      Math.max(0, Math.min(x, viewport.width - width)), Math.max(0, Math.min(y, viewport.height - height)),
+      Math.max(0, Math.min(snap(x), Math.floor((viewport.width - width) * ratio) / ratio)),
+      Math.max(0, Math.min(snap(y), Math.floor((viewport.height - height) * ratio) / ratio)),
     ];
-    const preferred: [number, number] = [screenX + clear, screenY - 9];
+    const preferred: [number, number] = [snap(screenX + clear), snap(screenY - 9)];
     if (priority === "ordinary" && options.freeze) {
       const rectangle = { x: preferred[0], y: preferred[1], width, height };
       if (rectangle.x < 0 || rectangle.y < 0 || rectangle.x + width > viewport.width || rectangle.y + height > viewport.height) {
@@ -98,7 +104,10 @@ export function placeWorkspaceMapLabels(
       [screenX - width / 2, screenY - height - clear], [screenX - width / 2, screenY + clear],
       [screenX + clear, screenY + clear], [screenX - width - clear, screenY + clear],
       ...explicit.flatMap((rectangle): Array<[number, number]> => [
-        [preferred[0], rectangle.y - height - GAP], [preferred[0], rectangle.y + rectangle.height + GAP],
+        // Round away from an occupied edge so snapping cannot consume the
+        // required gap and reject an otherwise available explicit placement.
+        [preferred[0], Math.floor((rectangle.y - height - GAP) * ratio) / ratio],
+        [preferred[0], Math.ceil((rectangle.y + rectangle.height + GAP) * ratio) / ratio],
       ]),
     ].map(clamp);
     let fitsViewport = false;

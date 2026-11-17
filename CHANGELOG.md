@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Versioned Context search
+
+- Keep matching published and shared draft versions as separate search results,
+  grouped by page and ordered by published, review-requested draft, then other
+  drafts. Keyword, semantic and hybrid retrieval deduplicate each version.
+- Show each result's publication state and open the exact matching version.
+  Ask uses only published Context evidence for every role, including editors;
+  matching drafts are excluded from answer grounding.
+- MCP contract revision 35 adds enumerated `version_status` and typed `draft`
+  search fields, shared with Context reads.
+  Refresh cached tool catalogs and result schemas, and use `version_id` to read
+  the matching version.
+- REST and retriever/SPI results carry the same optional version-state fields.
+
 ### Shared Context drafts
 
 - Save shared drafts in place using their version ID and editing revision.
@@ -9,8 +23,7 @@
 - Bind publication and review approval to a merge preview. Confirm automatic
   merge results in the editor before publication, and retain closed drafts as
   Git commits with their commit parents and version-owned metadata.
-- Collect all open drafts for indexing while preserving the existing
-  single-result search presentation. Existing draft-pointer and reconciliation
+- Collect all open drafts for indexing. Existing draft-pointer and reconciliation
   columns remain for the later cleanup.
 - MCP contract revision 34 adapts existing editing tools, removes
   `submit_revision_for_review` and the retired `current_editing` history

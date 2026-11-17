@@ -157,17 +157,29 @@ class _StubSearchService:
     def __init__(self, by_query: dict[str, list[str]]) -> None:
         self._by_query = by_query
 
-    def search(self, *, query, limit, **_ignored) -> SearchPayload:
-        identifiers = self._by_query.get(query, [])[:limit]
+    def search(self, *, query, limit, cursor=None, **_ignored) -> SearchPayload:
+        identifiers = self._by_query.get(query, [])
+        offset = int(cursor or 0)
+        # Keep the existing inputs on separate pages, including two versions
+        # of one document, to verify the document-level evaluation budget.
+        page = identifiers[offset : offset + min(limit, 1)]
         results = [
-            _ranked(identifier, 1.0 - index * 0.01)
-            for index, identifier in enumerate(identifiers)
+            _ranked(identifier, 1.0 - index * 0.01).model_copy(
+                update={
+                    "version_id": uuid5(NAMESPACE_URL, f"{identifier}:{index}"),
+                }
+            )
+            for index, identifier in enumerate(page, start=offset)
         ]
         return SearchPayload(
             ranked_results=results,
             supported_retrieval_modes=["keyword"],
             permission_note=None,
-            next_cursor=None,
+            next_cursor=(
+                str(offset + len(results))
+                if offset + len(results) < len(identifiers)
+                else None
+            ),
         )
 
 
@@ -184,7 +196,7 @@ def test_evaluate_aggregates_metrics_across_queries():
             ],
         ),
     ]
-    stub = _StubSearchService({"q1": ["doc-a", "doc-x"], "q2": ["doc-z", "doc-b"]})
+    stub = _StubSearchService({"q1": ["doc-a", "doc-a"], "q2": ["doc-z", "doc-b"]})
     [metrics] = evaluate(stub, None, None, golden, modes=["keyword"], k=8)
     assert metrics.mode == "keyword"
     assert metrics.queries == 2
@@ -197,30 +209,32 @@ def test_evaluate_aggregates_metrics_across_queries():
 
 def test_evaluate_lanes_separates_match_reason_families():
     class LaneStub:
-        def search(self, *, query, **_ignored):
+        def search(self, *, query, cursor=None, **_ignored):
             expected_reason = {
                 "entity query": "exact_title",
                 "trigram query": "trigram",
                 "bm25 query": "keyword",
             }[query]
+            candidates = [
+                _ranked(
+                    "/workflow-noise",
+                    2.0,
+                    match_reason="keyword",
+                    result_type="feedback",
+                ),
+                _ranked(
+                    f"/{query.split()[0]}",
+                    1.0,
+                    match_reason=expected_reason,
+                ),
+                _ranked("/wrong-lane", 0.5, match_reason="semantic"),
+            ]
+            offset = int(cursor or 0)
             return SearchPayload(
-                ranked_results=[
-                    _ranked(
-                        "/workflow-noise",
-                        2.0,
-                        match_reason="keyword",
-                        result_type="feedback",
-                    ),
-                    _ranked(
-                        f"/{query.split()[0]}",
-                        1.0,
-                        match_reason=expected_reason,
-                    ),
-                    _ranked("/wrong-lane", 0.5, match_reason="semantic"),
-                ],
+                ranked_results=candidates[offset : offset + 1],
                 supported_retrieval_modes=["keyword"],
                 permission_note=None,
-                next_cursor=None,
+                next_cursor=str(offset + 1) if offset + 1 < len(candidates) else None,
             )
 
     golden = [
@@ -238,7 +252,7 @@ def test_evaluate_lanes_separates_match_reason_families():
             "bm25 query", [f"context_page:{uuid5(NAMESPACE_URL, '/bm25')}"], lane="bm25"
         ),
     ]
-    metrics = evaluate_lanes(LaneStub(), None, None, golden, k=3)
+    metrics = evaluate_lanes(LaneStub(), None, None, golden, k=1)
 
     assert [metric.lane for metric in metrics] == ["entity", "trigram", "bm25"]
     assert all(metric.queries == 1 for metric in metrics)

@@ -17,7 +17,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from backend.policy.auth import ActorContext
-from backend.schemas.read import RankedResult, SearchPayload
+from backend.schemas.read import RankedResult
 from backend.services.eval.metrics import (
     hit_rate_at_k,
     recall_at_k,
@@ -150,13 +150,46 @@ def load_golden(raw: object) -> list[GoldenQuery]:
 
 def result_identifier(result: RankedResult) -> str:
     """Use document identities for content and result identities for audits."""
-    from backend.services.retrieval.fusion import ranked_result_key
+    from backend.services.retrieval.fusion import ranked_result_document_key
 
-    return ranked_result_key(result)
+    return ranked_result_document_key(result)
 
 
-def _predicted_identifiers(payload: SearchPayload) -> list[str]:
-    return [result_identifier(result) for result in payload.ranked_results]
+def _predicted_identifiers(
+    search_service,
+    session: Session,
+    workspace_id: UUID,
+    *,
+    query: str,
+    mode: str,
+    k: int,
+    actor: ActorContext | None,
+    lane: str | None = None,
+) -> list[str]:
+    """Collect document predictions without spending the budget on versions."""
+    predicted: dict[str, None] = {}
+    cursor = None
+    seen_cursors: set[str] = set()
+    while True:
+        options = {"cursor": cursor} if cursor is not None else {}
+        payload = search_service.search(
+            session=session,
+            workspace_id=workspace_id,
+            query=query,
+            retrieval_mode=mode,
+            limit=k,
+            actor=actor,
+            **options,
+        )
+        for result in payload.ranked_results:
+            if lane is None or _result_belongs_to_lane(result, lane):
+                predicted.setdefault(result_identifier(result), None)
+                if len(predicted) >= k:
+                    return list(predicted)[:k]
+        cursor = payload.next_cursor
+        if cursor is None or cursor in seen_cursors:
+            return list(predicted)
+        seen_cursors.add(cursor)
 
 
 def evaluate(
@@ -176,15 +209,15 @@ def evaluate(
     for mode in modes:
         recall_sum = mrr_sum = hit_sum = 0.0
         for item in golden:
-            payload = search_service.search(
-                session=session,
-                workspace_id=workspace_id,
+            predicted = _predicted_identifiers(
+                search_service,
+                session,
+                workspace_id,
                 query=item.query,
-                retrieval_mode=mode,
-                limit=k,
+                mode=mode,
+                k=k,
                 actor=actor,
             )
-            predicted = _predicted_identifiers(payload)
             recall_sum += recall_at_k(predicted, item.expected, k)
             mrr_sum += reciprocal_rank(predicted, item.expected)
             hit_sum += hit_rate_at_k(predicted, item.expected, k)
@@ -218,19 +251,16 @@ def evaluate_lanes(
             continue
         recall_sum = mrr_sum = hit_sum = 0.0
         for item in lane_golden:
-            payload = search_service.search(
-                session=session,
-                workspace_id=workspace_id,
+            predicted = _predicted_identifiers(
+                search_service,
+                session,
+                workspace_id,
                 query=item.query,
-                retrieval_mode="keyword",
-                limit=k,
+                mode="keyword",
+                k=k,
                 actor=actor,
+                lane=lane,
             )
-            predicted = [
-                result_identifier(result)
-                for result in payload.ranked_results
-                if _result_belongs_to_lane(result, lane)
-            ]
             recall_sum += recall_at_k(predicted, item.expected, k)
             mrr_sum += reciprocal_rank(predicted, item.expected)
             hit_sum += hit_rate_at_k(predicted, item.expected, k)

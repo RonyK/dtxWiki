@@ -228,6 +228,9 @@ import os
 import sys
 import warnings
 
+# Inspection must not add files that later checks mistake for archive payload.
+sys.dont_write_bytecode = True
+
 root = sys.argv[1]
 sys.path.insert(0, root)
 

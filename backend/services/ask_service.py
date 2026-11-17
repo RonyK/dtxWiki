@@ -533,17 +533,18 @@ class AskService:
             retrieval_mode=mode,
             limit=3,
             actor=actor,
+            citable_only=True,
         )
-        context = context_payload.ranked_results
+        context = context_payload.ranked_results[:3]
         tried_lanes = list(context_payload.tried_lanes)
         search_warnings = list(context_payload.warnings)
+        nearest_candidates = list(context_payload.nearest_candidates)
         if not honored:
             search_warnings = [
                 *search_warnings,
                 UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING,
             ]
         fallback = False
-        nearest_candidates = list(context_payload.nearest_candidates)
         results: list[RankedResult] = context
         if not results:
             fallback = True
@@ -609,16 +610,24 @@ class AskService:
                 if artifact_id is not None and artifact_id not in artifact_ids:
                     artifact_ids.append(artifact_id)
                     evidence_id = artifact_id
-            trace.append(
-                {
-                    "id": str(evidence_id),
-                    "type": result.type,
-                    "title": result.title,
-                    "score": f"{result.score:.2f}",
-                    "match_reason": result.match_reason or "",
-                    "stable_url": result.stable_url or "",
-                }
-            )
+            evidence_trace = {
+                "id": str(evidence_id),
+                "type": result.type,
+                "title": result.title,
+                "score": f"{result.score:.2f}",
+                "match_reason": result.match_reason or "",
+                "stable_url": result.stable_url or "",
+            }
+            if (
+                result.type in {"context_page", "context_claim"}
+                and result.version_id is not None
+            ):
+                evidence_trace["version_id"] = str(result.version_id)
+                evidence_trace["version_status"] = result.version_status or ""
+                evidence_trace["citation_available"] = str(
+                    result.citation_available
+                ).lower()
+            trace.append(evidence_trace)
         pack_text = "\n".join(lines)
         answer = pack_text
         if self.provider_unavailable_reason:

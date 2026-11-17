@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from backend.schemas.context_drafts import ContextDraftInfo
+
 DEFAULT_REST_ROLE = "owner"
 ActorProvenance = Literal[
     "browser_session",
@@ -83,6 +85,7 @@ SearchMatchReason = Literal[
     "hybrid",
     "associative",
 ]
+SearchVersionStatus = Literal["draft", "published_snapshot"]
 
 
 class SearchFilters(BaseModel):
@@ -117,6 +120,8 @@ class RankedResult(BaseModel):
     link_markdown: str | None = None
     concept_type: str | None = None
     version_id: UUID | None = None
+    version_status: SearchVersionStatus | None = None
+    draft: ContextDraftInfo | None = None
     heading_path: list[str] | None = None
     section_id: str | None = None
     source_ref: dict[str, str] | None = None
@@ -140,4 +145,5 @@ __all__ = [
     "SearchFilters",
     "SearchMatchReason",
     "SearchResultType",
+    "SearchVersionStatus",
 ]

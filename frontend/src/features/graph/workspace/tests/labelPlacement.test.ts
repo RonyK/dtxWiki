@@ -21,18 +21,20 @@ describe("bounded Workspace Map label placement", () => {
       || result[1].x + 150 + 5 <= result[2].x || result[2].x + 150 + 5 <= result[1].x).toBe(true);
   });
 
-  it.each([390, 734])("keeps three individually fitting full titles non-overlapping near a %ipx stage bottom", (width) => {
+  it.each([{ width: 390, ratio: 1 }, { width: 734, ratio: 2 }])("keeps fractional full titles contained and non-overlapping at $width px and DPR $ratio", ({ width, ratio }) => {
     const candidates = [0, 1, 2].map((index) => label({ priority: index === 0 ? "active" : "explicit",
-      screenX: width - 12, screenY: 600 - 130 - index * 15, width: Math.min(374, width - 16), height: 58 }));
-    const result = placeWorkspaceMapLabels(candidates, { width, height: 600 });
+      screenX: width - 12, screenY: 600 - 4 - index * 15, width: 368.28125, height: 58.28125 }));
+    const result = placeWorkspaceMapLabels(candidates, { width, height: 600 }, { pixelRatio: ratio });
     expect(result.every((placement) => placement.visible && placement.reason === "placed")).toBe(true);
     for (let index = 0; index < result.length; index += 1) {
       const current = result[index];
+      expect(Number.isInteger(current.x * ratio)).toBe(true);
+      expect(Number.isInteger(current.y * ratio)).toBe(true);
       expect(current.x).toBeGreaterThanOrEqual(0); expect(current.y).toBeGreaterThanOrEqual(0);
       expect(current.x + candidates[index].width).toBeLessThanOrEqual(width);
       expect(current.y + candidates[index].height).toBeLessThanOrEqual(600);
       for (const other of result.slice(index + 1)) {
-        expect(current.y + 58 + 5 <= other.y || other.y + 58 + 5 <= current.y
+        expect(current.y + candidates[index].height + 5 <= other.y || other.y + candidates[index].height + 5 <= current.y
           || current.x + candidates[index].width + 5 <= other.x || other.x + candidates[index].width + 5 <= current.x).toBe(true);
       }
     }

@@ -48,6 +48,7 @@ import { domainLabel } from "../lib/domainLabel";
 import { inputTextError, textInputLimit, trimShortText } from "../lib/inputPolicy";
 import { SEARCH_QUERY_MAX_LENGTH } from "../lib/searchLimits";
 import { searchResultHref } from "../lib/searchResultHref";
+import { searchResultKey, searchResultVersionState } from "../lib/searchResultPresentation";
 import { isValidWorkspaceRoute, legacyWorkspaceEntry, parseWorkspaceRoute, workspacePath, workspaceSwitchHref } from "../lib/workspaceRoutes";
 import { matchBrowserRoute } from "../lib/browserRoutes";
 import { NotFoundScreen } from "../../features/errors/NotFoundScreen";
@@ -63,6 +64,7 @@ import { PrismGlyph } from "./PrismGlyph";
 import { PreviewBadge } from "./PreviewBadge";
 import { RouteLoading } from "./RouteLoading";
 import { StatusBanner } from "./StatusBanner";
+import { StatusPill } from "./StatusPill";
 import { useExplicitInertRef } from "./useExplicitInertRef";
 import { useScrollLeftGuardRef } from "./useScrollLeftGuardRef";
 
@@ -1181,6 +1183,7 @@ function CommandSearchBox({
               ) : previewResults.length > 0 ? (
                 previewResults.map((result) => {
                   const href = searchResultHref(result, selectedId);
+                  const versionState = searchResultVersionState(result);
                   const optionIndex = selectableOptions.findIndex(
                     (option) =>
                       option.kind === "preview" && option.result === result,
@@ -1200,7 +1203,7 @@ function CommandSearchBox({
                             )
                           : undefined
                       }
-                      key={`${result.type}-${result.id}`}
+                      key={searchResultKey(result)}
                       onMouseDown={(event) => event.preventDefault()}
                       onMouseEnter={() => {
                         if (optionIndex >= 0) {
@@ -1213,7 +1216,10 @@ function CommandSearchBox({
                     >
                       <FileText size={15} aria-hidden="true" />
                       <span>
-                        <strong>{result.title}</strong>
+                        <span className="command-preview-title">
+                          <strong>{result.title}</strong>
+                          {versionState ? <StatusPill compact status={versionState} label={tSearch(`results.versions.${versionState}`)} /> : null}
+                        </span>
                         <small>{result.snippet}</small>
                       </span>
                       <small>

@@ -1,4 +1,5 @@
-import { expect, test, type CDPSession, type Page } from "@playwright/test";
+import { expect, type CDPSession, type Page } from "@playwright/test";
+import { test } from "./fixtures";
 import path from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 import { fixtureServerConfig } from "./vite-fixture";
