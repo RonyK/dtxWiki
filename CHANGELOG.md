@@ -18,8 +18,12 @@
   `publish_context_edit` for shared Context drafts. A preview's `result` is what
   publication publishes for the same conflict choice and edits; publication
   checks the preview's revision, published version and result hash, and the
-  workspace review policy decides it. Bringing in a commit the draft already
-  contains saves nothing.
+  workspace review policy decides it. With `commit_version_id` (MCP and REST
+  `merge-preview`), a preview shows what bringing in that commit would save.
+  Bringing in a commit the draft already contains saves nothing.
+- An MCP call that names a Context page of another workspace is refused at the
+  MCP edge, as REST already does; `patch_context_edit` checks the workspace
+  too. A publication receipt offers the chat's cumulative diff in Chats.
 - Register `context_merge_conflict` and `human_approval_required`. An AI
   approval refusal now reports `human_approval_required` on every surface, and
   a merge target outside the page's history reports `not_found`.

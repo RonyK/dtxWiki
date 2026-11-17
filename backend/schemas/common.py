@@ -252,8 +252,9 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        and ContextDraftInfo facts, grouped published-first. Refresh schemas; pass
 #        version_id to read the exact hit. Drafts remain non-citable.
 #  36 -- Preview, bring-in and publish shared Context drafts through MCP.
-#        A preview's result is what publication publishes; publication binds
-#        its revision, head (omitted when none) and result hash. Registers
+#        A preview's result is what publication publishes (or, with
+#        commit_version_id, what bring-in saves); publication binds its
+#        revision, head (omitted when none) and result hash. Registers
 #        context_merge_conflict and human_approval_required. Refresh cached tools.
 MCP_TOOL_CONTRACT_REVISION = 36
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their

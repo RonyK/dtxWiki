@@ -248,13 +248,23 @@ def _normalize_page_inputs(tool_name: str, payload: dict, ctx: ToolCallContext) 
     locator = parse_page_input(validated_input)
     if locator.workspace_id is not None and locator.workspace_id != ctx.workspace_id:
         raise PageLocatorNotFound("Context page not found")
-    if locator.page_id is not None:
-        result[field] = locator.page_id
-    else:
-        with ctx.session_factory() as session:
-            result[field] = resolve_page_input(
+    with ctx.session_factory() as session:
+        page_id = (
+            locator.page_id
+            if locator.page_id is not None
+            else resolve_page_input(
                 validated_input, LinkContext(session, ctx.workspace_id, ctx.actor)
             )
+        )
+        # The REST edge's rule (api/context_pages.py _workspace_page_service):
+        # a named page must belong to the workspace the call is authorized for,
+        # whatever form named it.
+        owner = ctx.services.workspace_directory.workspace_id_by_context_page(
+            session, page_id
+        )
+    if owner != ctx.workspace_id:
+        raise PageLocatorNotFound("Context page not found")
+    result[field] = page_id
     return result
 
 

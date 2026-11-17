@@ -315,6 +315,12 @@ class PatchContextEditToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+_COMMIT_VERSION_ID_FIELD = Field(
+    default=None,
+    description="A commit of this page; omit for the current published version.",
+)
+
+
 class _ContextMergeInput(InputRequest):
     workspace_id: UUID
     page_id: MCPPageInput
@@ -332,6 +338,7 @@ class _ContextMergeInput(InputRequest):
 
 
 class PreviewContextMergeInput(_ContextMergeInput):
+    commit_version_id: UUID | None = _COMMIT_VERSION_ID_FIELD
     body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
     page_metadata: PageMetadataPatch | None = Field(
         default=None,
@@ -404,10 +411,7 @@ class PreviewContextMergeToolOutput(BaseModel):
 
 
 class BringInContextVersionInput(_ContextMergeInput):
-    commit_version_id: UUID | None = Field(
-        default=None,
-        description="A commit of this page; omit for the current published version.",
-    )
+    commit_version_id: UUID | None = _COMMIT_VERSION_ID_FIELD
     expected_editing_revision: int = Field(
         ge=1, description="The draft's editing_revision from your last read or write."
     )

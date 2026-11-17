@@ -5739,6 +5739,8 @@ export interface components {
         ContextMergePreviewRequest: {
             /** Body Md */
             body_md?: string | null;
+            /** Commit Version Id */
+            commit_version_id?: string | null;
             /** On Conflict */
             on_conflict?: ("keep_both" | "latest") | null;
             /** Page Metadata */

@@ -34,7 +34,7 @@ Publish only when the user asked for publication; saving or requesting review is
 2. Call `publish_context_edit` with the preview's `editing_revision`, `published_version_id` (omit it when null) and `result.result_hash`, the same `on_conflict` and edits (as `result_body_md` and `result_page_metadata`), a `reason` and a retained `idempotency_key`. The workspace review policy decides whether it publishes or waits for a person's approval.
 3. If the preview went stale, preview again and use a new key. Use the returned `version_id`; a merge publication creates a new one.
 
-`bring_in_context_version` merges a commit (by default the current published version) into a draft; send the draft's `expected_editing_revision` and use the returned revision. A draft that already contains the commit is not saved again.
+`bring_in_context_version` merges a commit (by default the current published version) into a draft; send the draft's `expected_editing_revision` and use the returned revision. A draft that already contains the commit is not saved again; on a conflict, `preview_context_merge` with the same `commit_version_id` shows both choices.
 
 ## Register document references
 

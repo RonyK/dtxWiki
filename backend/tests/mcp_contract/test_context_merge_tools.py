@@ -143,6 +143,12 @@ def test_merge_tools_publish_and_recover_the_prepared_result(
     assert preview["kind"] == "automatic_merge"
     # Both choices are sent only for a conflict.
     assert "keep_both" not in preview and "latest" not in preview
+    # Naming a commit previews what bring-in would merge: the draft already
+    # contains the version it started from.
+    started_from = call(
+        "preview_context_merge", commit_version_id=str(initial.version_id)
+    )
+    assert started_from["kind"] == "fast_forward"
     assert preview["page_id"] == str(initial.id)
     assert "Published contribution." in preview["result"]["body_md"]
     assert "Draft contribution." in preview["result"]["body_md"]

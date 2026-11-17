@@ -794,6 +794,8 @@ class PageInlineCommentListResponse(RESTResponseBase):
 
 class ContextMergePreviewRequest(BaseModel):
     version_id: UUID
+    # Omitted: the current published version, as publication merges it.
+    commit_version_id: UUID | None = None
     on_conflict: Literal["keep_both", "latest"] | None = None
     body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
     page_metadata: dict[str, Any] | None = None

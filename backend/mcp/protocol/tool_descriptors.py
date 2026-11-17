@@ -126,7 +126,8 @@ TOOL_META = {
     "preview_context_merge": (
         "Preview context merge",
         "Show what publish_context_edit would publish for this draft: the draft "
-        "merged with the current published version. Saves nothing. result "
+        "merged with the current published version, or with commit_version_id "
+        "what bring_in_context_version would save. Saves nothing. result "
         "carries the result_hash to publish; a conflict also returns keep_both "
         "and latest, and result follows on_conflict once you choose. Pass "
         "body_md/page_metadata to preview an edited result.",

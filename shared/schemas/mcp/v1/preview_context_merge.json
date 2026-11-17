@@ -118,6 +118,20 @@
         "title": "Body Md",
         "x-final-maxLength": 1000000
       },
+      "commit_version_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "A commit of this page; omit for the current published version.",
+        "title": "Commit Version Id"
+      },
       "conversation_token": {
         "anyOf": [
           {

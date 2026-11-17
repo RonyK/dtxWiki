@@ -198,14 +198,31 @@ def test_submit_context_edit_cannot_publish_another_workspace(page_service, acto
             )
 
     before = other_state()
+    named = {
+        "workspace_id": str(workspace_id),
+        "page_id": str(draft.id),
+        "version_id": str(draft.version_id),
+        "expected_editing_revision": draft.editing_revision,
+        "idempotency_key": "submit-foreign-workspace",
+    }
     response = dispatch(
         "submit_context_edit_for_review",
+        named,
+        actor=actor,
+        page_service=page_service,
+    )
+    # Patching took the same unchecked path and rewrote B's draft.
+    patched = dispatch(
+        "patch_context_edit",
         {
-            "workspace_id": str(workspace_id),
-            "page_id": str(draft.id),
-            "version_id": str(draft.version_id),
-            "expected_editing_revision": draft.editing_revision,
-            "idempotency_key": "submit-foreign-workspace",
+            **named,
+            "operations": [
+                {
+                    "op": "replace_text",
+                    "old_text": "This draft must stay unpublished.",
+                    "new_text": "Written from another workspace.",
+                }
+            ],
         },
         actor=actor,
         page_service=page_service,
@@ -217,6 +234,7 @@ def test_submit_context_edit_cannot_publish_another_workspace(page_service, acto
         before,
         after,
     )
+    assert patched.envelope.error_code == "not_found", patched.envelope
     assert after == before
     with page_service.session_factory() as session:
         assert (

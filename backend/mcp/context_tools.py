@@ -594,6 +594,7 @@ def preview_context_merge(
             actor_provenance=actor.provenance,
             body_md=request.body_md,
             page_metadata=_metadata_patch(request.page_metadata),
+            commit_version_id=request.commit_version_id,
         )
     except ValidationError as exc:
         return PreviewContextMergeToolOutput(

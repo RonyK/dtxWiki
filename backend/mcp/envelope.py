@@ -72,8 +72,8 @@ ERROR_CODE_GUIDANCE = {
     ),
     "context_merge_conflict": (
         "The changes conflict, so nothing was saved. Choose on_conflict "
-        "keep_both or latest (preview_context_merge shows both) and send a new "
-        "request with that choice."
+        "keep_both or latest (preview_context_merge with the same "
+        "commit_version_id shows both) and send a new request with that choice."
     ),
     "human_approval_required": (
         "A person must approve this publication under workspace policy. Leave "

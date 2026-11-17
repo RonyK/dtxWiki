@@ -217,13 +217,15 @@ _SESSION_EDIT_TOOLS = frozenset(
         "bring_in_context_version",
     }
 )
+# Calls that finish an edit: their receipt names the version they submitted or
+# published, which stays diffable after the draft closes.
+_FINAL_RECEIPT_TOOLS = frozenset(
+    {"submit_context_edit_for_review", "publish_context_edit"}
+)
 # Calls whose receipt (result_detail.version_id) names the Context version they
 # wrote or submitted: Chats diffs that version, the graph links the chat to it.
 # begin only opens an edit and discard ends one; neither produced its version.
-VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | {
-    "submit_context_edit_for_review",
-    "publish_context_edit",
-}
+VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | _FINAL_RECEIPT_TOOLS
 # Commands whose input names the editing row they act on.
 _VERSION_NAMING_EDIT_TOOLS = frozenset(
     {
@@ -1589,9 +1591,9 @@ class McpChatService:
     ) -> dict[UUID, McpChatSessionDiff]:
         """Which rows offer a cumulative diff, computed now and never stored.
 
-        A submit row diffs the version it submitted against that version's
-        base. While an edit session is still open, its latest edit row in
-        this chat diffs the open editing row against its base. Only
+        A submit or publish row diffs the version it names against that
+        version's base. While an edit session is still open, its latest edit
+        row in this chat diffs the open editing row against its base. Only
         successful calls the reader can see qualify.
         """
 
@@ -1603,7 +1605,7 @@ class McpChatService:
             version_id = _edited_version_id(row)
             if version_id is None:
                 continue
-            if row.tool_name == "submit_context_edit_for_review":
+            if row.tool_name in _FINAL_RECEIPT_TOOLS:
                 candidates[row.id] = (version_id, False)
             elif row.tool_name in _SESSION_EDIT_TOOLS:
                 latest_edit[version_id] = row.id

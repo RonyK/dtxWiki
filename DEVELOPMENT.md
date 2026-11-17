@@ -1133,10 +1133,16 @@ returns a new `version_id`.
 `bring_in_context_version` merges a commit of the page (by default the current
 published version) into a draft with the draft's `expected_editing_revision`. A
 draft that already contains it is not saved; a conflict saves nothing until
-`on_conflict` is chosen. Both writes are keyed and recoverable through
-`get_operation_status`. Chats records a preview as a reference and each write
-against the version it produced; like the other edit tools, capture keeps a
+`on_conflict` is chosen, and `preview_context_merge` with the same
+`commit_version_id` shows both choices. Both writes are keyed and recoverable
+through `get_operation_status`. Chats records a preview as a reference and each
+write against the version it produced, and a publication, like a submission,
+offers the chat's cumulative diff; like the other edit tools, capture keeps a
 digest of a submitted body.
+
+An MCP call that names a Context page, in any accepted form, is refused as
+`not_found` unless the page belongs to the authorized workspace, the same
+check the REST routes make before they build a page service.
 
 Drafts remain in the database. Publication, rejection, withdrawal and restore
 close a draft into a Git commit with its existing ID and commit parents. The

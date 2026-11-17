@@ -6142,6 +6142,18 @@
             ],
             "title": "Body Md"
           },
+          "commit_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Version Id"
+          },
           "on_conflict": {
             "anyOf": [
               {

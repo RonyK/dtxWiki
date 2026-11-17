@@ -1164,8 +1164,43 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
             session, new_page, status="draft", author=owner.id, number=1
         )
         new_page.current_version_id = new_editing.id
+        # Published without a submission: the draft is closed, so only the
+        # publication receipt can carry the chat's cumulative change.
+        released_page, released_base = _published_page(
+            session, workspace.id, "diff-published", "Diff Published"
+        )
+        released_base.version_status = "superseded_snapshot"
+        session.flush()
+        released = _version(
+            session,
+            released_page,
+            status="published_snapshot",
+            author=owner.id,
+            number=2,
+            parent=released_base,
+        )
+        released_page.current_published_version_id = released.id
         session.flush()
         chat = _Chat(session, workspace, client, owner)
+        released_edit = chat.call(
+            "patch_context_edit",
+            _patch_arguments(released_page.id, released.id),
+            links=(_page_link(released_page, McpChatArtifactVerb.EDITED),),
+        )
+        publication = chat.call(
+            "publish_context_edit",
+            {
+                "page_id": str(released_page.id),
+                "version_id": str(released.id),
+                "expected_editing_revision": 2,
+                "reason": "ship it",
+            },
+            result_detail={
+                "page_id": str(released_page.id),
+                "version_id": str(released.id),
+            },
+            links=(_page_link(released_page, McpChatArtifactVerb.EDITED),),
+        )
         first = chat.call(
             "patch_context_edit",
             _patch_arguments(page.id, editing.id),
@@ -1211,6 +1246,12 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
     assert (created_diff.from_version_id, created_diff.to_version_id) == (
         None,
         new_editing.id,
+    )
+    assert _item(owner_detail, released_edit).session_diff is None
+    publication_diff = _item(owner_detail, publication).session_diff
+    assert (publication_diff.from_version_id, publication_diff.to_version_id) == (
+        released_base.id,
+        released.id,
     )
     assert {item.key for item in _item(owner_detail, submit).input_display_items} >= {
         "write_reason"

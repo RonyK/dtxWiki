@@ -1173,7 +1173,13 @@ class PageService:
         actor_provenance: str = "browser_session",
         body_md: str | None = None,
         page_metadata: dict | None = None,
+        commit_version_id: UUID | None = None,
     ) -> dict:
+        """The merge of a commit into this version, without saving.
+
+        The target defaults to the current published version, which is what
+        publication merges; a named commit is what bring-in would merge.
+        """
         from dataclasses import replace
 
         from backend.services.context_draft_workflow import preview_merge
@@ -1196,6 +1202,7 @@ class PageService:
                 session,
                 page,
                 version,
+                commit_version_id=commit_version_id,
                 prepare=lambda candidate: self._prepare_merge_candidate(
                     session,
                     page,
@@ -2881,7 +2888,7 @@ class PageService:
                 acquire_write_intent(session)
                 self._lock_context_media_usage_intent_for_page(session, page_id)
                 page = context_page_repo.get_page_by_id_for_update(session, page_id)
-                if page is None:
+                if page is None or page.workspace_id != workspace_id:
                     raise PageNotFoundError("page not found")
                 version = self._own_page_version(
                     session, page, version_id, actor_kind, actor_id

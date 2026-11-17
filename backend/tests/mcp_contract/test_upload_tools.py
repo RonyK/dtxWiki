@@ -432,9 +432,8 @@ def test_upload_image_rejects_missing_page_as_not_found(
     )
 
     assert response.envelope.error_code == "not_found"
-    assert response.envelope.error_message == (
-        "page not found " + ERROR_CODE_GUIDANCE["not_found"]
-    )
+    # Refused at the MCP edge, exactly like another workspace's page.
+    assert response.envelope.error_message == ERROR_CODE_GUIDANCE["not_found"]
 
 
 def test_upload_image_rejects_archived_page_as_not_found(
