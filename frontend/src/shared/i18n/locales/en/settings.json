@@ -1868,7 +1868,7 @@
     "created": "Created {{date}}",
     "lastUsed": "Last used {{date}}",
     "expires": "Expires {{date}}",
-    "never": "never",
+    "never": "Never",
     "client": "Client {{client}}",
     "uuid": "UUID {{id}}",
     "uuidTitle": "Internal token UUID: {{id}}",
@@ -1881,26 +1881,25 @@
   },
   "clientRow": {
     "lastUsed": "Last used {{date}}",
-    "never": "never",
+    "never": "Never",
     "clientId": "Client ID",
     "notSet": "not set",
     "systemClient": "System client",
     "status": "Status",
     "lifecycle": "Management lifecycle",
-    "updating": "Updating…",
+    "updating": "Saving…",
     "disableNamed": "Disable {{name}}",
     "enable": "Enable",
-    "reactivate": "Reactivate",
-    "reactivateNamed": "Reactivate {{name}}",
+    "reactivateNamed": "Enable {{name}}",
     "cleanup": "Clean up",
     "connectionTiming": "Last used {{lastUsed}} · Next expiry {{nextExpiry}}",
     "noLiveExpiry": "no live token",
     "state": {
-      "active": "Credential valid",
-      "expired": "Credential expired",
-      "revoked": "Credential revoked",
-      "disabled": "Use blocked",
-      "unknown": "Check credential status"
+      "active": "Valid",
+      "expired": "Expired",
+      "revoked": "Revoked",
+      "disabled": "Blocked",
+      "unknown": "Needs check"
     }
   },
   "dangerZone": {

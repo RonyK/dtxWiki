@@ -1887,20 +1887,19 @@
     "systemClient": "시스템 클라이언트",
     "status": "상태",
     "lifecycle": "관리 수명 주기",
-    "updating": "업데이트 중…",
+    "updating": "처리 중…",
     "disableNamed": "{{name}} 비활성화",
     "enable": "활성화",
-    "reactivate": "다시 활성화",
-    "reactivateNamed": "{{name}} 다시 활성화",
+    "reactivateNamed": "{{name}} 활성화",
     "cleanup": "정리",
     "connectionTiming": "마지막 사용 {{lastUsed}} · 다음 만료 {{nextExpiry}}",
     "noLiveExpiry": "유효한 토큰 없음",
     "state": {
-      "active": "인증 유효",
-      "expired": "인증 만료",
-      "revoked": "인증 취소",
-      "disabled": "사용 차단",
-      "unknown": "인증 상태 확인 필요"
+      "active": "유효",
+      "expired": "만료",
+      "revoked": "취소",
+      "disabled": "차단",
+      "unknown": "확인 필요"
     }
   },
   "dangerZone": {

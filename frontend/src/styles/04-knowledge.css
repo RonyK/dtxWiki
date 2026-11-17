@@ -3152,8 +3152,9 @@ body:has(.tree-node-menu) .tree-row-tooltip {
 /* MCP credential lists (access keys, connected MCP clients) ----------------
    One continuous bordered list and one row rule for both. When the list is
    wide it is a column table under one visual header; when it is narrow each
-   row stacks: title + actions, app / credential line, then inline-labelled
-   facts with the dates on their own line. Sized by the list's own width, not
+   row stacks: name + status on a line of their own, the app / credential line
+   beside the actions, then inline-labelled facts with the dates on their own
+   line. Sized by the list's own width, not
    the viewport, so the settings rail and phone widths need no extra rules.
    Rarely needed facts (created date, ids, type) fold into a details strip. */
 .mcp-cred-list {
@@ -3171,7 +3172,7 @@ body:has(.tree-node-menu) .tree-row-tooltip {
 .mcp-cred-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "title actions" "sub sub" "facts facts" "detail detail";
+  grid-template-areas: "title title" "sub actions" "facts facts" "detail detail";
   align-items: start;
   gap: 6px 12px;
   min-width: 0;
@@ -3194,7 +3195,6 @@ body:has(.tree-node-menu) .tree-row-tooltip {
 .mcp-cred-name { display: contents; }
 .mcp-cred-title {
   grid-area: title;
-  align-self: center;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -3204,20 +3204,24 @@ body:has(.tree-node-menu) .tree-row-tooltip {
 .mcp-cred-title strong { min-width: 0; overflow-wrap: anywhere; }
 .mcp-cred-sub {
   grid-area: sub;
+  align-self: center;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 8px;
-  margin-top: -2px;
   color: var(--ink-soft);
   font-size: 13px;
 }
 .mcp-cred-sub code {
+  max-width: 100%;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-subtle);
   font-size: 11px;
   padding: 1px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mcp-cred-facts {
   grid-area: facts;
@@ -3276,12 +3280,18 @@ body:has(.tree-node-menu) .tree-row-tooltip {
 .mcp-cred-detail code { word-break: break-all; }
 .mcp-cred-row.is-editing .mcp-key-rename { grid-column: 1 / -1; }
 
-@container mcp-cred (min-width: 760px) {
+/* The table appears only once its widest variant fits. Key table:
+   190 + 88 + 130 + 104 + 104 + 146 = 762px of tracks + 5 x 12px gaps + 24px
+   row padding + 2px border = 848px (the client table needs 738px). The fixed
+   tracks hold the widest en/ko content: "Reauthorization" (103px) in the date
+   columns, "Revoke" + menu (146px) and the busy "Saving…" + menu (156px) in
+   the action columns. Change tracks and this breakpoint together. */
+@container mcp-cred (min-width: 850px) {
   .mcp-cred-table--keys {
-    --mcp-cred-cols: minmax(190px, 2fr) minmax(88px, 0.9fr) minmax(130px, 1.3fr) 92px 92px 124px;
+    --mcp-cred-cols: minmax(190px, 2fr) minmax(88px, 0.9fr) minmax(130px, 1.3fr) 104px 104px 146px;
   }
   .mcp-cred-table--clients {
-    --mcp-cred-cols: minmax(190px, 2fr) minmax(96px, 0.8fr) minmax(110px, 1fr) 92px 92px 172px;
+    --mcp-cred-cols: minmax(190px, 2fr) minmax(110px, 1fr) 104px 104px 156px;
   }
   .mcp-cred-head {
     display: grid;

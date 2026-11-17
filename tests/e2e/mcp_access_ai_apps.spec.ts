@@ -41,7 +41,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await expect(section.locator(".mcp-client-row").first()).toContainText(
       "Seed app",
     );
-    await expect(section.getByRole("button", { name: /^Reactivate / }).first())
+    await expect(section.getByRole("button", { name: /^Enable / }).first())
       .toBeVisible();
 
     const search = section.getByRole("searchbox", { name: "Search MCP clients" });
@@ -58,7 +58,7 @@ test.describe.serial("MCP Access AI app and lifecycle UX", () => {
     await search.fill("Disabled UI client 01");
     await section.getByRole("button", { name: "Search", exact: true }).click();
     await expect(rows).toHaveCount(1);
-    await rows.getByRole("button", { name: /^Reactivate / }).click();
+    await rows.getByRole("button", { name: /^Enable / }).click();
     await expect(rows).toHaveCount(0);
     await section.getByRole("button", { name: "Clear client search" }).click();
     await expect(filters.getByRole("radio", { name: "Other states 24" }))

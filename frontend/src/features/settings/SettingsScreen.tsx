@@ -5196,7 +5196,7 @@ function McpKeyRow({
           <span>
             {token.last_used_at
               ? formatDateTime(token.last_used_at)
-              : t("keyRow.never", { defaultValue: "never" })}
+              : t("keyRow.never", { defaultValue: "Never" })}
           </span>
         </div>
         <div className="mcp-cred-fact mcp-cred-time">
@@ -5361,6 +5361,11 @@ function McpClientRow({
       <div className="mcp-cred-name">
         <div className="mcp-cred-title">
           <strong>{name}</strong>
+          <StatusPill
+            compact
+            label={clientConnectionStateLabel(connectionState, t)}
+            status={connectionState}
+          />
         </div>
         {kind !== "unknown" ? (
           <div className="mcp-cred-sub">
@@ -5378,14 +5383,6 @@ function McpClientRow({
         ) : null}
       </div>
       <div className="mcp-cred-facts">
-        <div className="mcp-cred-fact">
-          <span className="mcp-cred-label">{t("clientRow.status")}</span>
-          <StatusPill
-            compact
-            label={clientConnectionStateLabel(connectionState, t)}
-            status={connectionState}
-          />
-        </div>
         <div className="mcp-cred-fact">
           <span className="mcp-cred-label">{t("mcpCard.permissions")}</span>
           <ScopeChips scopes={scopes} />
@@ -5420,7 +5417,7 @@ function McpClientRow({
             <Ban size={15} aria-hidden="true" />
             <span>
               {busy
-                ? t("clientRow.updating", { defaultValue: "Updating…" })
+                ? t("clientRow.updating", { defaultValue: "Saving…" })
                 : t("shell:actions.disable")}
             </span>
           </button>
@@ -5428,7 +5425,7 @@ function McpClientRow({
         {canManage && !active ? (
           <button
             aria-label={t("clientRow.reactivateNamed", {
-              defaultValue: "Reactivate {{name}}",
+              defaultValue: "Enable {{name}}",
               name,
             })}
             className="icon-button text-button"
@@ -5439,8 +5436,8 @@ function McpClientRow({
             <CheckCircle2 size={15} aria-hidden="true" />
             <span>
               {busy
-                ? t("clientRow.updating", { defaultValue: "Updating…" })
-                : t("clientRow.reactivate", { defaultValue: "Reactivate" })}
+                ? t("clientRow.updating", { defaultValue: "Saving…" })
+                : t("clientRow.enable", { defaultValue: "Enable" })}
             </span>
           </button>
         ) : null}
@@ -5644,7 +5641,6 @@ function McpClientList({
             <McpCredentialTableHead
               labels={[
                 t("credentialTable.client", { defaultValue: "Client" }),
-                t("clientRow.status"),
                 t("mcpCard.permissions"),
                 t("mcpCard.lastUsed"),
                 t("mcpCard.expiry"),
@@ -10548,9 +10544,9 @@ function clientConnectionStateLabel(
     case "revoked":
       return t("clientRow.state.revoked", { defaultValue: "Revoked" });
     case "disabled":
-      return t("clientRow.state.disabled", { defaultValue: "Deactivated" });
+      return t("clientRow.state.disabled", { defaultValue: "Blocked" });
     default:
-      return t("clientRow.state.active", { defaultValue: "Active" });
+      return t("clientRow.state.active", { defaultValue: "Valid" });
   }
 }
 

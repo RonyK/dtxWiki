@@ -414,7 +414,7 @@ describe("SettingsScreen", () => {
     );
     expect(
       await within(clientSection).findByRole("button", {
-        name: /^Reactivate /,
+        name: /^Enable /,
       }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -741,7 +741,7 @@ describe("SettingsScreen", () => {
     ).toBeInTheDocument();
     // Delete sits in each row's More actions menu; the tombstone test opens it.
     expect(
-      within(clientSection).getAllByRole("button", { name: /^Reactivate / }),
+      within(clientSection).getAllByRole("button", { name: /^Enable / }),
     ).toHaveLength(2);
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/mcp-clients?status=disabled&limit=20`,
@@ -1033,7 +1033,7 @@ describe("SettingsScreen", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      within(clientSection).queryByRole("button", { name: /^Reactivate / }),
+      within(clientSection).queryByRole("button", { name: /^Enable / }),
     ).not.toBeInTheDocument();
     await user.click(
       within(clientSection).getByRole("button", {
