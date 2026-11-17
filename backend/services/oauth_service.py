@@ -1517,7 +1517,10 @@ class OAuthService:
     ) -> OAuthClient:
         if response_type != "code":
             raise InvalidOAuthRequestError("response_type must be code")
-        normalized_scope = normalize_scope(scope)
+        # Registration metadata is the client's initial scope preference.
+        # Additional supported scopes require fresh consent, checked by
+        # has_existing_consent and again when issuing the authorization code.
+        normalize_scope(scope)
         validate_pkce_request(code_challenge, code_challenge_method)
         validate_state(state)
         _validate_request_redirect(redirect_uri)
@@ -1528,8 +1531,6 @@ class OAuthService:
             raise InvalidOAuthRequestError("response_type is not registered")
         if not redirect_uri_matches(redirect_uri, list(client.redirect_uris)):
             raise InvalidOAuthRequestError("redirect_uri is not registered")
-        if not scope_covers(client.scope, normalized_scope):
-            raise InvalidOAuthRequestError("requested scope is not registered")
         client.redirect_uris = list(client.redirect_uris)
         return client
 
@@ -2530,8 +2531,6 @@ class OAuthService:
                 raise InvalidOAuthRequestError("response_type is not registered")
             validate_pkce_request(code_challenge, code_challenge_method)
             validate_state(state)
-            if not scope_covers(client.scope, normalized_scope):
-                raise InvalidOAuthRequestError("requested scope is not registered")
             if not redirect_uri_matches(redirect_uri, list(client.redirect_uris)):
                 self._emit_user_audit(
                     session=session,
@@ -3664,14 +3663,15 @@ def effective_consent_sliding_enabled(
     )
 
 
-def normalize_scope(scope: str) -> str:
+def normalize_scope(
+    scope: object, *, default_scopes: tuple[str, ...] = ("mcp:read",)
+) -> str:
     try:
-        validate_scope_input(scope)
+        validated_scope = validate_scope_input(scope)
     except ValueError as exc:
         raise InvalidOAuthRequestError(str(exc)) from exc
-    requested = [item for item in scope.split() if item]
-    if not requested:
-        requested = ["mcp:read"]
+    # Defaults apply only after the original input passes its envelope checks.
+    requested = validated_scope.split() or list(default_scopes)
     unknown = [item for item in requested if item not in ALLOWED_OAUTH_SCOPES]
     if unknown:
         raise InvalidOAuthRequestError(f"unsupported scope: {unknown[0]}")
@@ -3679,17 +3679,17 @@ def normalize_scope(scope: str) -> str:
 
 
 def registration_scope(scope: object) -> str:
-    """The scopes a registered client may request.
+    """Normalize the client's initial registration scope preference.
 
     A client that names no scope (omitted or empty, as client metadata
-    documents and many DCR clients send) may request any scope this server
-    offers; the user's consent decides what it receives. A scope the client
-    names stays its ceiling.
+    documents and many DCR clients send) defaults to every scope this server
+    offers. Later authorization requests may name additional supported scopes;
+    the user's consent decides what a token receives.
     """
 
-    if scope is None or (isinstance(scope, str) and not scope.split()):
-        return " ".join(ALLOWED_OAUTH_SCOPES)
-    return normalize_scope(scope)
+    return normalize_scope(
+        "" if scope is None else scope, default_scopes=ALLOWED_OAUTH_SCOPES
+    )
 
 
 def scope_covers(granted_scope: str, requested_scope: str) -> bool:

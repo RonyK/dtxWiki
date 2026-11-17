@@ -123,6 +123,10 @@ def test_serialized_cookie_limit_includes_escaping_name_and_attributes():
 
 def test_dcr_metadata_invalid_before_persistence():
     valid = {"client_name": "Test", "redirect_uris": ["https://client.example/cb"]}
+    # The tab-only and oversized space-only inputs cover independent syntax
+    # and size failures in the registration's blank-default branch. Existing
+    # nonblank normalize_scope boundary checks do not reach that branch;
+    # this blocked service exercises both failures without a database.
     for payload in (
         [],
         {**valid, "client_name": 123},
@@ -130,6 +134,8 @@ def test_dcr_metadata_invalid_before_persistence():
         {**valid, "redirect_uris": ["https://client.example/cb"] * 21},
         {**valid, "redirect_uris": ["https://client.example/" + "a" * 2048]},
         {**valid, "scope": ["mcp:read"]},
+        {**valid, "scope": "\t"},
+        {**valid, "scope": " " * 257},
         {**valid, "grant_types": ["client_credentials"]},
         {**valid, "response_types": ["token"]},
         {**valid, "application_type": {"native": True}},

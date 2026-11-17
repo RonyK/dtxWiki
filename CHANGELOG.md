@@ -204,9 +204,13 @@
   endpoint authentication methods register as a public client.
 - Allow port-less loopback redirect registrations; a request may use any port.
 - A client that registers no scope, or an empty one, may request every
-  offered scope. Consent, the allowed workspaces and the account's workspace
-  role still decide what it can do; an authorization request without a scope
-  stays read-only.
+  offered scope. A client that registers fewer scopes can request additional
+  supported scopes through fresh user consent. Existing tokens and refresh
+  tokens keep their original scopes. Consent, the allowed workspaces and the
+  account's workspace role still decide what it can do; an authorization
+  request without a scope stays read-only.
+- Validate supplied scope values before applying registration defaults, so
+  malformed or oversized blank values cannot become all-scope registrations.
 - The `/mcp` 401 challenge names `/.well-known/oauth-protected-resource/mcp`
   and the offered scopes, and an unauthenticated `HEAD /mcp` returns the same
   challenge. The root metadata URL keeps working.

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.models.audit import AuditEvent
-from backend.models.oauth import OAuthClient
+from backend.models.oauth import OAuthClient, OAuthConsent
 from backend.services import oauth_service
 from backend.services.oauth_cimd import CIMDClientMetadata
 from backend.services.oauth_service import challenge_s256
@@ -34,12 +35,16 @@ def make_client(page_service) -> TestClient:
     return client
 
 
-def _metadata(*, redirect_uris=(REDIRECT_URI,)) -> CIMDClientMetadata:
+def _metadata(
+    *,
+    redirect_uris=(REDIRECT_URI,),
+    scope="mcp:read mcp:write",
+) -> CIMDClientMetadata:
     return CIMDClientMetadata(
         client_id=CLIENT_ID,
         client_name="CIMD Integration Client",
         redirect_uris=tuple(redirect_uris),
-        scope="mcp:read mcp:write",
+        scope=scope,
         grant_types=("authorization_code", "refresh_token"),
         response_types=("code",),
         application_type="native",
@@ -55,6 +60,7 @@ def _authorize_params(
     *,
     redirect_uri=REDIRECT_URI,
     state="cimd-state-0123456789abcdef",
+    scope="mcp:read mcp:write",
 ):
     verifier = "v" * 64
     return verifier, {
@@ -63,13 +69,18 @@ def _authorize_params(
         "redirect_uri": redirect_uri,
         "code_challenge": challenge_s256(verifier),
         "code_challenge_method": "S256",
-        "scope": "mcp:read mcp:write",
+        "scope": scope,
         "state": state,
     }
 
 
-def _issue_cimd_tokens(client: TestClient):
-    verifier, params = _authorize_params()
+def _issue_cimd_tokens(
+    client: TestClient,
+    *,
+    scope="mcp:read mcp:write",
+    state="cimd-state-0123456789abcdef",
+):
+    verifier, params = _authorize_params(scope=scope, state=state)
     consent = client.get("/oauth/authorize", params=params)
     assert consent.status_code == 200, consent.text
     assert "CIMD Integration Client" in consent.text
@@ -234,6 +245,112 @@ def test_cimd_change_cannot_widen_existing_grant_and_outage_does_not_revoke_it(
         },
     )
     assert refreshed.status_code == 200, refreshed.text
+
+
+def test_established_cimd_scope_expansion_requires_fresh_consent(
+    page_service,
+    monkeypatch,
+):
+    # This established-grant path is independent of new-registration coverage:
+    # an immutable read-only snapshot must permit new consent without either
+    # refetching metadata or silently widening the existing credentials.
+    # HTTP consent and persisted credentials require this integration journey.
+    monkeypatch.setattr(
+        oauth_service,
+        "fetch_client_metadata_document",
+        lambda client_id: _metadata(scope="mcp:read"),
+    )
+    client = make_client(page_service)
+    original_tokens = _issue_cimd_tokens(client, scope="mcp:read")
+    service = oauth_service.OAuthService(
+        session_factory=page_service.session_factory,
+        settings=client.app.state.settings,
+        public_base_url="http://testserver",
+    )
+    with page_service.session_factory() as session:
+        consent = session.scalar(
+            select(OAuthConsent).where(OAuthConsent.client_id == CLIENT_ID)
+        )
+        assert consent is not None
+        user_id = consent.user_id
+
+    def unavailable(client_id):
+        raise AssertionError("an established client must not refetch its metadata")
+
+    monkeypatch.setattr(
+        oauth_service,
+        "fetch_client_metadata_document",
+        unavailable,
+    )
+    challenge = client.head("/mcp")
+    assert challenge.status_code == 401
+    requested_scope = (
+        challenge.headers["www-authenticate"]
+        .split('scope="', 1)[1]
+        .split('"', 1)[0]
+    )
+    assert "mcp:agent" in requested_scope.split()
+    _, params = _authorize_params(
+        scope=requested_scope,
+        state="cimd-expansion-deny-0123456789abcdef",
+    )
+    consent_page = client.get(
+        "/oauth/authorize", params=params, follow_redirects=False
+    )
+    assert consent_page.status_code == 200, consent_page.text
+    assert "Authorize dtxWiki MCP access" in consent_page.text
+    # Skipping the UI cannot turn the prior read-only consent into approval.
+    with pytest.raises(
+        oauth_service.InvalidOAuthRequestError, match="consent is required"
+    ):
+        service.issue_authorization_code(
+            user_id=user_id, grant_consent=False, **params
+        )
+
+    denied = client.post(
+        "/oauth/authorize",
+        data={**params, "decision": "deny"},
+        follow_redirects=False,
+    )
+    assert denied.status_code == 303, denied.text
+    denied_params = parse_qs(urlparse(denied.headers["location"]).query)
+    assert denied_params["error"] == ["access_denied"]
+    assert "code" not in denied_params
+    with page_service.session_factory() as session:
+        assert session.scalar(
+            select(OAuthConsent.scope).where(OAuthConsent.client_id == CLIENT_ID)
+        ) == "mcp:read"
+
+    expanded_tokens = _issue_cimd_tokens(
+        client,
+        scope=requested_scope,
+        state="cimd-expansion-allow-0123456789abcdef",
+    )
+    assert expanded_tokens["scope"] == requested_scope
+    assert service.verify_access_token(expanded_tokens["access_token"]).scopes == tuple(
+        requested_scope.split()
+    )
+    assert service.verify_access_token(original_tokens["access_token"]).scopes == (
+        "mcp:read",
+    )
+    refreshed = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "client_id": CLIENT_ID,
+            "refresh_token": original_tokens["refresh_token"],
+        },
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["scope"] == "mcp:read"
+    assert service.verify_access_token(refreshed.json()["access_token"]).scopes == (
+        "mcp:read",
+    )
+    with page_service.session_factory() as session:
+        stored = session.get(OAuthClient, CLIENT_ID)
+        assert stored is not None
+        assert stored.scope == "mcp:read"
+        assert stored.redirect_uris == [REDIRECT_URI]
 
 
 def test_cimd_failure_response_audit_and_log_do_not_leak_probe_details(

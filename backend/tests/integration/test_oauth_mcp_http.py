@@ -751,7 +751,7 @@ def test_oauth_authorize_browser_errors_render_html(page_service):
             "redirect_uri": "http://127.0.0.1:53682/callback",
             "code_challenge": challenge_s256(verifier),
             "code_challenge_method": "S256",
-            "scope": "mcp:agent",
+            "scope": "mcp:unknown",
             "state": oauth_state("browser-error"),
         },
         headers={"accept": "text/html"},
@@ -760,7 +760,7 @@ def test_oauth_authorize_browser_errors_render_html(page_service):
     assert response.status_code == 400
     assert response.headers["content-type"].startswith("text/html")
     assert "OAuth request could not continue" in response.text
-    assert "requested scope is not registered" in response.text
+    assert "unsupported scope: mcp:unknown" in response.text
 
 
 def test_oauth_rejects_invalid_pkce_and_state_parameters(page_service):
