@@ -10,6 +10,7 @@
   publishes it, or leaves it for a person (for example a risk at or above
   "Manual review from", or a conflict with the published version). A person's
   review request still waits for a reviewer.
+- On/off policy options in Settings are switches.
 
 ### MCP Context merge tools
 

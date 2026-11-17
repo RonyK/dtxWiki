@@ -3385,20 +3385,20 @@ describe("SettingsScreen", () => {
       </MemoryRouter>,
     );
 
-    const mapSwitch = await screen.findByRole("checkbox", {
+    const mapSwitch = await screen.findByRole("switch", {
       name: "Workspace Knowledge Map",
     });
     expect(mapSwitch).not.toBeChecked();
     expect(
       await screen.findByText("Knowledge Map is off for this workspace."),
     ).toBeInTheDocument();
-    const usageSwitch = screen.getByRole("checkbox", {
+    const usageSwitch = screen.getByRole("switch", {
       name: "Read-together relationships",
     });
     expect(usageSwitch).toBeChecked();
 
-    const askSwitch = screen.getByRole("checkbox", { name: "Ask" });
-    const agentSwitch = screen.getByRole("checkbox", { name: "Agent" });
+    const askSwitch = screen.getByRole("switch", { name: "Ask" });
+    const agentSwitch = screen.getByRole("switch", { name: "Agent" });
     expect(screen.getByRole("heading", { name: /Experimental features/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Knowledge graph/ })).toBeInTheDocument();
     await user.click(askSwitch);
@@ -3409,7 +3409,7 @@ describe("SettingsScreen", () => {
     expect(patchBodies).toHaveLength(0);
     const featureCard = within(askSwitch.closest(".policy-card") as HTMLElement);
     const graphCard = within(mapSwitch.closest(".policy-card") as HTMLElement);
-    expect(featureCard.queryByRole("checkbox", { name: "Workspace Knowledge Map" })).not.toBeInTheDocument();
+    expect(featureCard.queryByRole("switch", { name: "Workspace Knowledge Map" })).not.toBeInTheDocument();
     expect(graphCard.queryByRole("combobox", { name: "Ask retrieval mode" })).not.toBeInTheDocument();
     await user.click(graphCard.getByRole("button", { name: "Save" }));
     expect(featureCard.getByRole("button", { name: "Save" })).toBeDisabled();
@@ -3438,7 +3438,7 @@ describe("SettingsScreen", () => {
       changes: { usage_relation_signals_enabled: false },
     });
     expect(
-      await screen.findByRole("checkbox", { name: "Read-together relationships" }),
+      await screen.findByRole("switch", { name: "Read-together relationships" }),
     ).not.toBeChecked();
   });
 
@@ -9178,18 +9178,18 @@ describe("SettingsScreen", () => {
       </WorkspaceRefreshGate></WorkspaceProvider>;
     }
     render(<MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/settings?section=labs`]}><RoutedSettings /></MemoryRouter>);
-    await user.click(await screen.findByRole("checkbox", { name: "Agent" }));
-    const features = () => within(screen.getByRole("checkbox", { name: "Agent" }).closest(".policy-card") as HTMLElement);
+    await user.click(await screen.findByRole("switch", { name: "Agent" }));
+    const features = () => within(screen.getByRole("switch", { name: "Agent" }).closest(".policy-card") as HTMLElement);
     await user.click(features().getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies/batch`, expect.objectContaining({ method: "PATCH" })));
     await user.click(screen.getByRole("link", { name: "Other workspace" }));
-    expect(screen.queryByRole("checkbox", { name: "Agent" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Agent" })).not.toBeInTheDocument();
     await act(async () => finishOther({ data: other }));
-    expect(await screen.findByRole("checkbox", { name: "Ask" })).toBeChecked();
+    expect(await screen.findByRole("switch", { name: "Ask" })).toBeChecked();
     first.labs.policy.agent_enabled = true;
     await act(async () => finishSave({ data: first }));
-    expect(screen.getByRole("checkbox", { name: "Ask" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Agent" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Ask" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Agent" })).not.toBeChecked();
     expect(features().getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
@@ -9206,6 +9206,7 @@ describe("SettingsScreen", () => {
     await waitFor(() => expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument());
     expect(within(screen.getByRole("navigation", { name: "Settings sections" })).queryByRole("button", { name: /^Labs/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
@@ -9250,8 +9251,8 @@ describe("SettingsScreen", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Labs", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Ask" })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Agent" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Ask" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Agent" })).not.toBeChecked();
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     const labs = within(nav).getByRole("button", { name: "Labs Workspace admin" });

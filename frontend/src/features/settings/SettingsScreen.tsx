@@ -114,6 +114,7 @@ import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { PreviewBadge } from "../../shared/components/PreviewBadge";
 import { PaginatedCredentialList } from "../../shared/components/PaginatedCredentialList";
 import { RouteLoading } from "../../shared/components/RouteLoading";
+import { Switch } from "../../shared/components/Switch";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
 import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
@@ -8667,21 +8668,17 @@ function EditablePolicyField({
             ))}
           </select>
         ) : typeof field.rawValue === "boolean" ? (
-          <span className="checkbox-field inline-checkbox">
-            <input
-              aria-label={field.label}
-              checked={Boolean(draftValue)}
-              disabled={!canEdit || busy}
-              id={fieldId}
-              onChange={(event) => onDraftChange(event.target.checked)}
-              type="checkbox"
-            />
-            <span>
-              {draftValue
-                ? translate("settings:state.enabled", "Enabled")
-                : translate("settings:state.disabled", "Disabled")}
-            </span>
-          </span>
+          <Switch
+            checked={Boolean(draftValue)}
+            disabled={!canEdit || busy}
+            id={fieldId}
+            label={field.label}
+            onChange={onDraftChange}
+          >
+            {draftValue
+              ? translate("settings:state.enabled", "Enabled")
+              : translate("settings:state.disabled", "Disabled")}
+          </Switch>
         ) : field.multiline ? (
           <div className="policy-edit-control is-multiline">
             <textarea
