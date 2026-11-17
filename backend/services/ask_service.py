@@ -533,46 +533,12 @@ class AskService:
             retrieval_mode=mode,
             limit=3,
             actor=actor,
+            citable_only=True,
         )
-        # Search can show mutable drafts, but Ask evidence names published heads.
-        # Draft variants must not hide citable Context hits on the next page.
-        context = []
+        context = context_payload.ranked_results[:3]
         tried_lanes = list(context_payload.tried_lanes)
         search_warnings = list(context_payload.warnings)
         nearest_candidates = list(context_payload.nearest_candidates)
-        seen_cursors: set[str] = set()
-        seen_context: set[UUID] = set()
-        while True:
-            for result in context_payload.ranked_results:
-                if not result.citation_available or result.version_status == "draft":
-                    continue
-                document_id = self._result_document_id(result) or result.id
-                if document_id not in seen_context:
-                    seen_context.add(document_id)
-                    context.append(result)
-            context = context[:3]
-            cursor = context_payload.next_cursor
-            if len(context) == 3 or cursor is None or cursor in seen_cursors:
-                break
-            seen_cursors.add(cursor)
-            context_payload = self.search_service.search(
-                session=session,
-                workspace_id=workspace_id,
-                query=question,
-                scope="context_page",
-                retrieval_mode=mode,
-                limit=3,
-                cursor=cursor,
-                actor=actor,
-            )
-            tried_lanes = _stable_unique([*tried_lanes, *context_payload.tried_lanes])
-            search_warnings = _stable_unique(
-                [*search_warnings, *context_payload.warnings]
-            )
-            nearest_candidates = [
-                *nearest_candidates,
-                *context_payload.nearest_candidates,
-            ][:3]
         if not honored:
             search_warnings = [
                 *search_warnings,

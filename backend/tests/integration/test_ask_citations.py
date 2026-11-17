@@ -32,6 +32,7 @@ from backend.schemas.ask import AskSessionCreate, AskTurnCreate
 from backend.schemas.read import RankedResult, SearchPayload
 from backend.services.ask_service import AskService
 from backend.services.graph_service import GraphService
+from backend.services.search_service import SearchService
 
 pytestmark = pytest.mark.integration
 
@@ -295,50 +296,78 @@ def test_ask_cites_page_id_for_semantic_chunk_result(session_factory):
     with session_factory.begin() as session:
         workspace = _ws(session)
         page = _seed_page(session, workspace.id)
+        published_version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            version_no=1,
+            body_md="Rollout guidance",
+            content_hash="ask-published",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id=ACTOR_ID,
+            version_status="published_snapshot",
+        )
+        session.add(published_version)
+        session.flush()
+        draft_version = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=page.id,
+            parent_version_id=published_version.id,
+            version_no=2,
+            body_md="Unpublished draft evidence must not be cited",
+            content_hash="ask-draft",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id=ACTOR_ID,
+            version_status="draft",
+        )
+        session.add(draft_version)
+        session.flush()
+        page.current_published_version_id = published_version.id
+        page.current_version_id = published_version.id
+        page.latest_draft_version_id = draft_version.id
+        session.flush()
         published = _semantic_context_result(page.id).model_copy(
             update={
-                "version_id": uuid4(),
+                "version_id": published_version.id,
                 "version_status": "published_snapshot",
             }
         )
-        # A versioned search window can also contain a mutable draft of this
-        # page; its body must never be attributed to the published citation.
         draft = published.model_copy(
             update={
                 "id": uuid4(),
-                "version_id": uuid4(),
+                "version_id": draft_version.id,
                 "version_status": "draft",
                 "citation_available": False,
-                "snippet": "Unpublished draft evidence must not be cited",
+                "snippet": draft_version.body_md,
+                "score": 2.0,
             }
         )
 
-        class PaginatedSearch(FakeSemanticSearch):
+        class SemanticRetriever:
+            def supported_modes(self):
+                return {"keyword", "semantic", "hybrid"}
+
+            def retrieve(self, **kwargs):
+                return [draft, published]
+
+        class RecordingSearch(SearchService):
             def __init__(self):
-                # All first-page slots are occupied by different open drafts.
-                super().__init__(
-                    context=[
-                        draft,
-                        draft.model_copy(update={"id": uuid4(), "version_id": uuid4()}),
-                        draft.model_copy(update={"id": uuid4(), "version_id": uuid4()}),
-                    ]
-                )
+                super().__init__(retrievers=[SemanticRetriever()])
                 self.calls = []
 
             def search(self, **kwargs):
-                self.calls.append((kwargs["scope"], kwargs.get("cursor")))
-                payload = super().search(**kwargs)
-                if kwargs["scope"] != "context_page":
-                    return payload
-                if kwargs.get("cursor") is None:
-                    return payload.model_copy(update={"next_cursor": "published"})
-                assert kwargs["cursor"] == "published"
-                return payload.model_copy(update={"ranked_results": [published]})
+                self.calls.append((kwargs["scope"], kwargs.get("citable_only")))
+                return super().search(**kwargs)
 
-        search = PaginatedSearch()
+        search = RecordingSearch()
         service = AskService(search_service=search)
         turn, detail = _create_turn(
-            service, session, workspace.id, "how do we roll out?"
+            service,
+            session,
+            workspace.id,
+            "how do we roll out?",
+            actor=_actor("owner"),
         )
         cited = session.scalars(
             select(AskTurnCitation.target_id)
@@ -347,7 +376,7 @@ def test_ask_cites_page_id_for_semantic_chunk_result(session_factory):
             .order_by(AskTurnCitation.rank)
         ).all()
     assert cited == [page.id]
-    assert search.calls == [("context_page", None), ("context_page", "published")]
+    assert search.calls == [("context_page", True)]
     assert len(detail.retrieval_trace) == 1
     assert detail.retrieval_trace[0]["id"] == str(page.id)
     assert detail.retrieval_trace[0]["version_id"] == str(published.version_id)

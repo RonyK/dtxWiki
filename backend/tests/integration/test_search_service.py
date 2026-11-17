@@ -1221,6 +1221,7 @@ def test_keyword_candidate_limit_counts_documents_and_keeps_their_versions():
             title="Candidate Alpha",
             body="CandidateNeedle " + "ordinary filler " * 300,
         )
+        published_heads = {page.id: published.id}
         expected = {published.id}
         expected_items = {("context_page", page.id, published.id)}
         # More variants than both the old row budget and the deliberately
@@ -1272,6 +1273,7 @@ def test_keyword_candidate_limit_counts_documents_and_keeps_their_versions():
                 title="Candidate " + title,
                 body="CandidateNeedle " + "ordinary filler " * 300,
             )
+            published_heads[_other.id] = version.id
             expected.add(version.id)
             expected_pages.add(_other.id)
             expected_items.add(("context_page", _other.id, version.id))
@@ -1294,6 +1296,23 @@ def test_keyword_candidate_limit_counts_documents_and_keeps_their_versions():
             assert {hit.id for hit in candidates if hit.type == "context_claim"} == {
                 claim.id for claim in claims
             }
+            citable = service.search(
+                session=session,
+                workspace_id=workspace.id,
+                query="CandidateNeedle",
+                scope="context_page",
+                limit=3,
+                citable_only=True,
+                actor=actor,
+            )
+            assert len(citable.ranked_results) == 3
+            assert {
+                hit.id: hit.version_id for hit in citable.ranked_results
+            } == published_heads
+            assert all(
+                hit.citation_available and hit.version_status == "published_snapshot"
+                for hit in citable.ranked_results
+            )
             collected, cursor = [], None
             while True:
                 result = service.search(

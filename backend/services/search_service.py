@@ -47,6 +47,7 @@ from backend.services.page_name_lookup import (
 )
 from backend.services.read_errors import UnsupportedRetrievalModeError
 from backend.services.retrieval.fusion import ranked_result_item_key
+from backend.services.retrieval.identity import ranked_result_document_id
 from backend.services.retrieval.keyword import (
     EXCLUDED_LIBRARY_LIFECYCLE_STATUSES,
     RESTRICTED_LIBRARY_TRUST_LEVELS,
@@ -210,7 +211,9 @@ class SearchService:
         self._graph_service = graph_service
 
     @staticmethod
-    def _group_context_versions(session, workspace_id, ranked, actor):
+    def _group_context_versions(
+        session, workspace_id, ranked, actor, *, citable_only=False
+    ):
         if session is None:
             return _ContextSearchCandidates(list(ranked), {})
         from backend.services.context_drafts import context_draft_review_states
@@ -290,7 +293,7 @@ class SearchService:
             output.append(result)
         review_states = (
             context_draft_review_states(session, workspace_id, list(versions.values()))
-            if actor_can_read_drafts(actor)
+            if not citable_only and actor_can_read_drafts(actor)
             else {}
         )
         return _ContextSearchCandidates(
@@ -395,7 +398,10 @@ class SearchService:
         limit: int = 20,
         cursor: str | None = None,
         actor: ActorContext | None = None,
+        *,
+        citable_only: bool = False,
     ) -> SearchPayload:
+        """``citable_only`` keeps one published row per document before paging."""
         retriever = self._retriever_for(retrieval_mode)
         if retriever is None:
             raise UnsupportedRetrievalModeError(
@@ -561,7 +567,7 @@ class SearchService:
                     fallback=ranked[insertion:],
                 )
         context_candidates = self._group_context_versions(
-            session, workspace_id, ranked, actor
+            session, workspace_id, ranked, actor, citable_only=citable_only
         )
         ranked = context_candidates.ranked
         if not active_filters.include_agents:
@@ -588,15 +594,31 @@ class SearchService:
                     min_similarity=0.15,
                 )
             ]
+        if citable_only:
+            seen_documents: set[UUID] = set()
+            citable = []
+            for result in ranked:
+                if not result.citation_available or result.version_status == "draft":
+                    continue
+                document_id = ranked_result_document_id(result) or result.id
+                if document_id not in seen_documents:
+                    seen_documents.add(document_id)
+                    citable.append(result)
+            ranked = citable
         # Ranking is deterministic within the bounded planner candidate set, so
         # paging is a stable offset slice. total_count below is the size of this
         # set (especially for semantic mode), never a full-corpus COUNT.
         offset = _decode_search_cursor(cursor)
         window = ranked[offset : offset + limit]
         if session is not None:
-            self._enrich_context_drafts(
-                session, workspace_id, window, actor, context_candidates.review_states
-            )
+            if not citable_only:
+                self._enrich_context_drafts(
+                    session,
+                    workspace_id,
+                    window,
+                    actor,
+                    context_candidates.review_states,
+                )
             enrich_search_result_metadata(session, workspace_id, window, actor)
         next_offset = offset + limit
         has_more = len(ranked) > next_offset

@@ -71,35 +71,11 @@ _PURGE_DOCUMENTS = text("DELETE FROM search_doc_fts WHERE workspace_id = :worksp
 _PURGE_PAGE_NAMES = text(
     "DELETE FROM page_name_trgm WHERE workspace_id = :workspace_id"
 )
-_SEARCH_DOCUMENTS = text(
-    """
-    SELECT rowid, source_kind, entity_id, version_id, visibility_scope,
-           category, bm25(search_doc_fts, 5.0, 1.0) AS rank,
-           snippet(search_doc_fts, 1, '', '', ' ... ', 40) AS snippet
-      FROM search_doc_fts
-     WHERE search_doc_fts MATCH :match_query
-       AND workspace_id = :workspace_id
-       AND source_kind IN :source_kinds
-       AND visibility_scope IN :visibility_scopes
-       AND (
-            :allow_sensitive = 1
-            OR source_kind != 'agent_page'
-            OR category NOT IN :sensitive_categories
-       )
-     ORDER BY rank ASC, rowid ASC
-     LIMIT :take OFFSET :offset
-    """
-).bindparams(
-    bindparam("source_kinds", expanding=True),
-    bindparam("visibility_scopes", expanding=True),
-    bindparam("sensitive_categories", expanding=True),
-)
 _SEARCH_DOCUMENT_GROUPS = text(
     """
     WITH matches AS MATERIALIZED (
         SELECT rowid, source_kind, entity_id, version_id, visibility_scope,
-               category, bm25(search_doc_fts, 5.0, 1.0) AS rank,
-               snippet(search_doc_fts, 1, '', '', ' ... ', 40) AS snippet
+               category, bm25(search_doc_fts, 5.0, 1.0) AS rank
           FROM search_doc_fts
          WHERE search_doc_fts MATCH :match_query
            AND workspace_id = :workspace_id
@@ -135,8 +111,14 @@ _SEARCH_DOCUMENT_GROUPS = text(
          ORDER BY best_rank, first_rowid, document_kind, document_id
          LIMIT :take OFFSET :offset
     )
-    SELECT documents.*
+    SELECT documents.rowid, documents.source_kind, documents.entity_id,
+           documents.version_id, documents.visibility_scope, documents.category,
+           documents.rank,
+           snippet(search_doc_fts, 1, '', '', ' ... ', 40) AS snippet,
+           documents.document_kind, documents.document_id
       FROM documents JOIN selected USING (document_kind, document_id)
+      JOIN search_doc_fts ON search_doc_fts.rowid = documents.rowid
+     WHERE search_doc_fts MATCH :match_query
      ORDER BY selected.best_rank, selected.first_rowid,
               documents.rank, documents.rowid
     """
@@ -384,37 +366,6 @@ class WorkspaceFts5ProjectionRepository:
         self._session.execute(_PURGE_DOCUMENTS, parameters)
         self._session.execute(_PURGE_PAGE_NAMES, parameters)
 
-    def search_documents(
-        self,
-        *,
-        match_query: str,
-        source_kinds: Sequence[str],
-        visibility_scopes: Sequence[str],
-        allow_sensitive: bool,
-        sensitive_categories: Sequence[str],
-        take: int,
-        offset: int,
-    ) -> tuple[list[FtsDocumentHit], int]:
-        rows = (
-            self._session.execute(
-                _SEARCH_DOCUMENTS,
-                {
-                    "match_query": match_query,
-                    "workspace_id": str(self._workspace_id),
-                    "source_kinds": list(source_kinds),
-                    "visibility_scopes": list(visibility_scopes),
-                    "allow_sensitive": int(allow_sensitive),
-                    "sensitive_categories": list(sensitive_categories),
-                    "take": take,
-                    "offset": offset,
-                },
-            )
-            .mappings()
-            .all()
-        )
-        hits = _document_hits(rows)
-        return hits, len(rows)
-
     def search_document_groups(
         self,
         *,
@@ -431,8 +382,8 @@ class WorkspaceFts5ProjectionRepository:
         Both the candidate budget and offset count canonical document groups;
         claims/artifacts keep their own source identities in the expanded rows.
         MATCH ranks matching projection rows inside SQLite; only rows from the
-        selected groups reach Python. Expansion grows with those documents'
-        matching versions, rather than applying a version-row cap. Projection
+        selected groups receive snippets and reach Python. Expansion grows with
+        those documents' matching versions, without a version-row cap. Projection
         ACL predicates run inside the MATCH CTE, before group selection; the
         caller still validates each selected source-of-truth row. A document's
         many drafts therefore consume one candidate slot, and cannot hide its
