@@ -1,5 +1,6 @@
 """Release-time artifact gate tests for scripts/verify_wheel_artifact.py."""
 
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -149,6 +150,14 @@ def _verifier_module():
 
 def _graph_probe_source():
     return _verifier_module()._GRAPH_PROBE
+
+
+def _payload_inventory(root):
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
 
 
 # Parametrized from the gate's own list so the two cannot drift.
@@ -339,7 +348,9 @@ def test_verifier_rejects_an_artifact_that_imports_backend_it_does_not_carry(
     assert "backend.models" in result.stdout + result.stderr
 
 
-def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_path):
+def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(
+    tmp_path, monkeypatch
+):
     """Pin the mechanism `_check_migration_graph`'s comment names.
 
     Run the shipped probe from the repository root -- the worst cwd there is,
@@ -353,6 +364,9 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
 
     stage = _stage(tmp_path)
     shutil.rmtree(stage / "backend" / "models")
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    monkeypatch.delenv("PYTHONPYCACHEPREFIX", raising=False)
+    before = _payload_inventory(stage)
 
     probe = subprocess.run(
         [sys.executable, "-c", _graph_probe_source(), str(stage)],
@@ -380,6 +394,7 @@ def test_the_foreign_scan_not_the_probe_cwd_is_what_isolates_the_extract(tmp_pat
         and not Path(origin).resolve().is_relative_to(stage.resolve())
         for origin in leaked.values()
     ), leaked
+    assert _payload_inventory(stage) == before
 
 
 @pytest.mark.parametrize(
@@ -438,8 +453,20 @@ def test_verifier_rejects_an_artifact_whose_graph_violates_release_boundaries(
     assert expected in result.stdout + result.stderr
 
 
-def test_verifier_accepts_a_linear_revision_after_the_released_chain(tmp_path):
+def test_verifier_accepts_a_linear_revision_after_the_released_chain(
+    tmp_path, monkeypatch
+):
     """C11: development artifacts can carry unreleased revisions and helpers."""
+
+    # Exercise the probe's own behavior, independent of the invoking shell's
+    # bytecode settings. Verification must inspect the archive without adding
+    # generated files that a later inventory mistakes for shipped payload.
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    monkeypatch.delenv("PYTHONPYCACHEPREFIX", raising=False)
+    bundled_cache = (
+        "backend/migrations/revision_modules/unreleased/"
+        "__pycache__/bundled.cpython-312.pyc"
+    )
 
     def add_unreleased_revision(stage):
         _write_stray_revision(stage)
@@ -453,8 +480,31 @@ def test_verifier_accepts_a_linear_revision_after_the_released_chain(tmp_path):
         (helpers / "new_schema.py").write_text(
             "def upgrade():\n    pass\n", encoding="utf-8"
         )
+        cache = stage / bundled_cache
+        cache.parent.mkdir(exist_ok=True)
+        cache.write_bytes(b"bytecode already carried by the archive")
 
-    result = _run_verifier(_dist(tmp_path, mutate=add_unreleased_revision))
+    dist = _dist(tmp_path, mutate=add_unreleased_revision)
+    verifier = _verifier_module()
+    for artifact in sorted(dist.iterdir()):
+        extract = tmp_path / artifact.name.removesuffix(".whl")
+        payload, failures = verifier._unpack(artifact, extract)
+        assert failures == []
+
+        before = _payload_inventory(payload)
+        pending_before = verifier._check_unreleased_migrations(payload)
+        assert any(bundled_cache in failure for failure in pending_before)
+
+        failures, evidence = verifier.verify_artifact(artifact, extract)
+
+        assert failures == []
+        assert f"{artifact.name}: alembic head 0003_stray, " in evidence
+        assert _payload_inventory(payload) == before, (
+            f"verification modified {artifact.name}"
+        )
+        assert verifier._check_unreleased_migrations(payload) == pending_before
+
+    result = _run_verifier(dist)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"{WHEEL_NAME}: alembic head 0003_stray, " in result.stdout

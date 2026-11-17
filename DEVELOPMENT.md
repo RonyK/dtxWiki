@@ -726,16 +726,23 @@ make test-packaged                        # frontend + wheel build, packaged UI/
 
 # 검증은 wheel 파일이 아니라 dist 디렉터리를 받으며, 이전 빌드 잔여물이 섞이지 않도록 깨끗한 dist 에서 합니다.
 rm -rf dist && make build-wheel
-make verify-release-artifacts
+.venv/bin/python scripts/verify_wheel_artifact.py dist
 WHEEL="$(find dist -maxdepth 1 -name 'dtxwiki-*.whl' -print -quit)"
 sha256sum "$WHEEL" infra/prod/install.sh
 ```
 
-`verify_wheel_artifact.py` 는 릴리스 워크플로가 태그 시점에 돌리는 것과 같은 검사입니다 —
-SPA 번들과 그 index HTML이 참조하는 asset, alembic.ini, 배포된 migration·직접 초기화·
-helper의 고정 해시를 확인합니다. 추출본 안에서 Alembic graph를 실제로 걸어
-0.2.3 schema head `00ba02774c4a`와 release manifest를 대조합니다. 인자는 dist 디렉터리이며 wheel 경로를
-넘기면 사용법 오류(exit 2)입니다. 이미 만든 `dist/` 에 이전 빌드가 있으면(`make build-wheel` 은 그것을
+`verify_wheel_artifact.py`의 기본 검사는 wheel과 sdist의 SPA 번들, index HTML이 참조하는
+asset, alembic.ini, 배포된 migration·직접 초기화·helper의 고정 해시를 확인합니다.
+추출본 안에서 Alembic graph를 실제로 걸어 단일 head와 기존 release manifest의 정합성을
+검증하며, 개발 산출물의 `unreleased/` migration은 허용합니다.
+
+릴리스 브랜치에서 버전과 migration을 확정한 뒤에는 `make verify-release-artifacts`를
+실행합니다. 이 명령은 태그 시점의 릴리스 워크플로와 같이 `--release-version`을 전달해
+패키지 버전, 확정된 schema 경계와 head의 일치, `unreleased/` 파일이 남지 않았는지도
+검사합니다.
+
+인자는 dist 디렉터리이며 wheel 경로를 넘기면 사용법 오류(exit 2)입니다.
+이미 만든 `dist/` 에 이전 빌드가 있으면(`make build-wheel` 은 그것을
 `dist/prev/` 로 옮깁니다) 검사 대상이 모호해지므로 위처럼 `rm -rf dist` 로 시작하세요.
 
 개발 중인 migration은 `backend/migrations/versions/unreleased/<id>_<description>.py`
