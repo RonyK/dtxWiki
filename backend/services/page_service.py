@@ -2523,7 +2523,7 @@ class PageService:
             acquire_write_intent(session)
             self._lock_context_media_usage_intent_for_page(session, page_id)
             page = context_page_repo.get_page_by_id_for_update(session, page_id)
-            if page is None:
+            if page is None or page.workspace_id != workspace_id:
                 raise PageNotFoundError("page not found")
             version = self._own_page_version(
                 session, page, version_id, actor_kind, actor_id
