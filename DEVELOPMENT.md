@@ -697,6 +697,42 @@ CHANGELOG의 과거 릴리스, 운영 증거, DB schema 경계와 백업의 당�
 않습니다. DB 변경은 아래의 `unreleased` 절차를 따릅니다. 이 명령은 Git 태그 생성, push,
 registry 게시를 수행하지 않습니다.
 
+### Changelog와 GitHub Release 본문
+
+릴리스 브랜치에서 이전 릴리스 태그 또는 커밋 이후의 변경을 간결한 PR 목록으로 생성합니다.
+첫 명령은 미리보기이며, `make changelog`는 `CHANGELOG.md`의 `Unreleased`만 교체합니다.
+과거 릴리스 항목은 보존합니다. 태그가 로컬에 없으면 이전 릴리스 커밋을 지정할 수 있습니다.
+
+```bash
+.venv/bin/python scripts/changelog.py generate --since v0.2.4
+make changelog SINCE=v0.2.4
+```
+
+생성기는 Conventional Commit의 종류별로 변경을 묶고, 제목의 `(#123)` 또는 `#123`을
+PR 링크로 변환합니다. 일반 PR merge는 본문의 제목과 merge의 PR 번호로 한 번만 기록합니다.
+Release 병합과 릴리스 준비 커밋은 생략하되, 병합 안의 실제 변경은 읽습니다.
+PR 번호가 없는 변경은 커밋 링크로 남깁니다. Git 이력만 읽으며 GitHub API는 필요하지 않습니다.
+Conventional Commit의 `!` 또는 본문의 `BREAKING CHANGE:`는 `Breaking` 표시로 보존합니다.
+
+PR 제목만으로 부족한 내용은 두 곳에 직접 적습니다. 릴리스 전체의 호환성·업그레이드 안내와
+MCP tool contract revision별 클라이언트 조치는 `### Important changes`에, 특정 PR의 보충
+설명은 그 항목 아래 들여쓴 줄(`  - ...`)로 적습니다. 재생성해도 `Important changes`와,
+같은 PR·커밋 링크가 다시 생성된 항목 아래의 들여쓴 줄은 유지합니다. 그 밖의 `Unreleased`
+수동 편집은 덮어쓰므로, 재생성은 버전 확정 전에 실행합니다.
+
+검토를 마치면 기존처럼 `## Unreleased`를 `## X.Y.Z — YYYY-MM-DD`로 바꿉니다.
+GitHub Release 본문은 다음 명령으로 미리 볼 수 있습니다.
+
+```bash
+.venv/bin/python scripts/changelog.py notes --version X.Y.Z
+```
+
+릴리스는 기존처럼 `vX.Y.Z` 태그 push로 시작합니다. release workflow는 PyPI·npm 게시 전 build
+job에서 `## X.Y.Z`로 시작하는 항목 하나를 찾아 설치 안내, 태그 시점의 CHANGELOG 링크와 함께
+GitHub Release 본문을 만들고 artifact로 전달합니다. 항목이 없거나 비어 있거나 둘 이상이면
+경고를 남기고 설치 안내와 CHANGELOG 링크만으로 본문을 만들며, 릴리스는 중단하지 않습니다.
+게시 단계에서 파일을 수정하거나 PR 목록을 다시 생성하지 않습니다.
+
 ### MCP tool contract revision
 
 클라이언트가 관찰할 수 있는 MCP tool 계약이 바뀐 릴리스는 직전 배포본의
