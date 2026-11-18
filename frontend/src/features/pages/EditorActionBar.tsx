@@ -391,89 +391,91 @@ export function EditorActionBar({
       data-viewport={isMobile ? "mobile" : "desktop"}
       ref={rootRef}
     >
-      <div
-        aria-label={labels.toolbar}
-        className="editor-action-bar"
-        role="toolbar"
-      >
-        {primaryCommands.map((command, index) => {
-          const previous = primaryCommands[index - 1];
-          const separated = previous &&
-            previous.actionBar?.group !== command.actionBar?.group;
-          return (
-            <Fragment key={command.id}>
-              {separated ? (
+      <div className="editor-action-bar-anchor">
+        <div
+          aria-label={labels.toolbar}
+          className="editor-action-bar"
+          role="toolbar"
+        >
+          {primaryCommands.map((command, index) => {
+            const previous = primaryCommands[index - 1];
+            const separated = previous &&
+              previous.actionBar?.group !== command.actionBar?.group;
+            return (
+              <Fragment key={command.id}>
+                {separated ? (
+                  <span
+                    aria-hidden="true"
+                    className="editor-action-separator"
+                    role="separator"
+                  />
+                ) : null}
+                {renderActionButton(command, false)}
+              </Fragment>
+            );
+          })}
+          {overflowCommands.length ? (
+            <>
+              {primaryCommands.length ? (
                 <span
                   aria-hidden="true"
                   className="editor-action-separator"
                   role="separator"
                 />
               ) : null}
-              {renderActionButton(command, false)}
-            </Fragment>
-          );
-        })}
-        {overflowCommands.length ? (
-          <>
-            {primaryCommands.length ? (
-              <span
-                aria-hidden="true"
-                className="editor-action-separator"
-                role="separator"
-              />
-            ) : null}
-            <button
-              aria-expanded={moreOpen}
-              aria-haspopup="menu"
-              aria-label={labels.more}
-              className="editor-action-button editor-action-more"
-              onClick={() => {
-                if (moreOpen) closeMore(true);
-                else openMoreMenu();
-              }}
-              onKeyDown={(event) => {
-                if (
-                  !moreOpen &&
-                  (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ")
-                ) {
-                  event.preventDefault();
-                  openMoreMenu();
-                  return;
-                }
-                moveRovingFocus(
-                  event,
-                  topLevelIds,
-                  MORE_ITEM_ID,
-                  topLevelRefs.current,
-                  setRovingId,
-                );
-              }}
-              onMouseDown={preserveMouseSelection}
-              onPointerDown={preservePointerSelection}
-              ref={(element) => {
-                moreButtonRef.current = element;
-                if (element) topLevelRefs.current.set(MORE_ITEM_ID, element);
-                else topLevelRefs.current.delete(MORE_ITEM_ID);
-              }}
-              tabIndex={effectiveRovingId === MORE_ITEM_ID ? 0 : -1}
-              title={labels.more}
-              type="button"
-            >
-              <span aria-hidden="true">{labels.moreShort}</span>
-            </button>
-          </>
+              <button
+                aria-expanded={moreOpen}
+                aria-haspopup="menu"
+                aria-label={labels.more}
+                className="editor-action-button editor-action-more"
+                onClick={() => {
+                  if (moreOpen) closeMore(true);
+                  else openMoreMenu();
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    !moreOpen &&
+                    (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ")
+                  ) {
+                    event.preventDefault();
+                    openMoreMenu();
+                    return;
+                  }
+                  moveRovingFocus(
+                    event,
+                    topLevelIds,
+                    MORE_ITEM_ID,
+                    topLevelRefs.current,
+                    setRovingId,
+                  );
+                }}
+                onMouseDown={preserveMouseSelection}
+                onPointerDown={preservePointerSelection}
+                ref={(element) => {
+                  moreButtonRef.current = element;
+                  if (element) topLevelRefs.current.set(MORE_ITEM_ID, element);
+                  else topLevelRefs.current.delete(MORE_ITEM_ID);
+                }}
+                tabIndex={effectiveRovingId === MORE_ITEM_ID ? 0 : -1}
+                title={labels.more}
+                type="button"
+              >
+                <span aria-hidden="true">{labels.moreShort}</span>
+              </button>
+            </>
+          ) : null}
+        </div>
+        {moreOpen ? (
+          <div
+            aria-label={labels.moreMenu}
+            className="editor-action-more-menu"
+            ref={moreMenuRef}
+            role="menu"
+          >
+            {overflowCommands.map((command) => renderActionButton(command, true))}
+          </div>
         ) : null}
       </div>
-      {moreOpen ? (
-        <div
-          aria-label={labels.moreMenu}
-          className="editor-action-more-menu"
-          ref={moreMenuRef}
-          role="menu"
-        >
-          {overflowCommands.map((command) => renderActionButton(command, true))}
-        </div>
-      ) : null}
     </div>
   );
 }
