@@ -404,9 +404,20 @@ def verify_preview(preview, request, candidate, *, expected_target=_PUBLISHED_PI
         )
 
 
-def publication_candidate(session, page, version, request, *, prepare):
+def merge_write_candidate(
+    session,
+    page,
+    version,
+    request,
+    *,
+    prepare,
+    commit_version_id=None,
+    expected_target=_PUBLISHED_PIN,
+):
     """Select and verify the exact prepared result used by policy and storage."""
-    preview = preview_merge(session, page, version, prepare=prepare)
+    preview = preview_merge(
+        session, page, version, commit_version_id=commit_version_id, prepare=prepare
+    )
     candidate = preview.choose(getattr(request, "on_conflict", None))
     body = getattr(request, "result_body_md", None)
     metadata = getattr(request, "result_page_metadata", None)
@@ -414,7 +425,7 @@ def publication_candidate(session, page, version, request, *, prepare):
         candidate = prepare(
             edit_merge_candidate(candidate, body_md=body, page_metadata=metadata)
         )
-    verify_preview(preview, request, candidate)
+    verify_preview(preview, request, candidate, expected_target=expected_target)
     return preview, candidate
 
 
@@ -727,13 +738,16 @@ def edit_merge_candidate(candidate, *, body_md=None, page_metadata=None):
     metadata = candidate.metadata
     if page_metadata is not None:
         edit = PageMetadataPatch.model_validate(page_metadata)
+        # Placement is the one field whose null is a value (Context / Inbox):
+        # it changes when the edit sets it, as the metadata patch writer reads
+        # it (context_write_service). The other fields change when not null.
         metadata = PageMetadata(
             edit.title if edit.title is not None else metadata.title,
             edit.page_type if edit.page_type is not None else metadata.page_type,
             tuple(edit.tags) if edit.tags is not None else metadata.tags,
             tuple(edit.aliases) if edit.aliases is not None else metadata.aliases,
             edit.placement_parent_node_id
-            if edit.placement_parent_node_id is not None
+            if "placement_parent_node_id" in edit.model_fields_set
             else metadata.placement_parent_node_id,
         )
     body = candidate.body_md if body_md is None else body_md

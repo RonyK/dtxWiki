@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.models.context import ContextPageVersion
+from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.services.page_service import PageConflictError
 from backend.services.read_errors import StaleBaseVersionError
@@ -45,7 +46,7 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
             from_version_id=source,
         )
 
-    def save(draft, body, writer=actor):
+    def save(draft, body, writer=actor, **changes):
         return page_service.autosave_page(
             page_id=initial.id,
             workspace_id=workspace_id,
@@ -59,6 +60,7 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
             idempotency_key=str(uuid4()),
             expected_editing_revision=draft.editing_revision,
             version_id=draft.version_id,
+            **changes,
         )
 
     def preview(draft):
@@ -167,27 +169,74 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
         body_md=edited,
     )
 
-    def bring(result_hash):
+    def bring(draft, result_hash, **result):
         return page_service.bring_in_context_version(
             page_id=initial.id,
-            version_id=behind.version_id,
+            version_id=draft.version_id,
             workspace_id=workspace_id,
-            expected_editing_revision=behind.editing_revision,
+            expected_editing_revision=draft.editing_revision,
             idempotency_key=str(uuid4()),
             actor_kind="human",
             actor_id=actor,
             actor_provenance="browser_session",
             commit_version_id=moved,
             result_hash=result_hash,
-            result_body_md=edited,
+            **result,
         )
 
     with pytest.raises(StaleBaseVersionError):
-        bring(preview(behind)["result"]["result_hash"])
-    brought = bring(seen["result"]["result_hash"])
+        bring(behind, preview(behind)["result"]["result_hash"], result_body_md=edited)
+    brought = bring(behind, seen["result"]["result_hash"], result_body_md=edited)
     assert "Kept while bringing in." in brought.body_md
     assert "Middle moved." in brought.body_md
     assert moved in brought.parent_version_ids
+
+    # Bringing in a commit the draft already contains is bound the same way:
+    # the edited result is saved (the commit is not added twice) and a wrong
+    # hash is refused. An explicit null placement (Context / Inbox) replaces
+    # the draft's folder; an omitted placement keeps it.
+    with page_service.session_factory() as session:
+        inbox = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == workspace_id,
+                WorkspaceTreeNode.section == "context",
+                WorkspaceTreeNode.slug == "inbox",
+            )
+        )
+    placed = save(brought, brought.body_md, destination_node_id=inbox)
+    again = placed.body_md + "\nBrought in again.\n"
+    to_inbox = {"placement_parent_node_id": None}
+
+    def contained(**edit):
+        return page_service.preview_context_merge(
+            initial.id,
+            placed.version_id,
+            workspace_id,
+            actor_id=actor,
+            commit_version_id=moved,
+            body_md=again,
+            **edit,
+        )["result"]
+
+    kept, inboxed = contained(), contained(page_metadata=to_inbox)
+    assert kept["page_metadata"]["placement_parent_node_id"] == str(inbox)
+    assert inboxed["page_metadata"]["placement_parent_node_id"] is None
+    with pytest.raises(StaleBaseVersionError):
+        bring(
+            placed,
+            kept["result_hash"],
+            result_body_md=again,
+            result_page_metadata=to_inbox,
+        )
+    rebrought = bring(
+        placed,
+        inboxed["result_hash"],
+        result_body_md=again,
+        result_page_metadata=to_inbox,
+    )
+    assert "Brought in again." in rebrought.body_md
+    assert rebrought.page_metadata["placement_parent_node_id"] is None
+    assert rebrought.parent_version_ids == brought.parent_version_ids
 
     # REST History appends across the draft-to-commit boundary, even when a
     # draft's merged parent is a newer commit. The default keeps version order.

@@ -6197,18 +6197,27 @@ type ServerDraft = {
   page_type: string;
   tags?: string[] | null;
   aliases?: string[] | null;
+  /** The draft's recorded placement: null is Context / Inbox; absent is none recorded. */
   placement_parent_node_id?: string | null;
 };
 type EditorContent = { draft: DraftSnapshot; metadata: PageMetadata };
 
 function serverDraftOf(page: PagePayload): ServerDraft {
-  const placement = page.page_metadata?.placement_parent_node_id;
-  return { ...page, placement_parent_node_id: typeof placement === "string" ? placement : null };
+  const metadata = page.page_metadata ?? {};
+  const placement = metadata.placement_parent_node_id;
+  return {
+    ...page,
+    placement_parent_node_id: "placement_parent_node_id" in metadata
+      ? typeof placement === "string" ? placement : null
+      : undefined,
+  };
 }
 
 /**
- * The editor's content for a server draft. The draft's own placement wins;
- * otherwise its tree position, otherwise the default destination.
+ * The editor's content for a server draft. A recorded placement wins; null
+ * (Context / Inbox) is the default destination, named by its node because a
+ * save reads a null destination as "unchanged". A draft that records none
+ * stays where the tree has it, otherwise at the default destination.
  */
 function editorContentOf(server: ServerDraft, nodes: TreeNodePayload[]): EditorContent {
   const parsed = parsePageDocument(server.body_md, {
@@ -6217,9 +6226,9 @@ function editorContentOf(server: ServerDraft, nodes: TreeNodePayload[]): EditorC
     type: server.page_type as PageType,
   });
   const metadata = metadataFromPagePayload(parsed.metadata, server);
-  const destinationNodeId = server.placement_parent_node_id
-    ?? nodes.find((node) => node.target_id === server.id)?.parent_id
-    ?? chooseDefaultDestination(nodes);
+  const destinationNodeId = server.placement_parent_node_id !== undefined
+    ? server.placement_parent_node_id ?? chooseDefaultDestination(nodes)
+    : nodes.find((node) => node.target_id === server.id)?.parent_id ?? chooseDefaultDestination(nodes);
   return {
     metadata,
     draft: {

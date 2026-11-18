@@ -2454,7 +2454,14 @@ describe("PageEditor", () => {
     // Text typed while the Combine retry is in flight is sent again before the
     // dialog asks. When the draft moved again, the dialog shows the newer
     // preview instead of overwriting it, and the next confirm uses the newer base.
+    // The page sits in a folder; the chosen result places it in Context / Inbox.
     const metadata = { title: "Hello", page_type: "overview", tags: [], aliases: [], placement_parent_node_id: null };
+    const folderId = "88888888-8888-4888-8888-888888888888";
+    const tree = contextTreeNodesWithPageBranch()
+      .filter((node) => node.parent_id !== "context-page-node")
+      .map((node) => node.target_id === page.id ? { ...node, parent_id: folderId } : node);
+    const inbox = tree.find((node) => node.slug === "inbox")!;
+    tree.push({ ...inbox, id: folderId, slug: "projects", title: "Projects" });
     const overlap = (revision: number, serverBody: string, keptBody: string) => ({
       error_code: "context_merge_conflict", message: "conflict", request_id: "r1", warnings: [],
       server_version_id: "v1", server_content_hash: String(revision).repeat(64),
@@ -2486,7 +2493,7 @@ describe("PageEditor", () => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
       if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
-        return jsonResponse({ data: contextTreeNodes() });
+        return jsonResponse({ data: tree });
       }
       if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
@@ -2521,8 +2528,10 @@ describe("PageEditor", () => {
     expect(saves[3]).toMatchObject({
       version_id: "v1", expected_editing_revision: 2, base_content_hash: "2".repeat(64),
       base_snapshot: { body_md: "# Hello\n\nTheirs", page_metadata: metadata },
-      // The chosen result is saved like any editor text (with its front matter).
+      // The chosen result is saved like any editor text (with its front matter),
+      // in Context / Inbox (its null placement), not the folder the tree shows.
       body_md: expect.stringMatching(/\n# Hello\n\nMine\nTheirs$/),
+      destination_node_id: inbox.id,
     });
     expect(saves[4]).toMatchObject({
       expected_editing_revision: 3,

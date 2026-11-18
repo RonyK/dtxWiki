@@ -154,7 +154,9 @@ export function ContextMergeDialog({
         </div>
       )}
     >
-      <div className="context-merge-body">
+      {/* While the answer is being written nothing in it can change: what was
+          confirmed is what is written. */}
+      <div className="context-merge-body" inert={busy} aria-busy={busy}>
         {refreshed ? <p className="context-merge-refreshed" role="status">{t("merge.refreshed")}</p> : null}
         <p className="context-merge-summary">{summary}</p>
         <SegmentedControl

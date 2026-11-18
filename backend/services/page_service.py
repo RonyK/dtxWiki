@@ -1294,15 +1294,14 @@ class PageService:
         edited) result must all still match, as for publication.
         """
         from backend.services.context_draft_workflow import (
-            edit_merge_candidate,
             history_for,
             merge_draft_references,
+            merge_write_candidate,
             metadata_dict,
+            metadata_for,
             parents_for,
-            preview_merge,
             record_draft_save,
             set_parents,
-            verify_preview,
         )
 
         with self.session_factory.begin() as session:
@@ -1324,11 +1323,19 @@ class PageService:
                         error_code="editing_revision_conflict",
                     )
                 target_id = commit_version_id or page.current_published_version_id
-                preview = preview_merge(
+                preview, candidate = merge_write_candidate(
                     session,
                     page,
                     version,
+                    SimpleNamespace(
+                        expected_editing_revision=expected_editing_revision,
+                        result_hash=result_hash,
+                        on_conflict=on_conflict,
+                        result_body_md=result_body_md,
+                        result_page_metadata=result_page_metadata,
+                    ),
                     commit_version_id=target_id,
+                    expected_target=commit_version_id,
                     prepare=lambda candidate: self._prepare_merge_candidate(
                         session,
                         page,
@@ -1339,59 +1346,41 @@ class PageService:
                         actor_provenance,
                     ),
                 )
-                # The draft already contains the target (or there is none):
-                # nothing to merge, so nothing is saved.
-                if preview.kind == "fast_forward":
+                if (
+                    preview.kind == "fast_forward"
+                    and candidate.body_md == version.body_md
+                    and candidate.metadata == metadata_for(page, version)
+                ):
                     return self._payload_from_page(session, page, version)
-                candidate = preview.choose(on_conflict)
-                if result_body_md is not None or result_page_metadata is not None:
-                    candidate = self._prepare_merge_candidate(
-                        session,
-                        page,
-                        version,
-                        edit_merge_candidate(
-                            candidate,
-                            body_md=result_body_md,
-                            page_metadata=result_page_metadata,
-                        ),
-                        actor_kind,
-                        actor_id,
-                        actor_provenance,
-                    )
-                if result_hash is not None:
-                    verify_preview(
-                        preview,
-                        SimpleNamespace(
-                            expected_editing_revision=expected_editing_revision,
-                            result_hash=result_hash,
-                        ),
-                        candidate,
-                        expected_target=commit_version_id,
-                    )
-                target = self._require_page_version(session, page, target_id)
+                target = (
+                    self._require_page_version(session, page, target_id)
+                    if target_id
+                    else None
+                )
                 version.body_md, version.block_map = (
                     candidate.body_md,
                     candidate.block_map,
                 )
                 version.content_hash = content_hash(candidate.body_md)
                 version.page_metadata = metadata_dict(candidate.metadata)
-                merge_draft_references(
-                    session,
-                    source=version,
-                    head=target,
-                    target=version,
-                    self_origins=self.body_preparer.self_origins,
-                )
-                history, _ = history_for(session, page)
-                parents = list(parents_for(session, version))
-                parents = parents[:1] + [
-                    key
-                    for key in parents[1:]
-                    if not history.is_ancestor(key, target_id)
-                ]
-                if target_id not in parents:
-                    parents.append(target_id)
-                set_parents(session, version, parents)
+                if preview.kind != "fast_forward" and target is not None:
+                    merge_draft_references(
+                        session,
+                        source=version,
+                        head=target,
+                        target=version,
+                        self_origins=self.body_preparer.self_origins,
+                    )
+                    history, _ = history_for(session, page)
+                    parents = list(parents_for(session, version))
+                    parents = parents[:1] + [
+                        key
+                        for key in parents[1:]
+                        if not history.is_ancestor(key, target_id)
+                    ]
+                    if target_id not in parents:
+                        parents.append(target_id)
+                    set_parents(session, version, parents)
                 version.editing_revision += 1
                 version.last_saved_at = utc_now()
                 record_draft_save(
@@ -1717,7 +1706,7 @@ class PageService:
                     from backend.schemas.context_write import ReviewDecisionRequest
                     from backend.services.context_draft_workflow import (
                         direct_publication_risk,
-                        publication_candidate,
+                        merge_write_candidate,
                     )
                     from backend.services.review_risk_policy import (
                         ai_writes_require_human_review,
@@ -1736,7 +1725,7 @@ class PageService:
                         result_page_metadata=result_page_metadata,
                     )
                     policy_workspace = self._workspace_for(session, page.workspace_id)
-                    _, candidate = publication_candidate(
+                    _, candidate = merge_write_candidate(
                         session,
                         page,
                         staged,
@@ -4745,11 +4734,11 @@ class PageService:
         from backend.schemas.context_write import PublishContextPageRequest
         from backend.services.context_draft_workflow import (
             direct_publication_risk,
-            publication_candidate,
+            merge_write_candidate,
         )
 
         try:
-            _, candidate = publication_candidate(
+            _, candidate = merge_write_candidate(
                 session,
                 page,
                 version,

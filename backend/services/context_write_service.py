@@ -3093,8 +3093,8 @@ class ContextWriteService:
             from backend.services.context_draft_workflow import (
                 direct_publication_risk,
                 materialize_publication,
+                merge_write_candidate,
                 metadata_for,
-                publication_candidate,
             )
             from backend.services.page_service import PageService
 
@@ -3103,7 +3103,7 @@ class ContextWriteService:
                 body_preparer=self.body_preparer,
                 actor_context=self.actor_context,
             )
-            merge_preview, candidate = publication_candidate(
+            merge_preview, candidate = merge_write_candidate(
                 session,
                 page,
                 version,
