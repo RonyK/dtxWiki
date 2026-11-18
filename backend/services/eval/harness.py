@@ -166,30 +166,21 @@ def _predicted_identifiers(
     actor: ActorContext | None,
     lane: str | None = None,
 ) -> list[str]:
-    """Collect document predictions without spending the budget on versions."""
-    predicted: dict[str, None] = {}
-    cursor = None
-    seen_cursors: set[str] = set()
-    while True:
-        options = {"cursor": cursor} if cursor is not None else {}
-        payload = search_service.search(
-            session=session,
-            workspace_id=workspace_id,
-            query=query,
-            retrieval_mode=mode,
-            limit=k,
-            actor=actor,
-            **options,
-        )
-        for result in payload.ranked_results:
-            if lane is None or _result_belongs_to_lane(result, lane):
-                predicted.setdefault(result_identifier(result), None)
-                if len(predicted) >= k:
-                    return list(predicted)[:k]
-        cursor = payload.next_cursor
-        if cursor is None or cursor in seen_cursors:
-            return list(predicted)
-        seen_cursors.add(cursor)
+    """Select document predictions from one retrieval, after any lane filter."""
+    payload = search_service.search_documents(
+        session=session,
+        workspace_id=workspace_id,
+        query=query,
+        retrieval_mode=mode,
+        limit=k,
+        actor=actor,
+        result_filter=(
+            (lambda result: _result_belongs_to_lane(result, lane))
+            if lane is not None
+            else None
+        ),
+    )
+    return [result_identifier(result) for result in payload.ranked_results]
 
 
 def evaluate(

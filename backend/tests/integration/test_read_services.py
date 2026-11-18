@@ -471,7 +471,6 @@ def test_workspace_read_service_lists_details_and_guide_payload():
         "workspace_role": "none",
         "may_write_drafts": False,
         "my_writes_wait_for_human_review": False,
-        "my_writes_stage_as_drafts": False,
     }
     assert brief.required_workflow[0].startswith("guide: this brief view")
     assert any("get_index(format='nodes')" in step for step in brief.required_workflow)

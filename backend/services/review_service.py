@@ -2388,7 +2388,10 @@ class ReviewService:
             "browser_session",
             "internal",
         }:
-            raise ReadValidationError("AI-authenticated actors cannot approve reviews")
+            raise RejectedByPolicyError(
+                "AI-authenticated actors cannot approve reviews",
+                error_code="human_approval_required",
+            )
         if change_set is None or change_set.workspace_id != workspace_id:
             raise ReadNotFoundError("change set not found")
 

@@ -82,16 +82,16 @@ export async function configureWorkspaceLabs(
 export async function enableKnowledgeMapLab(page: Page) {
   const workspace = await currentWorkspace(page.request);
   await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
-  await page.getByRole("checkbox", { name: /^(Workspace Knowledge Map|워크스페이스 지식 지도)$/ }).check();
+  await page.getByRole("switch", { name: /^(Workspace Knowledge Map|워크스페이스 지식 지도)$/ }).check();
   await saveLabsSettings(page, "graph");
 }
 
 /** Save the Labs draft and wait for the server to accept its revision. */
 export async function saveLabsSettings(page: Page, group: "labs" | "graph" = "labs") {
-  const checkbox = page.getByRole("checkbox", {
+  const toggle = page.getByRole("switch", {
     name: group === "graph" ? /^(Workspace Knowledge Map|워크스페이스 지식 지도)$/ : /^Ask$/,
   });
-  const card = page.locator(".policy-card").filter({ has: checkbox });
+  const card = page.locator(".policy-card").filter({ has: toggle });
   const save = card.getByRole("button", { name: /^(Save|저장)$/ });
   if (await save.isEnabled()) {
     const saved = page.waitForResponse((response) => response.request().method() === "PATCH"

@@ -40,6 +40,7 @@ from backend.repositories.mcp_chat_projection import (
     ProjectionLink,
     ProjectionPolicy,
     artifact_visible_predicate,
+    edited_version_id,
     load_projection,
 )
 from backend.repositories.mcp_chat_repo import (
@@ -129,6 +130,8 @@ CONTEXT_EDIT_TOOLS = frozenset(
         "patch_context_edit",
         "submit_context_edit_for_review",
         "discard_context_edit",
+        "bring_in_context_version",
+        "publish_context_edit",
     }
 )
 WRITE_TOOLS = {
@@ -208,12 +211,22 @@ _EDIT_SUMMARY_TOOLS = frozenset(
     }
 )
 _SESSION_EDIT_TOOLS = frozenset(
-    {"create_context_page", "update_context_edit", "patch_context_edit"}
+    {
+        "create_context_page",
+        "update_context_edit",
+        "patch_context_edit",
+        "bring_in_context_version",
+    }
+)
+# Calls that finish an edit: their receipt names the version they submitted or
+# published, which stays diffable after the draft closes.
+_FINAL_RECEIPT_TOOLS = frozenset(
+    {"submit_context_edit_for_review", "publish_context_edit"}
 )
 # Calls whose receipt (result_detail.version_id) names the Context version they
 # wrote or submitted: Chats diffs that version, the graph links the chat to it.
 # begin only opens an edit and discard ends one; neither produced its version.
-VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | {"submit_context_edit_for_review"}
+VERSION_RECEIPT_TOOLS = _SESSION_EDIT_TOOLS | _FINAL_RECEIPT_TOOLS
 # Commands whose input names the editing row they act on.
 _VERSION_NAMING_EDIT_TOOLS = frozenset(
     {
@@ -221,6 +234,7 @@ _VERSION_NAMING_EDIT_TOOLS = frozenset(
         "patch_context_edit",
         "submit_context_edit_for_review",
         "discard_context_edit",
+        "bring_in_context_version",
     }
 )
 _INPUT_EDIT_MODES = {
@@ -253,6 +267,8 @@ _CONTEXT_VERSION_ID_FIELDS = frozenset(
         "base_version_id",
         "editing_version_id",
         "cited_context_page_version_id",
+        "commit_version_id",
+        "expected_published_version_id",
     }
 )
 # write_agent_page_draft's base_version_id is an AgentPageVersion.
@@ -1576,9 +1592,9 @@ class McpChatService:
     ) -> dict[UUID, McpChatSessionDiff]:
         """Which rows offer a cumulative diff, computed now and never stored.
 
-        A submit row diffs the version it submitted against that version's
-        base. While an edit session is still open, its latest edit row in
-        this chat diffs the open editing row against its base. Only
+        A submit or publish row diffs the version it names against that
+        version's base. While an edit session is still open, its latest edit
+        row in this chat diffs the open editing row against its base. Only
         successful calls the reader can see qualify.
         """
 
@@ -1590,7 +1606,7 @@ class McpChatService:
             version_id = _edited_version_id(row)
             if version_id is None:
                 continue
-            if row.tool_name == "submit_context_edit_for_review":
+            if row.tool_name in _FINAL_RECEIPT_TOOLS:
                 candidates[row.id] = (version_id, False)
             elif row.tool_name in _SESSION_EDIT_TOOLS:
                 latest_edit[version_id] = row.id
@@ -2075,6 +2091,8 @@ class _ReaderGate:
             ("base_version_id", "base_version"),
             ("editing_version_id", "editing_version"),
             ("cited_context_page_version_id", "cited_version"),
+            ("commit_version_id", "commit_version"),
+            ("expected_published_version_id", "expected_published_version"),
         ):
             if _target_kind_for_field(row.tool_name, field) != "context_version":
                 continue
@@ -2114,7 +2132,18 @@ class _ReaderGate:
         owner -- may see the content.
         """
 
-        if self.actor is None or row.tool_name not in CONTEXT_EDIT_TOOLS:
+        if self.actor is None:
+            return True
+        # Every Context version the input names must be readable, as for a
+        # failed call: a publication can return a visible commit while the
+        # draft it came from stays hidden.
+        if any(
+            self.visible_version(version_id) is None
+            for kind, version_id in _input_target_refs(row.tool_name, row.input_summary)
+            if kind == "context_version"
+        ):
+            return False
+        if row.tool_name not in CONTEXT_EDIT_TOOLS:
             return True
         version_id = _edited_version_id(row)
         if version_id is not None:
@@ -2387,23 +2416,13 @@ def _purge_row(row: MCPToolCall) -> bool:
 
 
 def _edited_version_id(row: MCPToolCall) -> UUID | None:
-    """The Context version a context-edit call wrote into, when recorded.
+    """The Context version a context-edit call produced (its receipt)."""
 
-    Commands that name their editing row take it from the input; create and
-    whole-body update learn it from the response, which capture keeps in
-    ``result_detail``. Calls captured before that existed return ``None``.
-    """
-
-    if row.tool_name not in CONTEXT_EDIT_TOOLS:
-        return None
-    input_summary = row.input_summary if isinstance(row.input_summary, dict) else {}
-    detail = row.result_detail if isinstance(row.result_detail, dict) else {}
-    from_input = (
-        _parse_uuid_value(input_summary.get("version_id"))
-        if row.tool_name in _VERSION_NAMING_EDIT_TOOLS
-        else None
+    return edited_version_id(
+        row,
+        context_edit_tools=CONTEXT_EDIT_TOOLS,
+        version_naming_edit_tools=_VERSION_NAMING_EDIT_TOOLS,
     )
-    return from_input or _parse_uuid_value(detail.get("version_id"))
 
 
 def _parse_uuid_value(value: Any) -> UUID | None:

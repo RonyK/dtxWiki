@@ -2859,6 +2859,67 @@ button.history-card {
   justify-content: start;
 }
 
+/* An on/off setting reads as a switch. The class outranks the base 16px
+   checkbox geometry; the label keeps the 24px target. */
+.switch-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  cursor: pointer;
+}
+
+input[type="checkbox"].switch-control {
+  appearance: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  min-width: 36px;
+  min-height: 20px;
+  max-width: 36px;
+  max-height: 20px;
+  flex: 0 0 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-active);
+  cursor: inherit;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+input[type="checkbox"].switch-control::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.3);
+  transition: transform 120ms ease;
+}
+
+input[type="checkbox"].switch-control:checked {
+  border-color: var(--context);
+  background: var(--context);
+}
+
+input[type="checkbox"].switch-control:checked::before {
+  transform: translateX(16px);
+}
+
+.switch-field:has(> .switch-control:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input[type="checkbox"].switch-control,
+  input[type="checkbox"].switch-control::before {
+    transition: none;
+  }
+}
+
 .placement-summary {
   display: grid;
   gap: 7px;

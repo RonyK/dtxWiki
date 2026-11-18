@@ -83,7 +83,7 @@ test.describe("UI surface", () => {
       const workspace = await currentWorkspace(page.request);
       if (surface.path === "/agent") {
         await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
-        await page.getByRole("checkbox", { name: "Agent", exact: true }).check();
+        await page.getByRole("switch", { name: "Agent", exact: true }).check();
         await saveLabsSettings(page);
       }
       const suffix = surface.path === "/context/new"
@@ -186,11 +186,11 @@ test.describe("UI surface", () => {
     await expect(page).toHaveURL(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
     await expect(page.getByRole("heading", { name: "Labs", exact: true }))
       .toBeVisible();
-    const ask = page.getByRole("checkbox", { name: "Ask", exact: true });
-    const agent = page.getByRole("checkbox", { name: "Agent", exact: true });
+    const ask = page.getByRole("switch", { name: "Ask", exact: true });
+    const agent = page.getByRole("switch", { name: "Agent", exact: true });
     await expect(ask).not.toBeChecked();
     await expect(agent).not.toBeChecked();
-    await expect(page.getByRole("checkbox", { name: "Show Chats menu", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("switch", { name: "Show Chats menu", exact: true })).toHaveCount(0);
 
     await ask.check();
     await saveLabsSettings(page);
@@ -267,8 +267,8 @@ test.describe("UI surface", () => {
     await signUp(page.request, firstEmail);
     const firstWorkspace = await currentWorkspace(page.request);
     await page.goto(`${workspaceUrl(firstWorkspace.id, "settings")}?section=labs`);
-    const ask = page.getByRole("checkbox", { name: "Ask", exact: true });
-    const agent = page.getByRole("checkbox", { name: "Agent", exact: true });
+    const ask = page.getByRole("switch", { name: "Ask", exact: true });
+    const agent = page.getByRole("switch", { name: "Agent", exact: true });
     const sidebar = page.getByRole("navigation", { name: "Sidebar" });
     await ask.check();
     await saveLabsSettings(page);

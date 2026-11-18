@@ -1161,6 +1161,7 @@ def preview_context_merge(
                 on_conflict=request_body.on_conflict,
                 body_md=request_body.body_md,
                 page_metadata=request_body.page_metadata,
+                commit_version_id=request_body.commit_version_id,
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
                 actor_provenance=actor.provenance,

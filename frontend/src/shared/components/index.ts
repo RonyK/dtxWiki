@@ -54,6 +54,7 @@ export * from "./Shell";
 export * from "./Spinner";
 export * from "./StatusBanner";
 export * from "./StatusPill";
+export * from "./Switch";
 export * from "./TabbedInspector";
 export * from "./TreeIndexPreview";
 export * from "./TreeNodeActionDialogs";

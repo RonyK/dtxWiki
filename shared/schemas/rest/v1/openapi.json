@@ -6207,6 +6207,18 @@
             ],
             "title": "Body Md"
           },
+          "commit_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Version Id"
+          },
           "on_conflict": {
             "anyOf": [
               {
@@ -18995,7 +19007,10 @@
                 "type": "null"
               }
             ],
-            "title": "Result Body Md"
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
+            "maxLength": 1000000,
+            "title": "Result Body Md",
+            "x-final-maxLength": 1000000
           },
           "result_hash": {
             "pattern": "^[a-f0-9]{64}$",
@@ -21073,7 +21088,10 @@
                 "type": "null"
               }
             ],
-            "title": "Result Body Md"
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
+            "maxLength": 1000000,
+            "title": "Result Body Md",
+            "x-final-maxLength": 1000000
           },
           "result_hash": {
             "anyOf": [

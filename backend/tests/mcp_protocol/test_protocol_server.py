@@ -49,6 +49,9 @@ def _pat_actor(
 
 
 EXPECTED_TOOLS = {
+    "preview_context_merge",
+    "bring_in_context_version",
+    "publish_context_edit",
     "build_agent_input_bundle",
     "cite",
     "fetch",

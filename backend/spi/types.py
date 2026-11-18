@@ -89,6 +89,10 @@ SearchVersionStatus = Literal["draft", "published_snapshot"]
 
 
 class SearchFilters(BaseModel):
+    # Internal evidence eligibility, independent of the caller's read access.
+    # Keeping this private preserves the public search input and wire schema.
+    _context_published_only: bool = PrivateAttr(default=False)
+
     include_agents: bool = Field(
         default=True,
         description="Whether Agent pages are included in search results.",

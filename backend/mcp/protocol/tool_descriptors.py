@@ -41,6 +41,8 @@ from backend.schemas.mcp.agent_tools import (
 from backend.schemas.mcp.context_tools import (
     BeginContextEditInput,
     BeginContextEditToolOutput,
+    BringInContextVersionInput,
+    BringInContextVersionToolOutput,
     CiteInput,
     CiteToolOutput,
     CreateContextPageInput,
@@ -51,6 +53,10 @@ from backend.schemas.mcp.context_tools import (
     ListMyContextEditsToolOutput,
     PatchContextEditInput,
     PatchContextEditToolOutput,
+    PreviewContextMergeInput,
+    PreviewContextMergeToolOutput,
+    PublishContextEditInput,
+    PublishContextEditToolOutput,
     SubmitContextEditForReviewInput,
     SubmitContextEditForReviewToolOutput,
     SubmitFeedbackInput,
@@ -117,6 +123,38 @@ class ToolMeta:
 
 
 TOOL_META = {
+    "preview_context_merge": (
+        "Preview context merge",
+        "Show what publish_context_edit would publish for this draft: the draft "
+        "merged with the current published version, or with commit_version_id "
+        "what bring_in_context_version would save. Saves nothing. result "
+        "carries the result_hash to publish; a conflict also returns keep_both "
+        "and latest, and result follows on_conflict once you choose. Pass "
+        "body_md/page_metadata to preview an edited result.",
+        True,
+    ),
+    "bring_in_context_version": (
+        "Bring in context version",
+        "Merge a commit of this page into the named draft (default: the current "
+        "published version) and return the draft's new editing_revision. A draft "
+        "that already contains it is not saved. A conflict saves nothing until "
+        "on_conflict is chosen. Requires conversation_token: echo one from an "
+        "earlier envelope or pass the literal new.",
+        False,
+        False,
+        True,
+    ),
+    "publish_context_edit": (
+        "Publish context edit",
+        "Publish the result previewed by preview_context_merge, with the same "
+        "on_conflict and result edits. Workspace review policy decides whether "
+        "it publishes or needs a person (human_approval_required). The returned "
+        "version_id can be a new merge commit. Requires conversation_token: "
+        "echo one from an earlier envelope or pass the literal new.",
+        False,
+        False,
+        True,
+    ),
     "get_operation_status": (
         "Get operation status",
         "Recover your keyed write within 24 hours without resending its body. "
@@ -547,6 +585,21 @@ def list_dtxwiki_tools(tool_names: Iterable[str] | None = None) -> list[Tool]:
             "get_operation_status",
             GetOperationStatusInput.model_json_schema(),
             GetOperationStatusOutput.model_json_schema(),
+        ),
+        tool(
+            "preview_context_merge",
+            PreviewContextMergeInput.model_json_schema(),
+            PreviewContextMergeToolOutput.model_json_schema(),
+        ),
+        tool(
+            "bring_in_context_version",
+            BringInContextVersionInput.model_json_schema(),
+            BringInContextVersionToolOutput.model_json_schema(),
+        ),
+        tool(
+            "publish_context_edit",
+            PublishContextEditInput.model_json_schema(),
+            PublishContextEditToolOutput.model_json_schema(),
         ),
         tool(
             "create_context_page",

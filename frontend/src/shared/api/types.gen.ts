@@ -5788,6 +5788,8 @@ export interface components {
         ContextMergePreviewRequest: {
             /** Body Md */
             body_md?: string | null;
+            /** Commit Version Id */
+            commit_version_id?: string | null;
             /** On Conflict */
             on_conflict?: ("keep_both" | "latest") | null;
             /** Page Metadata */
@@ -10402,7 +10404,10 @@ export interface components {
             publish_despite_findings: boolean;
             /** Reason */
             reason: string;
-            /** Result Body Md */
+            /**
+             * Result Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             result_body_md?: string | null;
             /** Result Hash */
             result_hash: string;
@@ -11086,7 +11091,10 @@ export interface components {
             expected_published_version_id?: string | null;
             /** On Conflict */
             on_conflict?: ("keep_both" | "latest") | null;
-            /** Result Body Md */
+            /**
+             * Result Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
             result_body_md?: string | null;
             /** Result Hash */
             result_hash?: string | null;

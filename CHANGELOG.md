@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Agent review switch
+
+- With "Review what agents write" turned off, an agent's write follows exactly
+  the rule a person's does: the risk threshold and page-type rules no longer
+  send it to review, and its `submit_context_edit_for_review` (MCP, or REST
+  with a token) publishes it unless the body fails the format floor or
+  conflicts with the published version. A person's review request still waits
+  for a reviewer.
+- On/off policy options in Settings are switches.
+
+### MCP Context merge tools
+
+- Add `preview_context_merge`, `bring_in_context_version`, and
+  `publish_context_edit` for shared Context drafts. A preview's `result` is what
+  publication publishes for the same conflict choice and edits; publication
+  checks the preview's revision, published version and result hash, and the
+  workspace review policy decides it. With `commit_version_id` (MCP and REST
+  `merge-preview`), a preview shows what bringing in that commit would save.
+  Bringing in a commit the draft already contains saves nothing.
+- An MCP call that names a Context page of another workspace is refused at the
+  MCP edge, as REST already does; `patch_context_edit` checks the workspace
+  too. A publication receipt offers the chat's cumulative diff in Chats, and
+  Chats takes the version a call produced from its receipt, so an
+  auto-published submission diffs the merge commit it returned.
+- Register `context_merge_conflict` and `human_approval_required`. An AI
+  approval refusal now reports `human_approval_required` on every surface, and
+  a merge target outside the page's history reports `not_found`.
+- Every Context command shares one failure mapping, and result bodies follow
+  the same input checks as other bodies. The guide no longer reports
+  `actor_context.my_writes_stage_as_drafts`; use
+  `my_writes_wait_for_human_review`.
+- MCP contract revision 36 adds these three tools and typed merge-preview
+  results. Refresh cached tool catalogs and result schemas before using them.
+
 ### Versioned Context search
 
 - Keep matching published and shared draft versions as separate search results,
@@ -15,6 +49,10 @@
   Refresh cached tool catalogs and result schemas, and use `version_id` to read
   the matching version.
 - REST and retriever/SPI results carry the same optional version-state fields.
+- Apply Ask's published Context eligibility before retrieval candidate limits,
+  so draft-only matches cannot crowd out published evidence for editors.
+- Evaluate document rankings from a single retrieval per query, removing
+  duplicate versions and claims before the document budget is applied.
 
 ### Shared Context drafts
 
@@ -42,7 +80,6 @@
   everyone who can see its draft whether or not it is in the body yet.
   Account deletion keeps the account's drafts and shows its author name on
   what it wrote instead of "Human editor".
-
 
 ### Context body links
 

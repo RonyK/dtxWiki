@@ -22,6 +22,7 @@ async function checkBoxes(page: Page, testInfo: TestInfo, surface: string) {
           )?.getBoundingClientRect();
           return {
             id: node.id,
+            role: node.getAttribute("role") ?? (input ? "checkbox" : null),
             label:
               node.getAttribute("aria-label") ||
               associatedLabel?.textContent?.trim() ||
@@ -43,10 +44,14 @@ async function checkBoxes(page: Page, testInfo: TestInfo, surface: string) {
         }),
     );
   for (const item of geometry) {
-    expect(item.width, `${surface}: ${item.label}`).toBe(16);
-    expect(item.height, `${surface}: ${item.label}`).toBe(16);
-    expect(item.computedWidth).toBe("16px");
-    expect(item.computedHeight).toBe("16px");
+    // On/off policy switches use a wider track; selection checkboxes and
+    // read-only Markdown task marks keep their 16px square geometry.
+    const width = item.role === "switch" ? 36 : 16;
+    const height = item.role === "switch" ? 20 : 16;
+    expect(item.width, `${surface}: ${item.label}`).toBe(width);
+    expect(item.height, `${surface}: ${item.label}`).toBe(height);
+    expect(item.computedWidth).toBe(`${width}px`);
+    expect(item.computedHeight).toBe(`${height}px`);
     if (item.targetHeight !== undefined) {
       expect(item.targetHeight, `${surface}: ${item.label}`).toBeGreaterThanOrEqual(24);
       expect(item.targetWidth, `${surface}: ${item.label}`).toBeGreaterThanOrEqual(24);
@@ -783,7 +788,7 @@ for (const [language, width] of LAYOUTS) {
     // Ask is enabled per workspace. Enable it through the mounted Labs
     // UI so this inventory exercises the save form rather than Not Found.
     await page.goto(`${workspaceUrl(workspace.id, "settings")}?section=labs`);
-    const askMenu = page.getByRole("checkbox", {
+    const askMenu = page.getByRole("switch", {
       name: "Ask",
       exact: true,
     });

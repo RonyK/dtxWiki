@@ -122,6 +122,7 @@ _MCP_OPERATIONS = {
     "discard_context_edit": "delete",
     "submit_context_edit_for_review": "request_review",
     "submit_revision_for_review": "request_review",
+    "publish_context_edit": "publish",
 }
 
 

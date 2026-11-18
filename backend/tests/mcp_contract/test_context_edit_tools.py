@@ -6,8 +6,11 @@ import pytest
 from sqlalchemy import select
 
 from backend.mcp.router import dispatch
-from backend.models.context import ContextPageVersion
+from backend.models.context import ContextPage, ContextPageVersion
+from backend.models.mcp_trace import MCPWriteIdempotency
+from backend.models.review import ReviewItem
 from backend.models.workspace import Workspace
+from backend.scripts.seed_dev import seed_default_workspace
 
 
 @pytest.fixture
@@ -145,6 +148,104 @@ def test_update_then_submit_context_edit_happy_path(page_service, actor):
     assert submitted.envelope.result_status == "succeeded", submitted.envelope
     assert submitted.data.version_status == "draft"
     assert submitted.data.review_item_id is not None
+
+
+def test_submit_context_edit_cannot_publish_another_workspace(page_service, actor):
+    # Independent security path: an A-only PAT can name B's raw UUIDs even
+    # when the router has authorized A. Real SQL and Git storage are needed
+    # to prove completion leaves B's draft, published ref, and reviews alone.
+    workspace_id = _workspace(page_service)
+    assert actor.token_workspace_ids == (workspace_id,)
+    with page_service.session_factory.begin() as session:
+        other = seed_default_workspace(session, slug="submit-other", title="Other")
+        other_id = other.id
+        other.review_policy = {
+            **other.review_policy,
+            "review_required": {
+                **other.review_policy["review_required"],
+                "always_for_ai_authored": False,
+            },
+        }
+    draft = page_service.create_page_first(
+        workspace_slug="submit-other",
+        title="Other workspace draft",
+        body_md="# Other workspace\n\nThis draft must stay unpublished.",
+        actor_kind="human",
+        actor_id="other-author",
+        actor_provenance="browser_session",
+    )
+
+    def other_state():
+        with page_service.session_factory() as session:
+            page = session.get(ContextPage, draft.id)
+            version = session.get(ContextPageVersion, draft.version_id)
+            store = session.info["context_snapshot_store"]
+            return (
+                page.current_version_id,
+                page.current_published_version_id,
+                version.version_status,
+                version.editing_revision,
+                version.body_md,
+                version.commit_oid,
+                store.list_heads(other_id),
+                tuple(
+                    session.execute(
+                        select(ReviewItem.id, ReviewItem.status)
+                        .where(ReviewItem.workspace_id == other_id)
+                        .order_by(ReviewItem.id)
+                    )
+                ),
+            )
+
+    before = other_state()
+    named = {
+        "workspace_id": str(workspace_id),
+        "page_id": str(draft.id),
+        "version_id": str(draft.version_id),
+        "expected_editing_revision": draft.editing_revision,
+        "idempotency_key": "submit-foreign-workspace",
+    }
+    response = dispatch(
+        "submit_context_edit_for_review",
+        named,
+        actor=actor,
+        page_service=page_service,
+    )
+    # Patching took the same unchecked path and rewrote B's draft.
+    patched = dispatch(
+        "patch_context_edit",
+        {
+            **named,
+            "operations": [
+                {
+                    "op": "replace_text",
+                    "old_text": "This draft must stay unpublished.",
+                    "new_text": "Written from another workspace.",
+                }
+            ],
+        },
+        actor=actor,
+        page_service=page_service,
+    )
+
+    after = other_state()
+    assert response.envelope.error_code == "not_found", (
+        response.envelope,
+        before,
+        after,
+    )
+    assert patched.envelope.error_code == "not_found", patched.envelope
+    assert after == before
+    with page_service.session_factory() as session:
+        assert (
+            session.scalar(
+                select(MCPWriteIdempotency.id).where(
+                    MCPWriteIdempotency.workspace_id == workspace_id,
+                    MCPWriteIdempotency.idempotency_key == "submit-foreign-workspace",
+                )
+            )
+            is None
+        )
 
 
 def test_cite_changes_references_on_private_edit_and_replays(page_service, actor):

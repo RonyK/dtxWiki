@@ -1341,6 +1341,87 @@ def test_keyword_candidate_limit_counts_documents_and_keeps_their_versions():
             connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, original_limit)
 
 
+def test_ask_selects_published_candidates_before_the_document_budget(session_factory):
+    # Follow-up budget exception: the merge transport/redaction cases cannot
+    # expose FTS document-budget starvation. This needs actual BM25 selection
+    # across distinct pages; the existing same-page version traversal cannot
+    # exercise that independent failure path. No extra actor/mode matrix.
+    from backend.schemas.read import SearchFilters
+    from backend.services.ask_service import AskService
+
+    search = SearchService()
+    filters = SearchFilters()
+    with session_factory.begin() as session:
+        workspace = seed_default_workspace(session)
+        published, version = _metadata_page(
+            session,
+            workspace.id,
+            slug="published-evidence",
+            title="Published evidence",
+            body="CrowdNeedle " + "ordinary filler " * 300,
+        )
+        # Distinct draft-only documents fill all twelve keyword candidate
+        # slots. Expanding versions within a selected page cannot recover
+        # the lower-ranked published document this fixture would otherwise lose.
+        for number in range(12):
+            _metadata_page(
+                session,
+                workspace.id,
+                slug=f"draft-crowding-{number}",
+                title=f"Draft source {number}",
+                body="CrowdNeedle " * 20,
+                published=False,
+            )
+        actor = ActorContext(
+            actor_kind="human",
+            actor_id="editor",
+            workspace_id=workspace.id,
+            workspace_role="editor",
+            role="editor",
+        )
+        before = search.search(
+            session,
+            workspace.id,
+            "CrowdNeedle",
+            scope="context_page",
+            limit=3,
+            actor=actor,
+            filters=filters,
+        )
+        assert before.total_count == 12
+        assert all(hit.version_status == "draft" for hit in before.ranked_results)
+        citable = search.search(
+            session,
+            workspace.id,
+            "CrowdNeedle",
+            scope="context_page",
+            limit=3,
+            actor=actor,
+            filters=filters,
+            citable_only=True,
+        )
+        assert [(hit.id, hit.version_id) for hit in citable.ranked_results] == [
+            (published.id, version.id)
+        ]
+        answer = AskService(search_service=search)._answer(
+            session, workspace.id, "CrowdNeedle", actor
+        )
+        assert answer[1] == [published.id]
+        assert answer[5] is False
+        after = search.search(
+            session,
+            workspace.id,
+            "CrowdNeedle",
+            scope="context_page",
+            limit=3,
+            actor=actor,
+            filters=filters,
+        )
+        assert [(hit.id, hit.version_id) for hit in after.ranked_results] == [
+            (hit.id, hit.version_id) for hit in before.ranked_results
+        ]
+
+
 def test_name_index_resyncs_on_rename_and_title_only_update():
     """BS-1/BS-2: a tree rename and a body-unchanged title-only edit both
     mutate the canonical page title without writing a new version; the name

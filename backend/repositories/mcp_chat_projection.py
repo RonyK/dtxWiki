@@ -59,6 +59,38 @@ from backend.repositories.workspace_scoped import select_projection_in_workspace
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
 
 
+def edited_version_id(
+    call: Any,
+    *,
+    context_edit_tools: frozenset[str],
+    version_naming_edit_tools: frozenset[str],
+) -> UUID | None:
+    """The Context version a context-edit call produced: its receipt.
+
+    A submission may publish a new merge commit, so the version a command
+    named is only the fallback for calls captured without a receipt (older
+    captures, failures). The Chats list and detail both decide with this.
+    """
+
+    if call.tool_name not in context_edit_tools:
+        return None
+    detail = call.result_detail if isinstance(call.result_detail, dict) else {}
+    named = call.input_summary if isinstance(call.input_summary, dict) else {}
+    candidates = (
+        detail.get("version_id"),
+        named.get("version_id")
+        if call.tool_name in version_naming_edit_tools
+        else None,
+    )
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            try:
+                return UUID(candidate)
+            except ValueError:
+                continue
+    return None
+
+
 @dataclass(frozen=True)
 class ProjectionPolicy:
     eligible_statuses: frozenset[str]
@@ -774,22 +806,15 @@ def _load_edit_versions(
     for chat_id, calls in result.calls_by_chat.items():
         first_id = result.first_call_ids_by_chat.get(chat_id)
         for call in calls:
-            if call.id != first_id or call.tool_name not in policy.context_edit_tools:
+            if call.id != first_id:
                 continue
-            raw_id = (
-                call.input_summary.get("version_id")
-                if call.tool_name in policy.version_naming_edit_tools
-                else None
+            version_id = edited_version_id(
+                call,
+                context_edit_tools=policy.context_edit_tools,
+                version_naming_edit_tools=policy.version_naming_edit_tools,
             )
-            candidates = (raw_id, (call.result_detail or {}).get("version_id"))
-            for raw_version_id in candidates:
-                if not isinstance(raw_version_id, str):
-                    continue
-                try:
-                    version_ids.add(UUID(raw_version_id))
-                except ValueError:
-                    continue
-                break
+            if version_id is not None:
+                version_ids.add(version_id)
     if not version_ids:
         return
     visible_pages = select_projection_in_workspace(

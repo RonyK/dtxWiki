@@ -70,6 +70,9 @@ AVAILABLE_READ_TOOLS = [
     "discard_context_edit",
     "patch_context_edit",
     "list_my_context_edits",
+    "preview_context_merge",
+    "bring_in_context_version",
+    "publish_context_edit",
     "upload_image",
     "list_context_drafts",
     "list_changes",
@@ -131,6 +134,12 @@ REQUIRED_WORKFLOW = [
         "instead of re-reading; submit_context_edit_for_review once when done. "
         "Continue editing submitted drafts by version_id. Use begin_context_edit "
         "with from to join an existing draft or start from a commit."
+    ),
+    (
+        "publish (only when asked): call preview_context_merge, then send its "
+        "editing_revision, published_version_id and result.result_hash to "
+        "publish_context_edit; workspace review policy decides. "
+        "bring_in_context_version merges a commit into a draft."
     ),
     (
         "place a new page: walk get_index(format='nodes') from /context and "
@@ -201,10 +210,6 @@ GUIDE_FIELD_EXPLANATIONS = {
         "decision in this workspace; false for browser writes, or when the "
         "workspace turned the requirement off."
     ),
-    "actor_context.my_writes_stage_as_drafts": (
-        "True for AI-authenticated writes: they never move the published "
-        "version themselves; a review decision publishes them."
-    ),
     "workspace_routing.whole_read": (
         "within_budget: the whole-workspace bundle is estimated at or under "
         "whole_read_budget_bytes, so reading it whole is an option for tasks "
@@ -217,7 +222,6 @@ _BRIEF_ACTOR_FIELDS = (
     "workspace_role",
     "may_write_drafts",
     "my_writes_wait_for_human_review",
-    "my_writes_stage_as_drafts",
 )
 
 RECOMMENDED_AGENT_GUIDANCE_FLOW = [
@@ -520,11 +524,8 @@ class WorkspaceReadService:
                 name in set(available_tools or [])
                 for name in ("create_context_page", "begin_context_edit")
             ),
-            # Both of these used to be read out of `write_policy`, a blob
-            # nothing enforced and no surface could edit, under names that
-            # promised more than they delivered. They now report what is
-            # actually true of this caller's writes.
-            #
+            # Read out of `write_policy` once, a blob nothing enforced. It now
+            # reports what is actually true of this caller's writes:
             # `my_writes_wait_for_human_review` is the question an agent is
             # really asking: will what I write sit in a queue, or land? It
             # is false for a person writing in the browser, and for an agent
@@ -532,12 +533,6 @@ class WorkspaceReadService:
             "my_writes_wait_for_human_review": (
                 getattr(actor, "provenance", "internal") in AI_PROVENANCES
                 and ai_writes_require_human_review(workspace)
-            ),
-            # An invariant, not a preference: an AI-authenticated write never
-            # moves the published pointer itself. It either waits for a
-            # decision or is published by one.
-            "my_writes_stage_as_drafts": (
-                getattr(actor, "provenance", "internal") in AI_PROVENANCES
             ),
         }
 

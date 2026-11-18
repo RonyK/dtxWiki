@@ -1,12 +1,11 @@
 ---
 name: dtxwiki-authoring-review
-description: Create or update grounded dtxWiki Context pages, upload images safely, and handle requested-change resubmission without crossing the human approval boundary. Use for every dtxWiki authoring or review-response workflow.
+description: Create or update grounded dtxWiki Context pages, upload images safely, handle requested changes, and preview authorized publication under the workspace review policy. Use for every dtxWiki authoring or review-response workflow.
 ---
 
 # dtxWiki Authoring and Review
 
 Generate and retain an idempotency_key for each write. If its response is lost, call get_operation_status with that key and follow next_action. Keep every original argument on a resend; changed content uses a new key. Successful receipts confirm saving without a read. Use page_id and version_id from the result for subsequent writes. Partial reads use top-level page_id and optional version_id.
-
 
 Read `dtxwiki-conventions` before writing. Call `guide` for the current write policy, citation policy, and effective capabilities; do not hardcode values it reports.
 
@@ -26,6 +25,16 @@ Never write against a base you did not read. `update_context_edit` and `patch_co
 4. Use `update_context_edit` for a full-document autosave -- title/body/tags/aliases/placement together, always sending the complete `body_md`. Changing tags, aliases, or placement requires the unchanged body too. Use `cite` for reference-only additions, note changes, or removals; it does not rewrite the body.
 5. Call `submit_context_edit_for_review` once, when the whole task is ready for human review ("Save draft"), not after each change. The requested draft stays editable at that same `version_id`; use its current revision for later saves. An unsubmitted draft remains readable as work in progress. Submission follows the workspace review and automatic-approval policy; inspect returned review/publication state and `data.publish_blocked_reasons`.
 6. Call `discard_context_edit` to withdraw the specified shared draft. It becomes a closed commit with its history preserved. A draft-only page follows the existing page lifecycle rules; a published page retains its published head.
+
+## Preview and publish
+
+Publish only when the user asked for publication; saving or requesting review is a separate action.
+
+1. Call `preview_context_merge` with the page and draft `version_id`. Its `result` is what publication would publish. For `kind: conflict`, `result` is null and `keep_both` and `latest` show the two choices: preview again with the user's choice as `on_conflict`. To edit the result, preview again with `body_md` and/or `page_metadata`.
+2. Call `publish_context_edit` with the preview's `editing_revision`, `published_version_id` (omit it when null) and `result.result_hash`, the same `on_conflict` and edits (as `result_body_md` and `result_page_metadata`), a `reason` and a retained `idempotency_key`. The workspace review policy decides whether it publishes or waits for a person's approval.
+3. If the preview went stale, preview again and use a new key. Use the returned `version_id`; a merge publication creates a new one.
+
+`bring_in_context_version` merges a commit (by default the current published version) into a draft; send the draft's `expected_editing_revision` and use the returned revision. A draft that already contains the commit is not saved again; on a conflict, `preview_context_merge` with the same `commit_version_id` shows both choices.
 
 ## Register document references
 
@@ -56,4 +65,4 @@ When a human requests changes:
 3. Save the changes to that shared draft with `update_context_edit` or `patch_context_edit`.
 4. Keep the existing open review request attached to the draft; inspect the returned review state.
 
-Submitting a revision never approves it. No MCP approval action exists. Never claim that a human approved, accepted, or published the work unless returned human-authored state proves it.
+Submitting a revision never approves it. No MCP review-decision action exists. `publish_context_edit` uses the caller's existing publication permissions and review policy. Describe saved, requested, approved, and published states only as the returned result establishes them; never claim a human approved or published the work unless returned human-authored state proves it.

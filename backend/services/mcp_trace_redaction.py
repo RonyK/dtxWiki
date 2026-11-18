@@ -24,12 +24,16 @@ _WRITE_BODY_FIELDS = {
     # `body_markdown`).
     "create_context_page": "body_md",
     "update_context_edit": "body_md",
+    "preview_context_merge": "body_md",
+    "publish_context_edit": "result_body_md",
 }
 # A whole-body autosave re-sends the entire document every time, so its
 # prefix is the same document preamble on every call and says nothing about
 # what changed. It keeps the digest only; Chats reads the server's edit
 # receipt (first change, changed sections) for this tool instead.
-_DIGEST_ONLY_BODY_TOOLS = frozenset({"update_context_edit"})
+_DIGEST_ONLY_BODY_TOOLS = frozenset(
+    {"update_context_edit", "preview_context_merge", "publish_context_edit"}
+)
 _SUBMIT_REVISION_TOOL = "submit_revision_for_review"
 _PATCH_CONTEXT_EDIT_TOOL = "patch_context_edit"
 # patch_draft operations carry document content in several differently named

@@ -821,10 +821,26 @@ def test_a_hidden_version_projects_an_allowlist_not_a_denylist(session_factory):
             },
             links=(_page_link(page, McpChatArtifactVerb.EDITED),),
         )
-        other_view = _item(
-            chat.read(_human(uuid4(), workspace.id, role="viewer")), call
+        # A publication returns a visible commit while the draft it names in
+        # its input stays hidden; the input decides, as for a failed call.
+        publication = chat.call(
+            "publish_context_edit",
+            {
+                "workspace_id": str(workspace.id),
+                "page_id": str(page.id),
+                "version_id": str(editing.id),
+                "expected_editing_revision": 2,
+                "reason": "HIDDEN-REASON",
+            },
+            result_detail={"page_id": str(page.id), "version_id": str(published.id)},
+            links=(_page_link(page, McpChatArtifactVerb.EDITED),),
         )
+        viewer_read = chat.read(_human(uuid4(), workspace.id, role="viewer"))
+        other_view = _item(viewer_read, call)
         owner_view = _item(chat.read(_human(owner.id, workspace.id)), call)
+    publication_view = _item(viewer_read, publication).model_dump_json()
+    assert "HIDDEN-REASON" not in publication_view
+    assert str(editing.id) not in publication_view
 
     assert other_view.input_summary == {
         "workspace_id": str(workspace.id),
@@ -1148,8 +1164,83 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
             session, new_page, status="draft", author=owner.id, number=1
         )
         new_page.current_version_id = new_editing.id
+        # Published without a submission: the draft is closed, so only the
+        # publication receipt can carry the chat's cumulative change.
+        released_page, released_base = _published_page(
+            session, workspace.id, "diff-published", "Diff Published"
+        )
+        released_base.version_status = "superseded_snapshot"
+        session.flush()
+        released = _version(
+            session,
+            released_page,
+            status="published_snapshot",
+            author=owner.id,
+            number=2,
+            parent=released_base,
+        )
+        released_page.current_published_version_id = released.id
+        # An auto-published submission names its closed source draft but
+        # returns the merge commit it made on top of a newer head.
+        source_draft = _version(
+            session,
+            released_page,
+            status="closed",
+            author=owner.id,
+            number=3,
+            parent=released_base,
+        )
+        newer_head = _version(
+            session,
+            released_page,
+            status="superseded_snapshot",
+            author=owner.id,
+            number=4,
+            parent=released_base,
+        )
+        merged = _version(
+            session,
+            released_page,
+            status="superseded_snapshot",
+            author=owner.id,
+            number=5,
+            parent=newer_head,
+        )
         session.flush()
         chat = _Chat(session, workspace, client, owner)
+        released_edit = chat.call(
+            "patch_context_edit",
+            _patch_arguments(released_page.id, released.id),
+            links=(_page_link(released_page, McpChatArtifactVerb.EDITED),),
+        )
+        publication = chat.call(
+            "publish_context_edit",
+            {
+                "page_id": str(released_page.id),
+                "version_id": str(released.id),
+                "expected_editing_revision": 2,
+                "reason": "ship it",
+            },
+            result_detail={
+                "page_id": str(released_page.id),
+                "version_id": str(released.id),
+            },
+            links=(_page_link(released_page, McpChatArtifactVerb.EDITED),),
+        )
+        auto_submit = chat.call(
+            "submit_context_edit_for_review",
+            {
+                "page_id": str(released_page.id),
+                "version_id": str(source_draft.id),
+                "expected_editing_revision": 2,
+                "reason": "done",
+            },
+            result_detail={
+                "page_id": str(released_page.id),
+                "version_id": str(merged.id),
+            },
+            links=(_page_link(released_page, McpChatArtifactVerb.EDITED),),
+        )
         first = chat.call(
             "patch_context_edit",
             _patch_arguments(page.id, editing.id),
@@ -1195,6 +1286,17 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
     assert (created_diff.from_version_id, created_diff.to_version_id) == (
         None,
         new_editing.id,
+    )
+    assert _item(owner_detail, released_edit).session_diff is None
+    publication_diff = _item(owner_detail, publication).session_diff
+    assert (publication_diff.from_version_id, publication_diff.to_version_id) == (
+        released_base.id,
+        released.id,
+    )
+    auto_diff = _item(owner_detail, auto_submit).session_diff
+    assert (auto_diff.from_version_id, auto_diff.to_version_id) == (
+        newer_head.id,
+        merged.id,
     )
     assert {item.key for item in _item(owner_detail, submit).input_display_items} >= {
         "write_reason"

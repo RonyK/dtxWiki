@@ -78,9 +78,7 @@ def test_redact_tool_arguments_is_idempotent_with_success_payload():
     assert second_pass == first_pass
     assert "url" not in second_pass
     assert second_pass["logical_ref"].startswith("dtx-media://asset/")
-    assert (
-        second_pass["version_id"] == _upload_arguments()["version_id"]
-    )
+    assert second_pass["version_id"] == _upload_arguments()["version_id"]
 
 
 def test_redact_tool_arguments_overwrites_raw_forged_fingerprint():

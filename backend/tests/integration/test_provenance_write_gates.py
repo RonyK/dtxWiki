@@ -450,6 +450,29 @@ def test_workspace_can_stop_requiring_a_person_for_ai_writes(page_service):
             "agent-authored page write approved by policy"
         )
 
+    # Submitting finishes an agent write by the same rule: with the switch off
+    # it is approved on the record and published, not left for a reviewer.
+    drafted = client.post(
+        _pages_url(workspace_id),
+        headers=headers,
+        json={"title": "Trusted agent submit", "body_md": "# Submit\n\nDone.\n"},
+    )
+    assert drafted.status_code == 201, drafted.text
+    draft = drafted.json()["data"]
+    submitted = client.post(
+        f"{_pages_url(workspace_id)}/{draft['id']}/submit-for-review",
+        headers=headers,
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "idempotency_key": "trusted-agent-submit",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    with page_service.session_factory() as session:
+        page = session.get(ContextPage, UUID(draft["id"]))
+        assert page is not None and page.current_published_version_id is not None
+
 
 @pytest.mark.parametrize("path", ["create", "update", "autosave"])
 def test_trusted_agent_write_still_stages_when_the_body_fails_lint(

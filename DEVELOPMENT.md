@@ -1042,7 +1042,7 @@ means server-confirmed links, not permission to activate arbitrary authored
 references. An omitted or empty value confirms no additional references. This
 MCP revision does not add that metadata to read responses.
 
-- **MCP Streamable HTTP**: 30 tools are registered; the tools available to a
+- **MCP Streamable HTTP**: 33 tools are registered; the tools available to a
   particular client are determined by its permissions and returned by `tools/list`.
 
 <!-- mcp-tool-catalog:start -->
@@ -1050,7 +1050,7 @@ MCP revision does not add that metadata to read responses.
 | Purpose | Tools |
 | --- | --- |
 | Discover and read | `list_my_workspaces`, `guide`, `search`, `fetch`, `grep_wiki`, `what_changed`, `read`, `get_index`, `read_concept`, `read_context_outline`, `read_structure_map`, `list_context_drafts`, `list_changes` |
-| Edit Context | `create_context_page`, `begin_context_edit`, `update_context_edit`, `submit_context_edit_for_review`, `discard_context_edit`, `patch_context_edit`, `list_my_context_edits`, `upload_image`, `cite`, `submit_feedback` |
+| Edit Context | `create_context_page`, `begin_context_edit`, `update_context_edit`, `submit_context_edit_for_review`, `discard_context_edit`, `patch_context_edit`, `list_my_context_edits`, `preview_context_merge`, `bring_in_context_version`, `publish_context_edit`, `upload_image`, `cite`, `submit_feedback` |
 | Recover writes | `get_operation_status` |
 | Agent workflows | `list_agent_categories`, `read_agent_page`, `write_agent_page_draft`, `build_agent_input_bundle` |
 | Review and maintenance | `list_requested_changes`, `wiki_maintenance` |
@@ -1118,6 +1118,32 @@ recheck them under the page lock. The editor asks for confirmation of an
 automatically merged result before publishing it. Conflict choice controls are
 provided separately from this minimum editor integration.
 
+MCP `preview_context_merge` shows, without saving, what `publish_context_edit`
+would publish for a draft: the draft merged with the current published version.
+Its `result` follows `on_conflict` and any `body_md`/`page_metadata` edits; it is
+null only for a conflict without a choice, and only a conflict also returns the
+`keep_both` and `latest` candidates. `publish_context_edit` sends the preview's
+`editing_revision`, `published_version_id` (omitted when null) and
+`result.result_hash` with the same choice and edits as `result_body_md` and
+`result_page_metadata`. Anything that moved since the preview fails with
+`stale_base_version`; workspace review policy decides publication, and an AI
+caller that needs a person gets `human_approval_required`. A merge publication
+returns a new `version_id`.
+
+`bring_in_context_version` merges a commit of the page (by default the current
+published version) into a draft with the draft's `expected_editing_revision`. A
+draft that already contains it is not saved; a conflict saves nothing until
+`on_conflict` is chosen, and `preview_context_merge` with the same
+`commit_version_id` shows both choices. Both writes are keyed and recoverable
+through `get_operation_status`. Chats records a preview as a reference and each
+write against the version it produced, and a publication, like a submission,
+offers the chat's cumulative diff; like the other edit tools, capture keeps a
+digest of a submitted body.
+
+An MCP call that names a Context page, in any accepted form, is refused as
+`not_found` unless the page belongs to the authorized workspace, the same
+check the REST routes make before they build a page service.
+
 Drafts remain in the database. Publication, rejection, withdrawal and restore
 close a draft into a Git commit with its existing ID and commit parents. The
 current published version retains its database body copy; closed and superseded
@@ -1129,8 +1155,10 @@ the most recently saved open draft. Editors and Owners receive `open_drafts`
 and unpublished bodies carry `draft` metadata, including commit parents and
 review state. `list_context_drafts` and the REST `/drafts` endpoint paginate
 summaries without loading bodies. Index collection includes every open draft;
-search continues returning one result per document until version-aware result
-presentation is introduced. Discarded historical editing rows remain hidden.
+search retains matching versions, grouped by page and ordered by published,
+review-requested draft, then other drafts. Read a hit's exact `version_id` to
+retrieve its matching content. Drafts remain excluded from Ask evidence and
+citation grounding. Discarded historical editing rows remain hidden.
 
 REST detail and write responses carry `can_submit_for_review` for the calling
 actor; the editor enables **Request review** only when it is true. MCP tool
