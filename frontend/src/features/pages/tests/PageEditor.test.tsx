@@ -7562,6 +7562,8 @@ describe("PageEditor", () => {
   });
 
   it("opens the page media manager for a persisted page", async () => {
+    const PAGE_MEDIA_PATH =
+      "/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media";
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -7576,10 +7578,7 @@ describe("PageEditor", () => {
       if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
         return jsonResponse({ data: [page], next_cursor: null });
       }
-      if (url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media?usage=used")) {
-        return jsonResponse({ data: [] });
-      }
-      if (url.endsWith("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/media?usage=unused")) {
+      if (url.endsWith(PAGE_MEDIA_PATH)) {
         return jsonResponse({ data: [] });
       }
       return jsonResponse({ data: page });
@@ -7595,9 +7594,10 @@ describe("PageEditor", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Page media" });
     expect(await within(dialog).findByText("No unused media.")).toBeInTheDocument();
+    // One unfiltered request feeds both the used and the unused group.
     expect(
-      fetchMock.mock.calls.some((call) => String(call[0]).includes("usage=used")),
-    ).toBe(true);
+      fetchMock.mock.calls.map((call) => String(call[0])).filter((url) => url.includes(PAGE_MEDIA_PATH)),
+    ).toEqual([`${BASE}${PAGE_MEDIA_PATH}`]);
     await typist().click(within(dialog).getByRole("button", { name: "Close page media" }));
     expect(screen.queryByRole("dialog", { name: "Page media" })).not.toBeInTheDocument();
   });
