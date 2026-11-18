@@ -22,6 +22,8 @@ export type PageMetadata = {
 
 export type ParsedPageDocument = {
   body: string;
+  /** The 1-based source line `body` starts on (1 when nothing was stripped). */
+  bodyStartLine: number;
   metadata: PageMetadata;
 };
 
@@ -82,21 +84,24 @@ export function parsePageDocument(
   const normalized = markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = normalized.split("\n");
   if (lines.length < 3 || lines[0].trim() !== "---") {
-    return { body: markdown, metadata: defaults };
+    return { body: markdown, bodyStartLine: 1, metadata: defaults };
   }
   const closingIndex = lines.findIndex((line, index) =>
     index > 0 && FRONTMATTER_DELIMITERS.has(line.trim()),
   );
   if (closingIndex === -1) {
-    return { body: markdown, metadata: defaults };
+    return { body: markdown, bodyStartLine: 1, metadata: defaults };
   }
   const frontmatterLines = lines.slice(1, closingIndex);
   const values = parseKnownFrontmatter(frontmatterLines);
   if (!values.hasKnownKey) {
-    return { body: markdown, metadata: defaults };
+    return { body: markdown, bodyStartLine: 1, metadata: defaults };
   }
+  // One blank line after the closing delimiter belongs to the front matter.
+  const bodyIndex = closingIndex + 1 + (lines[closingIndex + 1] === "" && closingIndex + 2 < lines.length ? 1 : 0);
   return {
-    body: lines.slice(closingIndex + 1).join("\n").replace(/^\n/, ""),
+    body: lines.slice(bodyIndex).join("\n"),
+    bodyStartLine: bodyIndex + 1,
     metadata: {
       icon: toPageIcon(values.icon) ?? defaults.icon,
       type: toPageType(values.type) ?? defaults.type,

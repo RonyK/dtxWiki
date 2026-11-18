@@ -2134,32 +2134,34 @@ function pendingReviewCompareCandidate(
   versions: VersionEntry[],
 ): CompareCandidate | null {
   const targetId = detail.pending_draft_version_id;
-  const target = versions.find((entry) => entry.version_id === targetId);
   if (
-    !target ||
-    !(
-      target.history_status === "current_draft" ||
-      versionStringField(target, "version_status") === "draft"
-    ) ||
+    !targetId ||
     !detail.pending_review ||
     !["pending", "changes_requested"].includes(detail.pending_review.status)
   ) {
     return null;
   }
-  if (!detail.current_published_version_id) {
-    return defaultHistoryCompareCandidate(versions, target);
-  }
-  const published = versions.find(
-    (entry) => entry.version_id === detail.current_published_version_id,
-  );
-  if (!published || published.version_no >= target.version_no) {
+  // A loaded target must be a draft; one on an older page is checked when the
+  // comparison loads it.
+  const target = versions.find((entry) => entry.version_id === targetId);
+  if (
+    target &&
+    !(
+      target.history_status === "current_draft" ||
+      versionStringField(target, "version_status") === "draft"
+    )
+  ) {
     return null;
   }
-  return {
-    from: published.version_id,
-    to: target.version_id,
-    origin: "banner",
-  };
+  const publishedId = detail.current_published_version_id;
+  if (!publishedId) {
+    return target ? defaultHistoryCompareCandidate(versions, target) : null;
+  }
+  const published = versions.find((entry) => entry.version_id === publishedId);
+  if (target && published && published.version_no >= target.version_no) {
+    return null;
+  }
+  return { from: publishedId, to: targetId, origin: "banner" };
 }
 
 function ContextReader({
@@ -2364,15 +2366,15 @@ function ContextReader({
   }, [detail.id, workspaceId]);
 
   const loadOlderHistory = useCallback(
-    async (targetVersionId?: string): Promise<ContextChangeHistory | null> => {
+    async (targetVersionIds: readonly string[] = []): Promise<ContextChangeHistory | null> => {
+      // Without targets, one more page; with targets, pages until all are loaded.
+      const missingTargets = (history: ContextChangeHistory) =>
+        targetVersionIds.some((id) => !history.versions.some((entry) => entry.version_id === id));
       if (
         !workspaceId ||
         historyLoadingRef.current ||
         !loadedHistory?.next_cursor ||
-        (targetVersionId &&
-          loadedHistory.versions.some(
-            (entry) => entry.version_id === targetVersionId,
-          ))
+        (targetVersionIds.length > 0 && !missingTargets(loadedHistory))
       ) {
         return loadedHistory ?? null;
       }
@@ -2393,11 +2395,7 @@ function ContextReader({
           merged = mergeContextChangeHistory(merged, next);
           cursor = merged.next_cursor;
           setHistoryPageState({ detailId: detail.id, history: merged });
-        } while (
-          targetVersionId &&
-          cursor &&
-          !merged.versions.some((entry) => entry.version_id === targetVersionId)
-        );
+        } while (cursor && targetVersionIds.length > 0 && missingTargets(merged));
         return merged;
       } catch {
         if (generation === historyLoadGenerationRef.current) {
@@ -2418,47 +2416,18 @@ function ContextReader({
     [detail.id, loadedHistory, t, workspaceId],
   );
 
-  const openComparison = useCallback(
-    (
-      candidate: CompareCandidate,
-      replace = false,
-      availableVersions: VersionEntry[] = versions,
-    ) => {
-      const normalized = normalizeComparePair(availableVersions, candidate);
-      if (!normalized) {
-        setComparePair(null);
-        setCompareStateError(
-          tShell("diff.invalidComparison", {
-            defaultValue:
-              "These versions cannot be compared from this history.",
-          }),
-        );
-        const nextParams = new URLSearchParams(searchParams);
-        nextParams.set("tab", "history");
-        nextParams.delete("compareFrom");
-        nextParams.delete("compareTo");
-        if (nextParams.toString() !== searchParams.toString()) {
-          setSearchParams(nextParams, { replace });
-        }
-        return;
-      }
-
-      setComparePair(normalized);
-      setCompareStateError(null);
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("tab", "history");
-      nextParams.set(
-        "compareFrom",
-        normalized.from ?? EMPTY_BASELINE_COMPARE_PARAM,
-      );
-      nextParams.set("compareTo", normalized.to);
-      appliedCompareRouteRef.current = `${detail.id}:${normalized.from ?? ""}:${normalized.to}`;
-      if (nextParams.toString() !== searchParams.toString()) {
-        setSearchParams(nextParams, { replace });
-      }
-    },
-    [detail.id, searchParams, setSearchParams, tShell, versions],
-  );
+  // A comparison is the route's compareFrom/compareTo. Every entry point --
+  // a History row, the draft band, a pending review, a shared link -- only
+  // sets them; the route effect below opens it.
+  const openComparison = useCallback((candidate: CompareCandidate) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.set("tab", "history");
+      next.set("compareFrom", candidate.from ?? EMPTY_BASELINE_COMPARE_PARAM);
+      next.set("compareTo", candidate.to);
+      return next;
+    });
+  }, [setSearchParams]);
 
   const openHistoryComparison = useCallback(
     async (entry: VersionEntry) => {
@@ -2479,61 +2448,65 @@ function ContextReader({
         return;
       }
 
-      let availableVersions = versions;
-      if (
-        !availableVersions.some(
-          (candidate) => candidate.version_id === parentId,
-        )
-      ) {
-        const merged = await loadOlderHistory(parentId);
-        availableVersions = merged?.versions ?? availableVersions;
-      }
-      if (
-        !availableVersions.some(
-          (candidate) => candidate.version_id === parentId,
-        )
-      ) {
-        setComparePair(null);
-        setCompareStateError(
-          t("history.previousVersionUnavailable", {
-            defaultValue: "The previous version is not available.",
-          }),
-        );
-        return;
-      }
-      openComparison(
-        { from: parentId, to: entry.version_id, origin: "history" },
-        false,
-        availableVersions,
-      );
+      openComparison({ from: parentId, to: entry.version_id, origin: "history" });
     },
-    [loadOlderHistory, openComparison, t, versions],
+    [openComparison, t],
   );
 
+  // Opens the route's comparison. Older History pages load until both
+  // versions are there; the pair is invalid only once every page is loaded
+  // and a version is still missing. A failed load keeps the link (History
+  // shows the error), and a route that moved on ignores what was loading.
   useEffect(() => {
     if (!compareFromParam || !compareToParam) {
       setComparePair(null);
-      setCompareStateError(null);
       appliedCompareRouteRef.current = null;
       return;
     }
-    const requestedFrom =
-      compareFromParam === EMPTY_BASELINE_COMPARE_PARAM
-        ? null
-        : compareFromParam;
-    const routeKey = `${detail.id}:${requestedFrom ?? ""}:${compareToParam}`;
-    if (appliedCompareRouteRef.current === routeKey) {
+    const from = compareFromParam === EMPTY_BASELINE_COMPARE_PARAM ? null : compareFromParam;
+    const routeKey = `${detail.id}:${from ?? ""}:${compareToParam}`;
+    if (appliedCompareRouteRef.current === routeKey || !loadedHistory) {
       return;
     }
-    openComparison(
-      {
-        from: requestedFrom,
-        to: compareToParam,
-        origin: "deep-link",
-      },
-      true,
+    const candidate: CompareCandidate = { from, to: compareToParam, origin: "deep-link" };
+    const normalized = normalizeComparePair(versions, candidate);
+    if (normalized) {
+      // The route keeps the pair in its normalized order (older first).
+      const normalizedFrom = normalized.from ?? EMPTY_BASELINE_COMPARE_PARAM;
+      appliedCompareRouteRef.current = `${detail.id}:${normalized.from ?? ""}:${normalized.to}`;
+      setComparePair(normalized);
+      setCompareStateError(null);
+      if (normalizedFrom !== compareFromParam || normalized.to !== compareToParam) {
+        setSearchParams((previous) => {
+          const next = new URLSearchParams(previous);
+          next.set("compareFrom", normalizedFrom);
+          next.set("compareTo", normalized.to);
+          return next;
+        }, { replace: true });
+      }
+      return;
+    }
+    const missing = [from, compareToParam].filter((id): id is string =>
+      Boolean(id) && !versions.some((entry) => entry.version_id === id));
+    if (missing.length > 0 && loadedHistory.next_cursor) {
+      // Each loaded page runs this effect again.
+      if (!historyLoadError) void loadOlderHistory(missing);
+      return;
+    }
+    setComparePair(null);
+    setCompareStateError(
+      tShell("diff.invalidComparison", {
+        defaultValue: "These versions cannot be compared from this history.",
+      }),
     );
-  }, [compareFromParam, compareToParam, detail.id, openComparison]);
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.set("tab", "history");
+      next.delete("compareFrom");
+      next.delete("compareTo");
+      return next;
+    }, { replace: true });
+  }, [compareFromParam, compareToParam, detail.id, historyLoadError, loadOlderHistory, loadedHistory, setSearchParams, tShell, versions]);
 
   const closeComparison = useCallback(() => {
     setComparePair(null);
@@ -2747,7 +2720,7 @@ function ContextReader({
     setHistoryFocusVersionId(versionId);
     changeTab("history");
     if (!versions.some((entry) => entry.version_id === versionId)) {
-      void loadOlderHistory(versionId);
+      void loadOlderHistory([versionId]);
     }
   }
   useEffect(() => {
@@ -3197,7 +3170,7 @@ function ContextReader({
             highlightedVersionId={historyFocusVersionId}
             onCloseCompare={closeComparison}
             onCompare={(entry) => void openHistoryComparison(entry)}
-            onComparePair={(candidate) => openComparison(candidate)}
+            onComparePair={openComparison}
             onLoadOlder={() => void loadOlderHistory()}
             onVersionRestored={onVersionRestored}
             workspaceId={workspaceId}

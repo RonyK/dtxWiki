@@ -781,38 +781,41 @@ export function PageEditor({
     writeReviewDraft(key, "");
     if (preparedPublicationRef.current?.key === key) preparedPublicationRef.current = null;
   }, []);
+  // A prepared publication whose outcome is unknown (its response was lost)
+  // ends the merge dialog and is replayed as it was, idempotency key and all,
+  // by the next Publish, so one publication is never sent twice. A command the
+  // server answered is settled and forgotten.
   async function publishEditorPage(workspace: string, id: string, versionId: string,
     intent: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash">,
     options: PageWriteOptions = {}) {
     const key = publicationKey(workspace, id);
-    const prepared = pendingPublication(key);
-    const publish = (mergeChoice?: PreparedMergeChoice) => publishPageVersion(workspace, id, versionId, intent, {
-      ...options,
-      mergeChoice,
-      preparedPublication: mergeChoice ? undefined : prepared,
-      onPublicationPrepared(command) {
-        preparedPublicationRef.current = { key, command };
-        writeReviewDraft(key, JSON.stringify(command));
-      },
+    const publish = async (mergeChoice?: PreparedMergeChoice) => {
+      try {
+        const result = await publishPageVersion(workspace, id, versionId, intent, {
+          ...options,
+          mergeChoice,
+          preparedPublication: mergeChoice ? undefined : pendingPublication(key),
+          onPublicationPrepared(command) {
+            preparedPublicationRef.current = { key, command };
+            writeReviewDraft(key, JSON.stringify(command));
+          },
+        });
+        clearPendingPublication(key);
+        return result;
+      } catch (error) {
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500) clearPendingPublication(key);
+        throw error;
+      }
+    };
+    return pendingPublication(key) ? publish() : merge.runMergeWrite({
+      kind: "publish",
+      workspaceId: workspace,
+      pageId: id,
+      publishedVersionNumber: page?.published_version_no ?? null,
+      errorMessage: (cause) => apiErrorMessage(cause, t("editor.publishFailed")),
+      loadPreview: () => previewPageMerge(workspace, id, versionId, { signal: options.signal }),
+      write: publish,
     });
-    try {
-      // A publication interrupted after it was prepared replays its exact
-      // command; a new one goes through the shared merge flow.
-      const result = prepared ? await publish() : await merge.runMergeWrite({
-        kind: "publish",
-        workspaceId: workspace,
-        pageId: id,
-        publishedVersionNumber: page?.published_version_no ?? null,
-        errorMessage: (cause) => apiErrorMessage(cause, t("editor.publishFailed")),
-        loadPreview: () => previewPageMerge(workspace, id, versionId, { signal: options.signal }),
-        write: publish,
-      });
-      clearPendingPublication(key);
-      return result;
-    } catch (error) {
-      if (error instanceof ApiError && error.status >= 400 && error.status < 500) clearPendingPublication(key);
-      throw error;
-    }
   }
 
   const propertiesPopoverId = useId();

@@ -16,12 +16,17 @@ const metadata = (title: string) => ({
   title, page_type: "guide", tags: [], aliases: [], placement_parent_node_id: null,
 });
 
-// The heading holds an emoji: one Unicode code point on the server, two UTF-16
-// units in the browser. A region that starts on the next line must mark only
-// that line's block; reading the code-point offset as a string index would
-// land on the heading's newline and mark the heading too.
-const keepBothBody = "## 😀\nours\ntheirs\n\nend\n";
-const latestBody = "## 😀\nours\n\nend\n";
+// Editor-authored bodies start with front matter, which the rendered result
+// omits: regions are numbered in the whole source. The heading holds an
+// emoji: one Unicode code point on the server, two UTF-16 units in the
+// browser. A region that starts on the next line must mark only that line's
+// block; reading the code-point offset as a string index would land on the
+// heading's newline and mark the heading too.
+const frontMatter = "---\ntype: guide\n---\n";
+const keepBothBody = `${frontMatter}## 😀\nours\ntheirs\n\nend\n`;
+const latestBody = `${frontMatter}## 😀\nours\n\nend\n`;
+
+const at = (offset: number) => [...frontMatter].length + offset;
 
 function conflictPreview(): ContextMergePreview {
   const candidate = (body: string, start: number, end: number, title: string) => ({
@@ -43,9 +48,10 @@ function conflictPreview(): ContextMergePreview {
     parent_version_ids: ["base-1"],
     kind: "conflict",
     result: null,
-    // Code points: "## 😀\n" is 5, "ours\ntheirs\n" is 12, "ours\n" is 5.
-    keep_both: candidate(keepBothBody, 5, 17, "Draft title"),
-    latest: candidate(latestBody, 5, 10, "Draft title"),
+    // Code points: the front matter, then "## 😀\n" is 5, "ours\ntheirs\n" is
+    // 12, "ours\n" is 5.
+    keep_both: candidate(keepBothBody, at(5), at(17), "Draft title"),
+    latest: candidate(latestBody, at(5), at(10), "Draft title"),
     metadata_conflicts: ["title"],
     base_conflicted: false,
     latest_side: "ours",

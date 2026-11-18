@@ -45,6 +45,11 @@ function isStale(error: unknown) {
   return error instanceof ApiError && error.status === 409 && STALE_CODES.has(error.body.error_code);
 }
 
+/** The server answered and refused: nothing was written. */
+function isRefused(error: unknown) {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+}
+
 function mergeClosed() {
   return new DOMException("Merge closed", "AbortError");
 }
@@ -79,8 +84,10 @@ export function useContextMerge() {
   // answers; a clean preview, or an answer, is written. A stale answer shows
   // the newer preview. A stale clean write is retried only when the newer
   // preview needs a choice -- otherwise the refusal is the outcome, so a
-  // write whose own pins are out of date never repeats. Any other failure is
-  // shown in the dialog, or ends the caller's wait when no dialog was needed.
+  // write whose own pins are out of date never repeats. An answer the server
+  // refused is asked again in the dialog; any other failure -- including a
+  // write whose outcome is unknown, which only its caller can recover -- ends
+  // the caller's wait.
   const settle = useCallback(async function settle(
     session: MergeSession,
     preview: ContextMergePreview,
@@ -103,8 +110,11 @@ export function useContextMerge() {
         await settle(session, newer, true);
       } catch (failure) {
         if (sessionRef.current !== session) return;
-        if (asking) setView({ session, preview, refreshed, busy: false, error: session.errorMessage(failure) });
-        else finish(session, failure);
+        if (asking && isRefused(failure)) {
+          setView({ session, preview, refreshed, busy: false, error: session.errorMessage(failure) });
+        } else {
+          finish(session, failure);
+        }
       }
     }
   }, [finish]);

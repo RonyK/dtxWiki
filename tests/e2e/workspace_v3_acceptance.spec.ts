@@ -1435,6 +1435,10 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           expect((await appearanceResponse.json()).data.query).toMatchObject({
             depth: 1, time: { mode: "appearance" }, budget: { nodes: 500, edges: 1500 },
           });
+          // The view switches once both of its queries settle (this history
+          // scene and the paired current scene): until then the timeline on
+          // screen is the previous view's.
+          await expect(graphPanel.getByRole("radio", { name: /Change history/ })).toBeChecked();
           await expect(depthTwo).toHaveAttribute("aria-disabled", "true");
           const timeline = graphPanel.getByRole("slider", {
             name: "Timeline position",
