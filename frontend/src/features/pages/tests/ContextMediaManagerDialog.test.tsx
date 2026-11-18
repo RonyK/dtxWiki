@@ -41,11 +41,8 @@ describe("ContextMediaManagerDialog", () => {
           },
         });
       }
-      if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=used")) {
-        return jsonResponse({ data: [mediaAsset("history_only")] });
-      }
-      if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=unused")) {
-        return jsonResponse({ data: deleted ? [] : [mediaAsset("unused")] });
+      if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media")) {
+        return jsonResponse({ data: [mediaAsset("history_only"), ...(deleted ? [] : [mediaAsset("unused")])] });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -61,9 +58,8 @@ describe("ContextMediaManagerDialog", () => {
       "1",
     );
     expect(within(dialog).getByText("History only")).toBeInTheDocument();
-    expect(
-      within(dialog).getByText("Draft 0, published 1, history 3"),
-    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole("button", { name: "Usage history" })).toHaveAttribute("aria-expanded", "false");
     expect(within(dialog).getByText("unused.png")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Delete retained.png" }))
       .not.toBeInTheDocument();
@@ -107,22 +103,14 @@ describe("ContextMediaManagerDialog", () => {
     expect(new Headers(deleteCall?.[1]?.headers).get("If-Match")).toBe(
       "cmu1_unused",
     );
-    expect(
-      fetchMock.mock.calls.filter((call) => String(call[0]).includes("usage=used")),
-    ).toHaveLength(2);
-    expect(
-      fetchMock.mock.calls.filter((call) => String(call[0]).includes("usage=unused")),
-    ).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method !== "DELETE")).toHaveLength(2);
   });
 
   it("cancels permanent deletion without issuing DELETE", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input) => {
         const url = String(input);
-        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=used")) {
-          return jsonResponse({ data: [] });
-        }
-        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=unused")) {
+        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media")) {
           return jsonResponse({ data: [mediaAsset("unused")] });
         }
         throw new Error(`Unexpected request: ${url}`);
@@ -167,10 +155,7 @@ describe("ContextMediaManagerDialog", () => {
           deleteStarted = true;
           return deleteGate;
         }
-        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=used")) {
-          return jsonResponse({ data: [] });
-        }
-        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=unused")) {
+        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media")) {
           return jsonResponse({
             data: deleteStarted ? [] : [mediaAsset("unused")],
           });
@@ -299,10 +284,7 @@ describe("ContextMediaManagerDialog", () => {
           );
         }
         listCalls += 1;
-        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=used")) {
-          return jsonResponse({ data: [] });
-        }
-        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=unused")) {
+        if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media")) {
           return jsonResponse({ data: [mediaAsset("unused")] });
         }
         throw new Error(`Unexpected request: ${url}`);
@@ -319,7 +301,7 @@ describe("ContextMediaManagerDialog", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(expected);
 
       await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
-      await waitFor(() => expect(listCalls).toBe(4));
+      await waitFor(() => expect(listCalls).toBe(2));
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     },
   );
@@ -328,11 +310,8 @@ describe("ContextMediaManagerDialog", () => {
     await i18n.changeLanguage("ko");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
-      if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=used")) {
-        return jsonResponse({ data: [mediaAsset("history_only")] });
-      }
-      if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media?usage=unused")) {
-        return jsonResponse({ data: [mediaAsset("unused")] });
+      if (url.endsWith("/api/v1/workspaces/w1/context/pages/page-1/media")) {
+        return jsonResponse({ data: [mediaAsset("history_only"), mediaAsset("unused")] });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -348,9 +327,7 @@ describe("ContextMediaManagerDialog", () => {
       "1",
     );
     expect(within(dialog).getByText("이전 버전에서만 사용")).toBeInTheDocument();
-    expect(
-      within(dialog).getByText("초안 0개, 게시본 1개, 이전 버전 3개"),
-    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "사용 내역" })).toBeInTheDocument();
     expect(within(dialog).getByText("2.0 킬로바이트")).toBeInTheDocument();
     expect(
       within(dialog).getByText(
@@ -418,9 +395,6 @@ function mediaAsset(usageState: "history_only" | "unused") {
     bytes: unused ? 512 : 2048,
     association_state: "active",
     usage_state: usageState,
-    latest_draft_reference_count: 0,
-    current_published_reference_count: unused ? 0 : 1,
-    historical_reference_count: unused ? 0 : 3,
     can_delete: unused,
     usage_token: unused ? "cmu1_unused" : "cmu1_used",
     content_url: `/api/v1/workspaces/w1/context/pages/page-1/versions/v1/media/${id}/content`,

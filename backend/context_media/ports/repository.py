@@ -1,6 +1,6 @@
 """Inward-owned persistence and transaction seams for Context media."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Protocol, Self
 from uuid import UUID
@@ -8,6 +8,7 @@ from uuid import UUID
 from backend.context_media.domain import (
     ActorIdentity,
     AssetUsageSnapshot,
+    AssetVersionUsagePage,
     ContentCapability,
     ContextMediaAssetRecord,
     WorkspaceUsagePage,
@@ -45,9 +46,9 @@ class ContextMediaRepository(Protocol):
         workspace_id: UUID,
         page_id: UUID,
         *,
-        viewer: ActorIdentity | None = None,
+        used: bool | None = None,
     ) -> tuple[AssetUsageSnapshot, ...]:
-        # Draft and discarded-version usage follow the same read permissions.
+        # Live assets of one page; ``used`` filters on any version's usage.
         ...
 
     def list_workspace_usage(
@@ -59,27 +60,34 @@ class ContextMediaRepository(Protocol):
         created_by: ActorIdentity | None = None,
         page_id: UUID | None = None,
         orphan_only: bool = False,
+        used: bool | None = None,
         filename_contains: str | None = None,
         after: tuple[datetime, UUID] | None = None,
         limit: int = 50,
     ) -> WorkspaceUsagePage:
-        # Same `viewer` contract as list_page_usage, and it matters more here:
-        # this is the first listing that spans a whole workspace, so it is the
-        # first place discarded-version references and uninserted previews
-        # need the same visibility rules as page-level listings.
-        #
         # `created_by` is the "mine" filter. `after` is the keyset cursor
         # (created_at, asset_id), matching the DESC ordering the adapter
-        # applies. `limit` is the PAGE size the caller wants -- the
-        # implementation is responsible for fetching one extra row internally
-        # to populate `WorkspaceUsagePage.has_more`/`next_after` (260912
-        # review: this used to be the caller's job, passing `limit + 1` down
-        # and computing paging state on whatever survived a Python filter
-        # applied afterward -- which silently truncated a filtered listing
-        # once the filter removed enough of that fetched page. See
-        # `WorkspaceUsagePage`'s docstring for why that state has to be fixed
-        # here, before any caller-side filtering can touch it.
+        # applies. `limit` is the PAGE size; every filter runs before the
+        # adapter's internal `limit + 1` probe, so `has_more`/`next_after`
+        # describe exactly the returned window.
         ...
+
+    def asset_usage_snapshots(
+        self, workspace_id: UUID, asset_ids: Iterable[UUID]
+    ) -> dict[UUID, AssetUsageSnapshot]:
+        # Batch snapshots for a caller holding no workspace read.
+        ...
+
+    def list_asset_version_usage(
+        self,
+        workspace_id: UUID,
+        asset_id: UUID,
+        *,
+        viewer: ActorIdentity,
+        viewer_role: str,
+        after: tuple[datetime, UUID] | None = None,
+        limit: int = 25,
+    ) -> AssetVersionUsagePage | None: ...
 
     def get_page_asset_usage(
         self, workspace_id: UUID, page_id: UUID, asset_id: UUID

@@ -1,13 +1,11 @@
 from collections.abc import Mapping
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
 
 from backend.context_media.application import (
     DeleteUnusedMedia,
-    ListWorkspaceMedia,
     RegisterMediaAsset,
     SyncVersionUsage,
 )
@@ -16,12 +14,9 @@ from backend.context_media.domain import (
     AssetUsageSnapshot,
     AssociationState,
     ContextMediaAssetRecord,
-    ContextMediaAttachmentSnapshot,
     MediaInUseError,
     RegisterContextMediaAsset,
     StaleUsageTokenError,
-    UsageState,
-    WorkspaceUsagePage,
 )
 from backend.media.domain import BlobEpoch, BlobReference
 
@@ -42,54 +37,6 @@ class FakeRepository:
         self.replacements: list[tuple[UUID, UUID, UUID, dict[UUID, int]]] = []
         self.snapshot: AssetUsageSnapshot | None = None
         self.tombstoned: list[UUID] = []
-        self.workspace_rows: list[ContextMediaAttachmentSnapshot] = []
-        self.list_workspace_usage_calls = 0
-
-    def list_workspace_usage(
-        self,
-        workspace_id: UUID,
-        *,
-        viewer=None,
-        viewer_role=None,
-        created_by=None,
-        page_id=None,
-        orphan_only: bool = False,
-        filename_contains: str | None = None,
-        after: tuple[datetime, UUID] | None = None,
-        limit: int = 50,
-    ) -> WorkspaceUsagePage:
-        """Mirrors the real adapter's keyset-plus-probe-row contract.
-
-        Not a stub returning canned pages -- it re-derives `has_more` and
-        `next_after` from the same DESC-ordered, `limit + 1` fetch the real
-        SQL does, over `self.workspace_rows`, so a test can seed the rows and
-        then drive `ListWorkspaceMedia` exactly the way a real repository
-        would: `has_more`/`next_after` fixed before ListWorkspaceMedia's
-        `usage` filter ever sees the rows.
-        """
-
-        del viewer, created_by, page_id, orphan_only, filename_contains
-        self.list_workspace_usage_calls += 1
-        ordered = sorted(
-            self.workspace_rows,
-            key=lambda row: (row.created_at, row.usage.asset.asset_id),
-            reverse=True,
-        )
-        if after is not None:
-            ordered = [
-                row
-                for row in ordered
-                if (row.created_at, row.usage.asset.asset_id) < after
-            ]
-        fetched = ordered[: limit + 1]
-        has_more = len(fetched) > limit
-        page = fetched[:limit]
-        next_after = (
-            (page[-1].created_at, page[-1].usage.asset.asset_id) if has_more else None
-        )
-        return WorkspaceUsagePage(
-            snapshots=tuple(page), has_more=has_more, next_after=next_after
-        )
 
     def add_asset(self, asset):
         self.assets[(asset.workspace_id, asset.asset_id)] = asset
@@ -168,176 +115,6 @@ def _asset(
         association_state=AssociationState.ACTIVE,
         revision=1,
     )
-
-
-def _attachment(
-    *,
-    workspace_id: UUID,
-    created_at: datetime,
-    used: bool,
-    asset_id: UUID | None = None,
-) -> ContextMediaAttachmentSnapshot:
-    record = _asset(workspace_id=workspace_id)
-    if asset_id is not None:
-        record = replace(record, asset_id=asset_id)
-    usage = AssetUsageSnapshot(
-        asset=record,
-        latest_draft_version_id=None,
-        current_published_version_id=None,
-        latest_draft_reference_count=0,
-        current_published_reference_count=1 if used else 0,
-        historical_reference_count=0,
-    )
-    return ContextMediaAttachmentSnapshot(
-        usage=usage,
-        page_title="Page",
-        kind="image",
-        created_at=created_at,
-        is_orphan=False,
-    )
-
-
-def test_usage_filter_does_not_truncate_an_interleaved_listing() -> None:
-    """260912 review, T1: a `usage=unused` walk must recover every unused
-    row even when used rows are interleaved among them and repeatedly land
-    in the same fetched window as unused ones. Before the fix, `has_more`
-    was computed from the FILTERED count, so a window that happened to keep
-    few (or zero) unused rows could under-report `has_more` and end the
-    walk with unseen unused rows still in the workspace."""
-
-    repository = FakeRepository()
-    workspace_id = uuid4()
-    unused_ids: set[UUID] = set()
-    for index in range(10):
-        asset_id = uuid4()
-        used = index % 2 == 1
-        if not used:
-            unused_ids.add(asset_id)
-        repository.workspace_rows.append(
-            _attachment(
-                workspace_id=workspace_id,
-                created_at=NOW - timedelta(seconds=index),
-                used=used,
-                asset_id=asset_id,
-            )
-        )
-
-    seen: set[UUID] = set()
-    cursor = None
-    for _ in range(20):  # generous bound; a real walk terminates in <= 5 pages
-        projections, has_more, next_after = ListWorkspaceMedia().execute(
-            repository,
-            workspace_id=workspace_id,
-            after=cursor,
-            limit=3,
-            usage=UsageState.UNUSED,
-        )
-        for item in projections:
-            assert item.asset.asset.asset_id not in seen, "a row was served twice"
-            seen.add(item.asset.asset.asset_id)
-        if not has_more:
-            break
-        cursor = next_after
-    else:
-        pytest.fail("walk did not terminate -- has_more never went false")
-
-    assert seen == unused_ids
-
-
-def test_a_genuinely_final_page_carries_no_cursor() -> None:
-    """260912 review, T2: when SQL's `limit + 1` probe does not return an
-    extra row, `next_after` must be None -- a real final page must not hand
-    the caller a cursor that resumes into nothing."""
-
-    repository = FakeRepository()
-    workspace_id = uuid4()
-    for index in range(5):
-        repository.workspace_rows.append(
-            _attachment(
-                workspace_id=workspace_id,
-                created_at=NOW - timedelta(seconds=index),
-                used=False,
-            )
-        )
-
-    projections, has_more, next_after = ListWorkspaceMedia().execute(
-        repository,
-        workspace_id=workspace_id,
-        limit=5,
-        usage=UsageState.UNUSED,
-    )
-
-    assert len(projections) == 5
-    assert has_more is False
-    assert next_after is None
-
-
-def test_a_used_leading_window_returns_empty_items_with_a_live_cursor() -> None:
-    """260912 review, T3: a fetched window that is ALL "used" must still
-    report `has_more`/`next_after` from what SQL saw, not from the (empty)
-    filtered result -- an empty `items` page with a live cursor, not a page
-    that looks like the end of the listing. The next page, using that
-    cursor, must then recover the unused rows sitting behind the window."""
-
-    repository = FakeRepository()
-    workspace_id = uuid4()
-    unused_ids: set[UUID] = set()
-    # Three newest rows (the limit=2 window plus its probe row) are used;
-    # two older rows behind them are unused.
-    for index in range(3):
-        repository.workspace_rows.append(
-            _attachment(
-                workspace_id=workspace_id,
-                created_at=NOW - timedelta(seconds=index),
-                used=True,
-            )
-        )
-    for index in range(3, 5):
-        asset_id = uuid4()
-        unused_ids.add(asset_id)
-        repository.workspace_rows.append(
-            _attachment(
-                workspace_id=workspace_id,
-                created_at=NOW - timedelta(seconds=index),
-                used=False,
-                asset_id=asset_id,
-            )
-        )
-
-    first_projections, first_has_more, first_next_after = ListWorkspaceMedia().execute(
-        repository,
-        workspace_id=workspace_id,
-        limit=2,
-        usage=UsageState.UNUSED,
-    )
-
-    assert first_projections == ()
-    assert first_has_more is True
-    assert first_next_after is not None
-
-    # Recovery may take more than one further page (the used rows are
-    # spread across the probe window of more than one fetch) -- what
-    # matters is that the walk terminates with every unused row seen,
-    # exactly like T1.
-    recovered: set[UUID] = set()
-    cursor = first_next_after
-    has_more = True
-    for _ in range(10):
-        projections, has_more, cursor = ListWorkspaceMedia().execute(
-            repository,
-            workspace_id=workspace_id,
-            after=cursor,
-            limit=2,
-            usage=UsageState.UNUSED,
-        )
-        recovered.update(item.asset.asset.asset_id for item in projections)
-        if not has_more:
-            break
-    else:
-        pytest.fail("recovery walk did not terminate")
-
-    assert recovered == unused_ids
-    assert has_more is False
 
 
 def test_registration_and_usage_sync() -> None:

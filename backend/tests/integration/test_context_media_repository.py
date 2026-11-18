@@ -1017,10 +1017,10 @@ def test_unused_delete_allows_other_editor_before_and_after_close(
         assert deleted.association_state is AssociationState.TOMBSTONED
 
 
-def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
+def test_list_page_usage_shares_a_foreign_authors_draft_reference_count(
     session_factory,
 ) -> None:
-    """Editing usage is shared with editors without changing deletion CAS counts."""
+    """Another author's draft usage counts in the listing and the deletion CAS."""
 
     author = ActorIdentity("human", str(uuid4()))
     other_author = ActorIdentity("human", str(uuid4()))
@@ -1089,21 +1089,11 @@ def test_list_page_usage_shares_a_foreign_authors_editing_reference_count(
         assert unmasked is not None
         assert unmasked.latest_draft_reference_count == 3
 
-        [foreign_snapshot] = repository.list_page_usage(
-            workspace_id, page.id, viewer=author
-        )
-        assert foreign_snapshot.latest_draft_reference_count == 3
-        assert foreign_snapshot.usage_token == unmasked.usage_token
+        [listed] = repository.list_page_usage(workspace_id, page.id)
+        assert listed.latest_draft_reference_count == 3
+        assert listed.usage_token == unmasked.usage_token
 
-        projection = ContextMediaAssetProjection.from_snapshot(foreign_snapshot)
-        assert projection.latest_draft_reference_count == 3
-        # Both the editing and published references keep the asset active.
+        projection = ContextMediaAssetProjection.from_snapshot(listed)
+        # Both the draft and published references keep the asset active.
         assert projection.usage_state is UsageState.ACTIVE
         assert projection.usage_token == unmasked.usage_token
-
-        [own_snapshot] = repository.list_page_usage(
-            workspace_id, page.id, viewer=other_author
-        )
-        assert own_snapshot.latest_draft_reference_count == 3
-        own_projection = ContextMediaAssetProjection.from_snapshot(own_snapshot)
-        assert own_projection.latest_draft_reference_count == 3

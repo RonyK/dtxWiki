@@ -106,11 +106,13 @@ def list_admin_attachments(
                 after=after if workspace_id == start_workspace else None,
                 limit=limit + 1 - len(rows),
             )
-            repository = repository_factory(session)
+            # One batch per workspace. A server admin holds no workspace read
+            # here, so every referencing version counts as unreadable.
+            snapshots = repository_factory(session).asset_usage_snapshots(
+                workspace_id, (asset.id for asset, _, _ in fetched)
+            )
             for asset, page_title, is_orphan in fetched:
-                snapshot = repository.get_page_asset_usage(
-                    workspace_id, asset.page_id, asset.id
-                )
+                snapshot = snapshots.get(asset.id)
                 if snapshot is None:
                     continue
                 projection = ContextMediaAttachmentProjection(

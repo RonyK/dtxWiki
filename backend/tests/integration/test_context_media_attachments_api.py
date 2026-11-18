@@ -628,3 +628,100 @@ def test_published_reference_is_preferred_for_preview(page_service):
     row = _list(owner, workspace_id, scope="workspace").json()["data"]["items"][0]
     assert row["asset_id"] == seeded["asset_id"]
     assert f"/versions/{published_id}/" in row["content_url"]
+
+
+def test_viewer_learns_of_unreadable_usage_and_lists_only_readable_versions(
+    page_service,
+):
+    """One fixture, three failure paths: the listing must flag usage in a
+    version the caller cannot read (without making the row deletable or
+    pointing its preview there), the usage detail must list only readable
+    versions while still saying hidden ones exist, and the listing's SQL
+    count must not grow with the number of rows it returns."""
+
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    from backend.models.context_media import ContextMediaUsage
+
+    owner = make_client(page_service, "attach-usage-owner@example.com", role="owner")
+    viewer = make_client(
+        page_service, "attach-usage-viewer@example.com", role="viewer"
+    )
+    workspace_id = _workspace_id(owner)
+    viewer_id = _user_id(page_service, "attach-usage-viewer@example.com")
+    seeded = _seed_asset(
+        page_service, UUID(workspace_id), created_by_actor_id=viewer_id, editing=True
+    )
+    asset_id = seeded["asset_id"]
+    with page_service.session_factory.begin() as session:
+        page = session.get(ContextPage, UUID(seeded["page_id"]))
+        published = session.get(ContextPageVersion, UUID(seeded["version_id"]))
+        published.version_status = "published_snapshot"
+        page.current_published_version_id = published.id
+        page.lifecycle_status = "published"
+        draft = ContextPageVersion(
+            id=uuid4(),
+            workspace_id=page.workspace_id,
+            page_id=page.id,
+            version_no=2,
+            parent_version_id=published.id,
+            body_md="",
+            content_hash="2" * 64,
+            actor_type="human",
+            actor_id=None,
+            version_status="draft",
+            created_by_actor_kind="human",
+            created_by_actor_id=viewer_id,
+        )
+        session.add(draft)
+        session.flush()
+        for version_id, count in ((published.id, 1), (draft.id, 3)):
+            session.add(
+                ContextMediaUsage(
+                    workspace_id=page.workspace_id,
+                    page_id=page.id,
+                    asset_id=UUID(asset_id),
+                    page_version_id=version_id,
+                    reference_count=count,
+                )
+            )
+        published_id, draft_id = str(published.id), str(draft.id)
+
+    [row] = _list(viewer, workspace_id, scope="mine").json()["data"]["items"]
+    assert row["usage_state"] == "active"
+    assert row["has_unreadable_usage"] is True
+    assert row["can_delete"] is False
+    assert f"/versions/{published_id}/" in row["content_url"]
+
+    usage_path = (
+        f"/api/v1/workspaces/{workspace_id}/context/media/assets/{asset_id}/usage"
+    )
+    hidden = viewer.get(usage_path).json()["data"]
+    assert [
+        (item["version_id"], item["history_status"], item["reference_count"])
+        for item in hidden["items"]
+    ] == [(published_id, "published_snapshot", 1)]
+    assert hidden["has_unreadable_usage"] is True
+    full = owner.get(usage_path).json()["data"]
+    assert [item["version_id"] for item in full["items"]] == [draft_id, published_id]
+    assert full["has_unreadable_usage"] is False
+
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    def listing_statement_count() -> int:
+        statements.clear()
+        event.listen(Engine, "before_cursor_execute", record)
+        try:
+            assert _list(owner, workspace_id, scope="workspace").status_code == 200
+        finally:
+            event.remove(Engine, "before_cursor_execute", record)
+        return len(statements)
+
+    one_row = listing_statement_count()
+    for _ in range(3):
+        _seed_asset(page_service, UUID(workspace_id), created_by_actor_id=viewer_id)
+    assert listing_statement_count() == one_row

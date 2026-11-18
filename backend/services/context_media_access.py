@@ -19,14 +19,13 @@ from backend.policy.rbac import (
     WorkspacePlaneUnavailableError,
     rebind_actor_to_workspace_access,
     require_workspace_role,
-    role_allows,
 )
 from backend.policy.trust_boundaries import (
     actor_kind_for_check,
     actor_with_target_workspace_scope,
 )
 from backend.repositories.workspace_scoped import select_in_workspace
-from backend.services.actor_visible_read import context_version_is_visible
+from backend.services.actor_visible_read import context_media_version_is_readable
 from backend.services.public_page_exposure import (
     exposure_scope_for_workspace,
     valid_public_exposed_version_id,
@@ -231,10 +230,10 @@ class ContextMediaAccessPolicy:
                         hide_membership=True,
                     )
             scoped_actor = rebind_actor_to_workspace_access(actor, access)
-            may_read_history = role_allows(access.role, "editor")
-            if not context_version_is_visible(version, scoped_actor) or (
-                not may_read_history
-                and page.current_published_version_id != page_version_id
+            if not context_media_version_is_readable(
+                version,
+                current_published_version_id=page.current_published_version_id,
+                actor=scoped_actor,
             ):
                 raise _not_found("page version not found")
             return workspace_id

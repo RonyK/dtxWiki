@@ -50,9 +50,10 @@ class ContextMediaAssetPayload(BaseModel):
     bytes: int = Field(ge=0)
     association_state: Literal["pending_install", "active", "tombstoned"]
     usage_state: Literal["active", "history_only", "unused"]
-    latest_draft_reference_count: int = Field(ge=0)
-    current_published_reference_count: int = Field(ge=0)
-    historical_reference_count: int = Field(ge=0)
+    """Every version's usage, including versions the caller cannot read. This
+    page-level listing is editor-gated and editors read every version, so it
+    carries no unreadable-usage flag; per-version counts come from the asset
+    usage endpoint."""
     can_delete: bool
     usage_token: str
     content_url: str
@@ -80,10 +81,9 @@ class ContextMediaOrphanPayload(BaseModel):
     """A page-owned media asset written into no version's Markdown -- either
     never (an upload abandoned mid-edit, the usual case) or no longer.
 
-    An asset still protected by an open "editing" session (P3.4:
-    ``created_for_version_id`` names a version whose own status is
-    ``"editing"``) is never listed here at all -- that is an upload in
-    progress, not an orphan.
+    An asset still protected by an open draft (``created_for_version_id``
+    names a version whose own status is ``"draft"``) is never listed here at
+    all -- that is an upload in progress, not an orphan.
 
     Not retention-gated -- every current orphan is listed regardless of
     age; only automatic removal (the ``context_media_orphan_sweep`` job) is
@@ -136,9 +136,15 @@ class ContextMediaAttachmentPayload(BaseModel):
     asset would appear, and a ``Literal`` there turns that row into a 500 on
     response validation rather than a row the reader can act on.
 
-    ``can_delete`` answers "may THIS caller delete this now", combining usage,
-    editing ownership and workspace role. Both listings respect editing
-    ownership; this workspace-wide listing is also readable by a viewer.
+    ``can_delete`` answers "may THIS caller delete this now", combining usage
+    across every version with the caller's workspace role. This
+    workspace-wide listing is also readable by a viewer.
+
+    ``usage_state`` counts every version, including versions the caller
+    cannot read: deleting a file such a version still references would break
+    that version. ``has_unreadable_usage`` says that some of that usage is in
+    versions the caller cannot read, without naming them or counting it.
+    Per-version counts come from the asset usage endpoint.
     """
 
     asset_id: UUID
@@ -153,9 +159,7 @@ class ContextMediaAttachmentPayload(BaseModel):
     bytes: int = Field(ge=0)
     association_state: Literal["pending_install", "active", "tombstoned"]
     usage_state: Literal["active", "history_only", "unused"]
-    latest_draft_reference_count: int = Field(ge=0)
-    current_published_reference_count: int = Field(ge=0)
-    historical_reference_count: int = Field(ge=0)
+    has_unreadable_usage: bool
     is_orphan: bool
     is_mine: bool
     can_delete: bool
@@ -221,3 +225,38 @@ class AdminContextMediaAttachmentListData(BaseModel):
 
 class AdminContextMediaAttachmentListResponse(RESTResponseBase):
     data: AdminContextMediaAttachmentListData
+
+
+class ContextMediaAssetVersionUsagePayload(BaseModel):
+    """One version, readable by the caller, that references the asset."""
+
+    version_id: UUID
+    version_no: int = Field(ge=1)
+    history_status: Literal[
+        "current_draft",
+        "published_snapshot",
+        "closed",
+        "discarded_draft",
+        "superseded_snapshot",
+    ]
+    reference_count: int = Field(ge=1)
+    """How many times this version's body references the asset."""
+    created_at: datetime
+    last_saved_at: datetime | None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMediaAssetUsageData(BaseModel):
+    items: tuple[ContextMediaAssetVersionUsagePayload, ...]
+    """Only versions the caller can read, newest first."""
+    has_unreadable_usage: bool
+    """Some version the caller cannot read also references the asset. Those
+    versions are never listed, counted, or named."""
+    next_cursor: str | None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMediaAssetUsageResponse(RESTResponseBase):
+    data: ContextMediaAssetUsageData

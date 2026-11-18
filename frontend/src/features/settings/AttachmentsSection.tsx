@@ -20,7 +20,15 @@ import { ListPanelHeader } from "../../shared/components/ListPanelHeader";
 import { SearchField } from "../../shared/components/SearchField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { ImageViewerDialog } from "../../shared/components/ImageViewerDialog";
+import {
+  MediaPreviewPlaceholder,
+  type MediaPreviewUnavailableReason,
+} from "../../shared/components/MediaPreviewPlaceholder";
 import { StatusBanner } from "../../shared/components/StatusBanner";
+import {
+  ContextMediaUnreadableUsagePill,
+  ContextMediaUsageHistory,
+} from "../../shared/components/ContextMediaUsage";
 import { StatusPill } from "../../shared/components/StatusPill";
 import {
   SettingsEmptyState,
@@ -701,13 +709,16 @@ export function AttachmentsSection({
                       />
                     </button>
                   ) : (
-                    <span
-                      aria-hidden="true"
-                      className="attachments-preview attachments-preview-kind"
-                      title={previewPlaceholderHint(item, t)}
-                    >
-                      {placeholderGlyph(item)}
-                    </span>
+                    <MediaPreviewPlaceholder
+                      className="attachments-preview"
+                      filename={item.original_filename}
+                      mediaType={item.media_type}
+                      reason={previewUnavailableReason(
+                        item,
+                        serverScope,
+                        unpreviewable,
+                      )}
+                    />
                   )}
                   <div className="attachments-card-main">
                     <div className="attachments-identity">
@@ -751,6 +762,9 @@ export function AttachmentsSection({
                             })}
                             tone={STATE_TONE[state]}
                           />
+                          {item.has_unreadable_usage ? (
+                            <ContextMediaUnreadableUsagePill />
+                          ) : null}
                           {item.is_mine ? (
                             <StatusPill
                               compact
@@ -825,6 +839,16 @@ export function AttachmentsSection({
                         <dd>{formatVersionTimestamp(item.created_at)}</dd>
                       </div>
                     </dl>
+
+                    {/* Server scope reads no workspace version, so it has no
+                        per-version history to offer. */}
+                    {!serverScope && item.usage_state !== "unused" ? (
+                      <ContextMediaUsageHistory
+                        assetId={item.asset_id}
+                        pageId={item.page_id}
+                        workspaceId={item.workspace_id}
+                      />
+                    ) : null}
 
                     {item.can_delete ? (
                       pendingDeleteId === attachmentKey(item) ? (
@@ -973,22 +997,19 @@ function previewable(
   return true;
 }
 
-function placeholderGlyph(item: ContextMediaAttachment): string {
-  if (item.kind === "audio") return "♪";
-  if (item.kind === "video") return "▶";
-  return "□";
-}
-
-function previewPlaceholderHint(item: ContextMediaAttachment, t: Translate) {
-  if (item.kind === "image") {
-    return t("attachments.previewPrivate", {
-      defaultValue:
-        "Preview unavailable for this version.",
-    });
-  }
-  return t("attachments.previewNotAnImage", {
-    defaultValue: "No preview for this file type.",
-  });
+// Why a row shows a placeholder instead of its thumbnail. No reason means
+// the file type simply has no still image.
+function previewUnavailableReason(
+  item: ContextMediaAttachment,
+  serverScope: boolean,
+  unpreviewable: ReadonlySet<string>,
+): MediaPreviewUnavailableReason | undefined {
+  if (serverScope) return "serverScope";
+  // Outside server scope the API omits content_url only when no version the
+  // viewer can read serves the file.
+  if (!item.content_url) return "unreadable";
+  if (unpreviewable.has(attachmentKey(item))) return "failed";
+  return undefined;
 }
 
 // One generic "nothing here" cannot tell an operator whether the workspace is
@@ -1073,7 +1094,7 @@ const STATE_FALLBACK: Record<AttachmentState, string> = {
 const STATE_HINT_FALLBACK: Record<AttachmentState, string> = {
   inUse: "Shown on the current published version of its page.",
   historyOnly: "Only referenced by older versions of its page.",
-  staging: "Uploaded into an edit nobody has saved yet, so it is held.",
+  staging: "An open draft retains this upload, which has not been inserted into the body yet.",
   unused:
     "No version of its page references it; the retention sweep will reclaim it.",
 };

@@ -9,6 +9,7 @@ from uuid import UUID
 
 from backend.context_media.domain import (
     ActorIdentity,
+    AssetVersionUsagePage,
     AssociationState,
     ContentCapability,
     ContextMediaAssetProjection,
@@ -92,43 +93,22 @@ class ListPageMedia:
         *,
         workspace_id: UUID,
         page_id: UUID,
-        usage: UsageState | None = None,
-        viewer: ActorIdentity | None = None,
+        used: bool | None = None,
     ) -> tuple[ContextMediaAssetProjection, ...]:
-        projections = tuple(
+        return tuple(
             ContextMediaAssetProjection.from_snapshot(snapshot)
             for snapshot in repository.list_page_usage(
-                workspace_id, page_id, viewer=viewer
+                workspace_id, page_id, used=used
             )
-            if snapshot.asset.association_state is not AssociationState.TOMBSTONED
-        )
-        if usage is None:
-            return projections
-        if usage is UsageState.UNUSED:
-            return tuple(item for item in projections if item.usage_state is usage)
-        return tuple(
-            item
-            for item in projections
-            if item.usage_state in {UsageState.ACTIVE, UsageState.HISTORY_ONLY}
         )
 
 
 class ListWorkspaceMedia:
     """One page of a workspace's attachments.
 
-    The ``usage`` filter uses the canonical reference counts, including
-    discarded versions. Pagination metadata comes from the SQL asset window.
-
-    260912 review: that same ordering used to break pagination. ``has_more``
-    and ``next_cursor`` were computed by the ROUTE from ``len(projections)``
-    -- AFTER this filter ran -- so a request like ``usage=unused&limit=50``
-    that fetched 51 rows and kept only 8 unused ones reported
-    ``has_more = 8 > 50 = False`` and stopped the listing there, even with
-    hundreds of unused assets still unseen. No error, no truncation marker.
-    ``repository.list_workspace_usage`` now fixes ``has_more``/``next_after``
-    from what SQL actually returned, before this method's filter ever touches
-    the rows (``WorkspaceUsagePage``'s docstring has the full argument) --
-    this method's only job is to pass that pair through unfiltered.
+    ``used`` filters on usage in any version, including versions the viewer
+    cannot read. It runs in SQL before the page window is cut, so the
+    repository's ``has_more``/``next_after`` pass through unchanged.
     """
 
     def execute(
@@ -141,10 +121,10 @@ class ListWorkspaceMedia:
         created_by: ActorIdentity | None = None,
         page_id: UUID | None = None,
         orphan_only: bool = False,
+        used: bool | None = None,
         filename_contains: str | None = None,
         after: tuple[datetime, UUID] | None = None,
         limit: int = 50,
-        usage: UsageState | None = None,
     ) -> tuple[
         tuple[ContextMediaAttachmentProjection, ...],
         bool,
@@ -157,33 +137,15 @@ class ListWorkspaceMedia:
             created_by=created_by,
             page_id=page_id,
             orphan_only=orphan_only,
+            used=used,
             filename_contains=filename_contains,
             after=after,
             limit=limit,
         )
-        # Not filtered here: the adapter's query already excludes
-        # TOMBSTONED in SQL (`association_state != TOMBSTONED.value`), so a
-        # tombstoned row never reaches `page.snapshots`. This used to be a
-        # second, redundant filter on the same condition; kept out entirely
-        # rather than kept as a defensive no-op, because a defensive filter
-        # applied AFTER `has_more`/`next_after` are fixed is exactly the shape
-        # of bug this method exists to not repeat -- see the class docstring.
         projections = tuple(
             ContextMediaAttachmentProjection.from_snapshot(snapshot)
             for snapshot in page.snapshots
         )
-        if usage is not None:
-            if usage is UsageState.UNUSED:
-                projections = tuple(
-                    item for item in projections if item.asset.usage_state is usage
-                )
-            else:
-                projections = tuple(
-                    item
-                    for item in projections
-                    if item.asset.usage_state
-                    in {UsageState.ACTIVE, UsageState.HISTORY_ONLY}
-                )
         return projections, page.has_more, page.next_after
 
 
@@ -265,16 +227,14 @@ class ContextMediaService:
         *,
         workspace_id: UUID,
         page_id: UUID,
-        usage: UsageState | None = None,
-        viewer: ActorIdentity | None = None,
+        used: bool | None = None,
     ) -> tuple[ContextMediaAssetProjection, ...]:
         with self._uow_factory(workspace_id) as uow:
             return ListPageMedia().execute(
                 uow.repository,
                 workspace_id=workspace_id,
                 page_id=page_id,
-                usage=usage,
-                viewer=viewer,
+                used=used,
             )
 
     def list_workspace_assets(
@@ -286,10 +246,10 @@ class ContextMediaService:
         created_by: ActorIdentity | None = None,
         page_id: UUID | None = None,
         orphan_only: bool = False,
+        used: bool | None = None,
         filename_contains: str | None = None,
         after: tuple[datetime, UUID] | None = None,
         limit: int = 50,
-        usage: UsageState | None = None,
     ) -> tuple[
         tuple[ContextMediaAttachmentProjection, ...],
         bool,
@@ -304,10 +264,30 @@ class ContextMediaService:
                 created_by=created_by,
                 page_id=page_id,
                 orphan_only=orphan_only,
+                used=used,
                 filename_contains=filename_contains,
                 after=after,
                 limit=limit,
-                usage=usage,
+            )
+
+    def list_asset_version_usage(
+        self,
+        *,
+        workspace_id: UUID,
+        asset_id: UUID,
+        viewer: ActorIdentity,
+        viewer_role: str,
+        after: tuple[datetime, UUID] | None = None,
+        limit: int = 25,
+    ) -> AssetVersionUsagePage | None:
+        with self._uow_factory(workspace_id) as uow:
+            return uow.repository.list_asset_version_usage(
+                workspace_id,
+                asset_id,
+                viewer=viewer,
+                viewer_role=viewer_role,
+                after=after,
+                limit=limit,
             )
 
     def delete_unused(

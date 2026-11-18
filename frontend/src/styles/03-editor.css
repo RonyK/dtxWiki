@@ -7484,3 +7484,178 @@ button.graph-seed-path-node:hover { background: var(--surface-hover); }
 @container graph-view (max-width: 760px) {
   .graph-height-picker > summary, .graph-height-option { min-height: 44px; }
 }
+
+/* Per-version usage history of one attachment, shared by the page media
+   dialog and the attachment settings cards. Collapsed by default; the panel
+   is fetched on first open. */
+.context-media-usage-history {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.context-media-usage-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  margin-inline-start: -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.context-media-usage-toggle:hover {
+  background: var(--surface-hover);
+}
+
+.context-media-usage-toggle svg {
+  transition: transform 120ms ease;
+}
+
+.context-media-usage-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.context-media-usage-panel {
+  justify-self: stretch;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.context-media-usage-panel[hidden] {
+  display: none;
+}
+
+.context-media-usage-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-media-usage-rows > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  padding: 6px 0;
+}
+
+.context-media-usage-rows > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.context-media-usage-status {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.context-media-usage-version,
+.context-media-usage-count,
+.context-media-usage-time {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-media-usage-version::before,
+.context-media-usage-count::before,
+.context-media-usage-time::before {
+  margin-inline-end: 8px;
+  color: var(--ink-soft);
+  content: "\00b7";
+}
+
+.context-media-usage-open {
+  margin-inline-start: auto;
+  color: var(--accent);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.context-media-usage-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 0;
+  color: var(--ink-muted);
+}
+
+.context-media-usage-rows + .context-media-usage-note {
+  border-top: 1px solid var(--border);
+}
+
+.context-media-usage-more {
+  margin: 2px 0 6px;
+}
+
+/* Settings cards: the history sits under the facts line, beside the actions
+   column, and spans the full card on phones like the facts line does. */
+.attachments-card-main > .context-media-usage-history {
+  grid-column: 1;
+}
+
+@media (max-width: 480px) {
+  .attachments-card-main > .context-media-usage-history {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Thumbnail stand-in shared by the attachment cards and the page media
+   dialog: the file's kind as an icon, its extension as plain text, and a
+   corner badge naming why there is no preview. The caller's thumbnail class
+   supplies the box, so the tile is exactly the size of a real preview. A
+   placeholder beats the browser's broken-image glyph, which reads as "this
+   file is corrupt". */
+.media-preview-placeholder {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--surface-subtle);
+  color: var(--ink-soft);
+}
+
+.media-preview-placeholder-extension {
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-preview-placeholder-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+

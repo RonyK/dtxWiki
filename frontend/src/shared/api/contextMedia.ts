@@ -69,9 +69,6 @@ export type ContextMediaAsset = {
   bytes: number;
   association_state: "pending_install" | "active" | "tombstoned";
   usage_state: ContextMediaUsageState;
-  latest_draft_reference_count: number;
-  current_published_reference_count: number;
-  historical_reference_count: number;
   can_delete: boolean;
   usage_token: string;
   content_url: string;
@@ -123,10 +120,26 @@ export function contextMediaCapabilitiesAreCurrent(
 export async function listPageContextMedia(
   workspaceId: string,
   pageId: string,
-  usage: ContextMediaUsageFilter,
+  usage?: ContextMediaUsageFilter,
 ) {
   const response = await apiRequest<ContextMediaAssetListResponse>(
-    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(pageId)}/media?usage=${usage}`,
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/context/pages/${encodeURIComponent(pageId)}/media${usage ? `?usage=${usage}` : ""}`,
+  );
+  return response.data;
+}
+
+export type ContextMediaAssetUsageData =
+  components["schemas"]["ContextMediaAssetUsageData"];
+
+export async function getContextMediaAssetUsage(
+  workspaceId: string,
+  assetId: string,
+  cursor?: string,
+): Promise<ContextMediaAssetUsageData> {
+  const params = new URLSearchParams({ limit: "25" });
+  if (cursor) params.set("cursor", cursor);
+  const response = await apiRequest<{ data: ContextMediaAssetUsageData }>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/context/media/assets/${encodedAssetId(assetId)}/usage?${params}`,
   );
   return response.data;
 }

@@ -10,7 +10,10 @@ import {
   type ContextMediaAsset,
   type ContextMediaUsageState,
 } from "../../shared/api/contextMedia";
+import { ContextMediaUsageHistory } from "../../shared/components/ContextMediaUsage";
 import { Dialog } from "../../shared/components/Dialog";
+import { MediaPreviewPlaceholder } from "../../shared/components/MediaPreviewPlaceholder";
+import { mediaFileCategory } from "../../shared/lib/mediaFile";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 
 type ContextMediaManagerDialogProps = {
@@ -55,10 +58,9 @@ export function ContextMediaManagerDialog({
     loadRequestRef.current = requestId;
     setMedia((current) => ({ ...current, error: false, loading: true }));
     try {
-      const [used, unused] = await Promise.all([
-        listPageContextMedia(workspaceId, pageId, "used"),
-        listPageContextMedia(workspaceId, pageId, "unused"),
-      ]);
+      const assets = await listPageContextMedia(workspaceId, pageId);
+      const used = assets.filter((asset) => asset.usage_state !== "unused");
+      const unused = assets.filter((asset) => asset.usage_state === "unused");
       if (loadRequestRef.current !== requestId) {
         return;
       }
@@ -212,6 +214,8 @@ export function ContextMediaManagerDialog({
         ) : media.error ? null : (
           <div className="context-media-groups">
             <MediaGroup
+              workspaceId={workspaceId}
+              pageId={pageId}
               assets={media.used}
               confirmingAssetId={pendingDeleteAsset?.id ?? null}
               deletingAssetId={deletingAssetId}
@@ -220,6 +224,8 @@ export function ContextMediaManagerDialog({
               onDelete={requestDelete}
             />
             <MediaGroup
+              workspaceId={workspaceId}
+              pageId={pageId}
               assets={media.unused}
               confirmingAssetId={pendingDeleteAsset?.id ?? null}
               deletingAssetId={deletingAssetId}
@@ -235,6 +241,8 @@ export function ContextMediaManagerDialog({
 }
 
 function MediaGroup({
+  workspaceId,
+  pageId,
   assets,
   confirmingAssetId,
   deletingAssetId,
@@ -242,6 +250,8 @@ function MediaGroup({
   headingId,
   onDelete,
 }: {
+  workspaceId: string;
+  pageId: string;
   assets: ContextMediaAsset[];
   confirmingAssetId: string | null;
   deletingAssetId: string | null;
@@ -251,6 +261,9 @@ function MediaGroup({
 }) {
   const { i18n, t } = useTranslation("pages");
   const heading = t(`mediaManager.groups.${group}.heading`);
+  const [failedPreviews, setFailedPreviews] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   return (
     <section aria-labelledby={headingId} className="context-media-group">
       <div className="context-media-group-heading">
@@ -274,12 +287,25 @@ function MediaGroup({
         >
           {assets.map((asset) => (
             <li className="context-media-item" key={asset.id}>
-              <img
-                alt=""
-                className="context-media-preview"
-                loading="lazy"
-                src={asset.content_url}
-              />
+              {mediaFileCategory(asset.media_type) === "image" &&
+              !failedPreviews.has(asset.id) ? (
+                <img
+                  alt=""
+                  className="context-media-preview"
+                  loading="lazy"
+                  onError={() =>
+                    setFailedPreviews((current) => new Set(current).add(asset.id))
+                  }
+                  src={asset.content_url}
+                />
+              ) : (
+                <MediaPreviewPlaceholder
+                  className="context-media-preview"
+                  filename={asset.original_filename}
+                  mediaType={asset.media_type}
+                  reason={failedPreviews.has(asset.id) ? "failed" : undefined}
+                />
+              )}
               <div className="context-media-item-body">
                 <div className="context-media-item-title">
                   <strong>{asset.original_filename}</strong>
@@ -292,21 +318,18 @@ function MediaGroup({
                     <dt>{t("mediaManager.facts.size")}</dt>
                     <dd>{formatBytes(asset.bytes, i18n.language, t)}</dd>
                   </div>
-                  <div>
-                    <dt>{t("mediaManager.facts.references")}</dt>
-                    <dd>
-                      {t("mediaManager.facts.referenceSummary", {
-                        draftCount: asset.latest_draft_reference_count,
-                        historyCount: asset.historical_reference_count,
-                        publishedCount: asset.current_published_reference_count,
-                      })}
-                    </dd>
-                  </div>
                 </dl>
                 {!asset.can_delete ? (
                   <p className="context-media-retained">
                     {t("mediaManager.facts.retained")}
                   </p>
+                ) : null}
+                {asset.usage_state !== "unused" ? (
+                  <ContextMediaUsageHistory
+                    assetId={asset.id}
+                    pageId={pageId}
+                    workspaceId={workspaceId}
+                  />
                 ) : null}
               </div>
               {asset.can_delete ? (
