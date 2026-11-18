@@ -189,11 +189,12 @@ export async function readEditablePage(workspaceId: string, id: string, versionI
   const joinsDraft = selected.version_status === "draft" && (versionId || !selected.current_published_version_id);
   const endedDraft = Boolean(versionId) &&
     (selected.version_status === "closed" || selected.version_status === "discarded");
-  return joinsDraft || endedDraft ? beginPageEdit(workspaceId, selected, selected.version_id) : selected;
+  return joinsDraft || endedDraft ? beginPageEdit(workspaceId, selected.id, selected.version_id) : selected;
 }
 
-export async function beginPageEdit(workspaceId: string, page: PagePayload, fromVersionId?: string) {
-  const response = await apiRequest<PageResponse>(pagesPath(workspaceId, `/${page.id}/begin-edit`), {
+/** Joins a named draft, or starts a new draft from a finished commit (or the published version). */
+export async function beginPageEdit(workspaceId: string, pageId: string, fromVersionId?: string) {
+  const response = await apiRequest<PageResponse>(pagesPath(workspaceId, `/${pageId}/begin-edit`), {
     method: "POST",
     body: JSON.stringify({ idempotency_key: newIdempotencyKey(), ...(fromVersionId ? { from: fromVersionId } : {}) }),
   });
@@ -212,18 +213,13 @@ export async function submitPageForReview(
   return response.data;
 }
 
-export async function discardAlternativeDraft(
-  workspaceId: string,
-  id: string,
-  versionId: string,
-  input: { reason: string },
-) {
-  const response = await apiRequest<{ data: PageVersionEntry }>(
-    pagesPath(workspaceId, `/${id}/versions/${versionId}/discard`),
-    { method: "POST", body: JSON.stringify(input) },
-  );
-  return response.data;
+export async function discardPageEdit(workspaceId: string, id: string, versionId: string) {
+  await apiRequest<void>(pagesPath(workspaceId, `/${id}/discard-edit`), {
+    method: "POST",
+    body: JSON.stringify({ version_id: versionId, idempotency_key: newIdempotencyKey(), retry_only: false }),
+  });
 }
+
 export async function diffPageVersions(
   workspaceId: string,
   id: string,
@@ -278,7 +274,8 @@ export async function createPageComment(
 export type PreparedPagePublication = { versionId: string; request: PublishPageVersionInput };
 export type PageWriteOptions = {
   signal?: AbortSignal;
-  onMergePreview?: (preview: ContextMergePreview) => Promise<boolean>;
+  /** The person's answer to a conflicting merge, bound to the preview they saw. */
+  mergeChoice?: PreparedMergeChoice;
   preparedPublication?: PreparedPagePublication;
   onPublicationPrepared?: (command: PreparedPagePublication) => void;
 };
@@ -330,30 +327,108 @@ export async function autosavePage(
   return response.data;
 }
 
-export type ContextMergeCandidate = {
-  body_md: string;
-  page_metadata: Record<string, unknown>;
-  block_map: Record<string, unknown>[];
-  result_hash: string;
-};
+export type ContextMergePreview = components["schemas"]["ContextMergePreviewData"];
+export type ContextMergeCandidate = components["schemas"]["ContextMergeCandidate"];
+export type ContextMergeChoiceValue = "keep_both" | "latest";
+export type ContextMergeMetadataInput = components["schemas"]["PageMetadataPatch"];
 
-export type ContextMergePreview = {
-  version_id: string;
-  editing_revision: number;
-  published_version_id: string | null;
-  parent_version_ids: string[];
-  kind: "fast_forward" | "automatic_merge" | "conflict";
-  result: ContextMergeCandidate | null;
-  keep_both: ContextMergeCandidate;
-  latest: ContextMergeCandidate;
+/** A merge that a person must settle with one of the two choices. */
+export class ContextMergeChoiceRequired extends Error {
+  preview: ContextMergePreview;
+  constructor(preview: ContextMergePreview) {
+    super("These changes overlap; choose how to combine them.");
+    this.name = "ContextMergeChoiceRequired";
+    this.preview = preview;
+  }
+}
+
+/** The preview changed between what the person saw and the confirm. */
+export class ContextMergePreviewChanged extends Error {
+  preview: ContextMergePreview;
+  constructor(preview: ContextMergePreview) {
+    super("The content changed; review the new preview.");
+    this.name = "ContextMergePreviewChanged";
+    this.preview = preview;
+  }
+}
+
+export type PreparedMergeChoice = {
+  expected_editing_revision: number;
+  target_version_id: string | null;
+  on_conflict?: ContextMergeChoiceValue;
+  result_hash: string;
+  result_body_md?: string;
+  result_page_metadata?: ContextMergeMetadataInput;
 };
 
 export async function previewPageMerge(workspaceId: string, id: string, versionId: string,
-  options: PageWriteOptions = {}) {
+  options: {
+    signal?: AbortSignal;
+    commitVersionId?: string | null;
+    onConflict?: ContextMergeChoiceValue;
+    bodyMd?: string;
+    pageMetadata?: ContextMergeMetadataInput;
+  } = {}) {
   const response = await apiRequest<{ data: ContextMergePreview }>(pagesPath(workspaceId, `/${id}/merge-preview`), {
-    method: "POST", body: JSON.stringify({ version_id: versionId }), signal: options.signal,
+    method: "POST",
+    body: JSON.stringify({
+      version_id: versionId,
+      ...(options.commitVersionId ? { commit_version_id: options.commitVersionId } : {}),
+      ...(options.onConflict ? { on_conflict: options.onConflict } : {}),
+      ...(options.bodyMd !== undefined ? { body_md: options.bodyMd } : {}),
+      ...(options.pageMetadata ? { page_metadata: options.pageMetadata } : {}),
+    }),
+    signal: options.signal,
   });
   return response.data;
+}
+
+/** Pins for a clean merge: what the server previewed is what it writes. */
+export function cleanMergeChoice(preview: ContextMergePreview): PreparedMergeChoice {
+  if (!preview.result) throw new ContextMergeChoiceRequired(preview);
+  return {
+    expected_editing_revision: preview.editing_revision,
+    target_version_id: preview.target_version_id ?? null,
+    result_hash: preview.result.result_hash,
+  };
+}
+
+/**
+ * Binds a person's choice (and optional edits) to the preview they saw. An
+ * edited result is hashed by the server; if the draft or the other side moved
+ * meanwhile, the caller gets the new preview instead of a silent overwrite.
+ */
+export async function prepareMergeChoice(workspaceId: string, id: string, preview: ContextMergePreview,
+  choice: { onConflict: ContextMergeChoiceValue; bodyMd?: string | null; pageMetadata?: ContextMergeMetadataInput | null },
+  options: { signal?: AbortSignal } = {}): Promise<PreparedMergeChoice> {
+  const candidate = preview[choice.onConflict];
+  const edited = choice.bodyMd != null || choice.pageMetadata != null;
+  let resultHash = candidate?.result_hash;
+  if (edited || !resultHash) {
+    const checked = await previewPageMerge(workspaceId, id, preview.version_id, {
+      signal: options.signal,
+      commitVersionId: preview.target_version_id !== preview.published_version_id ? preview.target_version_id : null,
+      onConflict: choice.onConflict,
+      ...(choice.bodyMd != null ? { bodyMd: choice.bodyMd } : {}),
+      ...(choice.pageMetadata != null ? { pageMetadata: choice.pageMetadata } : {}),
+    });
+    if (checked.editing_revision !== preview.editing_revision || checked.target_version_id !== preview.target_version_id || !checked.result) {
+      const fresh = await previewPageMerge(workspaceId, id, preview.version_id, {
+        signal: options.signal,
+        commitVersionId: preview.target_version_id !== preview.published_version_id ? preview.target_version_id : null,
+      });
+      throw new ContextMergePreviewChanged(fresh);
+    }
+    resultHash = checked.result.result_hash;
+  }
+  return {
+    expected_editing_revision: preview.editing_revision,
+    target_version_id: preview.target_version_id ?? null,
+    on_conflict: choice.onConflict,
+    result_hash: resultHash,
+    ...(choice.bodyMd != null ? { result_body_md: choice.bodyMd } : {}),
+    ...(choice.pageMetadata != null ? { result_page_metadata: choice.pageMetadata } : {}),
+  };
 }
 
 export async function publishPageVersion(
@@ -365,21 +440,33 @@ export async function publishPageVersion(
 ) {
   let command = options.preparedPublication;
   if (!command) {
-    const preview = await previewPageMerge(workspaceId, id, versionId, options);
-    if (!preview.result) {
-      throw new ApiError(409, { error_code: "context_merge_conflict", message: "These changes conflict. Read the current draft before publishing.", request_id: "", warnings: [] });
-    }
-    if (preview.kind === "automatic_merge" && options.onMergePreview &&
-        !await options.onMergePreview(preview)) {
-      throw new DOMException("Publication cancelled", "AbortError");
-    }
-    command = { versionId, request: { ...payload,
-      expected_editing_revision: preview.editing_revision,
-      expected_published_version_id: preview.published_version_id,
-      result_hash: preview.result.result_hash, idempotency_key: newIdempotencyKey() } };
+    const choice = options.mergeChoice ?? cleanMergeChoice(await previewPageMerge(workspaceId, id, versionId, options));
+    const { target_version_id: targetVersionId, ...pins } = choice;
+    command = { versionId, request: { ...payload, ...pins,
+      expected_published_version_id: targetVersionId, idempotency_key: newIdempotencyKey() } };
     options.onPublicationPrepared?.(command);
   }
   return executePreparedPagePublication(workspaceId, id, command, options);
+}
+
+/** Brings a commit (by default the published version) into a draft. */
+export async function bringInPageVersion(workspaceId: string, id: string, input: {
+  versionId: string;
+  commitVersionId: string;
+  choice: PreparedMergeChoice;
+}, options: { signal?: AbortSignal } = {}) {
+  const { target_version_id: _target, ...pins } = input.choice;
+  const response = await apiRequest<PageResponse>(pagesPath(workspaceId, `/${id}/bring-in`), {
+    method: "POST",
+    body: JSON.stringify({
+      version_id: input.versionId,
+      commit_version_id: input.commitVersionId,
+      ...pins,
+      idempotency_key: newIdempotencyKey(),
+    }),
+    signal: options.signal,
+  });
+  return response.data;
 }
 
 export async function executePreparedPagePublication(workspaceId: string, id: string,

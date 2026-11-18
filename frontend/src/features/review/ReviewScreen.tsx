@@ -1,4 +1,3 @@
-import { ContextMergeResultPreview } from "../pages/ContextMergeResultPreview";
 import { inputTextError, textInputLimit } from "../../shared/lib/inputPolicy";
 import {
   ArrowDown,
@@ -23,7 +22,7 @@ import {
   createReviewSelection,
   decideReview,
   decideReviewsBulk,
-  discardReviewReconciliationsBulk,
+  contextMergeBinding,
   getReview,
   getSettingsPolicies,
   getReviewCounts,
@@ -31,7 +30,15 @@ import {
   listReviews,
   undoReviewDecision,
 } from "../../shared/api/operations";
-import { previewPageMerge, restorePageVersion, type ContextMergePreview } from "../../shared/api/pages";
+import {
+  cleanMergeChoice,
+  prepareMergeChoice,
+  previewPageMerge,
+  restorePageVersion,
+  type ContextMergePreview,
+} from "../../shared/api/pages";
+import { useContextMergeChoice } from "../pages/ContextMergeDialog";
+import { MarkdownView } from "../pages/MarkdownView";
 import type {
   ContextMergeBinding,
   ReviewAudienceKind,
@@ -44,7 +51,6 @@ import type {
   ReviewDecisionUndo,
   ReviewEvidenceOperation,
   ReviewItem,
-  ReviewReconciliationBulkDiscardResult,
   ReviewScope,
   ReviewSelection,
 } from "../../shared/api/operations";
@@ -55,7 +61,6 @@ import { ApiError } from "../../shared/api/client";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { CountChip } from "../../shared/components/CountChip";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
-import { Dialog } from "../../shared/components/Dialog";
 import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { FormField } from "../../shared/components/FormField";
 import { ReaderTabs } from "../../shared/components/ReaderTabs";
@@ -190,23 +195,9 @@ export function ReviewScreen() {
   const [searchParams] = useSearchParams();
   const auth = useOptionalAuth();
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
-  const [mergeApprovalPrompt, setMergeApprovalPrompt] = useState<{ preview: ContextMergePreview; resolve: (accepted: boolean) => void } | null>(null);
-  const mergeApprovalResolveRef = useRef<((accepted: boolean) => void) | null>(null);
-  useEffect(() => {
-    setMergeApprovalPrompt(null);
-    return () => { mergeApprovalResolveRef.current?.(false); mergeApprovalResolveRef.current = null; };
-  }, [reviewRouteIdentity]);
-  function confirmAutomaticMerge(preview: ContextMergePreview): Promise<boolean> {
-    return new Promise((resolve) => {
-      mergeApprovalResolveRef.current = resolve;
-      setMergeApprovalPrompt({ preview, resolve });
-    });
-  }
-  function settleAutomaticMerge(accepted: boolean) {
-    mergeApprovalPrompt?.resolve(accepted);
-    mergeApprovalResolveRef.current = null;
-    setMergeApprovalPrompt(null);
-  }
+  const mergeChoice = useContextMergeChoice();
+  const closeMergeChoice = mergeChoice.close;
+  useEffect(() => closeMergeChoice, [closeMergeChoice, reviewRouteIdentity]);
 
   // Queue filters stay in the query; the selected review is owned by the path.
   // Keep the existing workflow's synchronous selection snapshot for in-flight
@@ -253,10 +244,6 @@ export function ReviewScreen() {
   const [bulkResult, setBulkResult] =
     useState<ReviewBulkDecisionResult | null>(null);
   const [bulkResultRun, setBulkResultRun] = useState(0);
-  const [bulkDiscardResult, setBulkDiscardResult] =
-    useState<ReviewReconciliationBulkDiscardResult | null>(null);
-  const [bulkDiscardOpen, setBulkDiscardOpen] = useState(false);
-  const [bulkDiscardReason, setBulkDiscardReason] = useState("");
   const [selectedBulkIds, setSelectedBulkIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -394,9 +381,6 @@ export function ReviewScreen() {
     setBulkBusy(false);
     setBulkResult(null);
     setBulkStopped(false);
-    setBulkDiscardResult(null);
-    setBulkDiscardOpen(false);
-    setBulkDiscardReason("");
   }, [routeWorkspaceId]);
 
   useEffect(() => {
@@ -776,6 +760,7 @@ export function ReviewScreen() {
     audienceKind?: ReviewAudienceKind,
     reasonOverride?: string,
     expectedImpactFingerprint?: string | null,
+    mergeBinding?: ContextMergeBinding,
   ): Promise<DecisionResult> {
     const selected = reviewForCurrentParam();
     const reason = (reasonOverride ?? decisionReason).trim();
@@ -806,14 +791,15 @@ export function ReviewScreen() {
             entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
           const pageId = operation?.document?.document_id;
           const versionId = operation?.content?.candidate_version_id;
-          pending.mergeBinding = null;
-          if (pageId && versionId) {
+          pending.mergeBinding = mergeBinding ?? null;
+          if (!mergeBinding && pageId && versionId) {
             const preview = await previewPageMerge(workspaceId, pageId, versionId);
-            if (!preview.result) throw new ApiError(409, { error_code: "context_merge_conflict",
-              message: t("workflow.mergeConflict"), request_id: "", warnings: [] });
-            if (preview.kind === "automatic_merge" && !await confirmAutomaticMerge(preview)) return "failed";
-            pending.mergeBinding = { expected_editing_revision: preview.editing_revision,
-              expected_published_version_id: preview.published_version_id, result_hash: preview.result.result_hash };
+            if (preview.kind === "conflict") {
+              // Overlapping changes: the approver picks one of the two choices.
+              openApprovalMerge(workspaceId, preview, audienceKind, reasonOverride);
+              return "failed";
+            }
+            pending.mergeBinding = contextMergeBinding(cleanMergeChoice(preview));
           }
         }
         // Save before POST so navigation/reload cannot enable a duplicate POST
@@ -859,6 +845,28 @@ export function ReviewScreen() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  function openApprovalMerge(workspaceId: string, preview: ContextMergePreview,
+    audienceKind?: ReviewAudienceKind, reasonOverride?: string) {
+    mergeChoice.open({
+      kind: "publish",
+      workspaceId,
+      pageId: preview.page_id,
+      preview,
+      reload: () => previewPageMerge(workspaceId, preview.page_id, preview.version_id),
+      onResolvedElsewhere: () => void submitDecision("approve"),
+      errorMessage: (cause) => reviewErrorMessage(cause, t("errors.decide")),
+      async confirm(resolution, seen) {
+        const choice = await prepareMergeChoice(workspaceId, seen.page_id, seen, {
+          onConflict: resolution.choice,
+          bodyMd: resolution.bodyMd,
+          pageMetadata: resolution.pageMetadata,
+        });
+        const result = await runDecision("approve", audienceKind, reasonOverride, null, contextMergeBinding(choice));
+        if (result === "failed") throw new Error(t("errors.decide"));
+      },
+    });
   }
 
   async function openNextReview() {
@@ -957,19 +965,7 @@ export function ReviewScreen() {
 
   function selectedDecisionCount() {
     if (!state || lifecycleTab === "resolved") return 0;
-    return [...selectedBulkIds].filter((id) => !state.reviews.some((review) =>
-      review.id === id && review.can_discard_reconciliation === true)).length;
-  }
-
-  function selectedReconciliationDiscardCount() {
-    if (!state || lifecycleTab === "resolved") {
-      return 0;
-    }
-    return state.reviews.filter(
-      (review) =>
-        selectedBulkIds.has(review.id)
-        && review.can_discard_reconciliation === true,
-    ).length;
+    return selectedBulkIds.size;
   }
 
   function toggleBulkSelection(reviewId: string, selected: boolean) {
@@ -993,10 +989,7 @@ export function ReviewScreen() {
     if (!workspaceIsCurrent || !state || lifecycleTab === "resolved" || !state.canEditDirectly) {
       return [];
     }
-    return state.reviews.filter(
-      (review) =>
-        review.can_decide || review.can_discard_reconciliation === true,
-    );
+    return state.reviews.filter((review) => review.can_decide);
   }
 
   function toggleSelectAllVisible(selected: boolean) {
@@ -1227,57 +1220,6 @@ export function ReviewScreen() {
     }
   }
 
-  async function runBulkReconciliationDiscard() {
-    if (
-      !workspaceIsCurrent || !state?.workspaceId
-      || bulkBusy
-      || busyId || refreshFailed || uncertainDecision
-      || bulkDiscardReason.trim().length === 0
-    ) {
-      return;
-    }
-    const reviewItemIds = state.reviews
-      .filter(
-        (review) =>
-          selectedBulkIds.has(review.id)
-          && review.can_discard_reconciliation === true,
-      )
-      .map((review) => review.id);
-    if (reviewItemIds.length === 0) {
-      return;
-    }
-    const generation = loadMoreGenerationRef.current;
-    const operation = ++bulkOperationRef.current;
-    setBulkBusy(true);
-    setError(null);
-    try {
-      const result = await discardReviewReconciliationsBulk(
-        state.workspaceId,
-        {
-          review_item_ids: reviewItemIds,
-          reason: bulkDiscardReason.trim(),
-        },
-      );
-      if (generation !== loadMoreGenerationRef.current) return;
-      setBulkDiscardResult(result);
-      setBulkDiscardOpen(false);
-      setBulkDiscardReason("");
-      setSelectedBulkIds(new Set(result.skipped.map((item) => item.review_item_id)));
-      await refreshQueueAfterBulk();
-    } catch (exc) {
-      if (generation === loadMoreGenerationRef.current) setError(
-        reviewErrorMessage(
-          exc,
-          t("errors.bulkDiscard", {
-            defaultValue: "Failed to discard reconciliation branches",
-          }),
-        ),
-      );
-    } finally {
-      if (operation === bulkOperationRef.current) setBulkBusy(false);
-    }
-  }
-
   function closeBulkDialog() {
     if (!bulkBusy) {
       setBulkDialog(null);
@@ -1435,14 +1377,11 @@ export function ReviewScreen() {
     };
   });
   const selectedBulkCount = selectedDecisionCount();
-  const selectedReconciliationCount = selectedReconciliationDiscardCount();
   const activeLifecycleLabel = t(`filters.statusOptions.${lifecycleTab}`, {
     defaultValue: defaultLifecycleLabel(lifecycleTab),
   });
   const canBulkApproveSelected =
     workspaceIsCurrent && state.canEditDirectly && lifecycleTab !== "resolved" && selectedBulkCount > 0 && !busyId && !bulkBusy && !refreshFailed && !groupBusyKey && !uncertainDecision;
-  const bulkDiscardBlocked = !workspaceIsCurrent || Boolean(busyId) || bulkBusy
-    || refreshing || refreshFailed || Boolean(uncertainDecision);
 
   return (
     <>
@@ -1711,25 +1650,6 @@ export function ReviewScreen() {
                       </span>
                     </button>
                   ) : null}
-                  {selectedReconciliationCount > 0 ? (
-                    <button aria-label={t("bulk.discardReconciliations", {
-                          count: selectedReconciliationCount,
-                          defaultValue: "Discard selected branches",
-                        })}
-                      className="icon-button danger"
-                      disabled={bulkDiscardBlocked}
-                      onClick={() => {
-                        setBulkDiscardReason("");
-                        setBulkDiscardOpen(true);
-                      }}
-                      type="button"
-                    >
-                      <X size={14} aria-hidden="true" />
-                      <span>
-                        {t("shell:actions.discard")}
-                      </span>
-                    </button>
-                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1784,8 +1704,8 @@ export function ReviewScreen() {
                   const rows = group.reviews.map((review, index) => (
                     <ReviewRow
                       active={review.id === selectedReview?.id}
-                      bulkDisabled={Boolean(busyId) || bulkBusy || refreshFailed || Boolean(groupBusyKey) || Boolean(uncertainDecision) || lifecycleTab === "resolved" || !state.canEditDirectly || (!review.can_decide && review.can_discard_reconciliation !== true)}
-                      bulkSelectable={lifecycleTab !== "resolved" && (review.can_decide || review.can_discard_reconciliation === true)}
+                      bulkDisabled={Boolean(busyId) || bulkBusy || refreshFailed || Boolean(groupBusyKey) || Boolean(uncertainDecision) || lifecycleTab === "resolved" || !state.canEditDirectly || !review.can_decide}
+                      bulkSelectable={lifecycleTab !== "resolved" && review.can_decide}
                       bulkSelected={selectedBulkIds.has(review.id)}
                       grouped={pendingGroup}
                       ordinal={index + 1}
@@ -1911,28 +1831,6 @@ export function ReviewScreen() {
                 <ReviewBulkOutcomes key={bulkResultRun} result={bulkResult} onOpen={setReviewParam} onUndo={undoDecision} undoneDecisionId={undoneDecision?.decisionId ?? null} busy={Boolean(busyId) || bulkBusy} />
               </StatusBanner>
             ) : null}
-            {bulkDiscardResult ? (
-              <StatusBanner tone="info">
-                <span>
-                  {t("bulk.discardResult", {
-                    discarded:
-                      bulkDiscardResult.discarded_review_item_ids.length,
-                    skipped: bulkDiscardResult.skipped.length,
-                    defaultValue:
-                      "Discarded {{discarded}} branches. Skipped {{skipped}}.",
-                  })}
-                </span>
-                {bulkDiscardResult.skipped.length > 0 ? (
-                  <ul className="review-bulk-skip-reasons">
-                    {bulkDiscardResult.skipped.map((item) => (
-                      <li key={item.review_item_id}>
-                        {shortIdentifier(item.review_item_id)}: {item.error_code}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </StatusBanner>
-            ) : null}
             {selectedReview ? (
               <>
                 <ReviewDetail
@@ -1978,19 +1876,7 @@ export function ReviewScreen() {
           </section>
         }
       />
-      {mergeApprovalPrompt?.preview.result ? (
-          <Dialog labelledBy="merge-approval-dialog-title" onClose={() => settleAutomaticMerge(false)}
-            title={t("workflow.mergePreviewTitle")}>
-            <section className="dialog-form">
-              <p>{t("workflow.mergePreviewDescription")}</p>
-              <ContextMergeResultPreview candidate={mergeApprovalPrompt.preview.result} workspaceId={state.workspaceId} />
-              <div className="dialog-actions">
-                <button type="button" className="icon-button text-button" onClick={() => settleAutomaticMerge(false)}>{t("workflow.mergePreviewCancel")}</button>
-                <button type="button" className="icon-button primary" onClick={() => settleAutomaticMerge(true)}>{t("workflow.mergePreviewApprove")}</button>
-              </div>
-            </section>
-          </Dialog>
-      ) : null}
+      {mergeChoice.dialog}
       {bulkDialog ? (
         <ConfirmDialog
           busy={bulkBusy}
@@ -2045,11 +1931,12 @@ export function ReviewScreen() {
               <li key={item.id}>
                 <strong>{item.target_title ?? t("workflow.unavailableReview")}{item.target_version_no != null ? ` · v${item.target_version_no}` : ""}</strong>
                 <span>{item.will_auto_settle ? t("workflow.autoSettled") : item.eligible ? t("workflow.eligible") : reviewOutcomeReason(item.reason_code, item.reason, t)}</span>
-                {item.eligible && selectionMergePreview(item)?.kind === "automatic_merge" ? (
-                  <section className="review-bulk-merge-preview">
-                    <p>{t("workflow.mergePreviewDescription")}</p>
-                    {selectionMergePreview(item)?.result ? <ContextMergeResultPreview candidate={selectionMergePreview(item)!.result!} workspaceId={state.workspaceId} /> : null}
-                  </section>
+                {item.eligible && selectionMergePreview(item)?.kind === "automatic_merge" && selectionMergePreview(item)?.result ? (
+                  <details className="review-bulk-merge-preview">
+                    <summary>{t("workflow.mergeAutomaticSummary")}</summary>
+                    <strong>{selectionMergePreview(item)!.result!.page_metadata.title}</strong>
+                    <MarkdownView body={selectionMergePreview(item)!.result!.body_md} workspaceId={state.workspaceId} />
+                  </details>
                 ) : null}
                 {item.eligible && !item.will_auto_settle && (item.auto_settled_review_item_ids?.length ?? 0) > 0 ? (
                   <span className="review-bulk-item-impact">
@@ -2059,54 +1946,6 @@ export function ReviewScreen() {
               </li>
             ))}
           </ul>
-        </ConfirmDialog>
-      ) : null}
-      {bulkDiscardOpen ? (
-        <ConfirmDialog
-          busy={bulkBusy}
-          busyLabel={t("bulk.discarding", { defaultValue: "Discarding" })}
-          className="review-bulk-dialog"
-          confirmDisabled={
-            bulkDiscardBlocked
-            || bulkDiscardReason.trim().length === 0
-            || selectedReconciliationCount === 0
-          }
-          confirmLabel={t("shell:actions.discard")}
-          labelledBy="review-bulk-discard-title"
-          onCancel={() => {
-            setBulkDiscardOpen(false);
-            setBulkDiscardReason("");
-          }}
-          onConfirm={() => void runBulkReconciliationDiscard()}
-          title={t("bulk.discardTitle", {
-            defaultValue: "Discard selected reconciliation branches?",
-          })}
-          tone="danger"
-        >
-          <p>
-            {t("bulk.discardBody", {
-              count: selectedReconciliationCount,
-              defaultValue:
-                "Only explicitly eligible branches will be discarded. Ineligible or stale items are returned with an error code.",
-            })}
-          </p>
-          {bulkDiscardBlocked && !bulkBusy ? (
-            <StatusBanner tone="warning">{t("bulk.discardBlocked")}</StatusBanner>
-          ) : null}
-          <label className="form-field">
-            <span>
-              {t("bulk.discardReason", { defaultValue: "Discard reason" })}
-            </span>
-            <textarea
-            {...textInputLimit(2000, false)}
-              autoFocus
-              required
-              value={bulkDiscardReason}
-              onChange={(event) =>
-                setBulkDiscardReason(event.currentTarget.value)
-              }
-            />
-          </label>
         </ConfirmDialog>
       ) : null}
     </>
@@ -2655,6 +2494,47 @@ function ReconciliationProvenanceMeta({ review }: { review: ReviewItem }) {
 // common OS limit) yet short enough not to be noticed as a wait.
 const UNDO_ARM_DELAY_MS = 500;
 
+/**
+ * What approving would publish when the published version moved: the combined
+ * result for an automatic merge, or a note that approval asks for a choice.
+ */
+function ContextApprovalResult({ review, workspaceId }: { review: ReviewItem; workspaceId: string }) {
+  const { t } = useTranslation("review");
+  const operation = review.evidence?.operations.find((entry) =>
+    entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
+  const pageId = operation?.document?.document_id ?? null;
+  const versionId = operation?.content?.candidate_version_id ?? null;
+  const key = pageId && versionId ? `${workspaceId}:${pageId}:${versionId}` : null;
+  const [preview, setPreview] = useState<{ key: string; value: ContextMergePreview } | null>(null);
+  useEffect(() => {
+    if (!key || !pageId || !versionId || !["pending", "changes_requested"].includes(review.status)) return;
+    let active = true;
+    void previewPageMerge(workspaceId, pageId, versionId)
+      .then((value) => { if (active) setPreview({ key, value }); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [key, pageId, review.status, versionId, workspaceId]);
+  const value = preview?.key === key ? preview.value : null;
+  if (value?.kind === "automatic_merge" && value.result) {
+    return (
+      <StatusBanner tone="info">
+        <div className="review-merge-result">
+          <span>{t("workflow.mergeAutomaticNotice")}</span>
+          <details>
+            <summary>{t("workflow.mergeAutomaticShow")}</summary>
+            <MarkdownView body={value.result.body_md} workspaceId={workspaceId} />
+          </details>
+        </div>
+      </StatusBanner>
+    );
+  }
+  if (value?.kind === "conflict") {
+    const count = Math.max(1, (value.keep_both?.conflicts.length ?? 0) + value.metadata_conflicts.length);
+    return <StatusBanner tone="warning">{t("workflow.mergeConflictNotice", { count })}</StatusBanner>;
+  }
+  return null;
+}
+
 function ReviewDetail({
   review,
   workspaceId,
@@ -3166,6 +3046,7 @@ function ReviewDetail({
         </StatusBanner>
       ) : null}
       {!isReadOnly && review.actions?.approve.reason_code ? <p className="review-action-unavailable" role="status">{reviewOutcomeReason(review.actions.approve.reason_code, null, t)}</p> : null}
+      {!isReadOnly ? <ContextApprovalResult review={review} workspaceId={workspaceId} /> : null}
       <ReviewEvidencePanel workspaceId={workspaceId} review={review} onContentStateChange={({ reviewId, status }) => { if (reviewId === review.id) setContentState(status); }} />
       <details className="review-risk-explanation">
         <summary>{t("detail.whyRisk", { defaultValue: "Why this risk?" })}: {riskInsight.summary}</summary>

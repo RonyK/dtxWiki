@@ -1,4 +1,3 @@
-import { ContextMergeResultPreview } from "../pages/ContextMergeResultPreview";
 import {
   Copy,
   ArrowRight,
@@ -7,8 +6,8 @@ import {
   Edit,
   FileText,
   Folder,
+  GitBranch,
   GitCompareArrows,
-  GitMerge,
   Globe,
   MessageSquare,
   MoreHorizontal,
@@ -16,7 +15,6 @@ import {
   RotateCcw,
   Send,
   Share2,
-  Trash2,
 } from "lucide-react";
 import {
   useCallback,
@@ -42,7 +40,7 @@ import { useWorkspaceGraphCapability } from "../graph/useWorkspaceGraphCapabilit
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { MarkdownView } from "../pages/MarkdownView";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
-import { ContextReconciliationWorkbench } from "./ContextReconciliationWorkbench";
+import { useContextMergeChoice } from "../pages/ContextMergeDialog";
 import { ContextDrafts } from "./ContextDrafts";
 import { citationKeyForSource } from "../pages/editorCompletions";
 import {
@@ -64,10 +62,12 @@ import {
   type LibraryItemTombstone,
 } from "../../shared/api/library";
 import {
-  discardAlternativeDraft,
+  beginPageEdit,
+  ContextMergeChoiceRequired,
   diffPageVersions,
+  prepareMergeChoice,
+  previewPageMerge,
   restorePageVersion,
-  type ContextMergePreview,
 } from "../../shared/api/pages";
 import {
   listContextChanges,
@@ -85,6 +85,7 @@ import {
   type TreeFavoriteScope,
 } from "../../shared/api/treeFavorites";
 import {
+  contextMergeBinding,
   decideReview,
   getContextPageNeighbors,
   getReview,
@@ -138,7 +139,6 @@ import {
 } from "../../shared/components/HistoryCard";
 import { HistoryDiffDialog } from "../../shared/components/HistoryDiffDialog";
 import { HistoryGraphList } from "../../shared/components/HistoryGraphList";
-import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { Dialog } from "../../shared/components/Dialog";
 import { WorkspaceFirstUseChecklist } from "../../shared/components/FirstUseChecklist";
 import { NewItemDialog } from "../../shared/components/NewItemDialog";
@@ -599,7 +599,6 @@ function ScopedContextScreen() {
     nextParams.delete("tab");
     nextParams.delete("compareFrom");
     nextParams.delete("compareTo");
-    nextParams.delete("reconcile");
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
     const query = nextParams.toString();
@@ -619,7 +618,6 @@ function ScopedContextScreen() {
     nextParams.delete("tab");
     nextParams.delete("compareFrom");
     nextParams.delete("compareTo");
-    nextParams.delete("reconcile");
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
     const query = nextParams.toString();
@@ -955,16 +953,10 @@ function ScopedContextScreen() {
           }
         : current,
     );
-    // One mutation, computed from the params as they are NOW. Reconciliation
-    // used to close by deleting `reconcile` and then call this reload, which
-    // rebuilt the URL from a `searchParams` snapshot captured before that
-    // delete -- putting `reconcile` straight back and re-opening the workbench
-    // on a branch the user had just consumed. Clearing it here means the close
-    // and the reload cannot disagree about which URL is current.
+    // One mutation, computed from the params as they are NOW.
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete(CONTEXT_FOLDER_CHILD_PAGE_PARAM);
     nextParams.delete(CONTEXT_CHILD_TAB_PAGE_PARAM);
-    nextParams.delete("reconcile");
     nextParams.delete(TREE_VERSION_PARAM);
     const query = nextParams.toString();
     void navigate({
@@ -1745,7 +1737,6 @@ function ContextPageList({
 
 function PendingDraftReview({
   review,
-  reconciliationPendingCount,
   canReview,
   workspaceId,
   onViewChanges,
@@ -1753,7 +1744,6 @@ function PendingDraftReview({
   onDecided,
 }: {
   review: NonNullable<ContextPageDetail["pending_review"]>;
-  reconciliationPendingCount: number;
   canReview: boolean;
   workspaceId: string;
   onViewChanges: (() => void) | null;
@@ -1766,17 +1756,7 @@ function PendingDraftReview({
   const actorId = useOptionalAuth()?.user?.user_id ?? "preview";
   const pendingKey = `${reviewDraftKey(actorId, workspaceId, review.review_item_id)}.pending`;
   const pendingApprovalRef = useRef<{ key: string; decisionId: string; mergeBinding: ContextMergeBinding | null } | null>(null);
-  const [mergePrompt, setMergePrompt] = useState<{ preview: ContextMergePreview; resolve: (accepted: boolean) => void } | null>(null);
-  const mergeResolveRef = useRef<((accepted: boolean) => void) | null>(null);
-  useEffect(() => {
-    setMergePrompt(null);
-    return () => { mergeResolveRef.current?.(false); mergeResolveRef.current = null; };
-  }, [pendingKey]);
-  function settleMerge(accepted: boolean) {
-    mergePrompt?.resolve(accepted);
-    mergeResolveRef.current = null;
-    setMergePrompt(null);
-  }
+  const mergeChoice = useContextMergeChoice();
   function readPendingApproval() {
     if (pendingApprovalRef.current?.key === pendingKey) return pendingApprovalRef.current;
     try {
@@ -1853,49 +1833,58 @@ function PendingDraftReview({
     ) {
       return;
     }
-    if (
-      type === "approve" &&
-      reconciliationPendingCount > 0 &&
-      !window.confirm(
-        t("pendingReview.reconciliationPublishWarning", {
-          count: reconciliationPendingCount,
-          defaultValue:
-            "{{count}} branch is still waiting for reconciliation. Publish this version anyway?",
-        }),
-      )
-    ) {
-      return;
-    }
     setBusy(true);
     setError(null);
-    try {
-      const pending = type === "approve" ? readPendingApproval() : null;
-      const decisionId = pending?.decisionId ?? crypto.randomUUID();
-      const result = await decideReview(
-        workspaceId,
-        review.review_item_id,
-        type,
-        type === "request_changes" ? reason : undefined,
-        {
-          decision_id: decisionId,
-          ...(pending ? { merge_binding: pending.mergeBinding } : {}),
-          onMergePreview: (preview) => new Promise<boolean>((resolve) => {
-            mergeResolveRef.current = resolve;
-            setMergePrompt({ preview, resolve });
-          }),
-          onDecisionPrepared(binding) {
-            if (type !== "approve") return;
-            pendingApprovalRef.current = { key: pendingKey, decisionId, mergeBinding: binding };
-            writeReviewDraft(pendingKey, JSON.stringify({ decisionId, workspaceId, reviewId: review.review_item_id,
-              decision: "approve", reason: null, mergeBinding: binding }));
-          },
+    const pending = type === "approve" ? readPendingApproval() : null;
+    const decisionId = pending?.decisionId ?? crypto.randomUUID();
+    const send = (mergeBinding?: ContextMergeBinding) => decideReview(
+      workspaceId,
+      review.review_item_id,
+      type,
+      type === "request_changes" ? reason : undefined,
+      {
+        decision_id: decisionId,
+        ...(mergeBinding ? { merge_binding: mergeBinding } : pending ? { merge_binding: pending.mergeBinding } : {}),
+        onDecisionPrepared(binding) {
+          if (type !== "approve") return;
+          pendingApprovalRef.current = { key: pendingKey, decisionId, mergeBinding: binding };
+          writeReviewDraft(pendingKey, JSON.stringify({ decisionId, workspaceId, reviewId: review.review_item_id,
+            decision: "approve", reason: null, mergeBinding: binding }));
         },
-      );
+      },
+    );
+    const settled = async (result: Awaited<ReturnType<typeof decideReview>>) => {
       pendingApprovalRef.current = null;
       writeReviewDraft(pendingKey, "");
       await onDecided(result);
+    };
+    try {
+      await settled(await send());
     } catch (exc) {
-      if (exc instanceof DOMException && exc.name === "AbortError") return;
+      if (exc instanceof ContextMergeChoiceRequired) {
+        // Overlapping changes need the person's choice before approval.
+        const reload = () => previewPageMerge(workspaceId, exc.preview.page_id, exc.preview.version_id);
+        mergeChoice.open({
+          kind: "publish",
+          workspaceId,
+          pageId: exc.preview.page_id,
+          preview: exc.preview,
+          reload,
+          onResolvedElsewhere: () => void decide("approve"),
+          errorMessage: () => t("pendingReview.approveError", {
+            defaultValue: "Could not approve and publish this version. Earlier pending reviews were not settled.",
+          }),
+          async confirm(resolution, preview) {
+            const choice = await prepareMergeChoice(workspaceId, preview.page_id, preview, {
+              onConflict: resolution.choice,
+              bodyMd: resolution.bodyMd,
+              pageMetadata: resolution.pageMetadata,
+            });
+            await settled(await send(contextMergeBinding(choice)));
+          },
+        });
+        return;
+      }
       if (exc instanceof ApiError && exc.status >= 400 && exc.status < 500) {
         pendingApprovalRef.current = null;
         writeReviewDraft(pendingKey, "");
@@ -2038,19 +2027,7 @@ function PendingDraftReview({
             })}
           </p>
         ) : null}
-        {mergePrompt?.preview.result ? (
-          <Dialog labelledBy="context-merge-approval-title" title={t("pages:editor.mergePreviewTitle")}
-            onClose={() => settleMerge(false)}>
-            <section className="dialog-form">
-              <p>{t("review:workflow.mergePreviewDescription")}</p>
-              <ContextMergeResultPreview candidate={mergePrompt.preview.result} workspaceId={workspaceId} />
-              <div className="dialog-actions">
-                <button type="button" className="icon-button text-button" onClick={() => settleMerge(false)}>{t("review:workflow.mergePreviewCancel")}</button>
-                <button type="button" className="icon-button primary" onClick={() => settleMerge(true)}>{t("review:workflow.mergePreviewApprove")}</button>
-              </div>
-            </section>
-          </Dialog>
-        ) : null}
+        {mergeChoice.dialog}
         {error ? <p className="pending-review-error">{error}</p> : null}
       </div>
     </StatusBanner>
@@ -2243,7 +2220,6 @@ function ContextReader({
   const tabParam = searchParams.get("tab");
   const compareFromParam = searchParams.get("compareFrom");
   const compareToParam = searchParams.get("compareTo");
-  const reconcileVersionParam = searchParams.get("reconcile");
   const routeTab = contextReaderTabFromParam(tabParam);
   const directChildren = useMemo(
     () => (node ? orderedContextChildren(nodes, node.id) : []),
@@ -2262,31 +2238,6 @@ function ContextReader({
     () => loadedHistory?.versions ?? [],
     [loadedHistory],
   );
-  const reconcilableBranches = useMemo(
-    () =>
-      versions.filter(
-        (entry) =>
-          entry.history_status === "alternative_draft"
-          && entry.reconciliation_available === true,
-      ),
-    [versions],
-  );
-  const reconciliationEntry = reconcileVersionParam
-    ? reconcilableBranches.find(
-        (entry) => entry.version_id === reconcileVersionParam,
-      ) ?? null
-    : null;
-  const reconciliationVersionId =
-    reconciliationEntry?.version_id
-    ?? (detail.reconciliation_available === true
-      && detail.next_reconciliation_version_id === reconcileVersionParam
-      ? reconcileVersionParam
-      : null);
-  const nextReconciliationVersionId =
-    detail.reconciliation_available === true
-    && detail.reconciliation_pending_count > 0
-      ? detail.next_reconciliation_version_id
-      : null;
   const [historyLoadingOlder, setHistoryLoadingOlder] = useState(false);
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null);
   const historyLoadingRef = useRef(false);
@@ -2482,38 +2433,6 @@ function ContextReader({
     },
     [detail.id, loadedHistory, t, workspaceId],
   );
-
-  useEffect(() => {
-    if (
-      !reconcileVersionParam
-      || reconciliationEntry
-      || !loadedHistory?.next_cursor
-    ) {
-      return;
-    }
-    void loadOlderHistory(reconcileVersionParam);
-  }, [
-    loadOlderHistory,
-    loadedHistory?.next_cursor,
-    reconcileVersionParam,
-    reconciliationEntry,
-  ]);
-
-  const openReconciliation = useCallback(
-    (versionId: string) => {
-      const next = new URLSearchParams(searchParams);
-      next.set("tab", "history");
-      next.set("reconcile", versionId);
-      setSearchParams(next);
-    },
-    [searchParams, setSearchParams],
-  );
-
-  const closeReconciliation = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-    next.delete("reconcile");
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
 
   const openComparison = useCallback(
     (
@@ -3116,14 +3035,20 @@ function ContextReader({
             <span>{t("reader.webPublished")}</span>
           </button>
         ) : null}
-        {/* A pending draft is a lifecycle state, not a property of the page, so
-            it reads as a status pill here — the neutral chips beside it carry
-            page attributes. */}
-        {detail.latest_draft_version_id ? (
+        {/* Open drafts and review requests are lifecycle state, not page
+            attributes, so they read as status pills beside the neutral chips. */}
+        {(detail.open_drafts?.total ?? 0) > 0 ? (
           <StatusPill
             compact
             status="draft"
-            label={t("reader.draftPending", { defaultValue: "Draft pending" })}
+            label={t("reader.draftCount", { count: detail.open_drafts?.total ?? 0 })}
+          />
+        ) : null}
+        {detail.open_review_count > 0 ? (
+          <StatusPill
+            compact
+            status="pending"
+            label={t("reader.openReviewCount", { count: detail.open_review_count })}
           />
         ) : null}
         <time
@@ -3134,7 +3059,22 @@ function ContextReader({
           {formatVersionTimestamp(detail.updated_at)}
         </time>
       </div>
-      {canEdit && workspaceId ? <ContextDrafts detail={detail} workspaceId={workspaceId} /> : null}
+      {canEdit && workspaceId ? (
+        <ContextDrafts
+          detail={detail}
+          onChanged={onVersionRestored}
+          onCompareWithPublished={
+            detail.draft && detail.current_published_version_id && detail.version_info
+              ? () => openComparison({
+                  from: detail.current_published_version_id,
+                  to: detail.version_info!.version_id,
+                  origin: "banner",
+                })
+              : null
+          }
+          workspaceId={workspaceId}
+        />
+      ) : null}
       {reviewNotice ? (
         <StatusBanner tone="info">{reviewNotice}</StatusBanner>
       ) : null}
@@ -3143,38 +3083,9 @@ function ContextReader({
           {t("pages:editor.blockMapStaleWarning")}
         </StatusBanner>
       ) : null}
-      {canEdit && nextReconciliationVersionId ? (
-        <StatusBanner
-          tone="warning"
-          action={
-            <button
-              className="icon-button"
-              onClick={() =>
-                openReconciliation(nextReconciliationVersionId)
-              }
-              type="button"
-            >
-              {t("reconciliation.open", { defaultValue: "Reconcile" })}
-            </button>
-          }
-        >
-          {detail.reconciliation_pending_count_truncated
-            ? t("reconciliation.pendingCountAtLeast", {
-                count: detail.reconciliation_pending_count,
-                defaultValue:
-                  "At least {{count}} branches require reconciliation before they can rejoin HEAD.",
-              })
-            : t("reconciliation.pendingCount", {
-                count: detail.reconciliation_pending_count,
-                defaultValue:
-                  "{{count}} branch requires reconciliation before it can rejoin HEAD.",
-              })}
-        </StatusBanner>
-      ) : null}
       {detail.pending_review ? (
         <PendingDraftReview
           review={detail.pending_review}
-          reconciliationPendingCount={detail.reconciliation_pending_count}
           canReview={canEdit}
           workspaceId={workspaceId ?? detail.workspace_id}
           onViewChanges={
@@ -3304,7 +3215,6 @@ function ContextReader({
             onCompare={(entry) => void openHistoryComparison(entry)}
             onComparePair={(candidate) => openComparison(candidate)}
             onLoadOlder={() => void loadOlderHistory()}
-            onReconcile={openReconciliation}
             onVersionRestored={onVersionRestored}
             workspaceId={workspaceId}
           />
@@ -3399,18 +3309,6 @@ function ContextReader({
           workspaceVisibility={
             workspaceContext?.selectedWorkspace?.visibility ?? null
           }
-        />
-      ) : null}
-      {canEdit && reconciliationVersionId && workspaceId ? (
-        <ContextReconciliationWorkbench
-          branchVersionId={reconciliationVersionId}
-          pageId={detail.id}
-          workspaceId={workspaceId}
-          onClose={closeReconciliation}
-          // No separate close step: reloadContextAfterRestore clears
-          // `reconcile` as part of its single URL mutation, so there is no
-          // window in which one of the two writes overwrites the other.
-          onCompleted={onVersionRestored}
         />
       ) : null}
     </section>
@@ -4226,6 +4124,9 @@ export function ContextChildrenIndex({
   );
 }
 
+// Finished versions that a new draft can start from (Git commits).
+const COMMIT_VERSION_STATUSES = new Set(["closed", "published_snapshot", "superseded_snapshot"]);
+
 export function ContextHistory({
   canEdit,
   comparePair,
@@ -4239,7 +4140,6 @@ export function ContextHistory({
   onCompare,
   onComparePair,
   onLoadOlder,
-  onReconcile,
   onVersionRestored,
   workspaceId,
 }: {
@@ -4255,7 +4155,6 @@ export function ContextHistory({
   onCompare: (entry: VersionEntry) => void;
   onComparePair: (candidate: CompareCandidate) => void;
   onLoadOlder: () => void;
-  onReconcile: (versionId: string) => void;
   onVersionRestored: () => Promise<void> | void;
   workspaceId: string | null;
 }) {
@@ -4266,11 +4165,8 @@ export function ContextHistory({
   const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null);
   // One restore at a time across the whole list, not just per row.
   const restoring = restoreVersionId !== null;
-  const [discardVersionId, setDiscardVersionId] = useState<string | null>(null);
-  const [discardCandidate, setDiscardCandidate] = useState<VersionEntry | null>(
-    null,
-  );
-  const [discardReason, setDiscardReason] = useState("");
+  const navigate = useNavigate();
+  const [startingVersionId, setStartingVersionId] = useState<string | null>(null);
   const versions = useMemo(() => history?.versions ?? [], [history?.versions]);
   const versionNodes = useMemo(() => contextHistoryNodes(versions), [versions]);
   const historyComplete = !history?.next_cursor;
@@ -4337,9 +4233,7 @@ export function ContextHistory({
     setRestoreError(null);
     setRestoreMessage(null);
     setRestoreVersionId(null);
-    setDiscardVersionId(null);
-    setDiscardCandidate(null);
-    setDiscardReason("");
+    setStartingVersionId(null);
   }, [detail.id]);
   useEffect(() => {
     setRestoreError(null);
@@ -4370,18 +4264,12 @@ export function ContextHistory({
     setRestoreMessage(null);
     setRestoreVersionId(entry.version_id);
     try {
-      const restored = await restorePageVersion(
+      await restorePageVersion(
         workspaceId,
         detail.id,
         entry.version_id,
       );
-      setRestoreMessage(
-        t("history.restored", {
-          version: entry.version_no,
-          draft: restored.version_id.slice(0, 8),
-          defaultValue: "v{{version}} was restored as draft v{{draft}}.",
-        }),
-      );
+      setRestoreMessage(t("history.restored", { version: entry.version_no }));
       onCloseCompare();
       await onVersionRestored();
     } catch (exc) {
@@ -4398,43 +4286,19 @@ export function ContextHistory({
     }
   }
 
-  async function discardAlternative(entry: VersionEntry) {
-    if (entry.history_status !== "alternative_draft" || !workspaceId) {
-      return;
-    }
-    if (discardReason.trim().length === 0) {
-      return;
-    }
+  // A finished commit is a starting point: a new draft whose first parent is
+  // that commit, opened in the editor.
+  async function startFrom(entry: VersionEntry) {
+    if (!workspaceId || startingVersionId) return;
     setRestoreError(null);
-    setRestoreMessage(null);
-    setDiscardVersionId(entry.version_id);
+    setStartingVersionId(entry.version_id);
     try {
-      await discardAlternativeDraft(workspaceId, detail.id, entry.version_id, {
-        reason: discardReason.trim(),
-      });
-      if (comparePair?.to === entry.version_id) {
-        closeCompareVersion();
-      }
-      setRestoreMessage(
-        t("history.discarded", {
-          version: entry.version_no,
-          defaultValue: "Alternative v{{version}} was discarded.",
-        }),
-      );
-      await onVersionRestored();
-      setDiscardCandidate(null);
-      setDiscardReason("");
+      const draft = await beginPageEdit(workspaceId, detail.id, entry.version_id);
+      navigate(`${contextEditHref(workspaceId, detail.id)}?version_id=${encodeURIComponent(draft.version_id)}`);
     } catch (exc) {
-      setRestoreError(
-        apiErrorMessage(
-          exc,
-          t("history.failedDiscard", {
-            defaultValue: "Failed to discard alternative",
-          }),
-        ),
-      );
+      setRestoreError(apiErrorMessage(exc, t("history.failedStartFrom")));
     } finally {
-      setDiscardVersionId(null);
+      setStartingVersionId(null);
     }
   }
 
@@ -4456,8 +4320,7 @@ export function ContextHistory({
             {canEdit &&
             !comparing &&
             !isCurrent &&
-            !isLatestDraft &&
-            entry.reconciliation_available !== true ? (
+            !isLatestDraft ? (
               <HistoryActionButton
                 accessibleLabel={t("history.restore", {
                   defaultValue: "Restore this version",
@@ -4473,16 +4336,18 @@ export function ContextHistory({
                 onClick={() => void restoreVersion(entry)}
               />
             ) : null}
-            {canEdit &&
-            entry.history_status === "alternative_draft" &&
-            entry.reconciliation_available === true ? (
+            {canEdit && COMMIT_VERSION_STATUSES.has(entry.version_status) ? (
               <HistoryActionButton
-                accessibleLabel={t("reconciliation.open", {
-                  defaultValue: "Reconcile",
-                })}
-                icon={GitMerge}
-                label={t("reconciliation.open", { defaultValue: "Reconcile" })}
-                onClick={() => onReconcile(entry.version_id)}
+                accessibleLabel={t("history.startFromLabel", { version: entry.version_no })}
+                busy={startingVersionId === entry.version_id}
+                disabled={startingVersionId !== null}
+                icon={GitBranch}
+                label={
+                  startingVersionId === entry.version_id
+                    ? t("history.startingFrom")
+                    : t("history.startFrom")
+                }
+                onClick={() => void startFrom(entry)}
               />
             ) : null}
             {/* Offered whenever the parent is visible, even when it is on an
@@ -4495,26 +4360,6 @@ export function ContextHistory({
                 }
                 open={comparing}
                 row={row}
-              />
-            ) : null}
-            {/* Last in source order and pushed to the right edge, so the
-                buttons every row shares keep the same place whether or not
-                this row can be discarded, and focus order matches the eye. */}
-            {canEdit && entry.history_status === "alternative_draft" ? (
-              <HistoryActionButton
-                accessibleLabel={t("shell:actions.discard")}
-                busy={discardVersionId === entry.version_id}
-                icon={Trash2}
-                label={
-                  discardVersionId === entry.version_id
-                    ? t("history.discarding", { defaultValue: "Discarding" })
-                    : t("shell:actions.discard")
-                }
-                onClick={() => {
-                  setDiscardCandidate(entry);
-                  setDiscardReason("");
-                }}
-                tone="danger"
               />
             ) : null}
           </>
@@ -4663,39 +4508,6 @@ export function ContextHistory({
         />
         {olderHistoryControls}
       </div>
-      {discardCandidate ? (
-        <ConfirmDialog
-          busy={discardVersionId !== null}
-          busyLabel={t("history.discarding", { defaultValue: "Discarding" })}
-          className="context-history-discard-dialog"
-          confirmDisabled={discardReason.trim().length === 0}
-          confirmLabel={t("shell:actions.discard")}
-          labelledBy="context-history-discard-title"
-          onCancel={() => {
-            setDiscardCandidate(null);
-            setDiscardReason("");
-          }}
-          onConfirm={() => void discardAlternative(discardCandidate)}
-          title={t("history.discardConfirm", {
-            version: discardCandidate.version_no,
-            defaultValue:
-              "Discard alternative v{{version}}? This cannot be undone.",
-          })}
-          tone="danger"
-        >
-          <label className="form-field">
-            <span>
-              {t("history.discardReason", { defaultValue: "Discard reason" })}
-            </span>
-            <textarea
-              autoFocus
-              required
-              value={discardReason}
-              onChange={(event) => setDiscardReason(event.currentTarget.value)}
-            />
-          </label>
-        </ConfirmDialog>
-      ) : null}
       {comparedVersion && comparePair ? (
         <HistoryDiffDialog
           diff={diff}

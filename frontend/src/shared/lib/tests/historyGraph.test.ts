@@ -134,12 +134,12 @@ const FIXTURES: {
     lanes: { v5: 0, v4: 1, v3: 0, v2: 0, v1: 0 },
   },
   {
-    name: "fork merged back by a reconcile version",
+    name: "fork merged back by a merge version",
     head: "v5",
     versions: [
-      version(5, 4),
+      version(5, 4, { parent_version_ids: ["v4", "v3"] }),
       version(4, 2),
-      version(3, 1, { merged_into_version_id: "v5" }),
+      version(3, 1),
       version(2, 1),
       version(1, null),
     ],
@@ -164,8 +164,8 @@ const FIXTURES: {
     name: "merge from a version whose parent is hidden",
     head: "v3",
     versions: [
-      version(3, null, { prior_relation: "hidden" }),
-      version(2, 1, { merged_into_version_id: "v3" }),
+      version(3, null, { prior_relation: "hidden", parent_version_ids: ["v2"] }),
+      version(2, 1),
       version(1, null),
     ],
     lanes: { v3: 0, v2: 1, v1: 1 },

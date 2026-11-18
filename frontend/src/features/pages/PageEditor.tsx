@@ -1,4 +1,3 @@
-import { ContextMergeResultPreview } from "./ContextMergeResultPreview";
 import { inputTextError, markdownInputError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { autocompletion, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -101,20 +100,21 @@ import {
   beginPageEdit,
   createPage,
   createPageComment,
-  diffPageVersions,
+  ContextMergeChoiceRequired,
   listPageTags,
   listPages,
   newIdempotencyKey,
   PageEditingUnavailableError,
   executePreparedPagePublication,
+  prepareMergeChoice,
+  previewPageMerge,
   publishPageVersion,
   readEditablePage,
   readPage,
   sendPageAutosave,
   submitPageForReview,
-  updatePage,
 } from "../../shared/api/pages";
-import type { ContextMergePreview, PagePayload, PageSummary, PageVersionDiff, PreparedPagePublication, PageWriteOptions, PublishPageVersionInput } from "../../shared/api/pages";
+import type { ContextMergePreview, PagePayload, PageSummary, PreparedPagePublication, PageWriteOptions, PublishPageVersionInput } from "../../shared/api/pages";
 import { listLibraryItems } from "../../shared/api/library";
 import type { LibraryItemSummary } from "../../shared/api/library";
 import {
@@ -135,7 +135,6 @@ import type { TreeNodePayload } from "../../shared/api/workspace";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs, type BreadcrumbItem } from "../../shared/components/Breadcrumbs";
 import { ChipInput } from "../../shared/components/ChipInput";
-import { DiffViewer } from "../../shared/components/DiffViewer";
 import { Dialog } from "../../shared/components/Dialog";
 import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
 import { EmojiPicker } from "../../shared/components/EmojiPicker";
@@ -167,6 +166,8 @@ import {
 } from "../../shared/media/formatCapabilities";
 import { normalizeSlugInput, slugify } from "../../shared/text/slug";
 import { ContextMediaManagerDialog } from "./ContextMediaManagerDialog";
+import { useContextMergeChoice } from "./ContextMergeDialog";
+import { resolvedMergeResult } from "./contextMerge";
 import { EditorActionBar } from "./EditorActionBar";
 import {
   MARKDOWN_GEOMETRY_CHANGE_EVENT,
@@ -262,11 +263,50 @@ type SaveState =
   | "conflict";
 type PublicationState = "published" | "staged" | "never-published";
 type StalePublishState = "idle" | "blocked" | "reloading" | "error";
+type DraftSnapshotBody = { body_md: string; page_metadata: Record<string, unknown> };
+/** A save that overlapped another save of the same draft: both choices and the draft they used. */
+type MergeConflict = {
+  kind: "merge";
+  preview: ContextMergePreview;
+  serverVersionId: string;
+  serverContentHash: string;
+  serverRevision: number;
+  serverSnapshot: DraftSnapshotBody;
+};
+type EditorConflict =
+  | MergeConflict
+  // The draft this session saved to ended (published or withdrawn) meanwhile.
+  | { kind: "ended"; endedVersionId: string }
+  | { kind: "other" };
+const COMMIT_VERSION_STATUSES = new Set(["closed", "published_snapshot", "superseded_snapshot"]);
+
+/** Reads the autosave conflict body; null for any other 409. */
+function mergeConflictFrom(error: unknown): MergeConflict | null {
+  if (!(error instanceof ApiError) || error.status !== 409 || error.body.error_code !== "context_merge_conflict") return null;
+  const body = error.body as typeof error.body & {
+    merge_preview?: ContextMergePreview | null;
+    server_snapshot?: DraftSnapshotBody | null;
+    server_editing_revision?: number | null;
+    server_version_id?: string | null;
+    server_content_hash?: string | null;
+  };
+  if (!body.merge_preview || !body.server_snapshot || body.server_editing_revision == null) return null;
+  return {
+    kind: "merge",
+    preview: body.merge_preview,
+    serverVersionId: body.server_version_id ?? body.merge_preview.version_id,
+    serverContentHash: body.server_content_hash ?? "",
+    serverRevision: body.server_editing_revision,
+    serverSnapshot: body.server_snapshot,
+  };
+}
 type ExecuteEditorCommandOptions = {
   replaceRange?: { from: number; to: number } | null;
 };
 type SaveOptions = {
   bodyOverride?: string;
+  /** Re-send a save that conflicted, and open the merge dialog if it still does. */
+  resolveConflict?: boolean;
   publish?: boolean;
   publishDespiteFindings?: boolean;
   skipFenceCheck?: boolean;
@@ -621,14 +661,10 @@ export function PageEditor({
     useState<FloatingPosition | null>(null);
   const [emojiPicker, setEmojiPicker] = useState<EmojiPickerState | null>(null);
   const [highlightedBlockIndex, setHighlightedBlockIndex] = useState(0);
-  const [conflict, setConflict] = useState<{
-    serverVersionId: string;
-    serverContentHash: string;
-  } | null>(null);
-  const [conflictDiff, setConflictDiff] = useState<PageVersionDiff | null>(null);
-  const [conflictDiffError, setConflictDiffError] = useState<string | null>(null);
-  const [conflictDiffLoading, setConflictDiffLoading] = useState(false);
-  const [conflictDiffOpen, setConflictDiffOpen] = useState(false);
+  const [conflict, setConflict] = useState<EditorConflict | null>(null);
+  // The newest merge conflict, read by the dialog's confirm after a refresh.
+  const mergeConflictRef = useRef<MergeConflict | null>(null);
+  const mergeChoice = useContextMergeChoice();
   const [stalePublishState, setStalePublishState] =
     useState<StalePublishState>("idle");
   const [isSaving, setIsSaving] = useState(false);
@@ -754,8 +790,6 @@ export function PageEditor({
   const lastSavedFingerprintRef = useRef<string | null>(null);
   const [draftContainsChanges, setDraftContainsChanges] = useState(false);
   const draftBaseSnapshotRef = useRef<{ body_md: string; page_metadata: Record<string, unknown> } | null>(null);
-  const [mergePublishPrompt, setMergePublishPrompt] = useState<{ preview: ContextMergePreview; resolve: (accepted: boolean) => void } | null>(null);
-  const mergePublishResolveRef = useRef<((accepted: boolean) => void) | null>(null);
   const preparedPublicationRef = useRef<{ key: string; command: PreparedPagePublication } | null>(null);
   const publicationKey = useCallback((workspace: string, page: string) => {
     return reviewDraftKey(actorIdRef.current ?? "", workspace, `context-page:${page}`) + ".publication";
@@ -776,33 +810,48 @@ export function PageEditor({
     intent: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash">,
     options: PageWriteOptions = {}) {
     const key = publicationKey(workspace, id);
+    const publish = (extra: PageWriteOptions = {}) => publishPageVersion(workspace, id, versionId, intent, { ...options, ...extra,
+      preparedPublication: extra.mergeChoice ? undefined : pendingPublication(key),
+      onPublicationPrepared(command) {
+        preparedPublicationRef.current = { key, command };
+        writeReviewDraft(key, JSON.stringify(command));
+      },
+    });
     try {
-      const result = await publishPageVersion(workspace, id, versionId, intent, { ...options,
-        preparedPublication: pendingPublication(key),
-        onPublicationPrepared(command) {
-          preparedPublicationRef.current = { key, command };
-          writeReviewDraft(key, JSON.stringify(command));
-        },
-      });
+      let result: Awaited<ReturnType<typeof publishPageVersion>>;
+      try {
+        result = await publish();
+      } catch (error) {
+        if (!(error instanceof ContextMergeChoiceRequired)) throw error;
+        // Overlapping changes: the person picks one of the two choices.
+        result = await new Promise((resolve, reject) => {
+          mergeChoice.open({
+            kind: "publish",
+            workspaceId: workspace,
+            pageId: id,
+            preview: error.preview,
+            publishedVersionNumber: page?.published_version_no ?? null,
+            reload: () => previewPageMerge(workspace, id, versionId),
+            onResolvedElsewhere: () => { publish().then(resolve, reject); },
+            onCancel: () => reject(new DOMException("Publication cancelled", "AbortError")),
+            errorMessage: (cause) => apiErrorMessage(cause, t("editor.publishFailed")),
+            async confirm(resolution, seen) {
+              const choice = await prepareMergeChoice(workspace, id, seen, {
+                onConflict: resolution.choice,
+                bodyMd: resolution.bodyMd,
+                pageMetadata: resolution.pageMetadata,
+              });
+              resolve(await publish({ mergeChoice: choice }));
+            },
+          });
+        });
+      }
       clearPendingPublication(key);
       return result;
     } catch (error) {
       if (error instanceof ApiError && error.status >= 400 && error.status < 500) clearPendingPublication(key);
       throw error;
     }
-  }
-
-  useEffect(() => () => { mergePublishResolveRef.current?.(false); }, []);
-  function confirmAutomaticMerge(preview: ContextMergePreview): Promise<boolean> {
-    return new Promise((resolve) => {
-      mergePublishResolveRef.current = resolve;
-      setMergePublishPrompt({ preview, resolve });
-    });
-  }
-  function settleAutomaticMerge(accepted: boolean) {
-    mergePublishPrompt?.resolve(accepted);
-    mergePublishResolveRef.current = null;
-    setMergePublishPrompt(null);
   }
 
   const propertiesPopoverId = useId();
@@ -882,7 +931,7 @@ export function PageEditor({
     if (editableDraftPromiseRef.current) return editableDraftPromiseRef.current;
     const current = editablePageRef.current?.id === selected.id ? editablePageRef.current : selected;
     if (current.version_status === "draft") return current;
-    const promise = beginPageEdit(workspace, current, current.version_id).then((draft) => {
+    const promise = beginPageEdit(workspace, current.id, current.version_id).then((draft) => {
       if (!isEditorMountedRef.current || workspaceIdRef.current !== workspace ||
           editorGenerationRef.current !== generation || pageIdRef.current !== current.id) {
         throw new DOMException("Editor is no longer current.", "AbortError");
@@ -1829,16 +1878,6 @@ export function PageEditor({
   useEffect(() => {
     contextMediaCapabilitiesRef.current = contextMediaCapabilities;
   }, [contextMediaCapabilities]);
-
-  useEffect(() => {
-    if (conflict) {
-      return;
-    }
-    setConflictDiff(null);
-    setConflictDiffError(null);
-    setConflictDiffLoading(false);
-    setConflictDiffOpen(false);
-  }, [conflict]);
 
   useEffect(() => {
     latestDraftRef.current = {
@@ -3126,7 +3165,7 @@ export function PageEditor({
         return;
       }
     }
-    if (!canSave || conflict) {
+    if (!canSave || (conflict && !options.resolveConflict)) {
       if (!conflict && source !== "auto" && saveBlockedReason) {
         if (missingTitle) {
           titleRef.current?.focus();
@@ -3183,6 +3222,7 @@ export function PageEditor({
     setStatus(null);
     setConflict(null);
     let publishRequestStarted = false;
+    let targetVersionId: string | null = null;
     try {
       if (mode === "create" && !page) {
         const submittedDraft = {
@@ -3288,7 +3328,7 @@ export function PageEditor({
             expected_content_hash: savedPage.content_hash,
             expected_references_hash: savedPage.references_hash,
           },
-          { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
+          { signal: controller.signal },
         );
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
@@ -3324,7 +3364,7 @@ export function PageEditor({
             expected_content_hash: page.content_hash,
             expected_references_hash: page.references_hash,
           },
-          { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
+          { signal: controller.signal },
         );
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
@@ -3352,6 +3392,7 @@ export function PageEditor({
       if (!isCurrentSaveRequest(requestId, saveRequestIdRef) || !isEditorMountedRef.current) return;
       const saveBase = editablePageRef.current ?? page;
       const requestedSessionVersionId = sessionVersionIdRef.current;
+      targetVersionId = requestedSessionVersionId ?? saveBase.version_id;
       const payload = {
         title: submittedDraft.title,
         body_md: serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current),
@@ -3465,7 +3506,7 @@ export function PageEditor({
           expected_content_hash: updated.content_hash,
           expected_references_hash: updated.references_hash,
         },
-        { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
+        { signal: controller.signal },
       );
       if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
       if (!isEditorMountedRef.current) return;
@@ -3542,15 +3583,19 @@ export function PageEditor({
         setStalePublishState("blocked");
         return;
       }
+      const overlap = mergeConflictFrom(exc);
+      if (overlap) {
+        mergeConflictRef.current = overlap;
+        setConflict(overlap);
+        if (options.resolveConflict) openMergeDialog();
+        return;
+      }
       if (exc instanceof ApiError && exc.status === 409) {
         sessionVersionIdRef.current = null;
-        setConflict({
-          serverVersionId: exc.body.server_version_id || "",
-          serverContentHash: exc.body.server_content_hash || "",
-        });
-        setConflictDiff(null);
-        setConflictDiffError(null);
-        setConflictDiffOpen(false);
+        setConflict({ kind: "other" });
+        if (exc.body.error_code === "editing_revision_conflict" && targetVersionId) {
+          void detectEndedDraft(targetVersionId);
+        }
         return;
       }
       setStatus(
@@ -3715,56 +3760,113 @@ export function PageEditor({
     };
   });
 
-  async function viewConflictChanges() {
-    if (!page || !conflict || conflictDiffLoading || !workspaceId) {
+  // Takes the server's draft as the editor's own, after a merge was saved.
+  function applyServerDraft(updated: PagePayload) {
+    adoptEditablePage(updated);
+    const parsed = parsePageDocument(updated.body_md, {
+      aliases: updated.aliases, tags: updated.tags, type: updated.page_type as PageType,
+    });
+    const metadata = metadataFromPagePayload(parsed.metadata, updated);
+    applyParsedMetadata(metadata);
+    setTitle(updated.title);
+    bodyRef.current = parsed.body;
+    setBody(parsed.body);
+    const destination = typeof updated.page_metadata?.placement_parent_node_id === "string"
+      ? updated.page_metadata.placement_parent_node_id : destinationNodeId;
+    setDestinationNodeId(destination);
+    lastSavedRef.current = {
+      ...currentDraft, body: parsed.body, title: updated.title, slug: updated.slug,
+      tags: metadata.tags, aliases: metadata.aliases, icon: metadata.icon,
+      pageType: updated.page_type as PageType, destinationNodeId: destination,
+    };
+    lastSavedFingerprintRef.current = draftSaveFingerprint(lastSavedRef.current, frontmatterExtraLinesRef.current);
+    acknowledgeCurrentEditorRevision();
+    mergeConflictRef.current = null;
+    setConflict(null);
+    setSaveError(false);
+    setSaveRelativeNow(Date.now());
+  }
+
+  // The chosen result is an ordinary save on the server draft the merge used:
+  // if that draft moved meanwhile, the server merges again or asks again.
+  function openMergeDialog() {
+    const current = mergeConflictRef.current;
+    const pageId = pageIdRef.current ?? page?.id;
+    if (!current || !workspaceId || !pageId) return;
+    mergeChoice.open({
+      kind: "save",
+      workspaceId,
+      pageId,
+      preview: current.preview,
+      errorMessage: (cause) => apiErrorMessage(cause, t("editor.saveFailed")),
+      async confirm(resolution) {
+        const seen = mergeConflictRef.current ?? current;
+        const result = resolvedMergeResult(resolution);
+        try {
+          const updated = await autosavePage(workspaceId, pageId, {
+            version_id: seen.preview.version_id,
+            expected_editing_revision: seen.serverRevision,
+            base_content_hash: seen.serverContentHash || undefined,
+            base_snapshot: seen.serverSnapshot,
+            title: result.page_metadata.title,
+            body_md: result.body_md,
+            page_type: result.page_metadata.page_type as PageType,
+            tags: result.page_metadata.tags,
+            aliases: result.page_metadata.aliases,
+            destination_node_id: result.page_metadata.placement_parent_node_id,
+            idempotency_key: newIdempotencyKey(),
+            on_stale: "conflict",
+            retry_only: false,
+          });
+          applyServerDraft(updated);
+        } catch (error) {
+          const next = mergeConflictFrom(error);
+          if (!next) throw error;
+          mergeConflictRef.current = next;
+          setConflict(next);
+          throw new ContextMergeChoiceRequired(next.preview);
+        }
+      },
+    });
+  }
+
+  // "Combine changes": send the editor's current text again, so the choices
+  // include everything typed since the conflict.
+  function resolveMergeConflict() {
+    if (draftSaveFingerprint({ ...currentDraft, slug: pageSlug, title: title.trim() }, frontmatterExtraLinesRef.current) === lastSavedFingerprintRef.current) {
+      // Nothing of this session's own is unsaved: take the server's draft.
+      void reloadLatest();
       return;
     }
-    setConflictDiffOpen(true);
-    setConflictDiffError(null);
-    if (!conflict.serverVersionId) {
-      setConflictDiff(null);
-      setConflictDiffError(
-        t("editor.conflictVersionMissing", {
-          defaultValue: "The server did not return a version to compare.",
-        }),
-      );
-      return;
-    }
-    if (conflict.serverVersionId === page.version_id) {
-      // An in-place autosave overwrite (two tabs on the same draft) reports
-      // the conflict against the caller's own version id, so a version-diff
-      // request here would just diff the draft against itself.
-      setConflictDiff(null);
-      setConflictDiffError(
-        t("editor.conflictInPlaceOverwritten", {
-          defaultValue:
-            "This draft was overwritten in place by another session; there is no version-to-version comparison.",
-        }),
-      );
-      return;
-    }
-    setConflictDiffLoading(true);
+    void save({ source: "manual", resolveConflict: true });
+  }
+
+  // A draft that ended (published or withdrawn) is a commit; keep this
+  // session's text by starting a new draft from it and saving onto that.
+  async function detectEndedDraft(versionId: string) {
+    const pageId = pageIdRef.current ?? page?.id;
+    if (!workspaceId || !pageId) return;
     try {
-      setConflictDiff(
-        await diffPageVersions(
-          workspaceId,
-          page.id,
-          page.version_id,
-          conflict.serverVersionId,
-        ),
-      );
-    } catch (exc) {
-      setConflictDiff(null);
-      setConflictDiffError(
-        apiErrorMessage(
-          exc,
-          t("editor.loadServerChangesFailed", {
-            defaultValue: "Failed to load server changes",
-          }),
-        ),
-      );
-    } finally {
-      setConflictDiffLoading(false);
+      const target = await readPage(workspaceId, pageId, versionId);
+      if (COMMIT_VERSION_STATUSES.has(target.version_status ?? "")) {
+        setConflict({ kind: "ended", endedVersionId: versionId });
+      }
+    } catch { /* The generic conflict banner stays. */ }
+  }
+
+  async function startFromEndedDraft() {
+    const pageId = pageIdRef.current ?? page?.id;
+    if (!workspaceId || !pageId || conflict?.kind !== "ended" || savingRef.current) return;
+    try {
+      const sessionBase = draftBaseSnapshotRef.current;
+      const draft = await beginPageEdit(workspaceId, pageId, conflict.endedVersionId);
+      adoptEditablePage(draft);
+      // The editor's own base stays, so the server merges this session's
+      // changes onto the ended draft instead of overwriting it.
+      draftBaseSnapshotRef.current = sessionBase;
+      await save({ source: "manual", resolveConflict: true });
+    } catch (error) {
+      setStatus(apiErrorMessage(error, t("editor.saveFailed")));
     }
   }
 
@@ -3853,57 +3955,6 @@ export function PageEditor({
       }
     } catch {
       setStalePublishState("error");
-    }
-  }
-
-  async function preserveAlternative() {
-    if (!page || !conflict || savingRef.current || !workspaceId) return;
-    const preservedRevision = editorRevisionRef.current;
-    savingRef.current = true;
-    setIsSaving(true);
-    updateInFlightRevision(preservedRevision);
-    setStatus(null);
-    try {
-      const submittedDraft = { ...currentDraft, slug: pageSlug, title: title.trim() };
-      const serializedBody = serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current);
-      const inputError = markdownInputError(serializedBody);
-      if (inputError) { setStatus(inputError); return; }
-      const preserved = await updatePage(workspaceId, page.id, {
-        title: submittedDraft.title,
-        body_md: serializedBody,
-        page_type: submittedDraft.pageType,
-        tags: submittedDraft.tags,
-        aliases: submittedDraft.aliases,
-        base_version_id: page.version_id,
-        base_content_hash: page.content_hash,
-        expected_editing_revision: page.editing_revision,
-        destination_node_id: submittedDraft.destinationNodeId || null,
-        on_stale: "preserve_as_alternative",
-      });
-      sessionVersionIdRef.current = null;
-      // The preserved bytes now live on a branched version that is not the
-      // page's editable head (_preserve_alternative does not move
-      // page.current_version_id), so this session cannot keep autosaving onto
-      // it. Rebase the editor onto the server head instead of adopting the
-      // branch, and name the parked alternative in the status line.
-      await reloadLatest();
-      setStatus(
-        t("editor.alternativePreserved", {
-          id: preserved.alternative_draft_id?.slice(0, 8) ?? "",
-          defaultValue: "Preserved as alternative draft {{id}}",
-        }),
-      );
-    } catch (exc) {
-      setStatus(
-        apiErrorMessage(
-          exc,
-          t("editor.preserveFailed", { defaultValue: "Preserve failed" }),
-        ),
-      );
-    } finally {
-      savingRef.current = false;
-      updateInFlightRevision(null);
-      setIsSaving(false);
     }
   }
 
@@ -5646,30 +5697,16 @@ export function PageEditor({
             tone="warning"
             action={
               <span className="banner-actions">
-                <button
-                  className="inline-action"
-                  type="button"
-                  onClick={viewConflictChanges}
-                  disabled={conflictDiffLoading}
-                >
-                  {conflictDiffLoading
-                    ? t("editor.loadingChanges", {
-                        defaultValue: "Loading changes",
-                      })
-                    : t("editor.viewTheirChanges", {
-                        defaultValue: "View their changes",
-                      })}
-                </button>
-                <button
-                  className="inline-action"
-                  type="button"
-                  onClick={preserveAlternative}
-                  disabled={isSaving}
-                >
-                  {t("editor.preserveAlternative", {
-                    defaultValue: "Preserve mine as alternative",
-                  })}
-                </button>
+                {conflict.kind === "merge" ? (
+                  <button className="inline-action" disabled={isSaving} onClick={resolveMergeConflict} type="button">
+                    {t("editor.combineChanges")}
+                  </button>
+                ) : null}
+                {conflict.kind === "ended" ? (
+                  <button className="inline-action" disabled={isSaving} onClick={() => void startFromEndedDraft()} type="button">
+                    {t("editor.startFromEnded")}
+                  </button>
+                ) : null}
                 <button aria-label={t("editor.conflictBannerReloadLatest", {
                     defaultValue: "Reload latest",
                   })}
@@ -5683,19 +5720,14 @@ export function PageEditor({
               </span>
             }
           >
-            {t("editor.conflictBannerMessage", {
-              defaultValue:
-                "Someone else updated this page. A newer version is available.",
-            })}
+            {conflict.kind === "merge"
+              ? t("editor.conflictOverlap")
+              : conflict.kind === "ended"
+                ? t("editor.conflictEnded")
+                : t("editor.conflictBannerMessage", {
+                    defaultValue: "Someone else updated this page. A newer version is available.",
+                  })}
           </StatusBanner>
-        ) : null}
-        {conflict && conflictDiffOpen ? (
-          <ConflictDiffPanel
-            diff={conflictDiff}
-            error={conflictDiffError}
-            loading={conflictDiffLoading}
-            onClose={() => setConflictDiffOpen(false)}
-          />
         ) : null}
         <div className="editor-page-header">
           <div className="editor-title-row">
@@ -6013,19 +6045,7 @@ export function PageEditor({
             workspaceId={page.workspace_id}
           />
         ) : null}
-        {mergePublishPrompt?.preview.result ? (
-          <Dialog labelledBy="merge-publish-dialog-title" onClose={() => settleAutomaticMerge(false)}
-            title={t("editor.mergePreviewTitle")}>
-            <section className="dialog-form">
-              <p>{t("editor.mergePreviewDescription")}</p>
-              <ContextMergeResultPreview candidate={mergePublishPrompt.preview.result} workspaceId={workspaceId} />
-              <div className="dialog-actions">
-                <button type="button" className="icon-button text-button" onClick={() => settleAutomaticMerge(false)}>{t("editor.fencePublishCancel")}</button>
-                <button type="button" className="icon-button primary" onClick={() => settleAutomaticMerge(true)}>{t("editor.mergePreviewPublish")}</button>
-              </div>
-            </section>
-          </Dialog>
-        ) : null}
+        {mergeChoice.dialog}
         {fencePublishPrompt ? (
           <Dialog
             className="fence-publish-dialog"
@@ -6271,57 +6291,6 @@ function ToolbarButton({
     >
       {children}
     </button>
-  );
-}
-
-function ConflictDiffPanel({
-  diff,
-  error,
-  loading,
-  onClose,
-}: {
-  diff: PageVersionDiff | null;
-  error: string | null;
-  loading: boolean;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation("pages");
-  return (
-    <section
-      className="editor-conflict-panel"
-      aria-label={t("editor.conflictDiffPanelTitle", { defaultValue: "Server changes" })}
-    >
-      <div className="editor-conflict-panel-header">
-        <div>
-          <p className="eyebrow">
-            {t("editor.conflictDiffPanelEyebrow", { defaultValue: "Conflict" })}
-          </p>
-          <h2>
-            {t("editor.conflictDiffPanelTitle", { defaultValue: "Server changes" })}
-          </h2>
-        </div>
-        <button
-          aria-label={t("editor.closeServerChangesAria", { defaultValue: "Close server changes" })}
-          className="icon-button"
-          onClick={onClose}
-          type="button"
-        >
-          <X size={16} aria-hidden="true" />
-        </button>
-      </div>
-      {loading ? (
-        <p className="page-history-empty">
-          {t("editor.loadingServerChanges", { defaultValue: "Loading server changes…" })}
-        </p>
-      ) : null}
-      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-      {!loading && !error && diff ? <DiffViewer diff={diff} /> : null}
-      {!loading && !error && !diff ? (
-        <p className="page-history-empty">
-          {t("editor.noServerChangesLoaded", { defaultValue: "No server changes loaded yet." })}
-        </p>
-      ) : null}
-    </section>
   );
 }
 

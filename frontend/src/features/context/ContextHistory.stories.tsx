@@ -55,10 +55,7 @@ function detail(overrides: Partial<ContextPageDetail> = {}): ContextPageDetail {
     warnings: [],
     pending_draft_version_id: null,
     pending_review: null,
-    reconciliation_pending_count: 0,
-    reconciliation_pending_count_truncated: false,
-    next_reconciliation_version_id: null,
-    reconciliation_available: false,
+    open_review_count: 0,
     ...overrides,
   };
 }
@@ -124,7 +121,6 @@ const baseProps = {
   onCompare: () => {},
   onComparePair: () => {},
   onLoadOlder: () => {},
-  onReconcile: () => {},
   onVersionRestored: () => {},
   workspaceId: "workspace-1",
 };
@@ -158,10 +154,9 @@ export const Linear = {
   ),
 };
 
-// A fork and its reconcile merge at once. v1 -> v2 -> v4 -> v5 is the trunk;
-// v3 forks off v1 (alternative_draft) and never grows descendants; v5 is the
-// reconcile-merge version, and `merged_into_version_id` (set on v3, the
-// branch) is its second parent. v3 keeps its own lane from v5's merge
+// A fork and its merge at once. v1 -> v2 -> v4 -> v5 is the trunk; v3 forks
+// off v1 and never grows descendants; v5 is the merge version, and its
+// `parent_version_ids` name v3 as its second parent. v3 keeps its own lane from v5's merge
 // departure all the way down to the row directly above v1 and joins there --
 // it must never run down the trunk through v2's dot, which is how this story
 // rendered before 2026-10-22 and why it is not a reference picture on its own:
@@ -181,13 +176,13 @@ export const ForkAndMerge = {
           historyVersion("version-5", 5, "published_snapshot", {
             is_visible_head: true,
             is_current_published: true,
+            parent_version_ids: ["version-4", "version-3"],
           }),
           historyVersion("version-4", 4, "superseded_snapshot", {
             prior_version_id: "version-2",
           }),
-          historyVersion("version-3", 3, "alternative_draft", {
+          historyVersion("version-3", 3, "closed", {
             prior_version_id: "version-1",
-            merged_into_version_id: "version-5",
           }),
           historyVersion("version-2", 2, "superseded_snapshot"),
           historyVersion("version-1", 1, "published_snapshot"),

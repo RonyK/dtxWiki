@@ -106,16 +106,24 @@ export function priorRelationForVersion(entry: VersionEntry): PriorRelation {
 export function contextHistoryNodes(
   versions: VersionEntry[],
 ): HistoryGraphNode<VersionEntry>[] {
-  return versions.map((entry) => ({
+  const nodes: HistoryGraphNode<VersionEntry>[] = versions.map((entry) => ({
     entry,
     id: entry.version_id,
     versionNo: entry.version_no,
     parentId: entry.prior_version_id ?? null,
     parentRelation: priorRelationForVersion(entry),
-    mergedIntoId: entry.merged_into_version_id ?? null,
+    // Merged-in parents, whatever order the reader's filtered list has: every
+    // parent except the first one.
+    mergeParentIds: (entry.parent_version_ids ?? []).filter((id) =>
+      id !== entry.parent_version_id && id !== entry.prior_version_id),
+    pending: entry.version_status === "draft",
     branched:
       entry.graph_status === "branched" ||
       entry.history_status === "alternative_draft" ||
       entry.history_status === "discarded_draft",
   }));
+  // Open drafts are the tip of history, like work not committed yet: they come
+  // first, so every parent they name -- a commit merged in later included --
+  // lies below them and its edge can be drawn.
+  return [...nodes.filter((node) => node.pending), ...nodes.filter((node) => !node.pending)];
 }

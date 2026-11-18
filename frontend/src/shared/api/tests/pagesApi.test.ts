@@ -218,7 +218,7 @@ describe("pages api", () => {
   it("publishes the previewed result with revision, head and hash checks", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(
       JSON.stringify({ data: String(input).endsWith("/merge-preview") ? {
-        version_id: "v2", editing_revision: 4, published_version_id: "v1", parent_version_ids: ["v1"],
+        version_id: "v2", editing_revision: 4, published_version_id: "v1", target_version_id: "v1", parent_version_ids: ["v1"],
         kind: "fast_forward", result: { body_md: "# Hello", page_metadata: {}, block_map: [], result_hash: "c".repeat(64) },
       } : pageDetail({ version_id: "v2", parent_version_id: "v1" }) }),
       { status: 200, headers: { "Content-Type": "application/json" } },

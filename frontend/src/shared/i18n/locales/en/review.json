@@ -7,7 +7,6 @@
     "loadMore": "Failed to load more reviews",
     "bulkPreview": "Failed to preview bulk approval",
     "bulkApprove": "Failed to approve reviews",
-    "bulkDiscard": "Failed to discard reconciliation branches",
     "decide": "Failed to decide Review",
     "claim": "Failed to claim Review"
   },
@@ -155,13 +154,6 @@
     "result": "Approved {{approved}} reviews. Skipped {{skipped}}.",
     "couldNotApprove": "{{count}} item(s) could not be approved",
     "selectAllVisible": "Select all {{count}} shown",
-    "discardReconciliations": "Discard selected branches",
-    "discardTitle": "Discard selected reconciliation branches?",
-    "discardBody": "Only explicitly eligible branches will be discarded. Ineligible or stale items are returned with an error code.",
-    "discardReason": "Discard reason",
-    "discardBlocked": "The review state changed. Close this dialog and refresh the queue before continuing.",
-    "discarding": "Discarding",
-    "discardResult": "Discarded {{discarded}} branches. Skipped {{skipped}}.",
     "approvalImpact": "{{count}} other reviews of this version or its earlier drafts will also be settled.",
     "confirmSelectedBody": "{{count}} of {{total}} selected reviews can be approved. Review automatic settlements and excluded items below."
   },
@@ -452,11 +444,11 @@
       "superseded_by_newer_draft": "Replaced by a newer draft",
       "superseded_by_decision_undo": "Closed by an undone decision"
     },
-    "mergeConflict": "These changes conflict. Read the current draft before approving.",
-    "mergePreviewTitle": "Review merged page",
-    "mergePreviewDescription": "The published page changed. Review the combined result before approving.",
-    "mergePreviewApprove": "Approve merged page",
-    "mergePreviewCancel": "Cancel"
+    "mergeAutomaticSummary": "Publishes the result combined with the published version · Show result",
+    "mergeAutomaticNotice": "The published version changed. Approving publishes the result combined with it.",
+    "mergeAutomaticShow": "Show combined result",
+    "mergeConflictNotice_one": "Overlaps the published version in {{count}} place. You choose how to combine when approving.",
+    "mergeConflictNotice_other": "Overlaps the published version in {{count}} places. You choose how to combine when approving."
   },
   "document": {
     "targets": "Review targets",

@@ -1614,7 +1614,7 @@ describe("ContextScreen", () => {
       within(draftHead).getByRole("button", { name: "Show changes in v8 since v7" }),
     ).toBeInTheDocument();
     expect(
-      within(draftHead).queryByRole("button", { name: "Start a new draft from this version" }),
+      within(draftHead).queryByRole("button", { name: "Restore this version" }),
     ).toBeNull();
     expect(publishedHead).not.toHaveAttribute("aria-current");
     expect(
@@ -1622,109 +1622,11 @@ describe("ContextScreen", () => {
     ).toBeInTheDocument();
     expect(
       within(publishedHead).getByRole("button", {
-        name: "Start a new draft from this version",
+        name: "Restore this version",
       }),
     ).toBeInTheDocument();
-    expect(
-      within(panel).getAllByRole("button", { name: "Discard" }),
-    ).toHaveLength(1);
-    // Discard comes after the buttons every row shares, so a row that can be
-    // discarded keeps Restore and Changes where every other row has them.
-    // (Visible text is the short label; the full names are the accessible
-    // names the rest of this suite queries by.)
-    const discardActions = within(panel)
-      .getByRole("button", { name: "Discard" })
-      .closest(".history-card-actions") as HTMLElement;
-    expect(
-      Array.from(discardActions.querySelectorAll("button")).map(
-        (button) => button.textContent,
-      ),
-    ).toEqual(["Restore", "Changes", "Discard"]);
-  });
-
-  it("discards a preserved alternative with an explicit reason", async () => {
-    const fetchMock = await renderDecisionLog();
-    await userEvent.click(
-      screen.getByRole("treeitem", { name: "Architecture Notes" }),
-    );
-    const readerTabs = within(
-      await screen.findByRole("tablist", { name: "Context reader views" }),
-    );
-    await userEvent.click(readerTabs.getByRole("tab", { name: /History/ }));
-    const historyPanel = screen.getByRole("tabpanel", { name: /History/ });
-    const alternative = within(historyPanel)
-      .getByText("v1")
-      .closest(".history-card") as HTMLElement;
-
-    await userEvent.click(
-      within(alternative).getByRole("button", { name: "Discard" }),
-    );
-    const dialog = screen.getByRole("dialog", {
-      name: "Discard alternative v1? This cannot be undone.",
-    });
-    const confirm = within(dialog).getByRole("button", {
-      name: "Discard",
-    });
-    expect(confirm).toBeDisabled();
-    await userEvent.type(
-      within(dialog).getByLabelText("Discard reason"),
-      "Superseded experiment",
-    );
-    await userEvent.click(confirm);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}/versions/version-alt/discard`,
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ reason: "Superseded experiment" }),
-      }),
-    );
-    expect(
-      await screen.findByText("Alternative v1 was discarded."),
-    ).toBeInTheDocument();
-  });
-
-  it("opens reconciliation only when the version capability is explicitly true", async () => {
-    const fetchMock = await renderDecisionLog({ reconciliationAvailable: true });
-    await userEvent.click(
-      screen.getByRole("treeitem", { name: "Architecture Notes" }),
-    );
-
-    expect(
-      await screen.findByText(/1 branch requires reconciliation/i),
-    ).toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole("tab", { name: /History/ }),
-    );
-    const alternative = within(screen.getByRole("tabpanel", { name: /History/ }))
-      .getByText("v1")
-      .closest(".history-card") as HTMLElement;
-    expect(
-      within(alternative).queryByRole("button", { name: "Start a new draft from this version" }),
-    ).toBeNull();
-    await userEvent.click(
-      within(alternative).getByRole("button", { name: "Reconcile" }),
-    );
-
-    const dialog = await screen.findByRole("dialog", { name: "Reconcile branch" });
-    expect(
-      await within(dialog).findByText("Base v1 → HEAD v3"),
-    ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${SECOND_PAGE_ID}/versions/version-alt/reconciliation`,
-      expect.objectContaining({ headers: expect.any(Headers) }),
-    );
-  });
-
-  it("keeps reconciliation hidden when the capability is absent", async () => {
-    await renderDecisionLog();
-    await userEvent.click(
-      screen.getByRole("treeitem", { name: "Architecture Notes" }),
-    );
-
-    await screen.findByText("Selected second page");
-    expect(screen.queryByRole("button", { name: "Reconcile" })).toBeNull();
-    expect(screen.queryByText(/requires reconciliation/i)).toBeNull();
+    // Drafts are withdrawn from the draft band, not discarded from History.
+    expect(within(panel).queryByRole("button", { name: "Discard" })).toBeNull();
   });
 
   it("renders Activity failure separately from its empty state", async () => {
@@ -3664,7 +3566,7 @@ describe("ContextScreen", () => {
     expect(within(viewerHistory).queryByText("Alternative draft")).toBeNull();
     // restore is a write; viewers must not see it (backend re-enforces anyway).
     expect(
-      screen.queryByRole("button", { name: "Start a new draft from this version" }),
+      screen.queryByRole("button", { name: "Restore this version" }),
     ).toBeNull();
   });
 
@@ -4117,11 +4019,11 @@ describe("ContextScreen", () => {
     ).toHaveTextContent("Changes");
     expect(
       within(versionTwo).queryByRole("button", {
-        name: "Start a new draft from this version",
+        name: "Restore this version",
       }),
     ).toBeNull();
     expect(
-      within(versionOne).getByRole("button", { name: "Start a new draft from this version" }),
+      within(versionOne).getByRole("button", { name: "Restore this version" }),
     ).toBeInTheDocument();
 
     await userEvent.click(
@@ -4151,18 +4053,18 @@ describe("ContextScreen", () => {
       within(dialog).getByText("Current published v2 · visible to readers"),
     ).toBeInTheDocument();
     expect(
-      within(dialog).queryByRole("button", { name: "Start a new draft from this version" }),
+      within(dialog).queryByRole("button", { name: "Restore this version" }),
     ).toBeNull();
 
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Close diff" }),
     );
     await userEvent.click(
-      within(versionOne).getByRole("button", { name: "Start a new draft from this version" }),
+      within(versionOne).getByRole("button", { name: "Restore this version" }),
     );
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      "Create a new draft from v1? The published version stays unchanged.",
+      "Restore v1? Its content becomes a new version.",
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/restore`,
@@ -5281,12 +5183,12 @@ describe("ContextScreen", () => {
       within(draftCard).getByRole("button", { name: "Show changes in v2 since v1" }),
     ).toBeInTheDocument();
     expect(
-      within(draftCard).queryByRole("button", { name: "Start a new draft from this version" }),
+      within(draftCard).queryByRole("button", { name: "Restore this version" }),
     ).toBeNull();
     expect(publishedCard).toHaveAttribute("aria-current", "page");
     expect(
       within(publishedCard).getByRole("button", {
-        name: "Start a new draft from this version",
+        name: "Restore this version",
       }),
     ).toBeInTheDocument();
   });
@@ -5759,7 +5661,7 @@ describe("ContextScreen", () => {
   });
 
   it("draws a merge departing into the branch lane and the branch joining at its fork point", async () => {
-    // v4 (published head, parent v2) merges v3, which forked from v1.
+    // v4 (published head, first parent v2) names v3, forked from v1, as its merged parent.
     const responses = comparisonHistoryFetch();
     const detailUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
     const detailResponse = responses[detailUrl] as {
@@ -5781,11 +5683,9 @@ describe("ContextScreen", () => {
             is_current: true,
             is_current_published: true,
             is_visible_head: true,
+            parent_version_ids: ["version-2", "version-3"],
           }),
-          {
-            ...historyVersion("version-3", 3, "alternative_draft", "version-1"),
-            merged_into_version_id: "version-4",
-          },
+          historyVersion("version-3", 3, "closed", "version-1"),
           historyVersion("version-2", 2, "superseded", "version-1"),
           historyVersion("version-1", 1, "published", null),
         ],
@@ -5910,56 +5810,6 @@ describe("ContextScreen", () => {
     expect(requestedUrls).toContain(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/rev-1`);
     expect(requestedUrls.filter((url) => /\/(?:inspector|neighbors|lint)(?:[/?]|$)/.test(url)))
       .toEqual([]);
-  });
-
-  it("warns about pending reconciliation before publish without blocking approval", async () => {
-    ctxWorkspace.current = {
-      selectedWorkspace: { role: "owner", id: WORKSPACE_ID },
-    };
-    const responses: Record<string, unknown> = pendingReviewFetch(0, "pending", 2);
-    responses[
-      `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/rev-1/decision`
-    ] = {
-      data: {
-        id: "rev-1",
-        status: "approved",
-        published_version_id: "version-2",
-        superseded_review_count: 0,
-      },
-    };
-    const fetchMock = mockFetch(responses);
-    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
-    render(
-      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
-        <ContextScreen />
-      </MemoryRouter>,
-    );
-    await userEvent.click(
-      await screen.findByRole("treeitem", { name: "Decision Log" }),
-    );
-    const approve = await screen.findByRole("button", { name: "Approve" });
-    await waitFor(() => expect(approve).toBeEnabled());
-
-    await userEvent.click(approve);
-
-    expect(confirm).toHaveBeenCalledWith(
-      "2 branches are still waiting for reconciliation. Publish this version anyway?",
-    );
-    expect(
-      fetchMock.mock.calls.some(([input]) =>
-        String(input).endsWith(`/reviews/rev-1/decision`),
-      ),
-    ).toBe(false);
-
-    confirm.mockReturnValueOnce(true);
-    await userEvent.click(approve);
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(([input]) =>
-          String(input).endsWith(`/reviews/rev-1/decision`),
-        ),
-      ).toBe(true),
-    );
   });
 
   it("hides pending-draft reviewer actions for viewers (F1 RBAC)", async () => {
@@ -6725,6 +6575,7 @@ function historyVersion(
     is_current_published: boolean;
     is_latest_draft: boolean;
     is_visible_head: boolean;
+    parent_version_ids: string[];
   }> = {},
 ) {
   const historyStatus: ContextHistoryStatus =
@@ -6781,6 +6632,7 @@ function historyVersion(
     is_alternative: options.isAlternative ?? false,
     is_discarded: options.isDiscarded ?? false,
     reconciliation_available: options.reconciliationAvailable,
+    ...(publication.parent_version_ids ? { parent_version_ids: publication.parent_version_ids } : {}),
   };
 }
 
