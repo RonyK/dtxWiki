@@ -106,7 +106,9 @@ export function priorRelationForVersion(entry: VersionEntry): PriorRelation {
 export function contextHistoryNodes(
   versions: VersionEntry[],
 ): HistoryGraphNode<VersionEntry>[] {
-  const nodes: HistoryGraphNode<VersionEntry>[] = versions.map((entry) => ({
+  // The History API already lists open drafts first (the tip of the history),
+  // so the layout keeps its order.
+  return versions.map((entry) => ({
     entry,
     id: entry.version_id,
     versionNo: entry.version_no,
@@ -122,8 +124,4 @@ export function contextHistoryNodes(
       entry.history_status === "alternative_draft" ||
       entry.history_status === "discarded_draft",
   }));
-  // Open drafts are the tip of history, like work not committed yet: they come
-  // first, so every parent they name -- a commit merged in later included --
-  // lies below them and its edge can be drawn.
-  return [...nodes.filter((node) => node.pending), ...nodes.filter((node) => !node.pending)];
 }

@@ -1715,16 +1715,25 @@ class DomainReadService:
             actor=actor,
             before_version_no=before_version_no,
         )
-        has_more_versions = len(version_page) > limit
-        versions = version_page[:limit]
+        # Open Context drafts lead the first page (they are the tip of the
+        # history); the cursor pages the commits below them.
+        leading = (
+            [entry for entry in version_page if entry.version_status == "draft"]
+            if target_type == "context_page"
+            else []
+        )
+        commits = [entry for entry in version_page if entry not in leading]
+        has_more_versions = len(commits) > limit
+        commits = commits[:limit]
+        versions = leading + commits
         next_cursor = (
             _encode_version_history_cursor(
                 workspace_id=workspace_id,
                 target_type=target_type,
                 target_id=target_id,
-                before_version_no=versions[-1].version_no,
+                before_version_no=commits[-1].version_no,
             )
-            if has_more_versions and versions
+            if has_more_versions and commits
             else None
         )
         return ListChangesPayload(
@@ -2434,17 +2443,35 @@ class DomainReadService:
                 .where(ContextPageVersion.page_id == target_id)
                 .where(ContextPage.workspace_id == workspace_id)
             )
+            open_drafts = []
             if not actor_can_read_drafts(actor):
                 stmt = stmt.where(
                     ContextPageVersion.version_status.in_(
                         PUBLISHED_CONTEXT_VERSION_STATUSES
                     )
                 )
+            else:
+                # Open drafts are the tip of the history: all of them lead the
+                # first page, so a later page never brings one in above rows
+                # already drawn. Every page after that holds commits only.
+                if before_version_no is None:
+                    open_drafts = session.scalars(
+                        stmt.where(
+                            ContextPageVersion.version_status == "draft"
+                        ).order_by(
+                            ContextPageVersion.last_saved_at.desc(),
+                            ContextPageVersion.id,
+                        )
+                    ).all()
+                stmt = stmt.where(ContextPageVersion.version_status != "draft")
             if before_version_no is not None:
                 stmt = stmt.where(ContextPageVersion.version_no < before_version_no)
-            versions = session.scalars(
-                stmt.order_by(ContextPageVersion.version_no.desc()).limit(limit)
-            ).all()
+            versions = [
+                *open_drafts,
+                *session.scalars(
+                    stmt.order_by(ContextPageVersion.version_no.desc()).limit(limit)
+                ).all(),
+            ]
             versions = [
                 version
                 for version in versions

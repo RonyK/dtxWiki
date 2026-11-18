@@ -29,6 +29,7 @@ from backend.schemas.context_drafts import (
     OpenDrafts,
 )
 from backend.services.read_errors import ReadNotFoundError, ReadValidationError
+from backend.utils.uuid import parse_uuid_or_none
 
 _OPEN_REVIEW_STATUSES = frozenset({"pending", "changes_requested"})
 
@@ -335,7 +336,8 @@ def count_drafts_in_review(session, page, actor) -> int:
     """Open drafts of a page that carry an open review request.
 
     Follows the open-draft list's rules: draft readers only, and only for a
-    page in ordinary discovery.
+    page in ordinary discovery. The query starts from the page's open reviews,
+    so its cost follows the review queue, not the number of drafts.
     """
     from backend.services.actor_visible_read import context_page_visible
 
@@ -345,27 +347,55 @@ def count_drafts_in_review(session, page, actor) -> int:
         or not context_page_visible(page, actor, workspace_id=page.workspace_id)
     ):
         return 0
-    drafts = session.scalars(
-        select_in_workspace(
-            ContextPageVersion,
-            workspace_id=page.workspace_id,
-            conditions=(
-                ContextPageVersion.page_id == page.id,
-                ContextPageVersion.version_status == "draft",
-            ),
-        ).options(
-            load_only(
-                ContextPageVersion.id,
-                ContextPageVersion.page_id,
-                ContextPageVersion.workspace_id,
-            )
+    query = select_in_workspace(
+        ChangeOperation,
+        workspace_id=page.workspace_id,
+        conditions=(
+            ChangeOperation.target_type == "context_page",
+            ChangeOperation.target_id == page.id,
+            ChangeOperation.diff_ref.like("context_page_version:%"),
+            ReviewItem.review_type == "context_update",
+            ReviewItem.status.in_(_OPEN_REVIEW_STATUSES),
+        ),
+    )
+    query = join_in_workspace(
+        query,
+        ChangeOperation,
+        ChangeSet,
+        workspace_id=page.workspace_id,
+        on=ChangeSet.id == ChangeOperation.change_set_id,
+    )
+    query = join_in_workspace(
+        query,
+        ChangeOperation,
+        ReviewItem,
+        workspace_id=page.workspace_id,
+        on=ReviewItem.change_set_id == ChangeSet.id,
+    )
+    version_ids = {
+        parsed
+        for diff_ref in session.scalars(
+            query.with_only_columns(ChangeOperation.diff_ref)
         )
-    ).all()
-    reviews = _reviews_for_versions(session, page.workspace_id, drafts)
-    return sum(
-        1
-        for items in reviews.values()
-        if any(review.status in _OPEN_REVIEW_STATUSES for review in items)
+        if (
+            parsed := parse_uuid_or_none(diff_ref.removeprefix("context_page_version:"))
+        )
+    }
+    if not version_ids:
+        return 0
+    return (
+        session.scalar(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                conditions=(
+                    ContextPageVersion.page_id == page.id,
+                    ContextPageVersion.id.in_(version_ids),
+                    ContextPageVersion.version_status == "draft",
+                ),
+            ).with_only_columns(func.count(), maintain_column_froms=True)
+        )
+        or 0
     )
 
 

@@ -189,6 +189,46 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
     assert "Middle moved." in brought.body_md
     assert moved in brought.parent_version_ids
 
+    # History lists every open draft first, before one page of commits; later
+    # pages hold commits only, so loading them never adds a draft above rows
+    # already drawn (the brought-in draft's merged parent is a newer commit).
+    from backend.policy.auth import ActorContext
+    from backend.services.domain_read import DomainReadService
+
+    editor = ActorContext(
+        actor_kind="human",
+        actor_id=actor,
+        token_kind="session",
+        scopes=("read",),
+        workspace_id=workspace_id,
+        workspace_role="editor",
+        role="editor",
+    )
+    with page_service.session_factory() as session:
+        first = DomainReadService().list_changes(
+            session=session,
+            workspace_id=workspace_id,
+            target_type="context_page",
+            target_id=initial.id,
+            limit=1,
+            actor=editor,
+        )
+        drafts = [row for row in first.versions if row.version_status == "draft"]
+        assert first.versions[: len(drafts)] == drafts
+        assert behind.version_id in {row.version_id for row in drafts}
+        assert len(first.versions) == len(drafts) + 1
+        later = DomainReadService().list_changes(
+            session=session,
+            workspace_id=workspace_id,
+            target_type="context_page",
+            target_id=initial.id,
+            limit=50,
+            cursor=first.next_cursor,
+            actor=editor,
+        )
+        assert later.versions
+        assert all(row.version_status != "draft" for row in later.versions)
+
     rejected = begin()
     submitted = page_service.submit_context_edit_for_review(
         initial.id,
