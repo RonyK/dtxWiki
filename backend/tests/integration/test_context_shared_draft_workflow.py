@@ -149,6 +149,46 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
     resolved = publish(conflict_right, conflict_preview, "latest")
     assert "Middle from right." in resolved.page.body_md
 
+    # Bringing the published version into a draft is bound to the result the
+    # person saw, edits included: an unedited result's hash is refused, and the
+    # edited result is saved with the commit added to the draft's parents.
+    behind, ahead = begin(), begin()
+    ahead = save(ahead, ahead.body_md.replace("Middle from right.", "Middle moved."))
+    moved = publish(ahead, preview(ahead)).page.version_id
+    edited = behind.body_md.replace("Middle from right.", "Middle moved.") + (
+        "\nKept while bringing in.\n"
+    )
+    seen = page_service.preview_context_merge(
+        initial.id,
+        behind.version_id,
+        workspace_id,
+        actor_id=actor,
+        commit_version_id=moved,
+        body_md=edited,
+    )
+
+    def bring(result_hash):
+        return page_service.bring_in_context_version(
+            page_id=initial.id,
+            version_id=behind.version_id,
+            workspace_id=workspace_id,
+            expected_editing_revision=behind.editing_revision,
+            idempotency_key=str(uuid4()),
+            actor_kind="human",
+            actor_id=actor,
+            actor_provenance="browser_session",
+            commit_version_id=moved,
+            result_hash=result_hash,
+            result_body_md=edited,
+        )
+
+    with pytest.raises(StaleBaseVersionError):
+        bring(preview(behind)["result"]["result_hash"])
+    brought = bring(seen["result"]["result_hash"])
+    assert "Kept while bringing in." in brought.body_md
+    assert "Middle moved." in brought.body_md
+    assert moved in brought.parent_version_ids
+
     rejected = begin()
     submitted = page_service.submit_context_edit_for_review(
         initial.id,
@@ -278,3 +318,62 @@ def test_two_editors_merge_browser_baseline_but_mcp_requires_current_revision(
         stored = session.get(ContextPageVersion, UUID(draft["version_id"]))
         assert stored.body_md == merged["body_md"]
         assert stored.editing_revision == merged["editing_revision"]
+
+    # An overlapping browser save returns both choices and the draft the merge
+    # used; confirming a choice is an ordinary save on that draft, and the
+    # same confirmation merges onto the draft if it moved again meanwhile.
+    overlap = peer.post(
+        url,
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "base_snapshot": baseline,
+            "body_md": draft["body_md"].replace(
+                "First paragraph.", "First rewritten by peer."
+            ),
+            "idempotency_key": "concurrent-peer-overlap",
+        },
+    )
+    assert overlap.status_code == 409, overlap.text
+    conflict = overlap.json()
+    assert conflict["error_code"] == "context_merge_conflict"
+    choices = conflict["merge_preview"]
+    assert choices["kind"] == "conflict" and choices["latest_side"] == "ours"
+    assert choices["sides"]["theirs"]["version_id"] == draft["version_id"]
+    assert conflict["server_editing_revision"] == merged["editing_revision"]
+    kept = choices["keep_both"]["body_md"]
+    assert "First edited by owner." in kept and "First rewritten by peer." in kept
+    confirm = {
+        "version_id": draft["version_id"],
+        "expected_editing_revision": conflict["server_editing_revision"],
+        "base_content_hash": conflict["server_content_hash"],
+        "base_snapshot": conflict["server_snapshot"],
+        "body_md": kept,
+    }
+    saved = peer.post(url, json={**confirm, "idempotency_key": "concurrent-confirm"})
+    assert saved.status_code == 200, saved.text
+    saved = saved.json()["data"]
+    assert saved["autosave_merged"] is False
+    assert "First rewritten by peer." in saved["body_md"]
+    moved = owner.post(
+        url,
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": saved["editing_revision"],
+            "base_snapshot": {
+                "body_md": saved["body_md"],
+                "page_metadata": saved["page_metadata"],
+            },
+            "body_md": saved["body_md"].replace(
+                "Last edited by peer.", "Last moved by owner."
+            ),
+            "idempotency_key": "concurrent-owner-move",
+        },
+    )
+    assert moved.status_code == 200, moved.text
+    again = peer.post(url, json={**confirm, "idempotency_key": "concurrent-reconfirm"})
+    assert again.status_code == 200, again.text
+    again = again.json()["data"]
+    assert again["autosave_merged"] is True
+    assert "Last moved by owner." in again["body_md"]
+    assert "First rewritten by peer." in again["body_md"]

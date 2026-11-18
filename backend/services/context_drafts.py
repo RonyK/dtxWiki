@@ -331,6 +331,44 @@ def list_context_drafts(session, *, workspace_id, page_id, actor, limit=5, curso
     return _project_open_drafts(session, page, actor, limit=limit, boundary=boundary)
 
 
+def count_drafts_in_review(session, page, actor) -> int:
+    """Open drafts of a page that carry an open review request.
+
+    Follows the open-draft list's rules: draft readers only, and only for a
+    page in ordinary discovery.
+    """
+    from backend.services.actor_visible_read import context_page_visible
+
+    if (
+        page is None
+        or not actor_can_read_drafts(actor)
+        or not context_page_visible(page, actor, workspace_id=page.workspace_id)
+    ):
+        return 0
+    drafts = session.scalars(
+        select_in_workspace(
+            ContextPageVersion,
+            workspace_id=page.workspace_id,
+            conditions=(
+                ContextPageVersion.page_id == page.id,
+                ContextPageVersion.version_status == "draft",
+            ),
+        ).options(
+            load_only(
+                ContextPageVersion.id,
+                ContextPageVersion.page_id,
+                ContextPageVersion.workspace_id,
+            )
+        )
+    ).all()
+    reviews = _reviews_for_versions(session, page.workspace_id, drafts)
+    return sum(
+        1
+        for items in reviews.values()
+        if any(review.status in _OPEN_REVIEW_STATUSES for review in items)
+    )
+
+
 def project_open_drafts(session, page, actor):
     """Embed discovery metadata without denying an independently allowed read.
 

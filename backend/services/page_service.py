@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -276,10 +277,16 @@ class PageConflictError(PageServiceError):
         *,
         no_open_edit: bool = False,
         error_code: str | None = None,
+        server_snapshot: dict | None = None,
+        merge_preview: dict | None = None,
     ) -> None:
         self.error_code = error_code or (
             "no_open_edit" if no_open_edit else "stale_base_version"
         )
+        # A browser save that conflicts with the server draft: the draft the
+        # merge used (resend it as base_snapshot to confirm) and both choices.
+        self.server_snapshot = server_snapshot
+        self.merge_preview = merge_preview
         super().__init__(self.error_code.replace("_", " "))
         self.server_version_id = server_version_id
         self.server_content_hash = server_content_hash
@@ -1174,11 +1181,14 @@ class PageService:
         body_md: str | None = None,
         page_metadata: dict | None = None,
         commit_version_id: UUID | None = None,
+        rest: bool = False,
     ) -> dict:
         """The merge of a commit into this version, without saving.
 
         The target defaults to the current published version, which is what
         publication merges; a named commit is what bring-in would merge.
+        `rest` selects the REST projection (both sides, choices only for a
+        conflict); MCP keeps its own wire shape.
         """
         from dataclasses import replace
 
@@ -1214,8 +1224,12 @@ class PageService:
                 ),
             )
             edited = body_md is not None or page_metadata is not None
+
+            def project(value):
+                return value.rest_payload(page.id) if rest else value.payload()
+
             if on_conflict is None and not edited:
-                return preview.payload()
+                return project(preview)
             # `result` is what publication would publish for the same choice
             # and edits.
             chosen = preview.choose(on_conflict)
@@ -1239,9 +1253,9 @@ class PageService:
             conflict_bodies["result"] = conflict_bodies.get(
                 on_conflict or "result", chosen.body_md
             )
-            return replace(
-                preview, clean=chosen, conflict_bodies=conflict_bodies
-            ).payload()
+            return project(
+                replace(preview, clean=chosen, conflict_bodies=conflict_bodies)
+            )
 
     def bring_in_context_version(
         self,
@@ -1255,9 +1269,19 @@ class PageService:
         actor_provenance: str,
         commit_version_id: UUID | None = None,
         on_conflict: str | None = None,
+        result_hash: str | None = None,
+        result_body_md: str | None = None,
+        result_page_metadata: dict | None = None,
         retry_only: bool = False,
     ) -> PagePayload:
+        """Merge a commit (default: the published version) into a draft.
+
+        With `result_hash` the write is bound to the preview the caller saw:
+        the draft revision, the named commit and the chosen (optionally
+        edited) result must all still match, as for publication.
+        """
         from backend.services.context_draft_workflow import (
+            edit_merge_candidate,
             history_for,
             merge_draft_references,
             metadata_dict,
@@ -1265,6 +1289,7 @@ class PageService:
             preview_merge,
             record_draft_save,
             set_parents,
+            verify_preview,
         )
 
         with self.session_factory.begin() as session:
@@ -1306,6 +1331,30 @@ class PageService:
                 if preview.kind == "fast_forward":
                     return self._payload_from_page(session, page, version)
                 candidate = preview.choose(on_conflict)
+                if result_body_md is not None or result_page_metadata is not None:
+                    candidate = self._prepare_merge_candidate(
+                        session,
+                        page,
+                        version,
+                        edit_merge_candidate(
+                            candidate,
+                            body_md=result_body_md,
+                            page_metadata=result_page_metadata,
+                        ),
+                        actor_kind,
+                        actor_id,
+                        actor_provenance,
+                    )
+                if result_hash is not None:
+                    verify_preview(
+                        preview,
+                        SimpleNamespace(
+                            expected_editing_revision=expected_editing_revision,
+                            result_hash=result_hash,
+                        ),
+                        candidate,
+                        expected_target=commit_version_id,
+                    )
                 target = self._require_page_version(session, page, target_id)
                 version.body_md, version.block_map = (
                     candidate.body_md,
@@ -1362,6 +1411,9 @@ class PageService:
                         "expected_editing_revision": expected_editing_revision,
                         "commit_version_id": commit_version_id,
                         "on_conflict": on_conflict,
+                        "result_hash": result_hash,
+                        "result_body_md": result_body_md,
+                        "result_page_metadata": result_page_metadata,
                     }
                 ),
                 result_model=PagePayload,
@@ -3927,8 +3979,11 @@ class PageService:
 
         from backend.app.context_version_storage import build_context_merger
         from backend.services.context_draft_workflow import (
+            DraftMergePreview,
+            merge_side,
             metadata_dict,
             metadata_for,
+            parents_for,
             snapshot,
         )
 
@@ -4047,11 +4102,52 @@ class PageService:
                         else outcome.clean
                     )
                     if candidate is None:
+                        # The person settles this in the browser: send both
+                        # choices and the server draft they were computed
+                        # against, so confirming is an ordinary save on it.
+                        theirs = snapshot(page, current)
+                        conflict = DraftMergePreview(
+                            current.id,
+                            current.editing_revision,
+                            page.current_published_version_id,
+                            parents_for(session, current),
+                            "conflict",
+                            None,
+                            outcome.keep_both,
+                            outcome.latest,
+                            metadata_conflicts=outcome.metadata_conflicts,
+                            base_conflicted=outcome.base_conflicted,
+                            latest_side="ours",
+                            target_version_id=current.id,
+                            sides={
+                                "ours": merge_side(
+                                    current,
+                                    ours,
+                                    saved_by={
+                                        "actor_kind": actor_kind,
+                                        "actor_id": str(actor_id),
+                                        "display_name": resolve_actor_display_name(
+                                            session,
+                                            actor_kind=actor_kind,
+                                            actor_id=actor_id,
+                                        ),
+                                    },
+                                ),
+                                "theirs": merge_side(current, theirs),
+                            },
+                        )
                         raise PageConflictError(
                             server_version_id=current.id,
                             server_content_hash=current.content_hash,
                             server_editing_revision=current.editing_revision,
                             error_code="context_merge_conflict",
+                            server_snapshot={
+                                "body_md": before,
+                                "page_metadata": metadata_dict(
+                                    metadata_for(page, current)
+                                ),
+                            },
+                            merge_preview=conflict.rest_payload(page.id),
                         )
                     prepared = self._autosave_prepare(
                         session=session,

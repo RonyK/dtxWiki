@@ -65,6 +65,7 @@ from backend.schemas.page import (
     BringInContextVersionRequest,
     ContextDraftListResponse,
     ContextMergePreviewRequest,
+    ContextMergePreviewResponse,
     ContextPageCreateRequest,
     ContextPageDetail,
     ContextPageDetailResponse,
@@ -87,6 +88,9 @@ from backend.schemas.page import (
     SubmitContextEditRequest,
 )
 from backend.schemas.read import ContextPageListResponse
+from backend.services.context_drafts import (
+    count_drafts_in_review,
+)
 from backend.services.context_drafts import (
     list_context_drafts as list_saved_context_drafts,
 )
@@ -230,6 +234,7 @@ def read_page_by_slug(
                     **payload.model_dump(),
                     "can_submit_for_review": payload._can_submit_for_review,
                     "latest_draft_version_id": summary.latest_draft_version_id,
+                    "open_review_count": count_drafts_in_review(session, page, actor),
                     **enrichment,
                 }
             )
@@ -356,6 +361,7 @@ def get_context_page(
             latest_draft_version_id = services.domain_read._context_page_summary(
                 page, actor=actor, visible_version_id=payload.visible_version_id
             ).latest_draft_version_id
+            open_review_count = count_drafts_in_review(session, page, actor)
     except PageServiceError as exc:
         return service_error_response(exc)
     detail = ContextPageDetail(
@@ -363,6 +369,7 @@ def get_context_page(
             **payload.model_dump(),
             "can_submit_for_review": payload._can_submit_for_review,
             "latest_draft_version_id": latest_draft_version_id,
+            "open_review_count": open_review_count,
             **enrichment,
         }
     )
@@ -1098,6 +1105,12 @@ def service_error_response(exc: PageServiceError) -> JSONResponse:
             "server_version_id": exc.server_version_id,
             "server_content_hash": exc.server_content_hash,
         }
+        if exc.merge_preview is not None:
+            extra.update(
+                server_editing_revision=exc.server_editing_revision,
+                server_snapshot=exc.server_snapshot,
+                merge_preview=exc.merge_preview,
+            )
     if isinstance(exc, PagePublicVersionConflictError):
         extra = {
             "server_version_id": (
@@ -1141,7 +1154,11 @@ def status_code_for_error(exc: PageServiceError) -> int:
     return 500
 
 
-@router.post("/{page_id}/merge-preview", responses=REST_WRITE_ERROR_RESPONSES)
+@router.post(
+    "/{page_id}/merge-preview",
+    response_model=ContextMergePreviewResponse,
+    responses=REST_WRITE_ERROR_RESPONSES,
+)
 def preview_context_merge(
     request: Request,
     workspace_id: UUID,
@@ -1165,6 +1182,7 @@ def preview_context_merge(
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
                 actor_provenance=actor.provenance,
+                rest=True,
             )
         }
     except PageServiceError as exc:
@@ -1197,6 +1215,13 @@ def bring_in_context_version(
             expected_editing_revision=request_body.expected_editing_revision,
             idempotency_key=request_body.idempotency_key,
             on_conflict=request_body.on_conflict,
+            result_hash=request_body.result_hash,
+            result_body_md=request_body.result_body_md,
+            result_page_metadata=(
+                request_body.result_page_metadata.model_dump(exclude_unset=True)
+                if request_body.result_page_metadata is not None
+                else None
+            ),
             actor_kind=actor.actor_kind,
             actor_id=actor.actor_id,
             actor_provenance=actor.provenance,

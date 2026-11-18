@@ -2391,7 +2391,7 @@ class DomainReadService:
         ids = ordered_parent_version_ids(session, version)
         if actor_can_read_drafts(actor):
             return list(ids)
-        return list(
+        visible = set(
             session.scalars(
                 select_in_workspace(
                     ContextPageVersion,
@@ -2406,6 +2406,8 @@ class DomainReadService:
                 ).with_only_columns(ContextPageVersion.id)
             )
         )
+        # Keep the parent order (first parent, then merged parents by ordinal).
+        return [key for key in ids if key in visible]
 
     def _version_entries(
         self,

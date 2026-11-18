@@ -193,6 +193,11 @@ class DraftMergePreview:
     base_conflicted: bool = False
     latest_side: str = "ours"
     conflict_bodies: dict[str, str] | None = None
+    # The commit merged into the draft: the published version for publication,
+    # the named commit for bring-in, the draft itself for two saves of it.
+    target_version_id: UUID | None = None
+    # The facts `prefer_ours` compared, shown to the person choosing (REST).
+    sides: dict | None = None
 
     def choose(self, on_conflict=None):
         if on_conflict not in {None, "keep_both", "latest"}:
@@ -243,6 +248,53 @@ class DraftMergePreview:
             "offset_unit": "unicode_code_points",
         }
 
+    def rest_payload(self, page_id):
+        """REST projection: the choices only for a conflict, plus both sides."""
+        data = self.payload()
+        conflict = self.kind == "conflict"
+        return {
+            **data,
+            "page_id": str(page_id),
+            "target_version_id": str(self.target_version_id)
+            if self.target_version_id
+            else None,
+            "keep_both": data["keep_both"] if conflict else None,
+            "latest": data["latest"] if conflict else None,
+            "sides": self.sides if self.kind != "fast_forward" else None,
+        }
+
+
+def merge_side(version, value: MergeSnapshot, *, saved_by=None) -> dict:
+    """One side of a merge as the person sees it: who saved it, when, and its
+    single-valued metadata. `saved_by` overrides the row's last saver."""
+    if saved_by is None:
+        actor_id = version.actor_id or version.created_by_actor_id
+        saved_by = (
+            {
+                "actor_kind": version.actor_type
+                if version.actor_id
+                else version.created_by_actor_kind,
+                "actor_id": str(actor_id),
+                "display_name": version.actor_display_name,
+            }
+            if actor_id
+            else None
+        )
+    return {
+        "version_id": str(value.version_id),
+        "saved_by": saved_by,
+        "last_saved_at": value.last_saved_at.isoformat()
+        if value.last_saved_at
+        else None,
+        "metadata": {
+            "title": value.metadata.title,
+            "page_type": value.metadata.page_type,
+            "placement_parent_node_id": str(value.metadata.placement_parent_node_id)
+            if value.metadata.placement_parent_node_id
+            else None,
+        },
+    }
+
 
 def preview_merge(session, page, version, *, commit_version_id=None, prepare=None):
     history, rows = history_for(session, page)
@@ -254,6 +306,7 @@ def preview_merge(session, page, version, *, commit_version_id=None, prepare=Non
     metadata_conflicts = ()
     base_conflicted = False
     latest_side = "ours"
+    sides = None
     if (
         target_id is None
         or target_id == version.id
@@ -292,6 +345,10 @@ def preview_merge(session, page, version, *, commit_version_id=None, prepare=Non
             if prefer_ours(snapshots[version.id], snapshots[target.id])
             else "theirs"
         )
+        sides = {
+            "ours": merge_side(version, snapshots[version.id]),
+            "theirs": merge_side(target, snapshots[target.id]),
+        }
         kind = "conflict" if clean is None else "automatic_merge"
     conflict_bodies = {"keep_both": both.body_md, "latest": latest.body_md}
     if clean is not None:
@@ -315,16 +372,27 @@ def preview_merge(session, page, version, *, commit_version_id=None, prepare=Non
         base_conflicted=base_conflicted,
         latest_side=latest_side,
         conflict_bodies=conflict_bodies,
+        target_version_id=target_id,
+        sides=sides,
     )
 
 
-def verify_preview(preview, request, candidate):
+_PUBLISHED_PIN = object()
+
+
+def verify_preview(preview, request, candidate, *, expected_target=_PUBLISHED_PIN):
+    """Bind a write to the preview its caller saw.
+
+    The other-side pin is the published version for publication and approval,
+    and the named commit for bring-in; both compare with the preview's target.
+    """
     revision = getattr(request, "expected_editing_revision", None)
-    expected_head = getattr(request, "expected_published_version_id", None)
+    if expected_target is _PUBLISHED_PIN:
+        expected_target = getattr(request, "expected_published_version_id", None)
     expected_hash = getattr(request, "result_hash", None)
     if (
         (revision is not None and revision != preview.editing_revision)
-        or (expected_hash is not None and expected_head != preview.published_version_id)
+        or (expected_hash is not None and expected_target != preview.target_version_id)
         or (expected_hash is not None and expected_hash != candidate.result_hash)
     ):
         raise StaleBaseVersionError(
