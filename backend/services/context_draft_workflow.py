@@ -25,6 +25,7 @@ from backend.repositories.workspace_scoped import (
     get_in_workspace,
     select_in_workspace,
 )
+from backend.services.context_version_refs import context_version_ref
 from backend.services.read_errors import (
     ReadNotFoundError,
     ReadValidationError,
@@ -248,13 +249,15 @@ class DraftMergePreview:
             "offset_unit": "unicode_code_points",
         }
 
-    def rest_payload(self, page_id):
+    def rest_payload(self, page_id: UUID, *, content_hash: str, references_hash: str):
         """REST projection: the choices only for a conflict, plus both sides."""
         data = self.payload()
         conflict = self.kind == "conflict"
         return {
             **data,
             "page_id": str(page_id),
+            "content_hash": content_hash,
+            "references_hash": references_hash,
             "target_version_id": str(self.target_version_id)
             if self.target_version_id
             else None,
@@ -481,7 +484,7 @@ def record_draft_save(
             target_id=page.id,
             operation="save_draft",
             diff_summary=reason,
-            diff_ref=f"context_page_version:{version.id}",
+            diff_ref=context_version_ref(version.id),
         )
     )
     if version.change_set_id is None:

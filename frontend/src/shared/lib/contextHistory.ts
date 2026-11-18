@@ -78,6 +78,13 @@ export const CONTEXT_HISTORY_PRESENTATION: Record<
   },
 };
 
+// Finished Context versions are Git commits; a new draft can start from one.
+const CONTEXT_COMMIT_STATUSES: ReadonlySet<string> = new Set(["closed", "published_snapshot", "superseded_snapshot"]);
+
+export function isContextCommit(versionStatus: string | null | undefined): boolean {
+  return CONTEXT_COMMIT_STATUSES.has(versionStatus ?? "");
+}
+
 export function contextHistoryPresentation(
   status: ContextHistoryStatus,
 ): ContextHistoryPresentation {

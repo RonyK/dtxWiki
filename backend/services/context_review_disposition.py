@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
@@ -9,10 +9,45 @@ from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import ContextPageVersion
 from backend.models.review import ReviewItem
 from backend.repositories.workspace_scoped import join_in_workspace, select_in_workspace
+from backend.services.context_version_refs import context_version_ref
 
 ContextReviewDisposition = Literal["rejected", "pending", "approved", "none"]
+OPEN_CONTEXT_REVIEW_STATUSES = frozenset({"pending", "changes_requested"})
 
-_VERSION_DIFF_PREFIX = "context_page_version:"
+
+def select_context_version_reviews(
+    workspace_id: UUID,
+    page_ids: Collection[UUID],
+    *,
+    review_type: str | None = "context_update",
+    conditions=(),
+):
+    """Select reviews of Context page operations, with their change sets and
+    operations, within one workspace. ``review_type=None`` keeps every type."""
+    statement = select_in_workspace(
+        ReviewItem,
+        workspace_id=workspace_id,
+        conditions=(
+            *((ReviewItem.review_type == review_type,) if review_type else ()),
+            ChangeOperation.target_type == "context_page",
+            ChangeOperation.target_id.in_(page_ids),
+            *conditions,
+        ),
+    )
+    statement = join_in_workspace(
+        statement,
+        ReviewItem,
+        ChangeSet,
+        workspace_id=workspace_id,
+        on=ReviewItem.change_set_id == ChangeSet.id,
+    )
+    return join_in_workspace(
+        statement,
+        ReviewItem,
+        ChangeOperation,
+        workspace_id=workspace_id,
+        on=ChangeSet.id == ChangeOperation.change_set_id,
+    )
 
 
 @dataclass(frozen=True)
@@ -27,7 +62,7 @@ def _disposition_from_statuses(statuses: set[str]) -> ContextReviewDisposition:
     # later pending sibling; "none" means no review ever spoke for this version.
     if "rejected" in statuses:
         return "rejected"
-    if statuses & {"pending", "changes_requested"}:
+    if statuses & OPEN_CONTEXT_REVIEW_STATUSES:
         return "pending"
     if "approved" in statuses:
         return "approved"
@@ -70,17 +105,8 @@ def context_version_review_metadata(
     versions = list(versions)
     if not versions:
         return {}
-    diff_refs = {
-        f"{_VERSION_DIFF_PREFIX}{version.id}": version.id for version in versions
-    }
+    diff_refs = {context_version_ref(version.id): version.id for version in versions}
     page_ids = {version.page_id for version in versions}
-    conditions = [
-        ReviewItem.review_type == "context_update",
-        ReviewItem.status != "superseded",
-        ChangeOperation.target_type == "context_page",
-        ChangeOperation.target_id.in_(page_ids),
-        ChangeOperation.diff_ref.in_(diff_refs.keys()),
-    ]
     scopes = (
         {workspace_id}
         if workspace_id is not None
@@ -88,24 +114,13 @@ def context_version_review_metadata(
     )
     rows = []
     for scope in scopes:
-        statement = select_in_workspace(
-            ReviewItem,
-            workspace_id=scope,
-            conditions=conditions,
-        )
-        statement = join_in_workspace(
-            statement,
-            ReviewItem,
-            ChangeSet,
-            workspace_id=scope,
-            on=ReviewItem.change_set_id == ChangeSet.id,
-        )
-        statement = join_in_workspace(
-            statement,
-            ReviewItem,
-            ChangeOperation,
-            workspace_id=scope,
-            on=ChangeSet.id == ChangeOperation.change_set_id,
+        statement = select_context_version_reviews(
+            scope,
+            page_ids,
+            conditions=(
+                ReviewItem.status != "superseded",
+                ChangeOperation.diff_ref.in_(diff_refs),
+            ),
         )
         rows.extend(
             session.execute(

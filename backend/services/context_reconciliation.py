@@ -47,6 +47,11 @@ from backend.services.context_push import (
     target_ids_for_operations,
     text_by_id,
 )
+from backend.services.context_review_disposition import (
+    OPEN_CONTEXT_REVIEW_STATUSES,
+    select_context_version_reviews,
+)
+from backend.services.context_version_refs import context_version_ref
 from backend.services.context_visibility import editable_context_version_id
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.lint.autofix import safe_normalize_markdown_legacy_v1
@@ -1122,21 +1127,15 @@ def discard_reconciliation_branch(
     session.add(branch)
     reconciliation_rows = (
         session.execute(
-            select(ReviewItem, ChangeSet)
-            .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-            .join(
-                ChangeOperation,
-                ChangeOperation.change_set_id == ChangeSet.id,
-            )
-            .where(
-                ReviewItem.workspace_id == page.workspace_id,
-                ChangeSet.workspace_id == page.workspace_id,
-                ReviewItem.review_type == "context_reconciliation",
-                ReviewItem.status.in_(("pending", "changes_requested")),
-                ChangeOperation.target_type == "context_page",
-                ChangeOperation.target_id == page.id,
-                ChangeOperation.diff_ref == f"context_page_version:{branch.id}",
-            )
+            select_context_version_reviews(
+                page.workspace_id,
+                {page.id},
+                review_type="context_reconciliation",
+                conditions=(
+                    ReviewItem.status.in_(OPEN_CONTEXT_REVIEW_STATUSES),
+                    ChangeOperation.diff_ref == context_version_ref(branch.id),
+                ),
+            ).with_only_columns(ReviewItem, ChangeSet)
         )
         .unique()
         .all()

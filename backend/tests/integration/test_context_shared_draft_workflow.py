@@ -189,9 +189,8 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
     assert "Middle moved." in brought.body_md
     assert moved in brought.parent_version_ids
 
-    # History lists every open draft first, before one page of commits; later
-    # pages hold commits only, so loading them never adds a draft above rows
-    # already drawn (the brought-in draft's merged parent is a newer commit).
+    # REST History appends across the draft-to-commit boundary, even when a
+    # draft's merged parent is a newer commit. The default keeps version order.
     from backend.policy.auth import ActorContext
     from backend.services.domain_read import DomainReadService
 
@@ -205,29 +204,42 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
         role="editor",
     )
     with page_service.session_factory() as session:
-        first = DomainReadService().list_changes(
-            session=session,
-            workspace_id=workspace_id,
-            target_type="context_page",
-            target_id=initial.id,
-            limit=1,
-            actor=editor,
+        history = DomainReadService().list_changes
+        options = {
+            "session": session,
+            "workspace_id": workspace_id,
+            "target_type": "context_page",
+            "target_id": initial.id,
+            "actor": editor,
+        }
+        first = history(**options, limit=1, drafts_first=True)
+        later = history(**options, limit=3, cursor=first.next_cursor, drafts_first=True)
+        commits = history(
+            **options, limit=50, cursor=later.next_cursor, drafts_first=True
         )
-        drafts = [row for row in first.versions if row.version_status == "draft"]
-        assert first.versions[: len(drafts)] == drafts
-        assert behind.version_id in {row.version_id for row in drafts}
-        assert len(first.versions) == len(drafts) + 1
-        later = DomainReadService().list_changes(
-            session=session,
-            workspace_id=workspace_id,
-            target_type="context_page",
-            target_id=initial.id,
-            limit=50,
-            cursor=first.next_cursor,
-            actor=editor,
-        )
-        assert later.versions
-        assert all(row.version_status != "draft" for row in later.versions)
+        # Every page is capped, and the second one crosses from drafts to commits.
+        assert len(first.versions) == 1 and len(later.versions) == 3
+        assert later.versions[0].version_status == "draft"
+        assert later.versions[-1].version_status != "draft"
+        assert commits.next_cursor is None
+
+        # The drafts lead and the commits follow, each newest first by version
+        # number (which never changes), so no row is repeated, lost or moved.
+        paged = first.versions + later.versions + commits.versions
+        drafts = [row for row in paged if row.version_status == "draft"]
+        assert paged[: len(drafts)] == drafts
+        assert {row.version_id for row in drafts} == {
+            behind.version_id,
+            merged.version_id,
+            restarted.version_id,
+        }
+        for phase in (drafts, paged[len(drafts) :]):
+            numbers = [row.version_no for row in phase]
+            assert numbers == sorted(numbers, reverse=True)
+        # The default (MCP) order stays newest first by version number.
+        legacy = [row.version_no for row in history(**options, limit=50).versions]
+        assert legacy == sorted(legacy, reverse=True)
+        assert sorted(row.version_no for row in paged) == sorted(legacy)
 
     rejected = begin()
     submitted = page_service.submit_context_edit_for_review(
@@ -379,8 +391,18 @@ def test_two_editors_merge_browser_baseline_but_mcp_requires_current_revision(
     assert conflict["error_code"] == "context_merge_conflict"
     choices = conflict["merge_preview"]
     assert choices["kind"] == "conflict" and choices["latest_side"] == "ours"
+    assert choices["result"] is None
     assert choices["sides"]["theirs"]["version_id"] == draft["version_id"]
     assert conflict["server_editing_revision"] == merged["editing_revision"]
+    preview = peer.post(
+        f"{pages_url}/{draft['id']}/merge-preview",
+        json={"version_id": merged["version_id"]},
+    )
+    assert preview.status_code == 200, preview.text
+    for payload in (choices, preview.json()["data"]):
+        assert payload["version_id"] == merged["version_id"]
+        assert payload["content_hash"] == merged["content_hash"]
+        assert payload["references_hash"] == merged["references_hash"]
     kept = choices["keep_both"]["body_md"]
     assert "First edited by owner." in kept and "First rewritten by peer." in kept
     confirm = {

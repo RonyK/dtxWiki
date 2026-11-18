@@ -4666,6 +4666,7 @@ def list_changes(
                 limit=limit,
                 cursor=cursor,
                 actor=actor,
+                drafts_first=target_type == "context_page",
             )
         }
 

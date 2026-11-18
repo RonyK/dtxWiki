@@ -28,6 +28,10 @@ from backend.schemas.activity import (
 from backend.services.actor_visible_read import (
     context_page_visible,
 )
+from backend.services.context_version_refs import (
+    CONTEXT_VERSION_REF_PREFIX,
+    written_context_version_id,
+)
 from backend.services.tree_projection import TreeProjectionService
 from backend.services.tree_service import DEFAULT_TREE_MOVE_REASON
 
@@ -44,12 +48,7 @@ def audit_text(value) -> str | None:
 
 
 def operation_version(operation: ChangeOperation) -> UUID | None:
-    prefix = "context_page_version:"
-    return (
-        audit_uuid(operation.diff_ref[len(prefix) :])
-        if operation.diff_ref and operation.diff_ref.startswith(prefix)
-        else None
-    )
+    return written_context_version_id(operation.diff_ref)
 
 
 class ContextActivityProjection:
@@ -291,7 +290,7 @@ class ContextActivityProjection:
             vid = operation_version(op)
             if (
                 op.diff_ref
-                and op.diff_ref.startswith("context_page_version:")
+                and op.diff_ref.startswith(CONTEXT_VERSION_REF_PREFIX)
                 and vid is None
             ):
                 return False

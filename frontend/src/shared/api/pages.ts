@@ -274,7 +274,7 @@ export async function createPageComment(
 export type PreparedPagePublication = { versionId: string; request: PublishPageVersionInput };
 export type PageWriteOptions = {
   signal?: AbortSignal;
-  /** The person's answer to a conflicting merge, bound to the preview they saw. */
+  /** The merge result a publication writes, bound to its preview. */
   mergeChoice?: PreparedMergeChoice;
   preparedPublication?: PreparedPagePublication;
   onPublicationPrepared?: (command: PreparedPagePublication) => void;
@@ -332,14 +332,23 @@ export type ContextMergeCandidate = components["schemas"]["ContextMergeCandidate
 export type ContextMergeChoiceValue = "keep_both" | "latest";
 export type ContextMergeMetadataInput = components["schemas"]["PageMetadataPatch"];
 
-/** A merge that a person must settle with one of the two choices. */
-export class ContextMergeChoiceRequired extends Error {
-  preview: ContextMergePreview;
-  constructor(preview: ContextMergePreview) {
-    super("These changes overlap; choose how to combine them.");
-    this.name = "ContextMergeChoiceRequired";
-    this.preview = preview;
-  }
+export type DraftBaseSnapshot = components["schemas"]["DraftBaseSnapshot"];
+
+/** The saved draft state a later autosave merges against. */
+export function draftBaseSnapshotOf(page: Pick<PagePayload, "body_md" | "page_metadata">): DraftBaseSnapshot {
+  return { body_md: page.body_md, page_metadata: page.page_metadata ?? {} };
+}
+
+/** An autosave that overlapped another save of the draft: the server draft and both choices. */
+export type ContextMergeConflict = components["schemas"]["ContextMergeConflictBody"];
+
+/** The typed merge-conflict body of a failed autosave; null for any other error. */
+export function contextMergeConflictOf(error: unknown): ContextMergeConflict | null {
+  if (!(error instanceof ApiError) || error.status !== 409 || error.body.error_code !== "context_merge_conflict") return null;
+  const body = error.body as Partial<ContextMergeConflict>;
+  return body.merge_preview && body.server_snapshot && body.server_editing_revision != null
+    ? body as ContextMergeConflict
+    : null;
 }
 
 /** The preview changed between what the person saw and the confirm. */
@@ -352,14 +361,31 @@ export class ContextMergePreviewChanged extends Error {
   }
 }
 
+/** The preview facts a merge write is bound to. */
+type MergePreviewPins = Pick<ContextMergePreview, "editing_revision" | "target_version_id" | "content_hash" | "references_hash">;
+
+/**
+ * A merge result bound to the preview it came from. `chosen` when a person
+ * picked it in the merge dialog (and so saw the preview's draft); `clean` when
+ * the merge needed no choice.
+ */
 export type PreparedMergeChoice = {
-  expected_editing_revision: number;
-  target_version_id: string | null;
-  on_conflict?: ContextMergeChoiceValue;
+  source: "clean" | "chosen";
+  preview: MergePreviewPins;
   result_hash: string;
+  on_conflict?: ContextMergeChoiceValue;
   result_body_md?: string;
   result_page_metadata?: ContextMergeMetadataInput;
 };
+
+function previewPins(preview: ContextMergePreview): MergePreviewPins {
+  return {
+    editing_revision: preview.editing_revision,
+    target_version_id: preview.target_version_id,
+    content_hash: preview.content_hash,
+    references_hash: preview.references_hash,
+  };
+}
 
 export async function previewPageMerge(workspaceId: string, id: string, versionId: string,
   options: {
@@ -383,14 +409,10 @@ export async function previewPageMerge(workspaceId: string, id: string, versionI
   return response.data;
 }
 
-/** Pins for a clean merge: what the server previewed is what it writes. */
+/** The merge needs no choice: what the server previewed is what it writes. */
 export function cleanMergeChoice(preview: ContextMergePreview): PreparedMergeChoice {
-  if (!preview.result) throw new ContextMergeChoiceRequired(preview);
-  return {
-    expected_editing_revision: preview.editing_revision,
-    target_version_id: preview.target_version_id ?? null,
-    result_hash: preview.result.result_hash,
-  };
+  if (!preview.result) throw new Error("A conflicting merge preview has no clean result.");
+  return { source: "clean", preview: previewPins(preview), result_hash: preview.result.result_hash };
 }
 
 /**
@@ -401,34 +423,57 @@ export function cleanMergeChoice(preview: ContextMergePreview): PreparedMergeCho
 export async function prepareMergeChoice(workspaceId: string, id: string, preview: ContextMergePreview,
   choice: { onConflict: ContextMergeChoiceValue; bodyMd?: string | null; pageMetadata?: ContextMergeMetadataInput | null },
   options: { signal?: AbortSignal } = {}): Promise<PreparedMergeChoice> {
-  const candidate = preview[choice.onConflict];
-  const edited = choice.bodyMd != null || choice.pageMetadata != null;
-  let resultHash = candidate?.result_hash;
-  if (edited || !resultHash) {
-    const checked = await previewPageMerge(workspaceId, id, preview.version_id, {
-      signal: options.signal,
-      commitVersionId: preview.target_version_id !== preview.published_version_id ? preview.target_version_id : null,
-      onConflict: choice.onConflict,
-      ...(choice.bodyMd != null ? { bodyMd: choice.bodyMd } : {}),
-      ...(choice.pageMetadata != null ? { pageMetadata: choice.pageMetadata } : {}),
-    });
+  const edits = {
+    ...(choice.bodyMd != null ? { bodyMd: choice.bodyMd } : {}),
+    ...(choice.pageMetadata != null ? { pageMetadata: choice.pageMetadata } : {}),
+  };
+  let resultHash = preview[choice.onConflict]?.result_hash;
+  if (Object.keys(edits).length > 0 || !resultHash) {
+    const target = { signal: options.signal, commitVersionId: preview.target_version_id };
+    const checked = await previewPageMerge(workspaceId, id, preview.version_id, { ...target, onConflict: choice.onConflict, ...edits });
     if (checked.editing_revision !== preview.editing_revision || checked.target_version_id !== preview.target_version_id || !checked.result) {
-      const fresh = await previewPageMerge(workspaceId, id, preview.version_id, {
-        signal: options.signal,
-        commitVersionId: preview.target_version_id !== preview.published_version_id ? preview.target_version_id : null,
-      });
-      throw new ContextMergePreviewChanged(fresh);
+      throw new ContextMergePreviewChanged(await previewPageMerge(workspaceId, id, preview.version_id, target));
     }
     resultHash = checked.result.result_hash;
   }
   return {
-    expected_editing_revision: preview.editing_revision,
-    target_version_id: preview.target_version_id ?? null,
-    on_conflict: choice.onConflict,
+    source: "chosen",
+    preview: previewPins(preview),
     result_hash: resultHash,
+    on_conflict: choice.onConflict,
     ...(choice.bodyMd != null ? { result_body_md: choice.bodyMd } : {}),
     ...(choice.pageMetadata != null ? { result_page_metadata: choice.pageMetadata } : {}),
   };
+}
+
+/** The fields every merge write sends to bind its result to the preview. */
+export function mergeResultPins(choice: PreparedMergeChoice) {
+  return {
+    expected_editing_revision: choice.preview.editing_revision,
+    result_hash: choice.result_hash,
+    ...(choice.on_conflict ? { on_conflict: choice.on_conflict } : {}),
+    ...(choice.result_body_md !== undefined ? { result_body_md: choice.result_body_md } : {}),
+    ...(choice.result_page_metadata !== undefined ? { result_page_metadata: choice.result_page_metadata } : {}),
+  };
+}
+
+type PublicationSource = Pick<PublishPageVersionInput, "expected_content_hash" | "expected_references_hash">;
+
+/**
+ * Publication pins. The draft being published is the one the person saw: the
+ * preview's draft after a choice in the dialog, otherwise the draft they saved.
+ */
+export function publicationPins(choice: PreparedMergeChoice, saved: PublicationSource) {
+  const seen = choice.source === "chosen"
+    ? { expected_content_hash: choice.preview.content_hash, expected_references_hash: choice.preview.references_hash }
+    : saved;
+  return { ...mergeResultPins(choice), expected_published_version_id: choice.preview.target_version_id, ...seen };
+}
+
+/** Bring-in pins: the commit the preview merged is the commit brought in. */
+export function bringInPins(choice: PreparedMergeChoice) {
+  if (!choice.preview.target_version_id) throw new Error("A bring-in preview names the commit it merges.");
+  return { ...mergeResultPins(choice), commit_version_id: choice.preview.target_version_id };
 }
 
 export async function publishPageVersion(
@@ -440,30 +485,25 @@ export async function publishPageVersion(
 ) {
   let command = options.preparedPublication;
   if (!command) {
-    const choice = options.mergeChoice ?? cleanMergeChoice(await previewPageMerge(workspaceId, id, versionId, options));
-    const { target_version_id: targetVersionId, ...pins } = choice;
-    command = { versionId, request: { ...payload, ...pins,
-      expected_published_version_id: targetVersionId, idempotency_key: newIdempotencyKey() } };
+    if (!options.mergeChoice) throw new Error("Publication needs a merge choice or a prepared command.");
+    const { reason, publish_despite_findings: publishDespiteFindings, ...saved } = payload;
+    command = { versionId, request: {
+      reason,
+      publish_despite_findings: publishDespiteFindings,
+      ...publicationPins(options.mergeChoice, saved),
+      idempotency_key: newIdempotencyKey(),
+    } };
     options.onPublicationPrepared?.(command);
   }
   return executePreparedPagePublication(workspaceId, id, command, options);
 }
 
-/** Brings a commit (by default the published version) into a draft. */
-export async function bringInPageVersion(workspaceId: string, id: string, input: {
-  versionId: string;
-  commitVersionId: string;
-  choice: PreparedMergeChoice;
-}, options: { signal?: AbortSignal } = {}) {
-  const { target_version_id: _target, ...pins } = input.choice;
+/** Brings the commit a merge preview named into a draft. */
+export async function bringInPageVersion(workspaceId: string, id: string, versionId: string,
+  choice: PreparedMergeChoice, options: { signal?: AbortSignal } = {}) {
   const response = await apiRequest<PageResponse>(pagesPath(workspaceId, `/${id}/bring-in`), {
     method: "POST",
-    body: JSON.stringify({
-      version_id: input.versionId,
-      commit_version_id: input.commitVersionId,
-      ...pins,
-      idempotency_key: newIdempotencyKey(),
-    }),
+    body: JSON.stringify({ version_id: versionId, ...bringInPins(choice), idempotency_key: newIdempotencyKey() }),
     signal: options.signal,
   });
   return response.data;

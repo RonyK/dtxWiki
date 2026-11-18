@@ -25,6 +25,7 @@ from backend.repositories.workspace_scoped import get_in_workspace, select_in_wo
 from backend.services.context_media_legacy_cutover import (
     require_no_visible_legacy_media,
 )
+from backend.services.context_version_refs import context_version_ref
 from backend.services.public_page_exposure import (
     clear_public_page_exposure,
     reconcile_public_exposure_after_publication,
@@ -234,9 +235,7 @@ def metadata_snapshot_records(
     earlier draft is first published.
     """
 
-    refs = {
-        f"context_page_version:{version_id}": version_id for version_id in version_ids
-    }
+    refs = {context_version_ref(version_id): version_id for version_id in version_ids}
     if not refs:
         return {}
     snapshots: dict[UUID, tuple[dict[str, object], UUID]] = {}
@@ -367,7 +366,7 @@ def record_unarchive(
             target_type="context_page",
             target_id=page.id,
             operation="unarchive",
-            diff_ref=f"context_page_version:{page.current_published_version_id}",
+            diff_ref=context_version_ref(page.current_published_version_id),
         )
     )
 
@@ -622,7 +621,7 @@ def _rejected_version_ids(
     if not versions:
         return set()
     versions_by_change_set: dict[UUID, set[UUID]] = {}
-    refs = {f"context_page_version:{version.id}": version.id for version in versions}
+    refs = {context_version_ref(version.id): version.id for version in versions}
     # Publication accepts both the version's producing ledger and later exact
     # operations (metadata edits, no-op revisions) as its review sources.
     for version in versions:
@@ -1447,7 +1446,7 @@ def record_context_decision(
                 target_id=page.id,
                 operation=operation,
                 diff_summary=reason,
-                diff_ref=f"context_page_version:{version.id}" if version else None,
+                diff_ref=context_version_ref(version.id) if version else None,
             )
         )
         audit = (audit_service or AuditService()).emit(

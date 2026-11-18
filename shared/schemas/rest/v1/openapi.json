@@ -6326,6 +6326,176 @@
         "title": "ContextMergeConflict",
         "type": "object"
       },
+      "ContextMergeConflictBody": {
+        "additionalProperties": false,
+        "properties": {
+          "blockers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RESTBlocker"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockers"
+          },
+          "blocking_workspaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RESTBlockingWorkspace"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Workspaces"
+          },
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PageNameDisambiguationCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidates"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          },
+          "error_code": {
+            "title": "Error Code",
+            "type": "string"
+          },
+          "limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Bytes"
+          },
+          "merge_preview": {
+            "$ref": "#/components/schemas/ContextMergePreviewData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Id"
+          },
+          "purge_grant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge Grant"
+          },
+          "purge_grant_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge Grant Expires At"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "server_content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Content Hash"
+          },
+          "server_editing_revision": {
+            "title": "Server Editing Revision",
+            "type": "integer"
+          },
+          "server_snapshot": {
+            "$ref": "#/components/schemas/DraftBaseSnapshot"
+          },
+          "server_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Version Id"
+          },
+          "settings_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Link"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "envelope",
+          "error_code",
+          "message",
+          "server_editing_revision",
+          "server_snapshot",
+          "merge_preview"
+        ],
+        "title": "ContextMergeConflictBody",
+        "type": "object"
+      },
       "ContextMergeMetadata": {
         "additionalProperties": false,
         "properties": {
@@ -6380,6 +6550,11 @@
           "base_conflicted": {
             "title": "Base Conflicted",
             "type": "boolean"
+          },
+          "content_hash": {
+            "description": "Content hash of version_id.",
+            "title": "Content Hash",
+            "type": "string"
           },
           "editing_revision": {
             "title": "Editing Revision",
@@ -6460,6 +6635,11 @@
             ],
             "title": "Published Version Id"
           },
+          "references_hash": {
+            "description": "Document references hash of version_id.",
+            "title": "References Hash",
+            "type": "string"
+          },
           "result": {
             "anyOf": [
               {
@@ -6501,6 +6681,8 @@
         "required": [
           "page_id",
           "version_id",
+          "content_hash",
+          "references_hash",
           "editing_revision",
           "published_version_id",
           "target_version_id",
@@ -19617,18 +19799,6 @@
             ],
             "title": "Limit Bytes"
           },
-          "merge_preview": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Merge Preview"
-          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -19683,29 +19853,6 @@
               }
             ],
             "title": "Server Content Hash"
-          },
-          "server_editing_revision": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Server Editing Revision"
-          },
-          "server_snapshot": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Server Snapshot"
           },
           "server_version_id": {
             "anyOf": [
@@ -38592,7 +38739,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTConflictErrorBody"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RESTConflictErrorBody"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ContextMergeConflictBody"
+                    }
+                  ],
+                  "title": "Response 409 Autosave Page Api V1 Workspaces  Workspace Id  Context Pages  Page Id  Autosave Post"
                 }
               }
             },

@@ -156,7 +156,10 @@ export function buildHistoryGraph<T>(
   const candidates = (options.headCandidateIds ?? []).filter(
     (id): id is string => Boolean(id),
   );
-  const trunkTipIndex = candidates
+  // The trunk follows the first head candidate. While older pages remain, a
+  // first candidate that is not loaded may still arrive below, so no later
+  // candidate stands in for it -- that would re-seat rows when it arrives (I5).
+  const trunkTipIndex = (options.complete === true ? candidates : candidates.slice(0, 1))
     .map((id) => indexById.get(id))
     .find((index) => index !== undefined);
   const trunk = new Set<number>();

@@ -10,6 +10,10 @@ from backend.models.review import ReviewDecision, ReviewItem
 from backend.models.workspace import Workspace
 from backend.services.audit_service import AuditService
 from backend.services.auto_approval import evaluate_context_write
+from backend.services.context_version_refs import (
+    context_version_ref,
+    inline_comment_anchor_ref,
+)
 from backend.services.lint import LintRegistry
 from backend.services.read_errors import ReadNotFoundError
 from backend.services.review_risk_policy import (
@@ -152,7 +156,7 @@ class ChangeReviewAuditRecorder:
             target_id=page_id,
             operation=operation_kind,
             diff_summary=action,
-            diff_ref=f"context_page_version:{version_id}",
+            diff_ref=context_version_ref(version_id),
         )
         summary, summary_code = _write_decision_summary(ai_authored, review_required)
         review = ReviewItem(
@@ -237,14 +241,7 @@ class ChangeReviewAuditRecorder:
             target_id=page_id,
             operation="inline_comment",
             diff_summary=note[:512],
-            diff_ref=json.dumps(
-                {
-                    "kind": "page_inline_comment_anchor",
-                    "version_id": str(version_id),
-                    "anchor": anchor,
-                },
-                separators=(",", ":"),
-            ),
+            diff_ref=inline_comment_anchor_ref(version_id, anchor),
         )
         review = ReviewItem(
             workspace_id=workspace_id,

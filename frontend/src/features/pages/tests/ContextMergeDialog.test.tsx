@@ -35,6 +35,8 @@ function conflictPreview(): ContextMergePreview {
   return {
     page_id: "page-1",
     version_id: "draft-1",
+    content_hash: "c".repeat(64),
+    references_hash: "r".repeat(64),
     editing_revision: 3,
     published_version_id: "pub-1",
     target_version_id: "pub-1",

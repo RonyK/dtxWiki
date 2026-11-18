@@ -64,6 +64,7 @@ from backend.schemas.page import (
     BeginContextEditRequest,
     BringInContextVersionRequest,
     ContextDraftListResponse,
+    ContextMergeConflictBody,
     ContextMergePreviewRequest,
     ContextMergePreviewResponse,
     ContextPageCreateRequest,
@@ -865,7 +866,10 @@ def update_page(
 @router.post(
     "/{page_id}/autosave",
     response_model=ContextPageWriteResponse,
-    responses=REST_WRITE_ERROR_RESPONSES,
+    responses={
+        **REST_WRITE_ERROR_RESPONSES,
+        409: {"model": RESTConflictErrorBody | ContextMergeConflictBody},
+    },
 )
 def autosave_page(
     request: Request,
@@ -1099,6 +1103,7 @@ def raise_page_policy_error(exc: ReadServiceError) -> None:
 
 def service_error_response(exc: PageServiceError) -> JSONResponse:
     status_code = status_code_for_error(exc)
+    body_model = None
     extra = None
     if isinstance(exc, PageConflictError):
         extra = {
@@ -1106,6 +1111,7 @@ def service_error_response(exc: PageServiceError) -> JSONResponse:
             "server_content_hash": exc.server_content_hash,
         }
         if exc.merge_preview is not None:
+            body_model = ContextMergeConflictBody
             extra.update(
                 server_editing_revision=exc.server_editing_revision,
                 server_snapshot=exc.server_snapshot,
@@ -1126,6 +1132,7 @@ def service_error_response(exc: PageServiceError) -> JSONResponse:
         message=str(exc) or exc.error_code,
         status_code=status_code,
         extra=extra,
+        body_model=body_model,
     )
 
 

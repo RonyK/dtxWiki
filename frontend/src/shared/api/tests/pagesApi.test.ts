@@ -4,17 +4,21 @@ import { ApiError } from "../client";
 import {
   PAGE_AUTOSAVE_BEACON_LIMIT_BYTES,
   autosavePage,
+  cleanMergeChoice,
   createPage,
   createPageComment,
   diffPageVersions,
   listPages,
   listPagesPage,
+  prepareMergeChoice,
   publishPageVersion,
   readEditablePage,
   readPageBySlug,
   restorePageVersion,
   sendPageAutosave,
   updatePage,
+  type ContextMergePreview,
+  type PreparedMergeChoice,
 } from "../pages";
 
 const WORKSPACE_ID = "w1";
@@ -216,25 +220,38 @@ describe("pages api", () => {
   });
 
   it("publishes the previewed result with revision, head and hash checks", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(
-      JSON.stringify({ data: String(input).endsWith("/merge-preview") ? {
-        version_id: "v2", editing_revision: 4, published_version_id: "v1", target_version_id: "v1", parent_version_ids: ["v1"],
-        kind: "fast_forward", result: { body_md: "# Hello", page_metadata: {}, block_map: [], result_hash: "c".repeat(64) },
-      } : pageDetail({ version_id: "v2", parent_version_id: "v1" }) }),
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ data: pageDetail({ version_id: "v2", parent_version_id: "v1" }) }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     ));
-    const result = await publishPageVersion(WORKSPACE_ID, "p1", "v2", {
-      reason: "Publish from test.", publish_despite_findings: false,
-      expected_content_hash: "a".repeat(64), expected_references_hash: "b".repeat(64),
-    });
-    expect(result.page.version_id).toBe("v2");
-    expect(String(fetchMock.mock.calls[0][0])).toContain("/p1/merge-preview");
-    expect(String(fetchMock.mock.calls[1][0])).toContain("/p1/versions/v2/publish");
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
-      reason: "Publish from test.", publish_despite_findings: false,
-      expected_content_hash: "a".repeat(64), expected_references_hash: "b".repeat(64),
-      expected_editing_revision: 4, expected_published_version_id: "v1", result_hash: "c".repeat(64),
-      idempotency_key: expect.any(String),
+    const preview = {
+      page_id: "p1", version_id: "v2", content_hash: "d".repeat(64), references_hash: "e".repeat(64),
+      editing_revision: 4, published_version_id: "v1", target_version_id: "v1", parent_version_ids: ["v1"],
+      kind: "fast_forward", result: { body_md: "# Hello", page_metadata: {}, block_map: [], result_hash: "c".repeat(64) },
+    } as unknown as ContextMergePreview;
+    const saved = { expected_content_hash: "a".repeat(64), expected_references_hash: "b".repeat(64) };
+    const publish = (mergeChoice: PreparedMergeChoice) => publishPageVersion(WORKSPACE_ID, "p1", "v2",
+      { reason: "Publish from test.", publish_despite_findings: false, ...saved }, { mergeChoice });
+    const sent = (call: number) => JSON.parse(String(fetchMock.mock.calls[call][1]?.body));
+    const pins = {
+      reason: "Publish from test.", publish_despite_findings: false, expected_editing_revision: 4,
+      expected_published_version_id: "v1", idempotency_key: expect.any(String),
+    };
+
+    // A merge that needed no choice publishes the draft the author saved.
+    expect((await publish(cleanMergeChoice(preview))).page.version_id).toBe("v2");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/p1/versions/v2/publish");
+    expect(sent(0)).toEqual({ ...pins, ...saved, result_hash: "c".repeat(64) });
+
+    // A choice made in the merge dialog publishes the draft that preview showed.
+    const conflict = {
+      ...preview, kind: "conflict", result: null, latest: { ...preview.result, result_hash: "f".repeat(64) },
+    } as unknown as ContextMergePreview;
+    await publish(await prepareMergeChoice(WORKSPACE_ID, "p1", conflict, { onConflict: "latest" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sent(1)).toEqual({
+      ...pins, expected_content_hash: "d".repeat(64), expected_references_hash: "e".repeat(64),
+      on_conflict: "latest", result_hash: "f".repeat(64),
     });
   });
 

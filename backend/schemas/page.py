@@ -7,6 +7,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -14,6 +15,7 @@ from pydantic import (
 from backend.schemas.common import (
     ContextHistoryStatus,
     DraftReviewReason,
+    RESTConflictErrorBody,
     RESTResponseBase,
 )
 from backend.schemas.context_drafts import (
@@ -742,6 +744,8 @@ class ContextMergeSides(BaseModel):
 class ContextMergePreviewData(BaseModel):
     page_id: UUID
     version_id: UUID
+    content_hash: str = Field(description="Content hash of version_id.")
+    references_hash: str = Field(description="Document references hash of version_id.")
     editing_revision: int
     published_version_id: UUID | None
     target_version_id: UUID | None
@@ -762,6 +766,17 @@ class ContextMergePreviewData(BaseModel):
     sides: ContextMergeSides | None
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ContextMergeConflictBody(RESTConflictErrorBody):
+    server_editing_revision: int
+    server_snapshot: DraftBaseSnapshot
+    merge_preview: ContextMergePreviewData
+
+    @field_serializer("merge_preview")
+    def serialize_merge_preview(self, preview: ContextMergePreviewData):
+        # Keep required nullable fields while omitting unset candidate fields.
+        return preview.model_dump(mode="json", exclude_unset=True)
 
 
 class ContextMergePreviewResponse(RESTResponseBase):

@@ -1,5 +1,5 @@
 import { ApiError, apiRequest, getApiBaseUrl } from "./client";
-import { cleanMergeChoice, previewPageMerge, type PagePayload, type PreparedMergeChoice } from "./pages";
+import { mergeResultPins, type PagePayload, type PreparedMergeChoice } from "./pages";
 import type { components } from "./types.gen";
 
 export type ActivityLane = "pending" | "advisory" | "history";
@@ -355,21 +355,23 @@ export async function getReview(
   return response.data;
 }
 
-export type ContextMergeBinding = {
-  expected_editing_revision: number;
-  expected_published_version_id: string | null;
-  result_hash: string;
-  on_conflict?: "keep_both" | "latest";
-  result_body_md?: string;
-  result_page_metadata?: PreparedMergeChoice["result_page_metadata"];
-};
-
-/** The approval pins for a merge: the preview's own for a clean one, the person's choice otherwise. */
-export function contextMergeBinding(choice: PreparedMergeChoice): ContextMergeBinding {
-  const { target_version_id: targetVersionId, ...pins } = choice;
-  return { ...pins, expected_published_version_id: targetVersionId };
+/** Review decision pins: the published version the merge preview targeted. */
+export function decisionPins(choice: PreparedMergeChoice) {
+  return { ...mergeResultPins(choice), expected_published_version_id: choice.preview.target_version_id };
 }
 
+export type ContextMergeBinding = ReturnType<typeof decisionPins>;
+
+/** The Context page and draft a review approves, when it approves one. */
+export function contextMergeTargetOf(review: ReviewItem): { pageId: string; versionId: string } | null {
+  const operation = review.evidence?.operations.find((entry) =>
+    entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
+  const pageId = operation?.document?.document_id;
+  const versionId = operation?.content?.candidate_version_id;
+  return pageId && versionId ? { pageId, versionId } : null;
+}
+
+/** Sends a review decision; a Context approval carries the merge pins it was bound to. */
 export async function decideReview(
   workspaceId: string,
   reviewItemId: string,
@@ -380,29 +382,16 @@ export async function decideReview(
     decision_id?: string;
     expected_impact_fingerprint?: string | null;
     merge_binding?: ContextMergeBinding | null;
-    onDecisionPrepared?: (binding: ContextMergeBinding | null) => void;
   } = {},
 ) {
-  let mergeBinding: ContextMergeBinding | Record<string, never> = options.merge_binding ?? {};
-  if (decision_type === "approve" && !("merge_binding" in options)) {
-    const review = await getReview(workspaceId, reviewItemId);
-    const operation = review.evidence?.operations.find((entry) =>
-      entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
-    const pageId = operation?.document?.document_id;
-    const versionId = operation?.content?.candidate_version_id;
-    if (pageId && versionId) {
-      // A clean merge needs no question; a conflict goes back to the caller's dialog.
-      mergeBinding = contextMergeBinding(cleanMergeChoice(await previewPageMerge(workspaceId, pageId, versionId)));
-    }
-  }
-  options.onDecisionPrepared?.("result_hash" in mergeBinding ? mergeBinding as ContextMergeBinding : null);
+  const mergeBinding = options.merge_binding ?? null;
   const response = await apiRequest<{ data: ReviewItem }>(
     `/api/v1/workspaces/${workspaceId}/reviews/${reviewItemId}/decision`,
     {
       method: "POST",
       body: JSON.stringify({
         decision_type,
-        ...mergeBinding,
+        ...(mergeBinding ?? {}),
         decision_reason: decision_reason || null,
         ...(options.decision_id ? { decision_id: options.decision_id } : {}),
         // Reject only: binds the decision to the impact the dialog showed.

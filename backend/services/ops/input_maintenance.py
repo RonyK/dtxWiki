@@ -25,6 +25,7 @@ from backend.migrations.revision_modules.v0_1.input_restrictions_v1 import (
 )
 from backend.models.normalized_keys import normalize_search_key
 from backend.repositories.input_metadata_repair import InputMetadataRepairRepository
+from backend.services.context_version_refs import context_version_ref
 from backend.services.ops.input_history_audit import audit_preserved_inputs
 from backend.services.ops.migration_preflight import (
     evaluate_connection_preflight,
@@ -478,7 +479,7 @@ def _sync_page_titles(connection, key, workspace_id, value, now, present):
     for version_id, scope in scopes:
         titles = [value]
         if scope == "draft":
-            reference = f"context_page_version:{UUID(str(version_id))}"
+            reference = context_version_ref(UUID(str(version_id)))
             pending = patches.get(reference, {}).get("title")
             if isinstance(pending, str):
                 titles.append(pending)

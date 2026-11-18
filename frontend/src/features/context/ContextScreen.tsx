@@ -40,7 +40,7 @@ import { useWorkspaceGraphCapability } from "../graph/useWorkspaceGraphCapabilit
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { MarkdownView } from "../pages/MarkdownView";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
-import { useContextMergeChoice } from "../pages/ContextMergeDialog";
+import { useContextMerge } from "../pages/useContextMerge";
 import { ContextDrafts } from "./ContextDrafts";
 import { citationKeyForSource } from "../pages/editorCompletions";
 import {
@@ -63,9 +63,7 @@ import {
 } from "../../shared/api/library";
 import {
   beginPageEdit,
-  ContextMergeChoiceRequired,
   diffPageVersions,
-  prepareMergeChoice,
   previewPageMerge,
   restorePageVersion,
 } from "../../shared/api/pages";
@@ -85,8 +83,9 @@ import {
   type TreeFavoriteScope,
 } from "../../shared/api/treeFavorites";
 import {
-  contextMergeBinding,
+  contextMergeTargetOf,
   decideReview,
+  decisionPins,
   getContextPageNeighbors,
   getReview,
   listContextPageActivity,
@@ -179,6 +178,7 @@ import {
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
+import { isAbortError } from "../../shared/lib/abortError";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import {
   copyTextWithReason,
@@ -189,6 +189,7 @@ import {
   contextHistoryNodes,
   contextHistoryPillTone,
   contextHistoryPresentation,
+  isContextCommit,
   priorRelationForVersion,
 } from "../../shared/lib/contextHistory";
 import {
@@ -1756,7 +1757,7 @@ function PendingDraftReview({
   const actorId = useOptionalAuth()?.user?.user_id ?? "preview";
   const pendingKey = `${reviewDraftKey(actorId, workspaceId, review.review_item_id)}.pending`;
   const pendingApprovalRef = useRef<{ key: string; decisionId: string; mergeBinding: ContextMergeBinding | null } | null>(null);
-  const mergeChoice = useContextMergeChoice();
+  const merge = useContextMerge();
   function readPendingApproval() {
     if (pendingApprovalRef.current?.key === pendingKey) return pendingApprovalRef.current;
     try {
@@ -1837,54 +1838,37 @@ function PendingDraftReview({
     setError(null);
     const pending = type === "approve" ? readPendingApproval() : null;
     const decisionId = pending?.decisionId ?? crypto.randomUUID();
-    const send = (mergeBinding?: ContextMergeBinding) => decideReview(
-      workspaceId,
-      review.review_item_id,
-      type,
-      type === "request_changes" ? reason : undefined,
-      {
-        decision_id: decisionId,
-        ...(mergeBinding ? { merge_binding: mergeBinding } : pending ? { merge_binding: pending.mergeBinding } : {}),
-        onDecisionPrepared(binding) {
-          if (type !== "approve") return;
-          pendingApprovalRef.current = { key: pendingKey, decisionId, mergeBinding: binding };
-          writeReviewDraft(pendingKey, JSON.stringify({ decisionId, workspaceId, reviewId: review.review_item_id,
-            decision: "approve", reason: null, mergeBinding: binding }));
-        },
-      },
-    );
-    const settled = async (result: Awaited<ReturnType<typeof decideReview>>) => {
+    const send = (mergeBinding: ContextMergeBinding | null) => {
+      if (type === "approve") {
+        // Recorded before sending, so a lost response replays this exact approval.
+        pendingApprovalRef.current = { key: pendingKey, decisionId, mergeBinding };
+        writeReviewDraft(pendingKey, JSON.stringify({ decisionId, workspaceId, reviewId: review.review_item_id,
+          decision: "approve", reason: null, mergeBinding }));
+      }
+      return decideReview(workspaceId, review.review_item_id, type, type === "request_changes" ? reason : undefined,
+        { decision_id: decisionId, merge_binding: mergeBinding });
+    };
+    try {
+      // A replayed approval resends its recorded pins; a new Context approval
+      // goes through the shared merge flow.
+      const target = type === "approve" && !pending
+        ? contextMergeTargetOf(await getReview(workspaceId, review.review_item_id))
+        : null;
+      const result = target
+        ? await merge.runMergeWrite({
+          kind: "publish",
+          workspaceId,
+          pageId: target.pageId,
+          errorMessage: () => t("pendingReview.approveError"),
+          loadPreview: () => previewPageMerge(workspaceId, target.pageId, target.versionId),
+          write: (choice) => send(decisionPins(choice)),
+        })
+        : await send(pending?.mergeBinding ?? null);
       pendingApprovalRef.current = null;
       writeReviewDraft(pendingKey, "");
       await onDecided(result);
-    };
-    try {
-      await settled(await send());
     } catch (exc) {
-      if (exc instanceof ContextMergeChoiceRequired) {
-        // Overlapping changes need the person's choice before approval.
-        const reload = () => previewPageMerge(workspaceId, exc.preview.page_id, exc.preview.version_id);
-        mergeChoice.open({
-          kind: "publish",
-          workspaceId,
-          pageId: exc.preview.page_id,
-          preview: exc.preview,
-          reload,
-          onResolvedElsewhere: () => void decide("approve"),
-          errorMessage: () => t("pendingReview.approveError", {
-            defaultValue: "Could not approve and publish this version. Earlier pending reviews were not settled.",
-          }),
-          async confirm(resolution, preview) {
-            const choice = await prepareMergeChoice(workspaceId, preview.page_id, preview, {
-              onConflict: resolution.choice,
-              bodyMd: resolution.bodyMd,
-              pageMetadata: resolution.pageMetadata,
-            });
-            await settled(await send(contextMergeBinding(choice)));
-          },
-        });
-        return;
-      }
+      if (isAbortError(exc)) return;
       if (exc instanceof ApiError && exc.status >= 400 && exc.status < 500) {
         pendingApprovalRef.current = null;
         writeReviewDraft(pendingKey, "");
@@ -2027,7 +2011,7 @@ function PendingDraftReview({
             })}
           </p>
         ) : null}
-        {mergeChoice.dialog}
+        {merge.dialog}
         {error ? <p className="pending-review-error">{error}</p> : null}
       </div>
     </StatusBanner>
@@ -4124,9 +4108,6 @@ export function ContextChildrenIndex({
   );
 }
 
-// Finished versions that a new draft can start from (Git commits).
-const COMMIT_VERSION_STATUSES = new Set(["closed", "published_snapshot", "superseded_snapshot"]);
-
 export function ContextHistory({
   canEdit,
   comparePair,
@@ -4336,7 +4317,7 @@ export function ContextHistory({
                 onClick={() => void restoreVersion(entry)}
               />
             ) : null}
-            {canEdit && COMMIT_VERSION_STATUSES.has(entry.version_status) ? (
+            {canEdit && isContextCommit(entry.version_status) ? (
               <HistoryActionButton
                 accessibleLabel={t("history.startFromLabel", { version: entry.version_no })}
                 busy={startingVersionId === entry.version_id}

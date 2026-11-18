@@ -19,7 +19,11 @@ def build_rest_error_response(
     request_id: str | UUID | None = None,
     warnings: list[EnvelopeWarning] | list[dict[str, str]] | None = None,
     extra: dict[str, Any] | None = None,
+    body_model: type[RESTErrorBody] | None = None,
 ) -> JSONResponse:
+    """Builds the REST error body. ``body_model`` names a typed body for
+    errors that have one; otherwise a body with extra fields is a conflict body.
+    """
     envelope_kwargs: dict[str, Any] = {
         "result_status": rest_error_status(error_code),
         "error_code": error_code,
@@ -38,8 +42,8 @@ def build_rest_error_response(
     if extra:
         payload.update(extra)
 
-    body_model = RESTConflictErrorBody if extra else RESTErrorBody
-    body = body_model(**payload)
+    model = body_model or (RESTConflictErrorBody if extra else RESTErrorBody)
+    body = model(**payload)
     return JSONResponse(
         status_code=status_code,
         content=body.model_dump(mode="json", exclude_none=True),

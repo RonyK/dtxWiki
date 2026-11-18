@@ -136,7 +136,7 @@ function renderWithRouter(initialEntry: string, routes: ReactNode, mergeKind: "f
     if (url.endsWith("/merge-preview")) {
       const request = JSON.parse(String(init?.body));
       return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
-        published_version_id: null, parent_version_ids: [], kind: mergeKind,
+        published_version_id: null, target_version_id: null, parent_version_ids: [], kind: mergeKind,
         result: { body_md: mergeKind === "automatic_merge" ? "Exact combined publication content." : page.body_md,
           page_metadata: mergeKind === "automatic_merge" ? { title: "Merged publication", tags: ["release"], aliases: ["combined"], page_type: "guide" } : {},
           block_map: [], result_hash: "c".repeat(64) } } });
@@ -267,7 +267,7 @@ function mockPublicationFlow({
     if (url.endsWith("/merge-preview")) {
       const request = JSON.parse(String(init?.body));
       return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
-        published_version_id: null, parent_version_ids: [], kind: "fast_forward",
+        published_version_id: null, target_version_id: null, parent_version_ids: [], kind: "fast_forward",
         result: { body_md: page.body_md, page_metadata: {}, block_map: [], result_hash: "c".repeat(64) } } });
     }
     if (url === `${BASE}/api/v1/workspaces`) {
@@ -2461,7 +2461,8 @@ describe("PageEditor", () => {
       server_editing_revision: revision,
       server_snapshot: { body_md: serverBody, page_metadata: metadata },
       merge_preview: {
-        page_id: page.id, version_id: "v1", editing_revision: revision, published_version_id: null,
+        page_id: page.id, version_id: "v1", content_hash: String(revision).repeat(64), references_hash: "r".repeat(64),
+        editing_revision: revision, published_version_id: null,
         target_version_id: "v1", parent_version_ids: [], kind: "conflict", result: null,
         keep_both: { body_md: keptBody, page_metadata: metadata, block_map: [], result_hash: "d".repeat(64),
           conflicts: [], offset_unit: "unicode_code_points" },
@@ -2478,7 +2479,7 @@ describe("PageEditor", () => {
       retry,
       jsonResponse(overlap(2, "# Hello\n\nTheirs", "# Hello\n\nMine\nTheirs"), 409),
       jsonResponse(overlap(3, "# Hello\n\nTheirs again", "# Hello\n\nMine\nTheirs again"), 409),
-      jsonResponse({ data: { ...page, version_status: "draft", title: "Combined title",
+      jsonResponse({ data: { ...page, version_status: "draft", title: "Hello",
         body_md: "# Hello\n\nMine\nTheirs again", editing_revision: 4 } }),
     ];
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -2520,14 +2521,18 @@ describe("PageEditor", () => {
     expect(saves[3]).toMatchObject({
       version_id: "v1", expected_editing_revision: 2, base_content_hash: "2".repeat(64),
       base_snapshot: { body_md: "# Hello\n\nTheirs", page_metadata: metadata },
-      body_md: "# Hello\n\nMine\nTheirs",
+      // The chosen result is saved like any editor text (with its front matter).
+      body_md: expect.stringMatching(/\n# Hello\n\nMine\nTheirs$/),
     });
     expect(saves[4]).toMatchObject({
       expected_editing_revision: 3,
       base_snapshot: { body_md: "# Hello\n\nTheirs again" },
-      body_md: "# Hello\n\nMine\nTheirs again",
+      body_md: expect.stringMatching(/\n# Hello\n\nMine\nTheirs again$/),
     });
-    await expectEditorTitle("Combined title");
+    // The chosen result replaced the editor's text ("My later edit"), and the
+    // server acknowledged it.
+    await expectEditorTitle("Hello");
+    await waitFor(() => expect(document.querySelector(".page-workspace")).toHaveAttribute("data-save-state", "clean"));
     expect(screen.queryByRole("button", { name: "Combine changes" })).toBeNull();
   });
 

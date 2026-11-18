@@ -22,7 +22,8 @@ import {
   createReviewSelection,
   decideReview,
   decideReviewsBulk,
-  contextMergeBinding,
+  contextMergeTargetOf,
+  decisionPins,
   getReview,
   getSettingsPolicies,
   getReviewCounts,
@@ -30,14 +31,9 @@ import {
   listReviews,
   undoReviewDecision,
 } from "../../shared/api/operations";
-import {
-  cleanMergeChoice,
-  prepareMergeChoice,
-  previewPageMerge,
-  restorePageVersion,
-  type ContextMergePreview,
-} from "../../shared/api/pages";
-import { useContextMergeChoice } from "../pages/ContextMergeDialog";
+import { previewPageMerge, restorePageVersion, type ContextMergePreview } from "../../shared/api/pages";
+import { isAbortError } from "../../shared/lib/abortError";
+import { useContextMerge } from "../pages/useContextMerge";
 import { MarkdownView } from "../pages/MarkdownView";
 import type {
   ContextMergeBinding,
@@ -195,9 +191,10 @@ export function ReviewScreen() {
   const [searchParams] = useSearchParams();
   const auth = useOptionalAuth();
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
-  const mergeChoice = useContextMergeChoice();
-  const closeMergeChoice = mergeChoice.close;
-  useEffect(() => closeMergeChoice, [closeMergeChoice, reviewRouteIdentity]);
+  const merge = useContextMerge();
+  // A merge dialog belongs to the review it was opened for.
+  const closeMerge = merge.close;
+  useEffect(() => closeMerge, [closeMerge, reviewRouteIdentity]);
 
   // Queue filters stay in the query; the selected review is owned by the path.
   // Keep the existing workflow's synchronous selection snapshot for in-flight
@@ -786,22 +783,7 @@ export function ReviewScreen() {
       let receipt: ReviewItem;
       let decisionRequestStarted = false;
       try {
-        if (decision === "approve") {
-          const operation = selectedDetail.review.evidence?.operations.find((entry) =>
-            entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
-          const pageId = operation?.document?.document_id;
-          const versionId = operation?.content?.candidate_version_id;
-          pending.mergeBinding = mergeBinding ?? null;
-          if (!mergeBinding && pageId && versionId) {
-            const preview = await previewPageMerge(workspaceId, pageId, versionId);
-            if (preview.kind === "conflict") {
-              // Overlapping changes: the approver picks one of the two choices.
-              openApprovalMerge(workspaceId, preview, audienceKind, reasonOverride);
-              return "failed";
-            }
-            pending.mergeBinding = contextMergeBinding(cleanMergeChoice(preview));
-          }
-        }
+        if (decision === "approve") pending.mergeBinding = mergeBinding ?? null;
         // Save before POST so navigation/reload cannot enable a duplicate POST
         // when the response is lost after the server commits.
         if (key) setPendingDecision(key, pending);
@@ -845,28 +827,6 @@ export function ReviewScreen() {
     } finally {
       setBusyId(null);
     }
-  }
-
-  function openApprovalMerge(workspaceId: string, preview: ContextMergePreview,
-    audienceKind?: ReviewAudienceKind, reasonOverride?: string) {
-    mergeChoice.open({
-      kind: "publish",
-      workspaceId,
-      pageId: preview.page_id,
-      preview,
-      reload: () => previewPageMerge(workspaceId, preview.page_id, preview.version_id),
-      onResolvedElsewhere: () => void submitDecision("approve"),
-      errorMessage: (cause) => reviewErrorMessage(cause, t("errors.decide")),
-      async confirm(resolution, seen) {
-        const choice = await prepareMergeChoice(workspaceId, seen.page_id, seen, {
-          onConflict: resolution.choice,
-          bodyMd: resolution.bodyMd,
-          pageMetadata: resolution.pageMetadata,
-        });
-        const result = await runDecision("approve", audienceKind, reasonOverride, null, contextMergeBinding(choice));
-        if (result === "failed") throw new Error(t("errors.decide"));
-      },
-    });
   }
 
   async function openNextReview() {
@@ -1226,10 +1186,33 @@ export function ReviewScreen() {
     }
   }
 
+  // A Context approval goes through the shared merge flow, which binds the
+  // decision to the merge preview the approver saw.
+  function approveContext(target: { pageId: string; versionId: string }) {
+    const workspaceId = state?.workspaceId;
+    if (!workspaceId) return Promise.resolve<DecisionResult>("failed");
+    return merge.runMergeWrite({
+      kind: "publish",
+      workspaceId,
+      pageId: target.pageId,
+      errorMessage: (cause) => reviewErrorMessage(cause, t("errors.decide")),
+      loadPreview: () => previewPageMerge(workspaceId, target.pageId, target.versionId),
+      write: async (choice) => {
+        const result = await runDecision("approve", undefined, undefined, null, decisionPins(choice));
+        if (result === "failed") throw new Error(t("errors.decide"));
+        return result;
+      },
+    });
+  }
+
   async function submitDecision(decision: ReviewDecisionType, expectedImpactFingerprint?: string | null): Promise<DecisionResult> {
     try {
-      return await runDecision(decision, undefined, undefined, expectedImpactFingerprint);
+      const target = decision === "approve" && selectedDetail?.review ? contextMergeTargetOf(selectedDetail.review) : null;
+      return target
+        ? await approveContext(target)
+        : await runDecision(decision, undefined, undefined, expectedImpactFingerprint);
     } catch (exc) {
+      if (isAbortError(exc)) return "failed";
       if (decision === "reject" && exc instanceof ApiError
         && exc.body.error_code === "review_decision_impact_changed") throw exc;
       setError(reviewErrorMessage(exc, t("errors.decide")));
@@ -1876,7 +1859,7 @@ export function ReviewScreen() {
           </section>
         }
       />
-      {mergeChoice.dialog}
+      {merge.dialog}
       {bulkDialog ? (
         <ConfirmDialog
           busy={bulkBusy}
@@ -2500,10 +2483,9 @@ const UNDO_ARM_DELAY_MS = 500;
  */
 function ContextApprovalResult({ review, workspaceId }: { review: ReviewItem; workspaceId: string }) {
   const { t } = useTranslation("review");
-  const operation = review.evidence?.operations.find((entry) =>
-    entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
-  const pageId = operation?.document?.document_id ?? null;
-  const versionId = operation?.content?.candidate_version_id ?? null;
+  const target = contextMergeTargetOf(review);
+  const pageId = target?.pageId ?? null;
+  const versionId = target?.versionId ?? null;
   const key = pageId && versionId ? `${workspaceId}:${pageId}:${versionId}` : null;
   const [preview, setPreview] = useState<{ key: string; value: ContextMergePreview } | null>(null);
   useEffect(() => {

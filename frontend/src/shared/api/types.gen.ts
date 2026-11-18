@@ -5828,6 +5828,45 @@ export interface components {
             /** Theirs */
             theirs: string;
         };
+        /** ContextMergeConflictBody */
+        ContextMergeConflictBody: {
+            /** Blockers */
+            blockers?: components["schemas"]["RESTBlocker"][] | null;
+            /** Blocking Workspaces */
+            blocking_workspaces?: components["schemas"]["RESTBlockingWorkspace"][] | null;
+            /** Candidates */
+            candidates?: components["schemas"]["PageNameDisambiguationCandidate"][] | null;
+            envelope: components["schemas"]["RESTResultEnvelope"];
+            /** Error Code */
+            error_code: string;
+            /** Limit Bytes */
+            limit_bytes?: number | null;
+            merge_preview: components["schemas"]["ContextMergePreviewData"];
+            /** Message */
+            message: string;
+            /** Page Id */
+            page_id?: string | null;
+            /** Purge Grant */
+            purge_grant?: string | null;
+            /** Purge Grant Expires At */
+            purge_grant_expires_at?: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id?: string;
+            /** Server Content Hash */
+            server_content_hash?: string | null;
+            /** Server Editing Revision */
+            server_editing_revision: number;
+            server_snapshot: components["schemas"]["DraftBaseSnapshot"];
+            /** Server Version Id */
+            server_version_id?: string | null;
+            /** Settings Link */
+            settings_link?: string | null;
+            /** Warnings */
+            warnings?: components["schemas"]["EnvelopeWarning"][];
+        };
         /** ContextMergeMetadata */
         ContextMergeMetadata: {
             /** Aliases */
@@ -5845,6 +5884,11 @@ export interface components {
         ContextMergePreviewData: {
             /** Base Conflicted */
             base_conflicted: boolean;
+            /**
+             * Content Hash
+             * @description Content hash of version_id.
+             */
+            content_hash: string;
             /** Editing Revision */
             editing_revision: number;
             keep_both: components["schemas"]["ContextMergeCandidate"] | null;
@@ -5876,6 +5920,11 @@ export interface components {
             parent_version_ids: string[];
             /** Published Version Id */
             published_version_id: string | null;
+            /**
+             * References Hash
+             * @description Document references hash of version_id.
+             */
+            references_hash: string;
             result: components["schemas"]["ContextMergeCandidate"] | null;
             sides: components["schemas"]["ContextMergeSides"] | null;
             /** Target Version Id */
@@ -10605,10 +10654,6 @@ export interface components {
             error_code: string;
             /** Limit Bytes */
             limit_bytes?: number | null;
-            /** Merge Preview */
-            merge_preview?: {
-                [key: string]: unknown;
-            } | null;
             /** Message */
             message: string;
             /** Page Id */
@@ -10624,12 +10669,6 @@ export interface components {
             request_id?: string;
             /** Server Content Hash */
             server_content_hash?: string | null;
-            /** Server Editing Revision */
-            server_editing_revision?: number | null;
-            /** Server Snapshot */
-            server_snapshot?: {
-                [key: string]: unknown;
-            } | null;
             /** Server Version Id */
             server_version_id?: string | null;
             /** Settings Link */
@@ -20643,7 +20682,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTConflictErrorBody"];
+                    "application/json": components["schemas"]["RESTConflictErrorBody"] | components["schemas"]["ContextMergeConflictBody"];
                 };
             };
             /** @description Unprocessable Entity */

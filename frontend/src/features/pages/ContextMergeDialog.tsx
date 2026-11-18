@@ -1,11 +1,9 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { RangeSetBuilder, StateField, type Extension } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ApiError } from "../../shared/api/client";
-import { ContextMergeChoiceRequired, ContextMergePreviewChanged } from "../../shared/api/pages";
 import { listTree, readTreeNode, type TreeNodePayload } from "../../shared/api/workspace";
 import { Dialog } from "../../shared/components/Dialog";
 import { FormField } from "../../shared/components/FormField";
@@ -30,101 +28,6 @@ import { PAGE_TYPE_OPTIONS } from "./pageFrontmatter";
 
 /** Where the merge happens; it only changes which side each label names. */
 export type ContextMergeDialogKind = "publish" | "bring_in" | "save";
-
-export type ContextMergeChoiceRequest = {
-  kind: ContextMergeDialogKind;
-  workspaceId: string | null;
-  pageId: string;
-  preview: ContextMergePreview;
-  publishedVersionNumber?: number | null;
-  /** Writes the person's answer; throws ContextMergeChoiceRequired/PreviewChanged to show a newer preview. */
-  confirm: (resolution: ContextMergeResolution, preview: ContextMergePreview) => Promise<void>;
-  /** A fresh preview after the server refused a confirm because the content moved. */
-  reload?: () => Promise<ContextMergePreview>;
-  /** The conflict went away meanwhile; the caller retries its ordinary path. */
-  onResolvedElsewhere?: () => void;
-  /** The person closed the dialog without combining. */
-  onCancel?: () => void;
-  errorMessage: (error: unknown) => string;
-};
-
-const STALE_CONFIRM_CODES = new Set(["stale_base_version", "context_merge_conflict", "editing_revision_conflict"]);
-
-/**
- * One flow for every caller of the merge dialog: show it, write the answer,
- * and on a stale confirm show the newer preview with a notice instead of
- * overwriting what changed.
- */
-export function useContextMergeChoice() {
-  const [state, setState] = useState<(ContextMergeChoiceRequest & { refreshed: boolean; busy: boolean; error: string | null }) | null>(null);
-  // The open request, read by close() so its cancel runs once, outside a state updater.
-  const requestRef = useRef<ContextMergeChoiceRequest | null>(null);
-  const open = useCallback((request: ContextMergeChoiceRequest) => {
-    requestRef.current = request;
-    setState({ ...request, refreshed: false, busy: false, error: null });
-  }, []);
-  const close = useCallback(() => {
-    const request = requestRef.current;
-    requestRef.current = null;
-    setState(null);
-    request?.onCancel?.();
-  }, []);
-
-  async function confirm(resolution: ContextMergeResolution) {
-    const current = state;
-    if (!current) return;
-    setState({ ...current, busy: true, error: null });
-    try {
-      await current.confirm(resolution, current.preview);
-      requestRef.current = null;
-      setState(null);
-    } catch (error) {
-      if (error instanceof ContextMergeChoiceRequired || error instanceof ContextMergePreviewChanged) {
-        if (error.preview.kind !== "conflict") {
-          requestRef.current = null;
-          setState(null);
-          current.onResolvedElsewhere?.();
-          return;
-        }
-        setState({ ...current, preview: error.preview, refreshed: true, busy: false, error: null });
-        return;
-      }
-      if (error instanceof ApiError && error.status === 409 && STALE_CONFIRM_CODES.has(error.body.error_code) && current.reload) {
-        try {
-          const fresh = await current.reload();
-          if (fresh.kind === "conflict") {
-            setState({ ...current, preview: fresh, refreshed: true, busy: false, error: null });
-          } else {
-            requestRef.current = null;
-            setState(null);
-            current.onResolvedElsewhere?.();
-          }
-          return;
-        } catch (reloadError) {
-          setState({ ...current, busy: false, error: current.errorMessage(reloadError) });
-          return;
-        }
-      }
-      setState({ ...current, busy: false, error: current.errorMessage(error) });
-    }
-  }
-
-  const dialog = state ? (
-    <ContextMergeDialog
-      busy={state.busy}
-      error={state.error}
-      kind={state.kind}
-      onClose={close}
-      onConfirm={(resolution) => void confirm(resolution)}
-      pageId={state.pageId}
-      preview={state.preview}
-      publishedVersionNumber={state.publishedVersionNumber}
-      refreshed={state.refreshed}
-      workspaceId={state.workspaceId}
-    />
-  ) : null;
-  return { open, close, dialog, isOpen: state !== null };
-}
 
 type MetadataSource = "ours" | "theirs" | "custom";
 type MetadataChoice = { source: MetadataSource; value: string | null };

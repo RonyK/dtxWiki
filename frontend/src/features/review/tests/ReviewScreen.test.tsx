@@ -3484,7 +3484,7 @@ function mockReviewFetch(handler: (input: RequestInfo | URL, init?: RequestInit)
     if (url.endsWith("/merge-preview")) {
       const request = JSON.parse(String(init?.body));
       return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
-        published_version_id: null, parent_version_ids: [], kind: "fast_forward",
+        published_version_id: null, target_version_id: null, parent_version_ids: [], kind: "fast_forward",
         result: { body_md: "Exact candidate body", page_metadata: {}, block_map: [], result_hash: "c".repeat(64) } } });
     }
     let response: Response;

@@ -100,7 +100,13 @@ from backend.services.context_media_legacy_cutover import (
 )
 from backend.services.context_push import target_ids_for_operations
 from backend.services.context_review_disposition import (
+    OPEN_CONTEXT_REVIEW_STATUSES,
     context_version_review_metadata,
+    select_context_version_reviews,
+)
+from backend.services.context_version_refs import (
+    context_version_ref,
+    inline_comment_anchor,
 )
 from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.context_visibility import (
@@ -1193,6 +1199,7 @@ class PageService:
         from dataclasses import replace
 
         from backend.services.context_draft_workflow import preview_merge
+        from backend.services.document_references import document_references_hash
 
         with self.session_factory() as session:
             page = context_page_repo.get_page_by_id(session, page_id)
@@ -1226,7 +1233,13 @@ class PageService:
             edited = body_md is not None or page_metadata is not None
 
             def project(value):
-                return value.rest_payload(page.id) if rest else value.payload()
+                if not rest:
+                    return value.payload()
+                return value.rest_payload(
+                    page.id,
+                    content_hash=version.content_hash,
+                    references_hash=document_references_hash(session, version),
+                )
 
             if on_conflict is None and not edited:
                 return project(preview)
@@ -3986,6 +3999,7 @@ class PageService:
             parents_for,
             snapshot,
         )
+        from backend.services.document_references import document_references_hash
 
         target_id = (
             version_id or editing_version_id or session_version_id or base_version_id
@@ -4147,7 +4161,13 @@ class PageService:
                                     metadata_for(page, current)
                                 ),
                             },
-                            merge_preview=conflict.rest_payload(page.id),
+                            merge_preview=conflict.rest_payload(
+                                page.id,
+                                content_hash=current.content_hash,
+                                references_hash=document_references_hash(
+                                    session, current
+                                ),
+                            ),
                         )
                     prepared = self._autosave_prepare(
                         session=session,
@@ -4484,22 +4504,15 @@ class PageService:
     ) -> int:
         pending_reviews = (
             session.scalars(
-                select(ReviewItem)
-                .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-                .join(
-                    ChangeOperation,
-                    ChangeOperation.change_set_id == ChangeSet.id,
-                )
-                .where(
-                    ReviewItem.workspace_id == page.workspace_id,
-                    ChangeSet.workspace_id == page.workspace_id,
-                    ReviewItem.status.in_(("pending", "changes_requested")),
-                    ReviewItem.review_type == "context_update",
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.diff_ref
-                    == f"context_page_version:{replaced_version.id}",
-                    ReviewItem.id != new_review_item_id,
+                select_context_version_reviews(
+                    page.workspace_id,
+                    {page.id},
+                    conditions=(
+                        ReviewItem.status.in_(OPEN_CONTEXT_REVIEW_STATUSES),
+                        ChangeOperation.diff_ref
+                        == context_version_ref(replaced_version.id),
+                        ReviewItem.id != new_review_item_id,
+                    ),
                 )
             )
             .unique()
@@ -4535,19 +4548,12 @@ class PageService:
 
         return list(
             session.scalars(
-                select(ReviewItem)
-                .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-                .join(
-                    ChangeOperation,
-                    ChangeOperation.change_set_id == ChangeSet.id,
-                )
-                .where(
-                    ReviewItem.workspace_id == page.workspace_id,
-                    ChangeSet.workspace_id == page.workspace_id,
-                    ReviewItem.review_type == "context_update",
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.diff_ref == f"context_page_version:{version.id}",
+                select_context_version_reviews(
+                    page.workspace_id,
+                    {page.id},
+                    conditions=(
+                        ChangeOperation.diff_ref == context_version_ref(version.id),
+                    ),
                 )
             )
             .unique()
@@ -5263,7 +5269,7 @@ def _publish_blocked_reasons(
         )
         for finding in publish_floor_findings(version.body_md, registry=registry)
     ]
-    diff_ref = f"context_page_version:{version.id}"
+    diff_ref = context_version_ref(version.id)
     evidence_rows = session.execute(
         select(
             ChangeSet.id,
@@ -6164,7 +6170,7 @@ def page_metadata_patches_for_versions(
     if not version_ids:
         return {}
     diff_refs = {
-        f"context_page_version:{version_id}": version_id for version_id in version_ids
+        context_version_ref(version_id): version_id for version_id in version_ids
     }
     operations = session.scalars(
         select(ChangeOperation)
@@ -6276,15 +6282,10 @@ def select_inline_comment_rows(page_id: UUID, *, limit: int):
 
 
 def parse_inline_comment_anchor(diff_ref: str | None) -> PageInlineCommentAnchor | None:
-    if not diff_ref:
+    anchor = inline_comment_anchor(diff_ref)
+    if anchor is None:
         return None
     try:
-        payload = json.loads(diff_ref)
-        if payload.get("kind") != "page_inline_comment_anchor":
-            return None
-        anchor = payload.get("anchor")
-        if not isinstance(anchor, dict):
-            return None
         return PageInlineCommentAnchor.model_validate(anchor)
     except (TypeError, ValueError):
         return None

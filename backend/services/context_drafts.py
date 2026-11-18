@@ -12,13 +12,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import load_only
 
 from backend.models.audit import AuditEvent
-from backend.models.change import ChangeOperation, ChangeSet
+from backend.models.change import ChangeOperation
 from backend.models.context import ContextPage, ContextPageVersion, ContextVersionParent
 from backend.models.review import ReviewItem
 from backend.policy.trust_boundaries import actor_can_read_drafts
 from backend.repositories.workspace_scoped import (
     get_in_workspace,
-    join_in_workspace,
     select_in_workspace,
 )
 from backend.schemas.context_drafts import (
@@ -28,39 +27,25 @@ from backend.schemas.context_drafts import (
     ContextDraftSummary,
     OpenDrafts,
 )
+from backend.services.context_review_disposition import (
+    OPEN_CONTEXT_REVIEW_STATUSES,
+    select_context_version_reviews,
+)
+from backend.services.context_version_refs import (
+    context_version_ref,
+    written_context_version_id,
+)
 from backend.services.read_errors import ReadNotFoundError, ReadValidationError
-from backend.utils.uuid import parse_uuid_or_none
-
-_OPEN_REVIEW_STATUSES = frozenset({"pending", "changes_requested"})
 
 
 def _reviews_for_versions(session, workspace_id, versions):
-    by_ref = {f"context_page_version:{version.id}": version.id for version in versions}
+    by_ref = {context_version_ref(version.id): version.id for version in versions}
     if not by_ref:
         return {}
-    query = select_in_workspace(
-        ChangeOperation,
-        workspace_id=workspace_id,
-        conditions=(
-            ChangeOperation.target_type == "context_page",
-            ChangeOperation.target_id.in_({version.page_id for version in versions}),
-            ChangeOperation.diff_ref.in_(by_ref),
-            ReviewItem.review_type == "context_update",
-        ),
-    )
-    query = join_in_workspace(
-        query,
-        ChangeOperation,
-        ChangeSet,
-        workspace_id=workspace_id,
-        on=ChangeSet.id == ChangeOperation.change_set_id,
-    )
-    query = join_in_workspace(
-        query,
-        ChangeOperation,
-        ReviewItem,
-        workspace_id=workspace_id,
-        on=ReviewItem.change_set_id == ChangeSet.id,
+    query = select_context_version_reviews(
+        workspace_id,
+        {version.page_id for version in versions},
+        conditions=(ChangeOperation.diff_ref.in_(by_ref),),
     )
     by_version = {}
     for diff_ref, review in session.execute(
@@ -78,7 +63,7 @@ def _review_info(reviews):
     review = max(
         reviews,
         key=lambda row: (
-            row.status in _OPEN_REVIEW_STATUSES,
+            row.status in OPEN_CONTEXT_REVIEW_STATUSES,
             row.created_at,
             str(row.id),
         ),
@@ -235,7 +220,7 @@ def project_context_drafts(session, pages, versions, actor, *, review_states=Non
                 is_editing=review_states[version.id][0]
                 if review_states is not None
                 else not any(
-                    review.status in _OPEN_REVIEW_STATUSES
+                    review.status in OPEN_CONTEXT_REVIEW_STATUSES
                     for review in reviews.get(version.id, [])
                 ),
                 review=review_states[version.id][1]
@@ -258,7 +243,7 @@ def context_draft_review_states(session, workspace_id, versions):
                 version.id,
                 (
                     not any(
-                        review.status in _OPEN_REVIEW_STATUSES
+                        review.status in OPEN_CONTEXT_REVIEW_STATUSES
                         for review in reviews.get(version.id, [])
                     ),
                     _review_info(reviews.get(version.id, [])),
@@ -317,6 +302,28 @@ def _encode_cursor(page, version):
     return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
 
 
+def _select_open_drafts(
+    workspace_id: UUID, page_id: UUID, boundary: tuple[datetime, UUID] | None
+):
+    """Apply the saved-draft ordering and its exclusive continuation boundary."""
+    conditions = [
+        ContextPageVersion.page_id == page_id,
+        ContextPageVersion.version_status == "draft",
+    ]
+    if boundary is not None:
+        saved_at, version_id = boundary
+        conditions.append(
+            or_(
+                ContextPageVersion.last_saved_at < saved_at,
+                (ContextPageVersion.last_saved_at == saved_at)
+                & (ContextPageVersion.id > version_id),
+            )
+        )
+    return select_in_workspace(
+        ContextPageVersion, workspace_id=workspace_id, conditions=conditions
+    ).order_by(ContextPageVersion.last_saved_at.desc(), ContextPageVersion.id.asc())
+
+
 def list_context_drafts(session, *, workspace_id, page_id, actor, limit=5, cursor=None):
     """Count and page open drafts without loading their Markdown bodies."""
     from backend.services.actor_visible_read import context_page_visible
@@ -347,39 +354,17 @@ def count_drafts_in_review(session, page, actor) -> int:
         or not context_page_visible(page, actor, workspace_id=page.workspace_id)
     ):
         return 0
-    query = select_in_workspace(
-        ChangeOperation,
-        workspace_id=page.workspace_id,
-        conditions=(
-            ChangeOperation.target_type == "context_page",
-            ChangeOperation.target_id == page.id,
-            ChangeOperation.diff_ref.like("context_page_version:%"),
-            ReviewItem.review_type == "context_update",
-            ReviewItem.status.in_(_OPEN_REVIEW_STATUSES),
-        ),
-    )
-    query = join_in_workspace(
-        query,
-        ChangeOperation,
-        ChangeSet,
-        workspace_id=page.workspace_id,
-        on=ChangeSet.id == ChangeOperation.change_set_id,
-    )
-    query = join_in_workspace(
-        query,
-        ChangeOperation,
-        ReviewItem,
-        workspace_id=page.workspace_id,
-        on=ReviewItem.change_set_id == ChangeSet.id,
+    query = select_context_version_reviews(
+        page.workspace_id,
+        {page.id},
+        conditions=(ReviewItem.status.in_(OPEN_CONTEXT_REVIEW_STATUSES),),
     )
     version_ids = {
-        parsed
+        version_id
         for diff_ref in session.scalars(
             query.with_only_columns(ChangeOperation.diff_ref)
         )
-        if (
-            parsed := parse_uuid_or_none(diff_ref.removeprefix("context_page_version:"))
-        )
+        if (version_id := written_context_version_id(diff_ref)) is not None
     }
     if not version_ids:
         return 0
@@ -418,18 +403,12 @@ def _project_open_drafts(session, page, actor, *, limit=5, boundary=None):
     if not actor_can_read_drafts(actor):
         return OpenDrafts()
     workspace_id, page_id = page.workspace_id, page.id
-    conditions = (
-        ContextPageVersion.workspace_id == workspace_id,
-        ContextPageVersion.page_id == page_id,
-        ContextPageVersion.version_status == "draft",
-    )
-    scoped_query = select_in_workspace(
-        ContextPageVersion, workspace_id=workspace_id, conditions=conditions
-    )
     total = session.scalar(
-        scoped_query.with_only_columns(func.count(), maintain_column_froms=True)
+        _select_open_drafts(workspace_id, page_id, None)
+        .order_by(None)
+        .with_only_columns(func.count(), maintain_column_froms=True)
     )
-    query = scoped_query.options(
+    query = _select_open_drafts(workspace_id, page_id, boundary).options(
         load_only(
             ContextPageVersion.id,
             ContextPageVersion.page_id,
@@ -444,23 +423,7 @@ def _project_open_drafts(session, page, actor, *, limit=5, boundary=None):
             ContextPageVersion.last_saved_at,
         )
     )
-    if boundary is not None:
-        saved_at, version_id = boundary
-        pagination_conditions = (
-            or_(
-                ContextPageVersion.last_saved_at < saved_at,
-                (ContextPageVersion.last_saved_at == saved_at)
-                & (ContextPageVersion.id > version_id),
-            ),
-        )
-        query = query.where(*pagination_conditions)
-    rows = list(
-        session.scalars(
-            query.order_by(
-                ContextPageVersion.last_saved_at.desc(), ContextPageVersion.id.asc()
-            ).limit(limit + 1)
-        )
-    )
+    rows = list(session.scalars(query.limit(limit + 1)))
     selected = rows[:limit]
     projections = project_context_drafts(session, [page], selected, actor)
     items = []
@@ -477,7 +440,7 @@ def _project_open_drafts(session, page, actor, *, limit=5, boundary=None):
                 ),
                 state="reviewing"
                 if info.review is not None
-                and info.review.status in _OPEN_REVIEW_STATUSES
+                and info.review.status in OPEN_CONTEXT_REVIEW_STATUSES
                 else "writing",
             )
         )

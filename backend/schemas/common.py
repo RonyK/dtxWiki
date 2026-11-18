@@ -716,11 +716,6 @@ class RESTBlockingWorkspace(BaseModel):
 class RESTConflictErrorBody(RESTErrorBody):
     server_version_id: UUID | None = None
     server_content_hash: str | None = None
-    # A browser save that conflicts with the shared draft: the draft revision
-    # and snapshot the merge used, and the two choices (ContextMergePreviewData).
-    server_editing_revision: int | None = None
-    server_snapshot: dict[str, Any] | None = None
-    merge_preview: dict[str, Any] | None = None
     limit_bytes: int | None = None
     settings_link: str | None = None
     candidates: list[PageNameDisambiguationCandidate] | None = None

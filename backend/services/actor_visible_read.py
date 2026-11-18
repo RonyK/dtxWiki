@@ -21,6 +21,10 @@ from backend.repositories.context_visibility import (
 )
 from backend.repositories.workspace_scoped import get_in_workspace
 from backend.schemas.agent import SENSITIVE_AGENT_PAGE_CATEGORIES
+from backend.services.context_version_refs import (
+    referenced_context_version_id,
+    version_id_from_ref,
+)
 
 if TYPE_CHECKING:
     from backend.models.agent import AgentPage, AgentPageVersion
@@ -272,36 +276,6 @@ def actor_can_read_audit_records(actor: ActorContext | None) -> bool:
     return bool({"*", "audit-read", "mcp:write"} & scopes)
 
 
-def _referenced_version_id(diff_ref: str | None, prefix: str):
-    """The version id a ChangeOperation's ``diff_ref`` names, if it names one.
-
-    HEAD writes two spellings: the bare ``"<kind>:<uuid>"`` used by every page
-    write, and the inline-comment anchor JSON carrying ``version_id``
-    (change_review_audit.py). Anything else (tree ``parent:...;sort:...``,
-    ``context_ingress_proposal:...``, a JSON blob with no ``version_id`` key)
-    names no version.
-    """
-    import json
-    from uuid import UUID
-
-    if not diff_ref:
-        return None
-    raw = None
-    if diff_ref.startswith(prefix):
-        raw = diff_ref[len(prefix) :]
-    elif diff_ref.startswith("{"):
-        try:
-            raw = json.loads(diff_ref).get("version_id")
-        except (ValueError, AttributeError):
-            return None
-    if not raw:
-        return None
-    try:
-        return UUID(str(raw))
-    except (ValueError, AttributeError, TypeError):
-        return None
-
-
 def change_set_visible(session, change_set, actor: ActorContext | None) -> bool:
     """A change set is readable only if EVERY operation in it is readable.
 
@@ -347,9 +321,7 @@ def change_set_visible(session, change_set, actor: ActorContext | None) -> bool:
                 session, operation.target_id, actor, workspace_id=workspace_id
             ):
                 return False
-            version_id = _referenced_version_id(
-                operation.diff_ref, "context_page_version:"
-            )
+            version_id = referenced_context_version_id(operation.diff_ref)
             if version_id is not None:
                 version = get_in_workspace(
                     session,
@@ -372,9 +344,7 @@ def change_set_visible(session, change_set, actor: ActorContext | None) -> bool:
             )
             if not agent_page_visible(page, actor, workspace_id=workspace_id):
                 return False
-            version_id = _referenced_version_id(
-                operation.diff_ref, "agent_page_version:"
-            )
+            version_id = version_id_from_ref(operation.diff_ref, "agent_page_version:")
             if version_id is not None:
                 version = get_in_workspace(
                     session,

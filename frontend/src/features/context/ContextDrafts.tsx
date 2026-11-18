@@ -4,20 +4,15 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { apiErrorMessage } from "../../shared/api/client";
 import { listContextDrafts, type ContextPageDetail, type OpenDrafts } from "../../shared/api/context";
-import {
-  bringInPageVersion,
-  cleanMergeChoice,
-  discardPageEdit,
-  prepareMergeChoice,
-  previewPageMerge,
-} from "../../shared/api/pages";
+import { bringInPageVersion, discardPageEdit, previewPageMerge } from "../../shared/api/pages";
 import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { TREE_VERSION_PARAM } from "../../shared/components/treeRouteState";
+import { isAbortError } from "../../shared/lib/abortError";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { contextEditHref, workspacePath } from "../../shared/lib/workspaceRoutes";
-import { useContextMergeChoice } from "../pages/ContextMergeDialog";
+import { useContextMerge } from "../pages/useContextMerge";
 
 export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onChanged }: {
   detail: ContextPageDetail;
@@ -29,7 +24,7 @@ export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onC
 }) {
   const { t } = useTranslation("context");
   const withdrawTitleId = useId();
-  const mergeChoice = useContextMergeChoice();
+  const merge = useContextMerge();
   const [action, setAction] = useState<"bring_in" | "withdraw" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
@@ -67,50 +62,25 @@ export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onC
   const publishedVersionId = detail.current_published_version_id;
   const failure = (error: unknown) => apiErrorMessage(error, t("drafts.actionError"));
 
-  // Brings the published version into this draft: a clean merge is saved at
-  // once, overlapping changes ask for one of the two choices.
+  // Brings the published version into this draft through the shared merge
+  // flow: a clean merge is saved at once, overlapping changes ask first.
   async function bringIn() {
     if (!draftVersionId || !publishedVersionId || action) return;
     setAction("bring_in");
     setActionError(null);
     try {
-      const preview = await previewPageMerge(workspaceId, detail.id, draftVersionId);
-      if (preview.kind === "conflict") {
-        mergeChoice.open({
-          kind: "bring_in",
-          workspaceId,
-          pageId: detail.id,
-          preview,
-          publishedVersionNumber: detail.published_version_info?.version_no ?? null,
-          reload: () => previewPageMerge(workspaceId, detail.id, draftVersionId),
-          onResolvedElsewhere: () => void bringIn(),
-          errorMessage: failure,
-          async confirm(resolution, seen) {
-            const choice = await prepareMergeChoice(workspaceId, detail.id, seen, {
-              onConflict: resolution.choice,
-              bodyMd: resolution.bodyMd,
-              pageMetadata: resolution.pageMetadata,
-            });
-            await bringInPageVersion(workspaceId, detail.id, {
-              versionId: draftVersionId,
-              commitVersionId: seen.target_version_id ?? publishedVersionId,
-              choice,
-            });
-            await onChanged();
-          },
-        });
-        return;
-      }
-      if (preview.kind === "automatic_merge") {
-        await bringInPageVersion(workspaceId, detail.id, {
-          versionId: draftVersionId,
-          commitVersionId: preview.target_version_id ?? publishedVersionId,
-          choice: cleanMergeChoice(preview),
-        });
-      }
+      await merge.runMergeWrite({
+        kind: "bring_in",
+        workspaceId,
+        pageId: detail.id,
+        publishedVersionNumber: detail.published_version_info?.version_no ?? null,
+        errorMessage: failure,
+        loadPreview: () => previewPageMerge(workspaceId, detail.id, draftVersionId),
+        write: (choice) => bringInPageVersion(workspaceId, detail.id, draftVersionId, choice),
+      });
       await onChanged();
     } catch (error) {
-      setActionError(failure(error));
+      if (!isAbortError(error)) setActionError(failure(error));
     } finally {
       setAction(null);
     }
@@ -228,7 +198,7 @@ export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onC
           <p>{t("drafts.withdrawConfirm")}</p>
         </ConfirmDialog>
       ) : null}
-      {mergeChoice.dialog}
+      {merge.dialog}
       {summary ? (
         <details className="context-draft-list" onToggle={(event) => {
           if (event.currentTarget.open) void loadDrafts(false);
