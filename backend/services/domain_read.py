@@ -2437,18 +2437,18 @@ class DomainReadService:
             )
             if page is None:
                 return []
-            stmt = (
-                select(ContextPageVersion)
-                .join(ContextPage, ContextPageVersion.page_id == ContextPage.id)
-                .where(ContextPageVersion.page_id == target_id)
-                .where(ContextPage.workspace_id == workspace_id)
-            )
+            page_condition = ContextPageVersion.page_id == target_id
             open_drafts = []
             if not actor_can_read_drafts(actor):
-                stmt = stmt.where(
-                    ContextPageVersion.version_status.in_(
-                        PUBLISHED_CONTEXT_VERSION_STATUSES
-                    )
+                stmt = select_in_workspace(
+                    ContextPageVersion,
+                    workspace_id=workspace_id,
+                    conditions=(
+                        page_condition,
+                        ContextPageVersion.version_status.in_(
+                            PUBLISHED_CONTEXT_VERSION_STATUSES
+                        ),
+                    ),
                 )
             else:
                 # Open drafts are the tip of the history: all of them lead the
@@ -2456,14 +2456,26 @@ class DomainReadService:
                 # already drawn. Every page after that holds commits only.
                 if before_version_no is None:
                     open_drafts = session.scalars(
-                        stmt.where(
-                            ContextPageVersion.version_status == "draft"
+                        select_in_workspace(
+                            ContextPageVersion,
+                            workspace_id=workspace_id,
+                            conditions=(
+                                page_condition,
+                                ContextPageVersion.version_status == "draft",
+                            ),
                         ).order_by(
                             ContextPageVersion.last_saved_at.desc(),
                             ContextPageVersion.id,
                         )
                     ).all()
-                stmt = stmt.where(ContextPageVersion.version_status != "draft")
+                stmt = select_in_workspace(
+                    ContextPageVersion,
+                    workspace_id=workspace_id,
+                    conditions=(
+                        page_condition,
+                        ContextPageVersion.version_status != "draft",
+                    ),
+                )
             if before_version_no is not None:
                 stmt = stmt.where(ContextPageVersion.version_no < before_version_no)
             versions = [

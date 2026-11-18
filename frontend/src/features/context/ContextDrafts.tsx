@@ -74,7 +74,7 @@ export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onC
     setAction("bring_in");
     setActionError(null);
     try {
-      const preview = await previewPageMerge(workspaceId, detail.id, draftVersionId, { commitVersionId: publishedVersionId });
+      const preview = await previewPageMerge(workspaceId, detail.id, draftVersionId);
       if (preview.kind === "conflict") {
         mergeChoice.open({
           kind: "bring_in",
@@ -82,7 +82,7 @@ export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onC
           pageId: detail.id,
           preview,
           publishedVersionNumber: detail.published_version_info?.version_no ?? null,
-          reload: () => previewPageMerge(workspaceId, detail.id, draftVersionId, { commitVersionId: publishedVersionId }),
+          reload: () => previewPageMerge(workspaceId, detail.id, draftVersionId),
           onResolvedElsewhere: () => void bringIn(),
           errorMessage: failure,
           async confirm(resolution, seen) {
@@ -91,7 +91,11 @@ export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onC
               bodyMd: resolution.bodyMd,
               pageMetadata: resolution.pageMetadata,
             });
-            await bringInPageVersion(workspaceId, detail.id, { versionId: draftVersionId, commitVersionId: publishedVersionId, choice });
+            await bringInPageVersion(workspaceId, detail.id, {
+              versionId: draftVersionId,
+              commitVersionId: seen.target_version_id ?? publishedVersionId,
+              choice,
+            });
             await onChanged();
           },
         });
@@ -100,7 +104,7 @@ export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onC
       if (preview.kind === "automatic_merge") {
         await bringInPageVersion(workspaceId, detail.id, {
           versionId: draftVersionId,
-          commitVersionId: publishedVersionId,
+          commitVersionId: preview.target_version_id ?? publishedVersionId,
           choice: cleanMergeChoice(preview),
         });
       }

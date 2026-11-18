@@ -2451,8 +2451,9 @@ describe("PageEditor", () => {
   it("combines an overlapping save with one of the two choices on the server draft it saw", async () => {
     // A save that overlaps another save of the same draft offers both choices;
     // confirming is an ordinary save based on the server draft the merge used.
-    // When that draft moved again, the dialog shows the newer preview instead
-    // of overwriting it, and the next confirm uses the newer base.
+    // Text typed while the Combine retry is in flight is sent again before the
+    // dialog asks. When the draft moved again, the dialog shows the newer
+    // preview instead of overwriting it, and the next confirm uses the newer base.
     const metadata = { title: "Hello", page_type: "overview", tags: [], aliases: [], placement_parent_node_id: null };
     const overlap = (revision: number, serverBody: string, keptBody: string) => ({
       error_code: "context_merge_conflict", message: "conflict", request_id: "r1", warnings: [],
@@ -2470,8 +2471,11 @@ describe("PageEditor", () => {
         sides: null,
       },
     });
-    const responses = [
+    let releaseRetry: (response: Response) => void = () => {};
+    const retry = new Promise<Response>((resolve) => { releaseRetry = resolve; });
+    const responses: Array<Response | Promise<Response>> = [
       jsonResponse(overlap(2, "# Hello\n\nTheirs", "# Hello\n\nMine\nTheirs"), 409),
+      retry,
       jsonResponse(overlap(2, "# Hello\n\nTheirs", "# Hello\n\nMine\nTheirs"), 409),
       jsonResponse(overlap(3, "# Hello\n\nTheirs again", "# Hello\n\nMine\nTheirs again"), 409),
       jsonResponse({ data: { ...page, version_status: "draft", title: "Combined title",
@@ -2497,6 +2501,9 @@ describe("PageEditor", () => {
     await setEditorTitle(await findTitleEditor(), "My edit");
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
     await typist().click(await screen.findByRole("button", { name: "Combine changes" }));
+    await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(2));
+    await setEditorTitle(getTitleEditor(), "My later edit");
+    releaseRetry(jsonResponse(overlap(2, "# Hello\n\nTheirs", "# Hello\n\nMine\nTheirs"), 409));
     let dialog = await screen.findByRole("dialog", { name: "Combine changes" });
     await typist().click(within(dialog).getByRole("radio", { name: /Keep both changes/ }));
     await typist().click(within(dialog).getByRole("button", { name: "Combine with this result" }));
@@ -2507,13 +2514,15 @@ describe("PageEditor", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Combine changes" })).toBeNull());
 
     const saves = autosaveCalls(fetchMock).map((call) => JSON.parse(String(call[1]?.body)));
-    expect(saves).toHaveLength(4);
-    expect(saves[2]).toMatchObject({
+    expect(saves).toHaveLength(5);
+    // The retry answered for the older text, so the newer title went out again.
+    expect(saves[2]).toMatchObject({ title: "My later edit" });
+    expect(saves[3]).toMatchObject({
       version_id: "v1", expected_editing_revision: 2, base_content_hash: "2".repeat(64),
       base_snapshot: { body_md: "# Hello\n\nTheirs", page_metadata: metadata },
       body_md: "# Hello\n\nMine\nTheirs",
     });
-    expect(saves[3]).toMatchObject({
+    expect(saves[4]).toMatchObject({
       expected_editing_revision: 3,
       base_snapshot: { body_md: "# Hello\n\nTheirs again" },
       body_md: "# Hello\n\nMine\nTheirs again",

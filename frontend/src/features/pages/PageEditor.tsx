@@ -101,6 +101,7 @@ import {
   createPage,
   createPageComment,
   ContextMergeChoiceRequired,
+  ContextMergePreviewChanged,
   listPageTags,
   listPages,
   newIdempotencyKey,
@@ -272,6 +273,7 @@ type MergeConflict = {
   serverContentHash: string;
   serverRevision: number;
   serverSnapshot: DraftSnapshotBody;
+  editorRevision: number;
 };
 type EditorConflict =
   | MergeConflict
@@ -280,8 +282,9 @@ type EditorConflict =
   | { kind: "other" };
 const COMMIT_VERSION_STATUSES = new Set(["closed", "published_snapshot", "superseded_snapshot"]);
 
-/** Reads the autosave conflict body; null for any other 409. */
-function mergeConflictFrom(error: unknown): MergeConflict | null {
+/** Reads the autosave conflict body; null for any other 409. `editorRevision` is
+ *  the editor revision the conflicting save carried. */
+function mergeConflictFrom(error: unknown, editorRevision: number): MergeConflict | null {
   if (!(error instanceof ApiError) || error.status !== 409 || error.body.error_code !== "context_merge_conflict") return null;
   const body = error.body as typeof error.body & {
     merge_preview?: ContextMergePreview | null;
@@ -298,6 +301,7 @@ function mergeConflictFrom(error: unknown): MergeConflict | null {
     serverContentHash: body.server_content_hash ?? "",
     serverRevision: body.server_editing_revision,
     serverSnapshot: body.server_snapshot,
+    editorRevision,
   };
 }
 type ExecuteEditorCommandOptions = {
@@ -810,7 +814,8 @@ export function PageEditor({
     intent: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash">,
     options: PageWriteOptions = {}) {
     const key = publicationKey(workspace, id);
-    const publish = (extra: PageWriteOptions = {}) => publishPageVersion(workspace, id, versionId, intent, { ...options, ...extra,
+    const publish = ({ intent: hashes, ...extra }: PageWriteOptions & { intent?: Partial<typeof intent> } = {}) =>
+      publishPageVersion(workspace, id, versionId, { ...intent, ...hashes }, { ...options, ...extra,
       preparedPublication: extra.mergeChoice ? undefined : pendingPublication(key),
       onPublicationPrepared(command) {
         preparedPublicationRef.current = { key, command };
@@ -836,12 +841,21 @@ export function PageEditor({
             onCancel: () => reject(new DOMException("Publication cancelled", "AbortError")),
             errorMessage: (cause) => apiErrorMessage(cause, t("editor.publishFailed")),
             async confirm(resolution, seen) {
+              // The draft may have moved since the publish began: bind its
+              // content and references to the revision this preview shows.
+              const draft = await readPage(workspace, id, versionId);
+              if (draft.editing_revision !== seen.editing_revision) {
+                throw new ContextMergePreviewChanged(await previewPageMerge(workspace, id, versionId));
+              }
               const choice = await prepareMergeChoice(workspace, id, seen, {
                 onConflict: resolution.choice,
                 bodyMd: resolution.bodyMd,
                 pageMetadata: resolution.pageMetadata,
               });
-              resolve(await publish({ mergeChoice: choice }));
+              resolve(await publish({
+                mergeChoice: choice,
+                intent: { expected_content_hash: draft.content_hash, expected_references_hash: draft.references_hash },
+              }));
             },
           });
         });
@@ -3583,9 +3597,15 @@ export function PageEditor({
         setStalePublishState("blocked");
         return;
       }
-      const overlap = mergeConflictFrom(exc);
+      const overlap = mergeConflictFrom(exc, dispatchedRevision);
       if (overlap) {
         mergeConflictRef.current = overlap;
+        if (options.resolveConflict && editorRevisionRef.current > dispatchedRevision) {
+          // The author typed while this retry was in flight: its choices lack
+          // that text, so send the current text again before asking.
+          void save({ source: "manual", resolveConflict: true });
+          return;
+        }
         setConflict(overlap);
         if (options.resolveConflict) openMergeDialog();
         return;
@@ -3801,6 +3821,12 @@ export function PageEditor({
       errorMessage: (cause) => apiErrorMessage(cause, t("editor.saveFailed")),
       async confirm(resolution) {
         const seen = mergeConflictRef.current ?? current;
+        if (editorRevisionRef.current > seen.editorRevision) {
+          // Newer text than the choices hold: ask again with it instead of
+          // replacing it with an older result.
+          void save({ source: "manual", resolveConflict: true });
+          return;
+        }
         const result = resolvedMergeResult(resolution);
         try {
           const updated = await autosavePage(workspaceId, pageId, {
@@ -3820,7 +3846,7 @@ export function PageEditor({
           });
           applyServerDraft(updated);
         } catch (error) {
-          const next = mergeConflictFrom(error);
+          const next = mergeConflictFrom(error, editorRevisionRef.current);
           if (!next) throw error;
           mergeConflictRef.current = next;
           setConflict(next);

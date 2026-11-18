@@ -80,6 +80,12 @@ export function useContextMergeChoice() {
       setState(null);
     } catch (error) {
       if (error instanceof ContextMergeChoiceRequired || error instanceof ContextMergePreviewChanged) {
+        if (error.preview.kind !== "conflict") {
+          requestRef.current = null;
+          setState(null);
+          current.onResolvedElsewhere?.();
+          return;
+        }
         setState({ ...current, preview: error.preview, refreshed: true, busy: false, error: null });
         return;
       }
