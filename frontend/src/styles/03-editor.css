@@ -4684,9 +4684,16 @@ button.relation-list-flow-hub-pill[aria-pressed="true"] { box-shadow: 0 0 0 2px 
 /* View controls and page tools share the first row; the editing toolbar
    always takes its own row beneath them, at every width. */
 .editor-action-bar-shell {
-  position: relative;
   flex: 1 0 100%;
   min-width: 0;
+}
+
+/* The shell spans the whole row, so the More menu is positioned against the
+   toolbar's own box; More is its last item. */
+.editor-action-bar-anchor {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
 }
 
 @media (min-width: 721px) and (max-width: 1024px) {
