@@ -1180,6 +1180,32 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
             parent=released_base,
         )
         released_page.current_published_version_id = released.id
+        # An auto-published submission names its closed source draft but
+        # returns the merge commit it made on top of a newer head.
+        source_draft = _version(
+            session,
+            released_page,
+            status="closed",
+            author=owner.id,
+            number=3,
+            parent=released_base,
+        )
+        newer_head = _version(
+            session,
+            released_page,
+            status="superseded_snapshot",
+            author=owner.id,
+            number=4,
+            parent=released_base,
+        )
+        merged = _version(
+            session,
+            released_page,
+            status="superseded_snapshot",
+            author=owner.id,
+            number=5,
+            parent=newer_head,
+        )
         session.flush()
         chat = _Chat(session, workspace, client, owner)
         released_edit = chat.call(
@@ -1198,6 +1224,20 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
             result_detail={
                 "page_id": str(released_page.id),
                 "version_id": str(released.id),
+            },
+            links=(_page_link(released_page, McpChatArtifactVerb.EDITED),),
+        )
+        auto_submit = chat.call(
+            "submit_context_edit_for_review",
+            {
+                "page_id": str(released_page.id),
+                "version_id": str(source_draft.id),
+                "expected_editing_revision": 2,
+                "reason": "done",
+            },
+            result_detail={
+                "page_id": str(released_page.id),
+                "version_id": str(merged.id),
             },
             links=(_page_link(released_page, McpChatArtifactVerb.EDITED),),
         )
@@ -1252,6 +1292,11 @@ def test_session_diff_is_offered_on_submit_and_on_the_open_sessions_last_edit(
     assert (publication_diff.from_version_id, publication_diff.to_version_id) == (
         released_base.id,
         released.id,
+    )
+    auto_diff = _item(owner_detail, auto_submit).session_diff
+    assert (auto_diff.from_version_id, auto_diff.to_version_id) == (
+        newer_head.id,
+        merged.id,
     )
     assert {item.key for item in _item(owner_detail, submit).input_display_items} >= {
         "write_reason"

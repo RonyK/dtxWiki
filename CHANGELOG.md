@@ -23,7 +23,9 @@
   Bringing in a commit the draft already contains saves nothing.
 - An MCP call that names a Context page of another workspace is refused at the
   MCP edge, as REST already does; `patch_context_edit` checks the workspace
-  too. A publication receipt offers the chat's cumulative diff in Chats.
+  too. A publication receipt offers the chat's cumulative diff in Chats, and
+  Chats takes the version a call produced from its receipt, so an
+  auto-published submission diffs the merge commit it returned.
 - Register `context_merge_conflict` and `human_approval_required`. An AI
   approval refusal now reports `human_approval_required` on every surface, and
   a merge target outside the page's history reports `not_found`.

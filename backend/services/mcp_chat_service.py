@@ -40,6 +40,7 @@ from backend.repositories.mcp_chat_projection import (
     ProjectionLink,
     ProjectionPolicy,
     artifact_visible_predicate,
+    edited_version_id,
     load_projection,
 )
 from backend.repositories.mcp_chat_repo import (
@@ -2415,23 +2416,13 @@ def _purge_row(row: MCPToolCall) -> bool:
 
 
 def _edited_version_id(row: MCPToolCall) -> UUID | None:
-    """The Context version a context-edit call wrote into, when recorded.
+    """The Context version a context-edit call produced (its receipt)."""
 
-    Commands that name their editing row take it from the input; create and
-    whole-body update learn it from the response, which capture keeps in
-    ``result_detail``. Calls captured before that existed return ``None``.
-    """
-
-    if row.tool_name not in CONTEXT_EDIT_TOOLS:
-        return None
-    input_summary = row.input_summary if isinstance(row.input_summary, dict) else {}
-    detail = row.result_detail if isinstance(row.result_detail, dict) else {}
-    from_input = (
-        _parse_uuid_value(input_summary.get("version_id"))
-        if row.tool_name in _VERSION_NAMING_EDIT_TOOLS
-        else None
+    return edited_version_id(
+        row,
+        context_edit_tools=CONTEXT_EDIT_TOOLS,
+        version_naming_edit_tools=_VERSION_NAMING_EDIT_TOOLS,
     )
-    return from_input or _parse_uuid_value(detail.get("version_id"))
 
 
 def _parse_uuid_value(value: Any) -> UUID | None:
