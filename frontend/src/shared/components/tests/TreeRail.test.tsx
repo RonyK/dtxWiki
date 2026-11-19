@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { clearTreeFavoriteCache, setTreeFavoriteActor } from "../../api/treeFavorites";
 import type { TreeNodePayload } from "../../api/workspace";
+import { RenameTreeNodeDialog } from "../TreeNodeActionDialogs";
 import { TreeRail } from "../TreeRail";
 
 describe("TreeRail", () => {
@@ -116,26 +117,43 @@ describe("TreeRail", () => {
     await waitFor(() => expect(row).toHaveFocus());
   });
 
-  it("keeps arrow keys and folder toggles inside the favorites tree and refocuses the full tree when its last favorite goes", async () => {
+  it("keeps arrow keys, folder toggles and dialog focus inside the tree that used them, and refocuses the full tree when the last favorite goes", async () => {
     clearTreeFavoriteCache();
     setTreeFavoriteActor("viewer-1");
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
     const onExpandedNodeIdsChange = vi.fn();
-    render(
-      <TreeRail
-        title="Context"
-        favoriteScope={{ actorId: "viewer-1", workspaceId: "workspace-1" }}
-        expandedNodeIds={[]}
-        onExpandedNodeIdsChange={onExpandedNodeIdsChange}
-        nodes={[
-          treeNode({ id: "design", title: "Design", node_kind: "folder", can_have_children: true, children_count: 1 }),
-          treeNode({ id: "rules", title: "Rules", parent_id: "design", target_kind: "context_page",
-            target_id: "rules", is_favorite: true }),
-        ]}
-      />,
-    );
+    function Harness() {
+      const [renaming, setRenaming] = useState<TreeNodePayload | null>(null);
+      return (
+        <>
+          <TreeRail
+            title="Context"
+            favoriteScope={{ actorId: "viewer-1", workspaceId: "workspace-1" }}
+            expandedNodeIds={[]}
+            onExpandedNodeIdsChange={onExpandedNodeIdsChange}
+            onRenameNode={setRenaming}
+            nodes={[
+              treeNode({ id: "design", title: "Design", node_kind: "folder", can_have_children: true, children_count: 1 }),
+              treeNode({ id: "rules", title: "Rules", parent_id: "design", target_kind: "context_page",
+                target_id: "rules", is_favorite: true }),
+            ]}
+          />
+          {renaming ? (
+            <RenameTreeNodeDialog node={renaming} onClose={() => setRenaming(null)} onSubmit={async () => setRenaming(null)} />
+          ) : null}
+        </>
+      );
+    }
+    render(<Harness />);
     const favorites = within(screen.getByRole("tree", { name: "Favorites" }));
     const fullTreeDesign = within(screen.getByRole("tree", { name: "Context" })).getByRole("treeitem", { name: "Design" });
+    // Design is in both trees; a dialog opened from the full tree returns there.
+    act(() => fullTreeDesign.focus());
+    await userEvent.keyboard("{Shift>}{F10}{/Shift}");
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(fullTreeDesign).toHaveFocus());
     const design = favorites.getByRole("treeitem", { name: "Design" });
     act(() => design.focus());
     fireEvent.keyDown(design, { key: "ArrowDown" });

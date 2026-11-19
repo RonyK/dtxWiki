@@ -192,13 +192,20 @@ describe("DeleteTreeNodeDialog", () => {
     }
   });
 
-  it("focuses a remaining row when deleting the node removes its action opener", async () => {
+  it("focuses a remaining row of the opening tree when deleting the node removes its action opener", async () => {
     function Harness() {
       const [dialogOpen, setDialogOpen] = useState(false);
       const [nodePresent, setNodePresent] = useState(true);
       const node = treeNode({ id: "deleted-node", title: "Deleted node" });
       return (
         <div className="tree-rail">
+          {/* Another tree in the same rail (favorites above the full tree)
+              must not take the focus that belongs to the opening tree. */}
+          <div aria-label="Other nodes" role="tree">
+            <div aria-selected="false" data-node-id="other-node" role="treeitem" tabIndex={0}>
+              Other tree row
+            </div>
+          </div>
           <div aria-label="Nodes" role="tree">
             {nodePresent ? (
               <div

@@ -825,23 +825,35 @@ export function TreeRail({
     });
   }
 
-  // Removing a favorite can take its row, or the whole favorites tree, out of
-  // the rail; focus then falls back to the nearest place that still exists.
+  // Where focus goes back after a row menu. Removing a favorite can take its
+  // row, or the whole favorites tree, out of the rail; focus then falls back
+  // to the nearest place that still exists.
+  function menuReturnTarget(rowKey: string, nodeId: string, invoker: HTMLElement | null) {
+    const candidates = [
+      invoker,
+      rowRefs.current.get(rowKey),
+      isFavoriteRowKey(rowKey) ? favoritesToggleRef.current : null,
+      rowRefs.current.get(nodeId),
+      treeListRef.current?.querySelector<HTMLElement>(
+        '[role="treeitem"][tabindex="0"]',
+      ),
+    ];
+    return candidates.find((element) => element?.isConnected) ?? undefined;
+  }
+
   function restoreMenuFocus(rowKey: string, nodeId: string, invoker: HTMLElement | null) {
     window.requestAnimationFrame(() => {
-      const candidates = [
-        invoker,
-        rowRefs.current.get(rowKey),
-        isFavoriteRowKey(rowKey) ? favoritesToggleRef.current : null,
-        rowRefs.current.get(nodeId),
-        treeListRef.current?.querySelector<HTMLElement>(
-          '[role="treeitem"][tabindex="0"]',
-        ),
-      ];
-      tooltip.restoreFocus(
-        candidates.find((element) => element?.isConnected) ?? undefined,
-      );
+      tooltip.restoreFocus(menuReturnTarget(rowKey, nodeId, invoker));
     });
+  }
+
+  // The menu lives in a portal, so an action that opens a dialog first puts
+  // focus back on the row that opened it. The dialog then returns there, in
+  // the same tree, when it closes. No scroll: the rail may have been scrolled
+  // while the menu was open, and the dialog covers it anyway.
+  function handOffMenuFocus(rowKey: string, nodeId: string, invoker: HTMLElement | null) {
+    menuReturnTarget(rowKey, nodeId, invoker)?.focus({ preventScroll: true });
+    tooltip.dismissForActivation();
   }
 
   function handleContextMenuAction(action: TreeNodeContextMenuAction) {
@@ -850,14 +862,17 @@ export function TreeRail({
     contextMenuInvokerRef.current = null;
     setContextMenu(null);
     if (action.type === "new-item") {
+      handOffMenuFocus(rowKey, action.node.id, invoker);
       create.open({ itemType: action.itemType, parentNodeId: action.node.id });
       return;
     }
     if (action.type === "rename") {
+      handOffMenuFocus(rowKey, action.node.id, invoker);
       onRenameNode?.(action.node);
       return;
     }
     if (action.type === "move") {
+      handOffMenuFocus(rowKey, action.node.id, invoker);
       onMoveNode?.(action.node);
       return;
     }
@@ -879,6 +894,7 @@ export function TreeRail({
       return;
     }
     if (action.type === "delete") {
+      handOffMenuFocus(rowKey, action.node.id, invoker);
       onDeleteNode?.(action.node);
       return;
     }
