@@ -1,14 +1,10 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
-import { ApiError } from "../../../shared/api/client";
-import type { ContextMergePreview, PreparedMergeChoice } from "../../../shared/api/pages";
+import type { ContextMergePreview } from "../../../shared/api/pages";
 import { ContextMergeDialog } from "../ContextMergeDialog";
-import { useContextMerge } from "../useContextMerge";
-
-afterEach(() => vi.restoreAllMocks());
 
 vi.mock("../../../shared/api/workspace", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../shared/api/workspace")>(),
@@ -119,79 +115,4 @@ it("offers the two choices, marks combined blocks by code point, and returns the
     bodyMd: null,
     pageMetadata: { title: "Agreed title" },
   }));
-});
-
-it("asks again when the preview changed after the answer, and ends only on an unknown write", async () => {
-  // Git's rules for a merge write: a failure before the write keeps the
-  // person's answer; a result that changed after they answered (here the
-  // overlap is gone) is shown and confirmed again, never written as is; only
-  // a write whose outcome is unknown ends the merge.
-  const user = userEvent.setup();
-  const conflict = conflictPreview();
-  const clean = {
-    ...conflict, kind: "automatic_merge", keep_both: null, latest: null, metadata_conflicts: [],
-    result: { ...conflict.latest!, conflicts: [], result_hash: "f".repeat(64) },
-  } as ContextMergePreview;
-  const edited = { ...conflict, result: { ...conflict.keep_both!, result_hash: "e".repeat(64) } };
-  vi.spyOn(globalThis, "fetch")
-    .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ data: edited }), {
-      status: 200, headers: { "Content-Type": "application/json" },
-    }));
-  const loadPreview = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce(clean);
-  const unknown = new TypeError("Failed to fetch");
-  const write = vi.fn<(choice: PreparedMergeChoice) => Promise<string>>()
-    .mockRejectedValueOnce(new ApiError(409, { error_code: "stale_base_version", message: "stale", request_id: "r1", warnings: [] }))
-    .mockRejectedValueOnce(unknown);
-  let outcome: Promise<unknown> = Promise.resolve();
-  function Publish() {
-    const merge = useContextMerge();
-    return (
-      <>
-        <button type="button" onClick={() => {
-          outcome = merge.runMergeWrite({
-            kind: "publish", workspaceId: "ws-1", pageId: "page-1", errorMessage: () => "Could not combine.",
-            loadPreview, write,
-          }).catch((error: unknown) => error);
-        }}>Publish</button>
-        {merge.dialog}
-      </>
-    );
-  }
-  render(<MemoryRouter><Publish /></MemoryRouter>);
-  await user.click(screen.getByRole("button", { name: "Publish" }));
-  let dialog = await screen.findByRole("dialog", { name: "Combine changes" });
-  await user.click(within(dialog).getByRole("radio", { name: /Keep both changes/ }));
-  await user.click(within(within(dialog).getByRole("radiogroup", { name: "Title" })).getByRole("radio", { name: "Edit myself" }));
-  const title = within(dialog).getByRole("textbox", { name: "Title" });
-  await user.clear(title);
-  await user.type(title, "Agreed title");
-  const confirm = () => within(dialog).getByRole("button", { name: "Combine with this result" });
-
-  // Preparing the edited result failed before any write: the answer stays.
-  await user.click(confirm());
-  expect(await within(dialog).findByText("Could not combine.")).toBeInTheDocument();
-  expect(within(dialog).getByRole("textbox", { name: "Title" })).toHaveValue("Agreed title");
-  expect(write).not.toHaveBeenCalled();
-
-  // The answer was out of date and the newer preview no longer overlaps: it
-  // is shown to confirm again, not written.
-  await user.click(confirm());
-  dialog = await screen.findByRole("dialog", { name: "Combine changes" });
-  expect(await within(dialog).findByText(/Nothing overlaps any more/)).toBeInTheDocument();
-  expect(within(dialog).queryByRole("radio", { name: /Keep both changes/ })).toBeNull();
-  expect(write).toHaveBeenCalledTimes(1);
-  expect(write.mock.calls[0][0]).toMatchObject({
-    source: "chosen", on_conflict: "keep_both", result_hash: "e".repeat(64),
-    result_page_metadata: { title: "Agreed title" },
-  });
-
-  // The clean result, confirmed, is written; its outcome is unknown, so the
-  // merge ends and the caller recovers.
-  await user.click(confirm());
-  expect(await outcome).toBe(unknown);
-  expect(screen.queryByRole("dialog", { name: "Combine changes" })).toBeNull();
-  expect(write).toHaveBeenCalledTimes(2);
-  expect(write.mock.calls[1][0]).toMatchObject({ source: "chosen", result_hash: "f".repeat(64) });
-  expect(write.mock.calls[1][0]).not.toHaveProperty("on_conflict");
 });

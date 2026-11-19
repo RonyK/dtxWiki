@@ -374,7 +374,6 @@
     "summary_other": "이 초안({{name}} · {{time}} 저장)이 게시본{{version}}과 {{count}}곳에서 겹칩니다.",
     "summarySave_one": "{{name}}님이 {{time}} 저장한 내용과 내 변경이 {{count}}곳에서 겹칩니다.",
     "summarySave_other": "{{name}}님이 {{time}} 저장한 내용과 내 변경이 {{count}}곳에서 겹칩니다.",
-    "summaryClean": "새로 저장된 내용으로 겹치는 곳이 없어졌습니다. 합친 결과를 확인한 뒤 확정하세요.",
     "someone": "다른 사람",
     "sides": {
       "mine": "내 변경",

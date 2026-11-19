@@ -101,7 +101,6 @@ import {
   newIdempotencyKey,
   PageEditingUnavailableError,
   contextMergeConflictOf,
-  ContextMergePreviewChanged,
   draftBaseSnapshotOf,
   executePreparedPagePublication,
   previewPageMerge,
@@ -808,7 +807,6 @@ export function PageEditor({
       workspaceId: workspace,
       pageId: id,
       publishedVersionNumber: page?.published_version_no ?? null,
-      errorMessage: (cause) => apiErrorMessage(cause, t("editor.publishFailed")),
       loadPreview: () => previewPageMerge(workspace, id, versionId, { signal: options.signal }),
       write: publish,
     });
@@ -3675,38 +3673,25 @@ export function PageEditor({
   }
 
   // Asks how to combine an overlapping save. The chosen result becomes the
-  // editor's text, rebased onto the server draft the merge used, and the
-  // ordinary save writes it -- so every save rule applies to it too. Text that
-  // changed while the dialog was open is saved instead of being replaced, and
-  // a save that overlaps again shows the newer choices in the same dialog.
-  function askToCombine(first: ContextMergeConflict) {
+  // editor's text, based on the server draft the merge used, and the ordinary
+  // save writes it; if that save overlaps again, the newer choices are asked.
+  function askToCombine(overlap: ContextMergeConflict, refreshed = false) {
     const pageId = pageIdRef.current ?? page?.id;
     if (!workspaceId || !pageId) return;
-    let overlap = first;
-    let seen = editorRevisionRef.current;
     merge.resolveConflict({
       kind: "save",
       workspaceId,
       pageId,
       preview: overlap.merge_preview,
-      errorMessage: (cause) => apiErrorMessage(cause, t("editor.saveFailed")),
+      refreshed,
       async apply(resolution) {
-        let draft: DraftSnapshot | undefined;
-        if (!hasInputSince(seen)) {
-          const result = resolvedMergeResult(resolution);
-          const content = editorContentOf({ ...result.page_metadata, id: pageId, slug: pageSlug, body_md: result.body_md }, contextTree);
-          showEditorContent(content);
-          markDraftMutation();
-          rebaseOntoServerDraft(overlap);
-          draft = content.draft;
-        }
-        // The newer choices hold the text this save sends, not text that
-        // arrives while it is in flight.
-        seen = editorRevisionRef.current;
-        const next = await saveRef.current({ source: "manual", draft, resolveConflict: true });
-        if (!next) return;
-        overlap = next;
-        throw new ContextMergePreviewChanged(next.merge_preview);
+        const result = resolvedMergeResult(resolution);
+        const content = editorContentOf({ ...result.page_metadata, id: pageId, slug: pageSlug, body_md: result.body_md }, contextTree);
+        showEditorContent(content);
+        markDraftMutation();
+        rebaseOntoServerDraft(overlap);
+        const next = await saveRef.current({ source: "manual", draft: content.draft, resolveConflict: true });
+        if (next) askToCombine(next, true);
       },
     });
   }

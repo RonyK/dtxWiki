@@ -2516,8 +2516,10 @@ describe("PageEditor", () => {
     await typist().click(within(dialog).getByRole("radio", { name: /Keep both changes/ }));
     await typist().click(within(dialog).getByRole("button", { name: "Combine with this result" }));
 
+    // The save overlapped again: as in git, the newer overlap is a new question.
     dialog = await screen.findByRole("dialog", { name: "Combine changes" });
     expect(await within(dialog).findByText("The content changed, so the preview was refreshed")).toBeInTheDocument();
+    await typist().click(within(dialog).getByRole("radio", { name: /Keep both changes/ }));
     await typist().click(within(dialog).getByRole("button", { name: "Combine with this result" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Combine changes" })).toBeNull());
 

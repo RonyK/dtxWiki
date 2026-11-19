@@ -74,13 +74,17 @@ export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onC
         workspaceId,
         pageId: detail.id,
         publishedVersionNumber: detail.published_version_info?.version_no ?? null,
-        errorMessage: failure,
         loadPreview: () => previewPageMerge(workspaceId, detail.id, draftVersionId),
         write: (choice) => bringInPageVersion(workspaceId, detail.id, draftVersionId, choice),
       });
       await onChanged();
     } catch (error) {
-      if (!isAbortError(error)) setActionError(failure(error));
+      if (isAbortError(error)) return;
+      // Refused or unknown: say so and show the draft as it is now. If the
+      // write did land, the refreshed draft shows it; trying again is bound
+      // to the new state, so it is never applied twice.
+      setActionError(failure(error));
+      await onChanged();
     } finally {
       setAction(null);
     }

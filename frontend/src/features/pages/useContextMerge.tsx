@@ -1,9 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiError } from "../../shared/api/client";
 import {
   cleanMergeChoice,
-  ContextMergePreviewChanged,
   prepareMergeChoice,
   type ContextMergePreview,
   type PreparedMergeChoice,
@@ -16,184 +14,135 @@ type MergeTarget = {
   workspaceId: string;
   pageId: string;
   publishedVersionNumber?: number | null;
-  errorMessage: (error: unknown) => string;
 };
 
-/** One merge, from its first preview until it is written, failed or closed. */
-type MergeSession = MergeTarget & {
-  /** Writes a merge that needed no choice. */
-  writeClean?: (preview: ContextMergePreview) => Promise<void>;
-  /** Writes the person's answer to the preview they saw. */
-  writeChosen: (resolution: ContextMergeResolution, preview: ContextMergePreview) => Promise<void>;
-  /** A newer preview, after the server refused a write as stale. */
-  reload?: () => Promise<ContextMergePreview>;
-  /** Ends the caller's wait with an error (an AbortError when closed). */
-  fail: (error: unknown) => void;
-};
+/** The merge in progress, from the click until it is written, failed or closed. */
+type Merge = { cancel: () => void };
 
-type MergeView = {
-  session: MergeSession;
+/** A conflict shown to the person; confirming writes their answer. */
+type MergeAsk = MergeTarget & {
   preview: ContextMergePreview;
   refreshed: boolean;
-  busy: boolean;
-  error: string | null;
+  write: (resolution: ContextMergeResolution) => Promise<void>;
 };
-
-const STALE_CODES = new Set(["stale_base_version", "context_merge_conflict", "editing_revision_conflict"]);
-
-function isStale(error: unknown) {
-  return error instanceof ApiError && error.status === 409 && STALE_CODES.has(error.body.error_code);
-}
-
-/** The server answered and refused: nothing was written. */
-function isRefused(error: unknown) {
-  return error instanceof ApiError && error.status >= 400 && error.status < 500;
-}
-
-/** A write was sent and its outcome is unknown: only its caller can recover. */
-class MergeOutcomeUnknown extends Error {
-  constructor(readonly cause: unknown) {
-    super("The merge write's outcome is unknown");
-  }
-}
 
 function mergeClosed() {
   return new DOMException("Merge closed", "AbortError");
 }
 
 /**
- * The merge flow every caller shares: a clean merge writes at once, a conflict
- * asks the person with the two choices, and a stale write shows the newer
- * preview instead of overwriting what changed. One merge runs at a time; a
- * merge that was closed or replaced never shows or writes anything later.
- * Callers supply only how they write (publish, approve, bring in) or apply
- * (the editor's own save).
+ * The merge flow every caller shares, with git's rules. A clean merge is
+ * written at once; a conflict is resolved by the person, then written. A
+ * write the server refuses (the draft or the other side moved) or that fails
+ * ends the merge with its error: the caller shows it, and doing it again
+ * starts from a fresh preview -- as a rejected push is pulled and pushed
+ * again. One merge runs at a time, and a closed one writes nothing.
  */
 export function useContextMerge() {
-  const [view, setView] = useState<MergeView | null>(null);
-  const sessionRef = useRef<MergeSession | null>(null);
+  const [ask, setAsk] = useState<MergeAsk | null>(null);
+  const [busy, setBusy] = useState(false);
+  const currentRef = useRef<Merge | null>(null);
 
-  const finish = useCallback((session: MergeSession, error?: unknown) => {
-    if (sessionRef.current !== session) return;
-    sessionRef.current = null;
-    setView(null);
-    if (error !== undefined) session.fail(error);
+  const end = useCallback((merge: Merge) => {
+    if (currentRef.current !== merge) return false;
+    currentRef.current = null;
+    setAsk(null);
+    setBusy(false);
+    return true;
   }, []);
-
-  const start = useCallback((session: MergeSession) => {
-    const previous = sessionRef.current;
-    sessionRef.current = session;
-    setView(null);
-    previous?.fail(mergeClosed());
-  }, []);
-
-  // The one transition, with git's rules. A conflicting preview is shown
-  // until the person answers; a clean one is written without a question.
-  // Once the person has answered, a changed preview is never written as is:
-  // it is shown again (clean or conflicting) and confirmed again. A stale
-  // clean write is retried only when the newer preview needs a choice, so a
-  // write whose own pins are out of date never repeats. Only a write whose
-  // outcome is unknown ends the merge for its caller to recover; a failure
-  // before the write, or a write the server refused, stays in the dialog with
-  // the person's answer.
-  const settle = useCallback(async function settle(
-    session: MergeSession,
-    preview: ContextMergePreview,
-    refreshed: boolean,
-    resolution?: ContextMergeResolution,
-  ): Promise<void> {
-    if (sessionRef.current !== session) return;
-    const asking = preview.kind === "conflict" || refreshed;
-    if (asking) setView({ session, preview, refreshed, busy: Boolean(resolution), error: null });
-    if (asking && !resolution) return;
-    try {
-      await (resolution ? session.writeChosen(resolution, preview) : session.writeClean?.(preview));
-      finish(session);
-    } catch (error) {
-      if (sessionRef.current !== session) return;
-      try {
-        if (error instanceof MergeOutcomeUnknown) throw error;
-        const newer = error instanceof ContextMergePreviewChanged ? error.preview
-          : isStale(error) && session.reload ? await session.reload() : null;
-        if (!newer || (!resolution && newer.kind !== "conflict")) throw error;
-        await settle(session, newer, true);
-      } catch (failure) {
-        if (sessionRef.current !== session) return;
-        if (asking && !(failure instanceof MergeOutcomeUnknown)) {
-          setView({ session, preview, refreshed, busy: false, error: session.errorMessage(failure) });
-        } else {
-          finish(session, failure instanceof MergeOutcomeUnknown ? failure.cause : failure);
-        }
-      }
-    }
-  }, [finish]);
 
   const close = useCallback(() => {
-    const session = sessionRef.current;
-    if (session) finish(session, mergeClosed());
-  }, [finish]);
+    const merge = currentRef.current;
+    if (merge && end(merge)) merge.cancel();
+  }, [end]);
+
+  const begin = useCallback((merge: Merge) => {
+    close();
+    currentRef.current = merge;
+  }, [close]);
+
+  // Leaving the screen closes its merge: nothing is written after it is gone.
+  useEffect(() => close, [close]);
 
   /**
    * Publish, approve or bring in. Resolves with the write's result; rejects
-   * with an AbortError when the person closes the dialog.
+   * with its error, or with an AbortError when the person closes the dialog.
    */
   const runMergeWrite = useCallback(<T,>(target: MergeTarget & {
     loadPreview: () => Promise<ContextMergePreview>;
     write: (choice: PreparedMergeChoice) => Promise<T>;
   }) => new Promise<T>((resolve, reject) => {
-    // The one place a merge write is sent. Nothing is written for a merge
-    // that was closed or replaced meanwhile; a write the server did not
-    // answer with a refusal has an unknown outcome.
+    const merge: Merge = { cancel: () => reject(mergeClosed()) };
+    begin(merge);
+    const fail = (error: unknown) => {
+      if (end(merge)) reject(error);
+    };
     const commit = async (choice: PreparedMergeChoice) => {
-      if (sessionRef.current !== session) return;
-      let result: T;
+      if (currentRef.current !== merge) return;
       try {
-        result = await target.write(choice);
+        const result = await target.write(choice);
+        if (end(merge)) resolve(result);
       } catch (error) {
-        throw isRefused(error) ? error : new MergeOutcomeUnknown(error);
+        fail(error);
       }
-      resolve(result);
     };
-    const session: MergeSession = {
-      ...target,
-      reload: target.loadPreview,
-      fail: reject,
-      writeClean: (preview) => commit(cleanMergeChoice(preview)),
-      writeChosen: async (resolution, preview) => commit(await prepareMergeChoice(
-        target.workspaceId, target.pageId, preview,
-        { onConflict: resolution.choice, bodyMd: resolution.bodyMd, pageMetadata: resolution.pageMetadata },
-      )),
-    };
-    start(session);
-    target.loadPreview().then((preview) => settle(session, preview, false), (error) => finish(session, error));
-  }), [finish, settle, start]);
+    target.loadPreview().then((preview) => {
+      if (currentRef.current !== merge) return;
+      if (preview.kind !== "conflict") return commit(cleanMergeChoice(preview));
+      setAsk({
+        ...target,
+        preview,
+        refreshed: false,
+        async write(resolution) {
+          let choice: PreparedMergeChoice;
+          try {
+            choice = await prepareMergeChoice(target.workspaceId, target.pageId, preview, {
+              onConflict: resolution.choice,
+              bodyMd: resolution.bodyMd,
+              pageMetadata: resolution.pageMetadata,
+            });
+          } catch (error) {
+            fail(error);
+            return;
+          }
+          await commit(choice);
+        },
+      });
+    }, fail);
+  }), [begin, end]);
 
-  /**
-   * The editor's own save overlapped another save: ask, and let the editor
-   * apply the answer. `apply` throws ContextMergePreviewChanged when its save
-   * overlaps again, so the same dialog shows the newer choices.
-   */
+  /** The editor's own save overlapped another save: ask, and let the editor apply the answer. */
   const resolveConflict = useCallback((target: MergeTarget & {
     preview: ContextMergePreview;
+    refreshed?: boolean;
     apply: (resolution: ContextMergeResolution) => Promise<void>;
   }) => {
-    const session: MergeSession = { ...target, fail: () => {}, writeChosen: target.apply };
-    start(session);
-    void settle(session, target.preview, false);
-  }, [settle, start]);
+    const merge: Merge = { cancel: () => {} };
+    begin(merge);
+    setAsk({
+      ...target,
+      refreshed: target.refreshed ?? false,
+      async write(resolution) {
+        end(merge);
+        await target.apply(resolution);
+      },
+    });
+  }, [begin, end]);
 
-  const dialog = view ? (
+  const dialog = ask ? (
     <ContextMergeDialog
-      busy={view.busy}
-      error={view.error}
-      kind={view.session.kind}
+      busy={busy}
+      kind={ask.kind}
       onClose={close}
-      onConfirm={(resolution) => void settle(view.session, view.preview, view.refreshed, resolution)}
-      pageId={view.session.pageId}
-      preview={view.preview}
-      publishedVersionNumber={view.session.publishedVersionNumber}
-      refreshed={view.refreshed}
-      workspaceId={view.session.workspaceId}
+      onConfirm={(resolution) => {
+        setBusy(true);
+        void ask.write(resolution);
+      }}
+      pageId={ask.pageId}
+      preview={ask.preview}
+      publishedVersionNumber={ask.publishedVersionNumber}
+      refreshed={ask.refreshed}
+      workspaceId={ask.workspaceId}
     />
   ) : null;
   return { dialog, runMergeWrite, resolveConflict, close };

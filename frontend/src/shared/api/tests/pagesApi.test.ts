@@ -220,9 +220,8 @@ describe("pages api", () => {
   });
 
   it("publishes the previewed result with revision, head and hash checks", async () => {
-    let edited: ContextMergePreview | null = null;
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(
-      JSON.stringify({ data: String(input).endsWith("/merge-preview") ? edited : pageDetail({ version_id: "v2", parent_version_id: "v1" }) }),
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ data: pageDetail({ version_id: "v2", parent_version_id: "v1" }) }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     ));
     const preview = {
@@ -253,17 +252,6 @@ describe("pages api", () => {
     expect(sent(1)).toEqual({
       ...pins, expected_content_hash: "d".repeat(64), expected_references_hash: "e".repeat(64),
       on_conflict: "latest", result_hash: "f".repeat(64),
-    });
-
-    // A clean result confirmed with an edit (no choice) is hashed by the
-    // server without a choice, and published without one.
-    edited = { ...preview, result: { ...(preview.result as object), result_hash: "9".repeat(64) } } as ContextMergePreview;
-    const confirmed = await prepareMergeChoice(WORKSPACE_ID, "p1", preview, { onConflict: null, bodyMd: "# Edited" });
-    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({ version_id: "v2", commit_version_id: "v1", body_md: "# Edited" });
-    await publish(confirmed);
-    expect(sent(3)).toEqual({
-      ...pins, expected_content_hash: "d".repeat(64), expected_references_hash: "e".repeat(64),
-      result_hash: "9".repeat(64), result_body_md: "# Edited",
     });
   });
 

@@ -353,11 +353,9 @@ export function contextMergeConflictOf(error: unknown): ContextMergeConflict | n
 
 /** The preview changed between what the person saw and the confirm. */
 export class ContextMergePreviewChanged extends Error {
-  preview: ContextMergePreview;
-  constructor(preview: ContextMergePreview) {
-    super("The content changed; review the new preview.");
+  constructor() {
+    super("The content changed; try again with the new preview.");
     this.name = "ContextMergePreviewChanged";
-    this.preview = preview;
   }
 }
 
@@ -416,25 +414,23 @@ export function cleanMergeChoice(preview: ContextMergePreview): PreparedMergeCho
 }
 
 /**
- * Binds the result a person confirmed -- one of the two choices, or a clean
- * result (no choice) -- and its optional edits to the preview they saw. An
+ * Binds a person's choice (and optional edits) to the preview they saw. An
  * edited result is hashed by the server; if the draft or the other side moved
- * meanwhile, the caller gets the new preview instead of a silent overwrite.
+ * meanwhile, it is refused with an error instead of overwriting the change.
  */
 export async function prepareMergeChoice(workspaceId: string, id: string, preview: ContextMergePreview,
-  choice: { onConflict: ContextMergeChoiceValue | null; bodyMd?: string | null; pageMetadata?: ContextMergeMetadataInput | null },
+  choice: { onConflict: ContextMergeChoiceValue; bodyMd?: string | null; pageMetadata?: ContextMergeMetadataInput | null },
   options: { signal?: AbortSignal } = {}): Promise<PreparedMergeChoice> {
   const edits = {
     ...(choice.bodyMd != null ? { bodyMd: choice.bodyMd } : {}),
     ...(choice.pageMetadata != null ? { pageMetadata: choice.pageMetadata } : {}),
   };
-  const onConflict = choice.onConflict ?? undefined;
-  let resultHash = (onConflict ? preview[onConflict] : preview.result)?.result_hash;
+  let resultHash = preview[choice.onConflict]?.result_hash;
   if (Object.keys(edits).length > 0 || !resultHash) {
     const target = { signal: options.signal, commitVersionId: preview.target_version_id };
-    const checked = await previewPageMerge(workspaceId, id, preview.version_id, { ...target, onConflict, ...edits });
+    const checked = await previewPageMerge(workspaceId, id, preview.version_id, { ...target, onConflict: choice.onConflict, ...edits });
     if (checked.editing_revision !== preview.editing_revision || checked.target_version_id !== preview.target_version_id || !checked.result) {
-      throw new ContextMergePreviewChanged(await previewPageMerge(workspaceId, id, preview.version_id, target));
+      throw new ContextMergePreviewChanged();
     }
     resultHash = checked.result.result_hash;
   }
@@ -442,7 +438,7 @@ export async function prepareMergeChoice(workspaceId: string, id: string, previe
     source: "chosen",
     preview: previewPins(preview),
     result_hash: resultHash,
-    ...(onConflict ? { on_conflict: onConflict } : {}),
+    on_conflict: choice.onConflict,
     ...(choice.bodyMd != null ? { result_body_md: choice.bodyMd } : {}),
     ...(choice.pageMetadata != null ? { result_page_metadata: choice.pageMetadata } : {}),
   };

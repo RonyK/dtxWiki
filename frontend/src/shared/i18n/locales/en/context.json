@@ -374,7 +374,6 @@
     "summary_other": "This draft ({{name}}, saved {{time}}) overlaps the published version {{version}} in {{count}} places.",
     "summarySave_one": "Your changes overlap what {{name}} saved {{time}} in {{count}} place.",
     "summarySave_other": "Your changes overlap what {{name}} saved {{time}} in {{count}} places.",
-    "summaryClean": "Nothing overlaps any more: a newer save resolved it. Review the combined result, then confirm.",
     "someone": "someone",
     "sides": {
       "mine": "My changes",

@@ -1190,19 +1190,22 @@ export function ReviewScreen() {
   // decision to the merge preview the approver saw.
   function approveContext(target: { pageId: string; versionId: string }) {
     const workspaceId = state?.workspaceId;
-    if (!workspaceId) return Promise.resolve<DecisionResult>("failed");
+    const reviewId = reviewForCurrentParam()?.id;
+    if (!workspaceId || !reviewId) return Promise.resolve<DecisionResult>("failed");
+    // The review is reserved from the click: no other decision on it while
+    // its merge preview loads or its dialog is open.
+    setBusyId(reviewId);
     return merge.runMergeWrite({
       kind: "publish",
       workspaceId,
       pageId: target.pageId,
-      errorMessage: (cause) => reviewErrorMessage(cause, t("errors.decide")),
       loadPreview: () => previewPageMerge(workspaceId, target.pageId, target.versionId),
       write: async (choice) => {
         const result = await runDecision("approve", undefined, undefined, null, decisionPins(choice));
         if (result === "failed") throw new Error(t("errors.decide"));
         return result;
       },
-    });
+    }).finally(() => setBusyId((current) => current === reviewId ? null : current));
   }
 
   async function submitDecision(decision: ReviewDecisionType, expectedImpactFingerprint?: string | null): Promise<DecisionResult> {

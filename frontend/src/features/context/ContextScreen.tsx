@@ -1871,7 +1871,6 @@ function PendingDraftReview({
           kind: "publish",
           workspaceId,
           pageId: target.pageId,
-          errorMessage: () => t("pendingReview.approveError"),
           loadPreview: () => previewPageMerge(workspaceId, target.pageId, target.versionId),
           write: (choice) => send(decisionPins(choice)),
         })

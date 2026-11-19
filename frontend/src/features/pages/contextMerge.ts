@@ -15,8 +15,7 @@ export type ContextMergeMetadataField = "title" | "page_type" | "placement_paren
 export type ContextMergeMetadataEdit = Pick<ContextMergeMetadataInput, ContextMergeMetadataField>;
 
 export type ContextMergeResolution = {
-  /** Null when the merge needed no choice (a clean result shown again). */
-  choice: ContextMergeChoice | null;
+  choice: ContextMergeChoice;
   candidate: ContextMergeCandidate;
   /** Null when the person kept the merge module's text as it is. */
   bodyMd: string | null;
