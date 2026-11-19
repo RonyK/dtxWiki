@@ -7,7 +7,6 @@ from the ordinary reader's current head.
 
 from __future__ import annotations
 
-import json
 import logging
 from uuid import UUID
 
@@ -33,6 +32,10 @@ from backend.services.actor_visible_read import (
     library_item_visible,
 )
 from backend.services.context_lifecycle import is_publishable_draft
+from backend.services.context_version_refs import (
+    referenced_context_version_id,
+    version_id_from_ref,
+)
 from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.workspace_urls import (
     agent_page_url,
@@ -40,7 +43,6 @@ from backend.services.workspace_urls import (
     library_item_url,
 )
 from backend.utils.page_frontmatter import parse_page_frontmatter
-from backend.utils.uuid import parse_uuid_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -48,24 +50,9 @@ logger = logging.getLogger(__name__)
 def operation_version_id(operation: ChangeOperation, kind: str) -> UUID | None:
     if operation.target_type == f"{kind}_version":
         return operation.target_id
-    prefix = f"{kind}_version:"
-    if operation.diff_ref and operation.diff_ref.startswith(prefix):
-        return parse_uuid_or_none(operation.diff_ref[len(prefix) :])
-    if (
-        kind == "context_page"
-        and operation.operation == "inline_comment"
-        and operation.diff_ref
-    ):
-        try:
-            anchor = json.loads(operation.diff_ref)
-        except (ValueError, TypeError):
-            return None
-        if (
-            isinstance(anchor, dict)
-            and anchor.get("kind") == "page_inline_comment_anchor"
-        ):
-            return parse_uuid_or_none(anchor.get("version_id"))
-    return None
+    if kind == "context_page":
+        return referenced_context_version_id(operation.diff_ref)
+    return version_id_from_ref(operation.diff_ref, f"{kind}_version:")
 
 
 def project_review_target(

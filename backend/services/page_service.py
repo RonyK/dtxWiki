@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -99,7 +100,13 @@ from backend.services.context_media_legacy_cutover import (
 )
 from backend.services.context_push import target_ids_for_operations
 from backend.services.context_review_disposition import (
+    OPEN_CONTEXT_REVIEW_STATUSES,
     context_version_review_metadata,
+    select_context_version_reviews,
+)
+from backend.services.context_version_refs import (
+    context_version_ref,
+    inline_comment_anchor,
 )
 from backend.services.context_version_storage import ContextStorageServiceError
 from backend.services.context_visibility import (
@@ -276,10 +283,16 @@ class PageConflictError(PageServiceError):
         *,
         no_open_edit: bool = False,
         error_code: str | None = None,
+        server_snapshot: dict | None = None,
+        merge_preview: dict | None = None,
     ) -> None:
         self.error_code = error_code or (
             "no_open_edit" if no_open_edit else "stale_base_version"
         )
+        # A browser save that conflicts with the server draft: the draft the
+        # merge used (resend it as base_snapshot to confirm) and both choices.
+        self.server_snapshot = server_snapshot
+        self.merge_preview = merge_preview
         super().__init__(self.error_code.replace("_", " "))
         self.server_version_id = server_version_id
         self.server_content_hash = server_content_hash
@@ -1174,15 +1187,19 @@ class PageService:
         body_md: str | None = None,
         page_metadata: dict | None = None,
         commit_version_id: UUID | None = None,
+        rest: bool = False,
     ) -> dict:
         """The merge of a commit into this version, without saving.
 
         The target defaults to the current published version, which is what
         publication merges; a named commit is what bring-in would merge.
+        `rest` selects the REST projection (both sides, choices only for a
+        conflict); MCP keeps its own wire shape.
         """
         from dataclasses import replace
 
         from backend.services.context_draft_workflow import preview_merge
+        from backend.services.document_references import document_references_hash
 
         with self.session_factory() as session:
             page = context_page_repo.get_page_by_id(session, page_id)
@@ -1214,8 +1231,18 @@ class PageService:
                 ),
             )
             edited = body_md is not None or page_metadata is not None
+
+            def project(value):
+                if not rest:
+                    return value.payload()
+                return value.rest_payload(
+                    page.id,
+                    content_hash=version.content_hash,
+                    references_hash=document_references_hash(session, version),
+                )
+
             if on_conflict is None and not edited:
-                return preview.payload()
+                return project(preview)
             # `result` is what publication would publish for the same choice
             # and edits.
             chosen = preview.choose(on_conflict)
@@ -1239,9 +1266,9 @@ class PageService:
             conflict_bodies["result"] = conflict_bodies.get(
                 on_conflict or "result", chosen.body_md
             )
-            return replace(
-                preview, clean=chosen, conflict_bodies=conflict_bodies
-            ).payload()
+            return project(
+                replace(preview, clean=chosen, conflict_bodies=conflict_bodies)
+            )
 
     def bring_in_context_version(
         self,
@@ -1255,14 +1282,24 @@ class PageService:
         actor_provenance: str,
         commit_version_id: UUID | None = None,
         on_conflict: str | None = None,
+        result_hash: str | None = None,
+        result_body_md: str | None = None,
+        result_page_metadata: dict | None = None,
         retry_only: bool = False,
     ) -> PagePayload:
+        """Merge a commit (default: the published version) into a draft.
+
+        With `result_hash` the write is bound to the preview the caller saw:
+        the draft revision, the named commit and the chosen (optionally
+        edited) result must all still match, as for publication.
+        """
         from backend.services.context_draft_workflow import (
             history_for,
             merge_draft_references,
+            merge_write_candidate,
             metadata_dict,
+            metadata_for,
             parents_for,
-            preview_merge,
             record_draft_save,
             set_parents,
         )
@@ -1286,11 +1323,19 @@ class PageService:
                         error_code="editing_revision_conflict",
                     )
                 target_id = commit_version_id or page.current_published_version_id
-                preview = preview_merge(
+                preview, candidate = merge_write_candidate(
                     session,
                     page,
                     version,
+                    SimpleNamespace(
+                        expected_editing_revision=expected_editing_revision,
+                        result_hash=result_hash,
+                        on_conflict=on_conflict,
+                        result_body_md=result_body_md,
+                        result_page_metadata=result_page_metadata,
+                    ),
                     commit_version_id=target_id,
+                    expected_target=commit_version_id,
                     prepare=lambda candidate: self._prepare_merge_candidate(
                         session,
                         page,
@@ -1301,35 +1346,41 @@ class PageService:
                         actor_provenance,
                     ),
                 )
-                # The draft already contains the target (or there is none):
-                # nothing to merge, so nothing is saved.
-                if preview.kind == "fast_forward":
+                if (
+                    preview.kind == "fast_forward"
+                    and candidate.body_md == version.body_md
+                    and candidate.metadata == metadata_for(page, version)
+                ):
                     return self._payload_from_page(session, page, version)
-                candidate = preview.choose(on_conflict)
-                target = self._require_page_version(session, page, target_id)
+                target = (
+                    self._require_page_version(session, page, target_id)
+                    if target_id
+                    else None
+                )
                 version.body_md, version.block_map = (
                     candidate.body_md,
                     candidate.block_map,
                 )
                 version.content_hash = content_hash(candidate.body_md)
                 version.page_metadata = metadata_dict(candidate.metadata)
-                merge_draft_references(
-                    session,
-                    source=version,
-                    head=target,
-                    target=version,
-                    self_origins=self.body_preparer.self_origins,
-                )
-                history, _ = history_for(session, page)
-                parents = list(parents_for(session, version))
-                parents = parents[:1] + [
-                    key
-                    for key in parents[1:]
-                    if not history.is_ancestor(key, target_id)
-                ]
-                if target_id not in parents:
-                    parents.append(target_id)
-                set_parents(session, version, parents)
+                if preview.kind != "fast_forward" and target is not None:
+                    merge_draft_references(
+                        session,
+                        source=version,
+                        head=target,
+                        target=version,
+                        self_origins=self.body_preparer.self_origins,
+                    )
+                    history, _ = history_for(session, page)
+                    parents = list(parents_for(session, version))
+                    parents = parents[:1] + [
+                        key
+                        for key in parents[1:]
+                        if not history.is_ancestor(key, target_id)
+                    ]
+                    if target_id not in parents:
+                        parents.append(target_id)
+                    set_parents(session, version, parents)
                 version.editing_revision += 1
                 version.last_saved_at = utc_now()
                 record_draft_save(
@@ -1362,6 +1413,9 @@ class PageService:
                         "expected_editing_revision": expected_editing_revision,
                         "commit_version_id": commit_version_id,
                         "on_conflict": on_conflict,
+                        "result_hash": result_hash,
+                        "result_body_md": result_body_md,
+                        "result_page_metadata": result_page_metadata,
                     }
                 ),
                 result_model=PagePayload,
@@ -1652,7 +1706,7 @@ class PageService:
                     from backend.schemas.context_write import ReviewDecisionRequest
                     from backend.services.context_draft_workflow import (
                         direct_publication_risk,
-                        publication_candidate,
+                        merge_write_candidate,
                     )
                     from backend.services.review_risk_policy import (
                         ai_writes_require_human_review,
@@ -1671,7 +1725,7 @@ class PageService:
                         result_page_metadata=result_page_metadata,
                     )
                     policy_workspace = self._workspace_for(session, page.workspace_id)
-                    _, candidate = publication_candidate(
+                    _, candidate = merge_write_candidate(
                         session,
                         page,
                         staged,
@@ -3927,10 +3981,14 @@ class PageService:
 
         from backend.app.context_version_storage import build_context_merger
         from backend.services.context_draft_workflow import (
+            DraftMergePreview,
+            merge_side,
             metadata_dict,
             metadata_for,
+            parents_for,
             snapshot,
         )
+        from backend.services.document_references import document_references_hash
 
         target_id = (
             version_id or editing_version_id or session_version_id or base_version_id
@@ -4047,11 +4105,58 @@ class PageService:
                         else outcome.clean
                     )
                     if candidate is None:
+                        # The person settles this in the browser: send both
+                        # choices and the server draft they were computed
+                        # against, so confirming is an ordinary save on it.
+                        theirs = snapshot(page, current)
+                        conflict = DraftMergePreview(
+                            current.id,
+                            current.editing_revision,
+                            page.current_published_version_id,
+                            parents_for(session, current),
+                            "conflict",
+                            None,
+                            outcome.keep_both,
+                            outcome.latest,
+                            metadata_conflicts=outcome.metadata_conflicts,
+                            base_conflicted=outcome.base_conflicted,
+                            latest_side="ours",
+                            target_version_id=current.id,
+                            sides={
+                                "ours": merge_side(
+                                    current,
+                                    ours,
+                                    saved_by={
+                                        "actor_kind": actor_kind,
+                                        "actor_id": str(actor_id),
+                                        "display_name": resolve_actor_display_name(
+                                            session,
+                                            actor_kind=actor_kind,
+                                            actor_id=actor_id,
+                                        ),
+                                    },
+                                ),
+                                "theirs": merge_side(current, theirs),
+                            },
+                        )
                         raise PageConflictError(
                             server_version_id=current.id,
                             server_content_hash=current.content_hash,
                             server_editing_revision=current.editing_revision,
                             error_code="context_merge_conflict",
+                            server_snapshot={
+                                "body_md": before,
+                                "page_metadata": metadata_dict(
+                                    metadata_for(page, current)
+                                ),
+                            },
+                            merge_preview=conflict.rest_payload(
+                                page.id,
+                                content_hash=current.content_hash,
+                                references_hash=document_references_hash(
+                                    session, current
+                                ),
+                            ),
                         )
                     prepared = self._autosave_prepare(
                         session=session,
@@ -4388,22 +4493,15 @@ class PageService:
     ) -> int:
         pending_reviews = (
             session.scalars(
-                select(ReviewItem)
-                .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-                .join(
-                    ChangeOperation,
-                    ChangeOperation.change_set_id == ChangeSet.id,
-                )
-                .where(
-                    ReviewItem.workspace_id == page.workspace_id,
-                    ChangeSet.workspace_id == page.workspace_id,
-                    ReviewItem.status.in_(("pending", "changes_requested")),
-                    ReviewItem.review_type == "context_update",
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.diff_ref
-                    == f"context_page_version:{replaced_version.id}",
-                    ReviewItem.id != new_review_item_id,
+                select_context_version_reviews(
+                    page.workspace_id,
+                    {page.id},
+                    conditions=(
+                        ReviewItem.status.in_(OPEN_CONTEXT_REVIEW_STATUSES),
+                        ChangeOperation.diff_ref
+                        == context_version_ref(replaced_version.id),
+                        ReviewItem.id != new_review_item_id,
+                    ),
                 )
             )
             .unique()
@@ -4439,19 +4537,12 @@ class PageService:
 
         return list(
             session.scalars(
-                select(ReviewItem)
-                .join(ChangeSet, ChangeSet.id == ReviewItem.change_set_id)
-                .join(
-                    ChangeOperation,
-                    ChangeOperation.change_set_id == ChangeSet.id,
-                )
-                .where(
-                    ReviewItem.workspace_id == page.workspace_id,
-                    ChangeSet.workspace_id == page.workspace_id,
-                    ReviewItem.review_type == "context_update",
-                    ChangeOperation.target_type == "context_page",
-                    ChangeOperation.target_id == page.id,
-                    ChangeOperation.diff_ref == f"context_page_version:{version.id}",
+                select_context_version_reviews(
+                    page.workspace_id,
+                    {page.id},
+                    conditions=(
+                        ChangeOperation.diff_ref == context_version_ref(version.id),
+                    ),
                 )
             )
             .unique()
@@ -4643,11 +4734,11 @@ class PageService:
         from backend.schemas.context_write import PublishContextPageRequest
         from backend.services.context_draft_workflow import (
             direct_publication_risk,
-            publication_candidate,
+            merge_write_candidate,
         )
 
         try:
-            _, candidate = publication_candidate(
+            _, candidate = merge_write_candidate(
                 session,
                 page,
                 version,
@@ -5167,7 +5258,7 @@ def _publish_blocked_reasons(
         )
         for finding in publish_floor_findings(version.body_md, registry=registry)
     ]
-    diff_ref = f"context_page_version:{version.id}"
+    diff_ref = context_version_ref(version.id)
     evidence_rows = session.execute(
         select(
             ChangeSet.id,
@@ -6068,7 +6159,7 @@ def page_metadata_patches_for_versions(
     if not version_ids:
         return {}
     diff_refs = {
-        f"context_page_version:{version_id}": version_id for version_id in version_ids
+        context_version_ref(version_id): version_id for version_id in version_ids
     }
     operations = session.scalars(
         select(ChangeOperation)
@@ -6180,15 +6271,10 @@ def select_inline_comment_rows(page_id: UUID, *, limit: int):
 
 
 def parse_inline_comment_anchor(diff_ref: str | None) -> PageInlineCommentAnchor | None:
-    if not diff_ref:
+    anchor = inline_comment_anchor(diff_ref)
+    if anchor is None:
         return None
     try:
-        payload = json.loads(diff_ref)
-        if payload.get("kind") != "page_inline_comment_anchor":
-            return None
-        anchor = payload.get("anchor")
-        if not isinstance(anchor, dict):
-            return None
         return PageInlineCommentAnchor.model_validate(anchor)
     except (TypeError, ValueError):
         return None

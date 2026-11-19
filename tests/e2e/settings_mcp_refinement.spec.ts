@@ -533,9 +533,9 @@ for (const [language, width] of LAYOUTS) {
   });
 }
 
-// Review, Markdown, and sharing use real drafts. Lint/reconciliation receive
-// explicit UI fixtures so no background worker or merge race is needed to
-// exercise their mounted selection controls.
+// Review, Markdown, and sharing use real drafts. Lint receives an explicit UI
+// fixture so no background worker is needed to exercise its mounted selection
+// controls.
 for (const [language, width] of LAYOUTS) {
   test(`${language} ${width}px common checkbox surfaces preserve geometry and semantics`, async ({
     page,
@@ -600,93 +600,6 @@ for (const [language, width] of LAYOUTS) {
     await page.locator(".context-reader-share-action").click();
     await expect(page.locator('input[type="checkbox"]').last()).toBeVisible();
     await checkBoxes(page, testInfo, "public-share");
-    await page.keyboard.press("Escape");
-
-    const branch = created.version_id;
-    const version = {
-      version_id: branch,
-      version_no: 1,
-      content_hash: "fixture-hash",
-      created_at: "2026-10-18T00:00:00Z",
-    };
-    await page.route(
-      `**${prefix}/context/pages/${created.id}`,
-      async (route) => {
-        const response = await route.fetch();
-        const body = await response.json();
-        body.data.reconciliation_available = true;
-        body.data.reconciliation_pending_count = 1;
-        body.data.next_reconciliation_version_id = branch;
-        await route.fulfill({ response, json: body });
-      },
-    );
-    await page.route(
-      `**${prefix}/context/pages/${created.id}/versions/${branch}/reconciliation`,
-      (route) =>
-        route.fulfill({
-          json: {
-            data: {
-              page: {
-                id: created.id,
-                slug: created.slug,
-                title: "Checkbox geometry",
-              },
-              branch: {
-                ...version,
-                actor_kind: "agent",
-                actor_display_name: "Fixture agent",
-                base_version_id: branch,
-              },
-              base: version,
-              original_head: version,
-              head: version,
-              head_advance_count: 1,
-              blocks: [
-                {
-                  block_id: "new-note",
-                  kind: "paragraph",
-                  granularity: "block",
-                  parent_block_id: null,
-                  row_index: null,
-                  state: "branch_only",
-                  label: "New note",
-                },
-              ],
-              conflicts: [],
-              clean_changes: [
-                {
-                  block_id: "new-note",
-                  resolution_target_id: null,
-                  kind: "paragraph",
-                  state: "branch_only",
-                  head: null,
-                  yours: {
-                    hash: "a".repeat(64),
-                    text: "New note",
-                    actor_kind: "agent",
-                    actor_display_name: "Fixture agent",
-                    at: "2026-10-18T00:00:00Z",
-                    version_id: branch,
-                  },
-                },
-              ],
-            },
-          },
-        }),
-    );
-    await page.goto(
-      `${workspaceUrl(workspace.id, `context/pages/${created.id}`)}?tab=history&reconcile=${branch}`,
-    );
-    const reconciliation = page.locator(".context-reconciliation-dialog");
-    await expect(
-      reconciliation.locator('input[type="checkbox"]'),
-    ).toBeVisible();
-    await checkBoxes(page, testInfo, "context-reconciliation");
-    await reconciliation.locator('input[type="checkbox"]').focus();
-    await page.keyboard.press("Space");
-    await expect(
-      reconciliation.locator('input[type="checkbox"]'),
-    ).not.toBeChecked();
     await page.keyboard.press("Escape");
 
     await page.route(`**${prefix}/lint/findings?*`, (route) =>

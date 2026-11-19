@@ -136,7 +136,7 @@ function renderWithRouter(initialEntry: string, routes: ReactNode, mergeKind: "f
     if (url.endsWith("/merge-preview")) {
       const request = JSON.parse(String(init?.body));
       return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
-        published_version_id: null, parent_version_ids: [], kind: mergeKind,
+        published_version_id: null, target_version_id: null, parent_version_ids: [], kind: mergeKind,
         result: { body_md: mergeKind === "automatic_merge" ? "Exact combined publication content." : page.body_md,
           page_metadata: mergeKind === "automatic_merge" ? { title: "Merged publication", tags: ["release"], aliases: ["combined"], page_type: "guide" } : {},
           block_map: [], result_hash: "c".repeat(64) } } });
@@ -267,7 +267,7 @@ function mockPublicationFlow({
     if (url.endsWith("/merge-preview")) {
       const request = JSON.parse(String(init?.body));
       return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
-        published_version_id: null, parent_version_ids: [], kind: "fast_forward",
+        published_version_id: null, target_version_id: null, parent_version_ids: [], kind: "fast_forward",
         result: { body_md: page.body_md, page_metadata: {}, block_map: [], result_hash: "c".repeat(64) } } });
     }
     if (url === `${BASE}/api/v1/workspaces`) {
@@ -1250,7 +1250,7 @@ describe("PageEditor", () => {
     });
   });
 
-  it("publishes a dirty edit after confirming the exact automatically merged result", async () => {
+  it("publishes a dirty edit with the automatically merged result without asking", async () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
       "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
@@ -1265,14 +1265,7 @@ describe("PageEditor", () => {
     expect(publishButton).toBeEnabled();
 
     await typist().click(publishButton);
-    const dialog = await screen.findByRole("dialog", { name: "Review merged page" });
-    expect(within(dialog).getByText("Exact combined publication content.")).toBeInTheDocument();
-    expect(within(dialog).getByRole("heading", { name: "Merged publication" })).toBeInTheDocument();
-    expect(within(dialog).getByText("release")).toBeInTheDocument();
-    expect(within(dialog).getByText("combined")).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/publish"))).toBe(false);
-    await typist().click(within(dialog).getByRole("button", { name: "Publish merged page" }));
-
+    // A clean merge needs no question: the preview's pins go straight out.
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish")),
@@ -1307,6 +1300,7 @@ describe("PageEditor", () => {
       });
       expect(router.state.historyAction).toBe("REPLACE");
     });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("enables direct Publish for a new Context page", async () => {
@@ -2454,6 +2448,105 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("region", { name: "Page properties" })).not.toBeInTheDocument();
   });
 
+  it("combines an overlapping save with one of the two choices on the server draft it saw", async () => {
+    // A save that overlaps another save of the same draft offers both choices;
+    // confirming is an ordinary save based on the server draft the merge used.
+    // Text typed while the Combine retry is in flight is sent again before the
+    // dialog asks. When the draft moved again, the dialog shows the newer
+    // preview instead of overwriting it, and the next confirm uses the newer base.
+    // The page sits in a folder; the chosen result places it in Context / Inbox.
+    const metadata = { title: "Hello", page_type: "overview", tags: [], aliases: [], placement_parent_node_id: null };
+    const folderId = "88888888-8888-4888-8888-888888888888";
+    const tree = contextTreeNodesWithPageBranch()
+      .filter((node) => node.parent_id !== "context-page-node")
+      .map((node) => node.target_id === page.id ? { ...node, parent_id: folderId } : node);
+    const inbox = tree.find((node) => node.slug === "inbox")!;
+    tree.push({ ...inbox, id: folderId, slug: "projects", title: "Projects" });
+    const overlap = (revision: number, serverBody: string, keptBody: string) => ({
+      error_code: "context_merge_conflict", message: "conflict", request_id: "r1", warnings: [],
+      server_version_id: "v1", server_content_hash: String(revision).repeat(64),
+      server_editing_revision: revision,
+      server_snapshot: { body_md: serverBody, page_metadata: metadata },
+      merge_preview: {
+        page_id: page.id, version_id: "v1", content_hash: String(revision).repeat(64), references_hash: "r".repeat(64),
+        editing_revision: revision, published_version_id: null,
+        target_version_id: "v1", parent_version_ids: [], kind: "conflict", result: null,
+        keep_both: { body_md: keptBody, page_metadata: metadata, block_map: [], result_hash: "d".repeat(64),
+          conflicts: [], offset_unit: "unicode_code_points" },
+        latest: { body_md: "# Hello\n\nMine", page_metadata: metadata, block_map: [], result_hash: "e".repeat(64),
+          conflicts: [], offset_unit: "unicode_code_points" },
+        metadata_conflicts: [], base_conflicted: false, latest_side: "ours", offset_unit: "unicode_code_points",
+        sides: null,
+      },
+    });
+    let releaseRetry: (response: Response) => void = () => {};
+    const retry = new Promise<Response>((resolve) => { releaseRetry = resolve; });
+    const responses: Array<Response | Promise<Response>> = [
+      jsonResponse(overlap(2, "# Hello\n\nTheirs", "# Hello\n\nMine\nTheirs"), 409),
+      retry,
+      jsonResponse(overlap(2, "# Hello\n\nTheirs", "# Hello\n\nMine\nTheirs"), 409),
+      jsonResponse(overlap(3, "# Hello\n\nTheirs again", "# Hello\n\nMine\nTheirs again"), 409),
+      jsonResponse({ data: { ...page, version_status: "draft", title: "Hello",
+        body_md: "# Hello\n\nMine\nTheirs again", editing_revision: 4 } }),
+    ];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === `${BASE}/api/v1/workspaces`) return workspaceResponse();
+      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
+        return jsonResponse({ data: tree });
+      }
+      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
+        return jsonResponse({ data: [page], next_cursor: null });
+      }
+      if (init?.method === "POST" && url.endsWith("/autosave")) return responses.shift()!;
+      return jsonResponse({ data: { ...page, version_status: "draft" } });
+    });
+    renderWithRouter(
+      "/pages/hello/edit",
+      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
+    );
+
+    await setEditorTitle(await findTitleEditor(), "My edit");
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    await typist().click(await screen.findByRole("button", { name: "Combine changes" }));
+    await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(2));
+    await setEditorTitle(getTitleEditor(), "My later edit");
+    releaseRetry(jsonResponse(overlap(2, "# Hello\n\nTheirs", "# Hello\n\nMine\nTheirs"), 409));
+    let dialog = await screen.findByRole("dialog", { name: "Combine changes" });
+    await typist().click(within(dialog).getByRole("radio", { name: /Keep both changes/ }));
+    await typist().click(within(dialog).getByRole("button", { name: "Combine with this result" }));
+
+    // The save overlapped again: as in git, the newer overlap is a new question.
+    dialog = await screen.findByRole("dialog", { name: "Combine changes" });
+    expect(await within(dialog).findByText("The content changed, so the preview was refreshed")).toBeInTheDocument();
+    await typist().click(within(dialog).getByRole("radio", { name: /Keep both changes/ }));
+    await typist().click(within(dialog).getByRole("button", { name: "Combine with this result" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Combine changes" })).toBeNull());
+
+    const saves = autosaveCalls(fetchMock).map((call) => JSON.parse(String(call[1]?.body)));
+    expect(saves).toHaveLength(5);
+    // The retry answered for the older text, so the newer title went out again.
+    expect(saves[2]).toMatchObject({ title: "My later edit" });
+    expect(saves[3]).toMatchObject({
+      version_id: "v1", expected_editing_revision: 2, base_content_hash: "2".repeat(64),
+      base_snapshot: { body_md: "# Hello\n\nTheirs", page_metadata: metadata },
+      // The chosen result is saved like any editor text (with its front matter),
+      // in Context / Inbox (its null placement), not the folder the tree shows.
+      body_md: expect.stringMatching(/\n# Hello\n\nMine\nTheirs$/),
+      destination_node_id: inbox.id,
+    });
+    expect(saves[4]).toMatchObject({
+      expected_editing_revision: 3,
+      base_snapshot: { body_md: "# Hello\n\nTheirs again" },
+      body_md: expect.stringMatching(/\n# Hello\n\nMine\nTheirs again$/),
+    });
+    // The chosen result replaced the editor's text ("My later edit"), and the
+    // server acknowledged it.
+    await expectEditorTitle("Hello");
+    await waitFor(() => expect(document.querySelector(".page-workspace")).toHaveAttribute("data-save-state", "clean"));
+    expect(screen.queryByRole("button", { name: "Combine changes" })).toBeNull();
+  });
+
   it("shows a conflict banner on stale updates and blocks stale retry saves", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let pageReadCount = 0;
@@ -2480,27 +2573,6 @@ describe("PageEditor", () => {
         pageReadCount += 1;
         return jsonResponse({ data: pageReadCount === 1 ? page : serverLatest });
       }
-      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/diff")) {
-        expect(url).toContain("from_version_id=v1");
-        expect(url).toContain("to_version_id=v2");
-        return jsonResponse({
-          data: {
-            from_version_id: "v1",
-            to_version_id: "v2",
-            from_version_no: 1,
-            to_version_no: 2,
-            lines: [
-              "--- v1",
-              "+++ v2",
-              "@@ -1 +1 @@",
-              "-Old server text",
-              "+New server text",
-            ],
-            additions: 1,
-            deletions: 1,
-          },
-        });
-      }
       if (init?.method === "POST" && url.endsWith("/autosave")) {
         return jsonResponse(
           {
@@ -2528,11 +2600,6 @@ describe("PageEditor", () => {
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
 
     expect(await screen.findByText(/Someone else updated this page/)).toBeInTheDocument();
-    await typist().click(screen.getByRole("button", { name: "View their changes" }));
-    const serverChanges = await screen.findByLabelText("Server changes");
-    expect(await within(serverChanges).findByLabelText("Diff v1 to v2"))
-      .toHaveTextContent("New server text");
-    expect(within(serverChanges).getByText("+1 / -1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload latest" })).toBeInTheDocument();
     expect(publicationActions().getByRole("button", { name: "Save draft" })).toBeDisabled();
 
@@ -2553,116 +2620,6 @@ describe("PageEditor", () => {
       "data-save-state",
       "clean",
     );
-  });
-
-  it("does not expose a raw generic error when loading conflict changes", async () => {
-    const rawSecret = "raw-diff-secret=internal-host.example";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return workspaceResponse();
-      }
-      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
-        return jsonResponse({ data: contextTreeNodes() });
-      }
-      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/library/items?limit=100`) {
-        return jsonResponse({ data: [] });
-      }
-      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
-        return jsonResponse({ data: [page], next_cursor: null });
-      }
-      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/diff")) {
-        throw new Error(rawSecret);
-      }
-      if (init?.method === "POST" && url.endsWith("/autosave")) {
-        return jsonResponse(
-          {
-            error_code: "stale_base_version",
-            message: "stale",
-            request_id: "r-secret-diff",
-            warnings: [],
-            server_version_id: "v2",
-            server_content_hash: "b".repeat(64),
-          },
-          409,
-        );
-      }
-      return jsonResponse({ data: page });
-    });
-
-    renderWithRouter(
-      "/pages/hello/edit",
-      <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />,
-    );
-
-    await setEditorTitle(await findTitleEditor(), "My stale edit");
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-    expect(await screen.findByText(/Someone else updated this page/)).toBeInTheDocument();
-
-    await typist().click(screen.getByRole("button", { name: "View their changes" }));
-    const serverChanges = await screen.findByLabelText("Server changes");
-    expect(
-      await within(serverChanges).findByText("Failed to load server changes"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(rawSecret)).toBeNull();
-  });
-
-  it("does not request a version diff when a conflict names the editor's own version", async () => {
-    // PUB-02 (3): an in-place autosave overwrite (two tabs on the same
-    // draft) makes the server report server_version_id === the editor's own
-    // page.version_id. Diffing a version against itself is always empty and
-    // misleading, so "View their changes" must short-circuit to an
-    // explanatory message instead of firing /diff.
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url === `${BASE}/api/v1/workspaces`) {
-        return workspaceResponse();
-      }
-      if (url === `${BASE}/api/v1/workspaces/11111111-1111-4111-8111-111111111111/tree?section=context`) {
-        return jsonResponse({ data: contextTreeNodes() });
-      }
-      if (url.includes("/api/v1/workspaces/11111111-1111-4111-8111-111111111111/context/pages?")) {
-        return jsonResponse({ data: [page], next_cursor: null });
-      }
-      if (init?.method === "POST" && url.endsWith("/autosave")) {
-        return jsonResponse(
-          {
-            error_code: "stale_base_version",
-            message: "stale",
-            request_id: "r1",
-            warnings: [],
-            // Same version id the editor already has -- the in-place
-            // overwrite shape, not a genuine different-version conflict.
-            server_version_id: "v1",
-            server_content_hash: "d".repeat(64),
-          },
-          409,
-        );
-      }
-      return jsonResponse({ data: page });
-    });
-
-    renderWithRouter(
-      "/pages/hello/edit",
-      <>
-          <Route path="/workspaces/:workspaceId/context/pages/:pageId/edit" element={<RoutedPageEditor mode="edit" />} />
-      </>,
-    );
-
-    await setEditorTitle(await findTitleEditor(), "My in-place edit");
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-
-    expect(await screen.findByText(/Someone else updated this page/)).toBeInTheDocument();
-    await typist().click(screen.getByRole("button", { name: "View their changes" }));
-
-    const serverChanges = await screen.findByLabelText("Server changes");
-    expect(within(serverChanges).getByText(
-      /overwritten in place by another session/i,
-    )).toBeInTheDocument();
-    expect(
-      fetchMock.mock.calls.some((call) => String(call[0]).includes("/diff")),
-    ).toBe(false);
   });
 
   it("treats a stale publish target as a publish-eligibility failure, not a base conflict", async () => {

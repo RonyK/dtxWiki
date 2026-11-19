@@ -78,6 +78,13 @@ export const CONTEXT_HISTORY_PRESENTATION: Record<
   },
 };
 
+// Finished Context versions are Git commits; a new draft can start from one.
+const CONTEXT_COMMIT_STATUSES: ReadonlySet<string> = new Set(["closed", "published_snapshot", "superseded_snapshot"]);
+
+export function isContextCommit(versionStatus: string | null | undefined): boolean {
+  return CONTEXT_COMMIT_STATUSES.has(versionStatus ?? "");
+}
+
 export function contextHistoryPresentation(
   status: ContextHistoryStatus,
 ): ContextHistoryPresentation {
@@ -106,13 +113,19 @@ export function priorRelationForVersion(entry: VersionEntry): PriorRelation {
 export function contextHistoryNodes(
   versions: VersionEntry[],
 ): HistoryGraphNode<VersionEntry>[] {
+  // The History API already lists open drafts first (the tip of the history),
+  // so the layout keeps its order.
   return versions.map((entry) => ({
     entry,
     id: entry.version_id,
     versionNo: entry.version_no,
     parentId: entry.prior_version_id ?? null,
     parentRelation: priorRelationForVersion(entry),
-    mergedIntoId: entry.merged_into_version_id ?? null,
+    // Merged-in parents, whatever order the reader's filtered list has: every
+    // parent except the first one.
+    mergeParentIds: (entry.parent_version_ids ?? []).filter((id) =>
+      id !== entry.parent_version_id && id !== entry.prior_version_id),
+    pending: entry.version_status === "draft",
     branched:
       entry.graph_status === "branched" ||
       entry.history_status === "alternative_draft" ||

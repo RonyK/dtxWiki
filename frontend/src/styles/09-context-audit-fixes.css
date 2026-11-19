@@ -656,6 +656,14 @@
   box-shadow: 0 0 0 1px var(--border-strong);
 }
 
+/* An open draft is not a commit yet: a hollow dot with a dashed rim in its
+   lane colour, so it never reads as a finished version. */
+.history-graph-node[data-pending="true"] {
+  border: 2px dashed var(--history-lane-tint, var(--reader-accent, var(--context)));
+  background: var(--surface);
+  box-shadow: none;
+}
+
 /* Every edge segment is a 2px line in the lane historyGraph.ts gave it
    (--history-segment-lane), wearing the colour of the lane that edge travels
    in. The lane is per segment, never "the parent's lane": routing an edge
@@ -1035,264 +1043,249 @@
   }
 }
 
-/* Reconciliation is intentionally a server-driven workbench: the strip is a
-   compact map of server-owned block states and the panels never infer blocks
-   from a client-side Markdown diff. */
-.dialog-panel.context-reconciliation-dialog {
+/* The merge dialog: two plain choices first, the whole result below them,
+   editing optional. It shows the merge module's result as it is. */
+.dialog-panel.context-merge-dialog {
   display: flex;
   flex-direction: column;
-  width: min(1180px, calc(100vw - 32px));
-  max-width: 1180px;
+  width: min(960px, calc(100vw - 32px));
+  max-width: 960px;
   max-height: calc(100dvh - 32px);
   overflow: hidden;
 }
 
-.dialog-panel.context-reconciliation-dialog > .dialog-scroll-region {
+.dialog-panel.context-merge-dialog > .dialog-scroll-region {
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
 }
 
-.dialog-panel.context-reconciliation-dialog > .dialog-footer {
+.dialog-panel.context-merge-dialog > .dialog-footer {
   flex: 0 0 auto;
 }
 
-.context-reconciliation-footer,
-.context-reconciliation-summary,
-.context-reconciliation-block-strip,
-.context-reconciliation-choice,
-.review-bulk-actions {
-  display: flex;
-  align-items: center;
-}
-
-.context-reconciliation-footer {
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.context-reconciliation-body {
+.context-merge-body {
   display: grid;
-  gap: 18px;
-  padding-top: 12px;
+  gap: 16px;
+  min-width: 0;
+  padding-top: 4px;
 }
 
-.context-reconciliation-summary {
-  flex-wrap: wrap;
-  gap: 8px;
+.context-merge-summary,
+.context-merge-hint,
+.context-merge-legend {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.context-merge-refreshed {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-control);
+  background: var(--info-soft);
+  color: var(--ink);
+  font-size: 13px;
+  word-break: keep-all;
+}
+
+/* Two large, equal choice cards rather than a compact segmented strip: they
+   are the whole decision for most people. A chosen card is the full box --
+   tint plus a 2px ring on every side. */
+.segmented-control.context-merge-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 10px;
+}
+
+.segmented-control.context-merge-choices > button {
+  display: block;
+  min-height: 72px;
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  color: var(--ink);
+  font-weight: 400;
+  text-align: start;
+}
+
+.segmented-control.context-merge-choices > button.active {
+  border-color: var(--context);
+  background: var(--context-soft);
+  box-shadow: 0 0 0 1px var(--context);
+}
+
+.context-merge-choice {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.context-merge-choice strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.context-merge-choice > span {
   color: var(--ink-muted);
   font-size: 13px;
+  line-height: 1.45;
 }
 
-.context-reconciliation-summary span {
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+.context-merge-choice .context-merge-choice-side {
+  color: var(--ink-soft);
+  font-size: 12px;
 }
 
-.context-reconciliation-workspace {
+.context-merge-result,
+.context-merge-metadata {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
-  align-items: start;
-  gap: 14px;
-}
-
-.context-reconciliation-rail,
-.context-reconciliation-selection {
+  gap: 10px;
   min-width: 0;
 }
 
-.context-reconciliation-block-strip {
-  display: grid;
-  align-content: start;
-  gap: 6px;
+.context-merge-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.context-merge-result h3,
+.context-merge-metadata h3 {
   margin: 0;
-  max-height: min(62dvh, 680px);
-  padding: 4px;
-  overflow-y: auto;
-  list-style: none;
-  overscroll-behavior-block: contain;
+  font-size: 14px;
 }
 
-.context-reconciliation-block-item {
+.context-merge-preview,
+.context-merge-editor {
   min-width: 0;
-}
-
-.context-reconciliation-block {
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  min-height: 52px;
-  padding: 8px 10px;
+  max-height: 52vh;
+  overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: var(--surface);
-  color: var(--ink);
-  text-align: left;
 }
 
-.context-reconciliation-block span:last-child {
+.context-merge-preview {
+  padding: 4px 16px;
+}
+
+.context-merge-editor .cm-editor {
+  min-height: 240px;
+}
+
+/* A combined region: a left rule plus a pale fill on every rendered block or
+   source line the merge joined, in the caution tone. */
+.context-merge-preview [data-merged-region="true"],
+.context-merge-editor .context-merge-line {
+  box-shadow: inset 3px 0 0 var(--warning);
+  background: var(--warning-soft);
+}
+
+.context-merge-preview [data-merged-region="true"] {
+  padding-inline-start: 10px;
+}
+
+.context-merge-metadata-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.context-merge-metadata-field {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.segmented-control.context-merge-metadata-choices {
+  flex-wrap: wrap;
+}
+
+.segmented-control.context-merge-metadata-choices > button {
+  min-height: 36px;
+  max-width: 100%;
+  font-weight: 400;
+}
+
+.segmented-control.context-merge-metadata-choices > button.active {
+  border-color: var(--context);
+  background: var(--context-soft);
+  box-shadow: 0 0 0 1px var(--context);
+  color: var(--ink);
+}
+
+.context-merge-metadata-option {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.context-merge-metadata-option > span {
   color: var(--ink-muted);
   font-size: 12px;
 }
 
-.context-reconciliation-block[data-state="conflict"] {
-  border-color: var(--danger);
-}
-
-.context-reconciliation-block[data-state="branch_only"] {
-  border-color: var(--context);
-}
-
-.context-reconciliation-block[aria-current="true"] {
-  box-shadow: 0 0 0 2px var(--focus-ring, var(--info));
-}
-
-.context-reconciliation-conflict,
-.context-reconciliation-clean-change,
-.context-reconciliation-clean-changes,
-.context-reconciliation-preview,
-.context-reconciliation-discard {
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-raised, var(--surface));
-}
-
-.context-reconciliation-comparison {
+.context-merge-metadata-custom {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.context-reconciliation-side {
+  gap: 8px;
   min-width: 0;
 }
 
-.context-reconciliation-side-provenance {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+.context-merge-footer {
+  display: grid;
+  gap: 8px;
+  width: 100%;
 }
 
-.context-reconciliation-side-actor-kind {
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-subtle, var(--surface));
-  font-size: 11px;
+.context-merge-footer .dialog-actions {
+  justify-content: flex-end;
 }
 
-.context-reconciliation-side pre {
-  min-height: 96px;
-  max-height: 300px;
-  margin: 0;
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-subtle, var(--surface));
-  color: var(--ink);
-  font: inherit;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.context-reconciliation-base {
-  margin-top: 12px;
-}
-
-.context-reconciliation-base summary {
+.context-merge-footer button {
   min-height: 44px;
-  cursor: pointer;
 }
 
-.context-reconciliation-choices {
-  display: grid;
-  gap: 8px;
-  margin-top: 14px;
-  padding: 0;
-  border: 0;
-}
-
-.context-reconciliation-choice {
-  gap: 8px;
-  min-height: 36px;
-}
-
-.context-reconciliation-clean-change-list {
-  display: grid;
-  gap: 10px;
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.context-reconciliation-clean-change-list li {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.context-reconciliation-clean-change-toggle {
+.review-bulk-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 36px;
-}
-
-.context-reconciliation-clean-change-list pre {
-  overflow: auto;
-  margin: 0;
-  padding: 8px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: var(--surface-sunken, var(--surface));
-}
-
-.context-reconciliation-custom,
-.context-reconciliation-reason,
-.context-reconciliation-discard label {
-  display: grid;
-  gap: 6px;
-}
-
-.context-reconciliation-custom-prefill {
-  display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.context-reconciliation-custom textarea,
-.context-reconciliation-reason textarea,
-.context-reconciliation-discard textarea,
-.context-history-discard-dialog textarea,
 .review-bulk-dialog textarea {
   width: 100%;
   min-height: 96px;
   resize: vertical;
 }
 
-.context-reconciliation-preview .markdown-body {
-  max-height: 52vh;
+.review-bulk-merge-preview summary,
+.review-merge-result summary {
+  cursor: pointer;
+}
+
+.review-bulk-merge-preview .markdown-body,
+.review-merge-result .markdown-body {
+  max-height: 40vh;
+  margin-top: 8px;
   overflow: auto;
 }
 
-.context-reconciliation-footer {
-  width: 100%;
-}
-
-.context-reconciliation-footer button {
-  min-height: 44px;
-}
-
-.review-bulk-actions {
-  flex-wrap: wrap;
-  gap: 8px;
+.review-merge-result {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 
 .review-reconciliation-meta {
@@ -1339,53 +1332,43 @@
   justify-self: start;
 }
 
+.short-permalink-form {
+  overflow-wrap: anywhere;
+}
+
+/* Phones: the dialog takes the whole screen, the two choices stack, and the
+   result and its editor share one place. */
 @media (max-width: 720px) {
-  .dialog-backdrop:has(.context-reconciliation-dialog) {
+  .dialog-backdrop:has(.context-merge-dialog) {
     padding: 0;
   }
 
-  .dialog-panel.context-reconciliation-dialog {
+  .dialog-panel.context-merge-dialog {
     width: 100vw;
     max-width: none;
+    height: 100dvh;
     max-height: 100dvh;
     border-radius: 0;
   }
 
-  .context-reconciliation-comparison {
+  .segmented-control.context-merge-choices {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .context-reconciliation-workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .context-reconciliation-block-strip {
-    display: flex;
+  .context-merge-preview,
+  .context-merge-editor {
     max-height: none;
-    padding: 4px 0 10px;
-    overflow-x: auto;
-    overflow-y: visible;
-    overscroll-behavior-inline: contain;
   }
 
-  .context-reconciliation-block-item {
-    flex: 0 0 min(164px, 42vw);
-  }
-
-  .context-reconciliation-footer {
-    align-items: stretch;
-  }
-
-  .context-reconciliation-footer {
-    flex-direction: column;
-  }
-
-  .context-reconciliation-footer .dialog-actions {
+  .context-merge-footer .dialog-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
+}
 
-  .context-reconciliation-block {
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .segmented-control.context-merge-metadata-choices > button,
+  .context-draft-actions > * {
     min-height: 44px;
   }
 }
@@ -1401,6 +1384,19 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.context-draft-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.context-draft-error {
+  margin: 8px 0 0;
+  color: var(--danger-strong, var(--danger));
 }
 
 .context-draft-list {

@@ -31,6 +31,7 @@ from backend.services.audit_service import AuditService
 from backend.services.context_media_legacy_cutover import (
     require_no_visible_legacy_media,
 )
+from backend.services.context_version_refs import context_version_ref
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.read_errors import (
     DuplicateSlugError,
@@ -1574,7 +1575,7 @@ def _cascade_archive_to_targets(
                     target_id=page.id,
                     operation="archive",
                     diff_summary=f"archive {page.title}",
-                    diff_ref=(f"context_page_version:{head_id}" if head_id else None),
+                    diff_ref=(context_version_ref(head_id) if head_id else None),
                 )
             )
             remove_document_chunks(

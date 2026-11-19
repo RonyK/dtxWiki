@@ -4261,6 +4261,43 @@
             ],
             "title": "On Conflict"
           },
+          "result_body_md": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.",
+            "maxLength": 1000000,
+            "title": "Result Body Md",
+            "x-final-maxLength": 1000000
+          },
+          "result_hash": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Hash"
+          },
+          "result_page_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageMetadataPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "version_id": {
             "format": "uuid",
             "title": "Version Id",
@@ -6192,6 +6229,477 @@
         "title": "ContextMediaUploadResponse",
         "type": "object"
       },
+      "ContextMergeCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "block_map": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Block Map",
+            "type": "array"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "conflict_body_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Body Md"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/ContextMergeConflict"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "offset_unit": {
+            "const": "unicode_code_points",
+            "title": "Offset Unit",
+            "type": "string"
+          },
+          "page_metadata": {
+            "$ref": "#/components/schemas/ContextMergeMetadata"
+          },
+          "result_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Result Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body_md",
+          "page_metadata",
+          "block_map",
+          "result_hash",
+          "conflicts",
+          "offset_unit"
+        ],
+        "title": "ContextMergeCandidate",
+        "type": "object"
+      },
+      "ContextMergeConflict": {
+        "additionalProperties": false,
+        "properties": {
+          "keep_both_end": {
+            "title": "Keep Both End",
+            "type": "integer"
+          },
+          "keep_both_start": {
+            "title": "Keep Both Start",
+            "type": "integer"
+          },
+          "latest_end": {
+            "title": "Latest End",
+            "type": "integer"
+          },
+          "latest_start": {
+            "title": "Latest Start",
+            "type": "integer"
+          },
+          "ours": {
+            "title": "Ours",
+            "type": "string"
+          },
+          "theirs": {
+            "title": "Theirs",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ours",
+          "theirs",
+          "keep_both_start",
+          "keep_both_end",
+          "latest_start",
+          "latest_end"
+        ],
+        "title": "ContextMergeConflict",
+        "type": "object"
+      },
+      "ContextMergeConflictBody": {
+        "additionalProperties": false,
+        "properties": {
+          "blockers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RESTBlocker"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockers"
+          },
+          "blocking_workspaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RESTBlockingWorkspace"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Workspaces"
+          },
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PageNameDisambiguationCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidates"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          },
+          "error_code": {
+            "title": "Error Code",
+            "type": "string"
+          },
+          "limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Bytes"
+          },
+          "merge_preview": {
+            "$ref": "#/components/schemas/ContextMergePreviewData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "page_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Id"
+          },
+          "purge_grant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge Grant"
+          },
+          "purge_grant_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge Grant Expires At"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "server_content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Content Hash"
+          },
+          "server_editing_revision": {
+            "title": "Server Editing Revision",
+            "type": "integer"
+          },
+          "server_snapshot": {
+            "$ref": "#/components/schemas/DraftBaseSnapshot"
+          },
+          "server_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Version Id"
+          },
+          "settings_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Link"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "envelope",
+          "error_code",
+          "message",
+          "server_editing_revision",
+          "server_snapshot",
+          "merge_preview"
+        ],
+        "title": "ContextMergeConflictBody",
+        "type": "object"
+      },
+      "ContextMergeMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "page_type": {
+            "title": "Page Type",
+            "type": "string"
+          },
+          "placement_parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Parent Node Id"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "page_type",
+          "tags",
+          "aliases",
+          "placement_parent_node_id"
+        ],
+        "title": "ContextMergeMetadata",
+        "type": "object"
+      },
+      "ContextMergePreviewData": {
+        "additionalProperties": false,
+        "properties": {
+          "base_conflicted": {
+            "title": "Base Conflicted",
+            "type": "boolean"
+          },
+          "content_hash": {
+            "description": "Content hash of version_id.",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "editing_revision": {
+            "title": "Editing Revision",
+            "type": "integer"
+          },
+          "keep_both": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextMergeCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "fast_forward",
+              "automatic_merge",
+              "conflict"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextMergeCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_side": {
+            "enum": [
+              "ours",
+              "theirs"
+            ],
+            "title": "Latest Side",
+            "type": "string"
+          },
+          "metadata_conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Metadata Conflicts",
+            "type": "array"
+          },
+          "offset_unit": {
+            "const": "unicode_code_points",
+            "description": "Offsets are Unicode code points; when conflict_body_md is present the offsets index into it, otherwise into body_md.",
+            "title": "Offset Unit",
+            "type": "string"
+          },
+          "page_id": {
+            "format": "uuid",
+            "title": "Page Id",
+            "type": "string"
+          },
+          "parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Parent Version Ids",
+            "type": "array"
+          },
+          "published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Id"
+          },
+          "references_hash": {
+            "description": "Document references hash of version_id.",
+            "title": "References Hash",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextMergeCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sides": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextMergeSides"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Version Id"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "version_id",
+          "content_hash",
+          "references_hash",
+          "editing_revision",
+          "published_version_id",
+          "target_version_id",
+          "parent_version_ids",
+          "kind",
+          "result",
+          "keep_both",
+          "latest",
+          "metadata_conflicts",
+          "base_conflicted",
+          "latest_side",
+          "offset_unit",
+          "sides"
+        ],
+        "title": "ContextMergePreviewData",
+        "type": "object"
+      },
       "ContextMergePreviewRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6256,6 +6764,114 @@
           "version_id"
         ],
         "title": "ContextMergePreviewRequest",
+        "type": "object"
+      },
+      "ContextMergePreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ContextMergePreviewData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ContextMergePreviewResponse",
+        "type": "object"
+      },
+      "ContextMergeSide": {
+        "additionalProperties": false,
+        "properties": {
+          "last_saved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Saved At"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ContextMergeSideMetadata"
+          },
+          "saved_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextDraftAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "saved_by",
+          "last_saved_at",
+          "metadata"
+        ],
+        "title": "ContextMergeSide",
+        "type": "object"
+      },
+      "ContextMergeSideMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "page_type": {
+            "title": "Page Type",
+            "type": "string"
+          },
+          "placement_parent_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Parent Node Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "page_type",
+          "placement_parent_node_id"
+        ],
+        "title": "ContextMergeSideMetadata",
+        "type": "object"
+      },
+      "ContextMergeSides": {
+        "additionalProperties": false,
+        "properties": {
+          "ours": {
+            "$ref": "#/components/schemas/ContextMergeSide"
+          },
+          "theirs": {
+            "$ref": "#/components/schemas/ContextMergeSide"
+          }
+        },
+        "required": [
+          "ours",
+          "theirs"
+        ],
+        "title": "ContextMergeSides",
         "type": "object"
       },
       "ContextPageCreateRequest": {
@@ -6613,6 +7229,12 @@
           },
           "open_drafts": {
             "$ref": "#/components/schemas/OpenDrafts"
+          },
+          "open_review_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Open Review Count",
+            "type": "integer"
           },
           "page_metadata": {
             "additionalProperties": true,
@@ -38117,7 +38739,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTConflictErrorBody"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RESTConflictErrorBody"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ContextMergeConflictBody"
+                    }
+                  ],
+                  "title": "Response 409 Autosave Page Api V1 Workspaces  Workspace Id  Context Pages  Page Id  Autosave Post"
                 }
               }
             },
@@ -39480,7 +40110,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ContextMergePreviewResponse"
+                }
               }
             },
             "description": "Successful Response"

@@ -28,14 +28,13 @@ from backend.repositories.workspace_scoped import (
     select_in_workspace_by_ids,
 )
 from backend.services.context_links import format_stable_url
-from backend.utils.uuid import parse_uuid_or_none
+from backend.services.context_version_refs import written_context_version_id
 
 _PUBLISH_OPERATIONS = ("create", "update", "publish")
 # Point the published head at the named version (or at nothing) without
 # being that version's publish instant.
 _REPOINT_OPERATIONS = ("publish_revert", "unarchive")
 _TIMELINE_OPERATIONS = (*_PUBLISH_OPERATIONS, "archive", *_REPOINT_OPERATIONS)
-_VERSION_REF_PREFIX = "context_page_version:"
 
 _PUBLISHED_STATUSES = {"published_snapshot", "superseded_snapshot"}
 
@@ -58,12 +57,6 @@ class TimelineEvent:
     reason: str | None
 
 
-def _version_id_from_ref(diff_ref: str | None) -> UUID | None:
-    if not diff_ref or not diff_ref.startswith(_VERSION_REF_PREFIX):
-        return None
-    return parse_uuid_or_none(diff_ref[len(_VERSION_REF_PREFIX) :])
-
-
 def _draft_write_version_ids(
     session: Session,
     rows: list,
@@ -81,7 +74,7 @@ def _draft_write_version_ids(
     referenced: set[UUID] = set()
     published_by_publish_op: set[UUID] = set()
     for operation, *_rest in rows:
-        version_id = _version_id_from_ref(operation.diff_ref)
+        version_id = written_context_version_id(operation.diff_ref)
         if version_id is None:
             continue
         if operation.operation == "publish":
@@ -115,7 +108,7 @@ def _publish_operation_version_ids(session: Session, page_ids: set[UUID]) -> set
         .where(ChangeOperation.target_id.in_(page_ids))
         .where(ChangeOperation.operation == "publish")
     ).all():
-        version_id = _version_id_from_ref(diff_ref)
+        version_id = written_context_version_id(diff_ref)
         if version_id is not None:
             result.add(version_id)
     return result
@@ -210,7 +203,9 @@ def _published_heads_at(
     heads: dict[UUID, UUID | None] = {}
     for operation, _change_set in rows:
         after = _published_head_after(
-            operation, _version_id_from_ref(operation.diff_ref), draft_writes
+            operation,
+            written_context_version_id(operation.diff_ref),
+            draft_writes,
         )
         if after is not _UNMOVED:
             heads[operation.target_id] = after
@@ -245,7 +240,7 @@ def publish_timeline(
     events: list[TimelineEvent] = []
     published_versions: set[UUID] = set()
     for operation, change_set in rows:
-        version_id = _version_id_from_ref(operation.diff_ref)
+        version_id = written_context_version_id(operation.diff_ref)
         if operation.operation in ("archive", *_REPOINT_OPERATIONS):
             pass
         elif not _is_publish_instant(operation, version_id, draft_writes):
@@ -385,7 +380,7 @@ def what_changed(
 
     entries: list[WhatChangedEntry] = []
     for operation, change_set, page in rows:
-        version_id = _version_id_from_ref(operation.diff_ref)
+        version_id = written_context_version_id(operation.diff_ref)
         after = _published_head_after(operation, version_id, draft_writes)
         if after is _UNMOVED:
             continue

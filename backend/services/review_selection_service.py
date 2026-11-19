@@ -39,6 +39,10 @@ from backend.schemas.context_write import (
     ReviewSelectionPayload,
     ReviewSelectionRequest,
 )
+from backend.services.context_version_refs import (
+    CONTEXT_VERSION_REF_PREFIX,
+    written_context_version_id,
+)
 from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.read_errors import ReadServiceError, ReadValidationError
 from backend.services.review_approval import ReviewApprovalPreflight
@@ -48,7 +52,6 @@ from backend.services.review_service import (
     _parse_csv_filter,
     _targets_context_page,
 )
-from backend.utils.uuid import parse_uuid_or_none
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import sessionmaker
@@ -81,9 +84,8 @@ def review_candidate_versions(
             ).with_only_columns(ReviewItem.id, ReviewItem.change_set_id)
         ).all()
     )
-    prefix = "context_page_version:"
     version_by_change_set = {
-        change_set_id: parse_uuid_or_none(diff_ref[len(prefix) :])
+        change_set_id: written_context_version_id(diff_ref)
         for change_set_id, diff_ref in session.execute(
             select_in_workspace(
                 ChangeOperation,
@@ -91,7 +93,7 @@ def review_candidate_versions(
                 criteria=[
                     ChangeOperation.change_set_id.in_(set(change_sets.values())),
                     ChangeOperation.target_type == "context_page",
-                    ChangeOperation.diff_ref.startswith(prefix),
+                    ChangeOperation.diff_ref.startswith(CONTEXT_VERSION_REF_PREFIX),
                 ],
             )
             .with_only_columns(ChangeOperation.change_set_id, ChangeOperation.diff_ref)

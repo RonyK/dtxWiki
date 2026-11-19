@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { readPage, type PagePayload } from "../../../shared/api/pages";
+import { readPage } from "../../../shared/api/pages";
 import { PagePublicShareControl } from "../PagePublicShareControl";
 
 vi.mock("../../../shared/api/pages", async (importOriginal) => ({
@@ -60,7 +60,7 @@ it("renders exact published-version link and media projections in its preview", 
         current_slug: "policy",
       },
     ],
-  } as unknown as PagePayload);
+  } as unknown as Awaited<ReturnType<typeof readPage>>);
 
   render(
     <MemoryRouter>

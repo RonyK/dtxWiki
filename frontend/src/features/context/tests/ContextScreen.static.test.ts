@@ -62,35 +62,26 @@ describe("Context reader static layout regressions", () => {
     );
   });
 
-  it("collapses reconciliation comparisons and actions to one column on mobile", () => {
+  it("opens the merge dialog full screen on phones with the two choices stacked", () => {
     const styles = readAppStyles();
 
     expect(styles).toMatch(
-      /\.dialog-panel\.context-reconciliation-dialog \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*overflow: hidden;/s,
+      /\.dialog-panel\.context-merge-dialog \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*overflow: hidden;/s,
     );
     expect(styles).toMatch(
-      /\.dialog-panel\.context-reconciliation-dialog > \.dialog-scroll-region \{[^}]*flex: 1 1 auto;[^}]*min-height: 0;[^}]*max-height: none;/s,
+      /\.dialog-panel\.context-merge-dialog > \.dialog-scroll-region \{[^}]*flex: 1 1 auto;[^}]*min-height: 0;[^}]*max-height: none;/s,
     );
     expect(styles).toMatch(
-      /\.dialog-panel\.context-reconciliation-dialog > \.dialog-footer \{[^}]*flex: 0 0 auto;/s,
+      /\.context-merge-footer button \{[^}]*min-height: 44px;/s,
     );
     expect(styles).toMatch(
-      /\.context-reconciliation-footer button \{[^}]*min-height: 44px;/s,
+      /@media \(max-width: 720px\) \{[\s\S]*?\.dialog-backdrop:has\(\.context-merge-dialog\) \{[^}]*padding: 0;/,
     );
     expect(styles).toMatch(
-      /@media \(max-width: 720px\) \{[\s\S]*?\.dialog-backdrop:has\(\.context-reconciliation-dialog\) \{[^}]*padding: 0;/,
+      /@media \(max-width: 720px\) \{[\s\S]*?\.dialog-panel\.context-merge-dialog \{[^}]*width: 100vw;[^}]*max-height: 100dvh;/,
     );
     expect(styles).toMatch(
-      /\.context-reconciliation-workspace \{[^}]*grid-template-columns: minmax\(180px, 240px\) minmax\(0, 1fr\);/,
-    );
-    expect(styles).toMatch(
-      /@media \(max-width: 720px\) \{[\s\S]*?\.context-reconciliation-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
-    );
-    expect(styles).toMatch(
-      /@media \(max-width: 720px\) \{[\s\S]*?\.context-reconciliation-comparison \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
-    );
-    expect(styles).toMatch(
-      /@media \(max-width: 720px\) \{[\s\S]*?\.context-reconciliation-footer \.dialog-actions \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
+      /@media \(max-width: 720px\) \{[\s\S]*?\.segmented-control\.context-merge-choices \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
     );
   });
 

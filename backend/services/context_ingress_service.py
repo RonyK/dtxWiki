@@ -43,6 +43,7 @@ from backend.schemas.input_policy import validate_request_inputs
 from backend.services.audit_service import AuditService
 from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.context_lifecycle import record_metadata_snapshot
+from backend.services.context_version_refs import context_version_ref
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.page_service import refresh_page_links
 from backend.services.read_errors import (
@@ -526,7 +527,7 @@ class ContextIngressService:
                 target_id=page.id,
                 operation="context_ingress_accept",
                 diff_summary=f"{request.final_save_mode}: {request.final_title}",
-                diff_ref=f"context_page_version:{version.id}",
+                diff_ref=context_version_ref(version.id),
             )
         )
         record_metadata_snapshot(

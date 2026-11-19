@@ -59,6 +59,7 @@ from backend.services.context_lifecycle import project_context_version
 from backend.services.context_review_disposition import (
     context_version_review_metadata,
 )
+from backend.services.context_version_refs import written_context_version_id
 from backend.services.graph_observation_service import GraphObservationService
 from backend.services.graph_rank import (
     DENOMINATOR_KINDS,
@@ -3530,8 +3531,7 @@ def _newest_records(records: list[GraphNodeRecord]) -> list[GraphNodeRecord]:
 
 
 def _change_version_id(operation: ChangeOperation) -> UUID | None:
-    kind, _, raw_id = (operation.diff_ref or "").partition(":")
-    return _uuid_or_none(raw_id) if kind == "context_page_version" else None
+    return written_context_version_id(operation.diff_ref)
 
 
 def _audit_version_id(event: AuditEvent) -> UUID | None:

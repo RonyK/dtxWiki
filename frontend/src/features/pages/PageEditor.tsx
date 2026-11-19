@@ -1,11 +1,6 @@
-import { ContextMergeResultPreview } from "./ContextMergeResultPreview";
 import { inputTextError, markdownInputError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { autocompletion, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
-  defaultKeymap,
-  history,
-  historyKeymap,
   indentWithTab,
   redo,
   undo,
@@ -101,20 +96,21 @@ import {
   beginPageEdit,
   createPage,
   createPageComment,
-  diffPageVersions,
   listPageTags,
   listPages,
   newIdempotencyKey,
   PageEditingUnavailableError,
+  contextMergeConflictOf,
+  draftBaseSnapshotOf,
   executePreparedPagePublication,
+  previewPageMerge,
   publishPageVersion,
   readEditablePage,
   readPage,
   sendPageAutosave,
   submitPageForReview,
-  updatePage,
 } from "../../shared/api/pages";
-import type { ContextMergePreview, PagePayload, PageSummary, PageVersionDiff, PreparedPagePublication, PageWriteOptions, PublishPageVersionInput } from "../../shared/api/pages";
+import type { ContextMergeConflict, DraftBaseSnapshot, PagePayload, PageSummary, PreparedMergeChoice, PreparedPagePublication, PageWriteOptions, PublishPageVersionInput } from "../../shared/api/pages";
 import { listLibraryItems } from "../../shared/api/library";
 import type { LibraryItemSummary } from "../../shared/api/library";
 import {
@@ -135,7 +131,6 @@ import type { TreeNodePayload } from "../../shared/api/workspace";
 import { AdvancedSection } from "../../shared/components/AdvancedSection";
 import { Breadcrumbs, type BreadcrumbItem } from "../../shared/components/Breadcrumbs";
 import { ChipInput } from "../../shared/components/ChipInput";
-import { DiffViewer } from "../../shared/components/DiffViewer";
 import { Dialog } from "../../shared/components/Dialog";
 import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
 import { EmojiPicker } from "../../shared/components/EmojiPicker";
@@ -160,6 +155,7 @@ import {
 } from "../../shared/lib/workspaceRoutes";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { isContextId } from "../../shared/lib/contextLinks";
+import { isContextCommit } from "../../shared/lib/contextHistory";
 import {
   formatUploadByteLimit,
   uploadAcceptValue,
@@ -167,6 +163,8 @@ import {
 } from "../../shared/media/formatCapabilities";
 import { normalizeSlugInput, slugify } from "../../shared/text/slug";
 import { ContextMediaManagerDialog } from "./ContextMediaManagerDialog";
+import { resolvedMergeResult } from "./contextMerge";
+import { useContextMerge } from "./useContextMerge";
 import { EditorActionBar } from "./EditorActionBar";
 import {
   MARKDOWN_GEOMETRY_CHANGE_EVENT,
@@ -262,11 +260,21 @@ type SaveState =
   | "conflict";
 type PublicationState = "published" | "staged" | "never-published";
 type StalePublishState = "idle" | "blocked" | "reloading" | "error";
+type EditorConflict =
+  // A save that overlapped another save of the same draft.
+  | { kind: "merge" }
+  // The draft this session saved to ended (published or withdrawn) meanwhile.
+  | { kind: "ended"; endedVersionId: string }
+  | { kind: "other" };
 type ExecuteEditorCommandOptions = {
   replaceRange?: { from: number; to: number } | null;
 };
 type SaveOptions = {
   bodyOverride?: string;
+  /** The whole draft to write instead of the editor's (a merge resolution). */
+  draft?: DraftSnapshot;
+  /** Part of combining an overlapping save: runs while the conflict shows. */
+  resolveConflict?: boolean;
   publish?: boolean;
   publishDespiteFindings?: boolean;
   skipFenceCheck?: boolean;
@@ -621,14 +629,8 @@ export function PageEditor({
     useState<FloatingPosition | null>(null);
   const [emojiPicker, setEmojiPicker] = useState<EmojiPickerState | null>(null);
   const [highlightedBlockIndex, setHighlightedBlockIndex] = useState(0);
-  const [conflict, setConflict] = useState<{
-    serverVersionId: string;
-    serverContentHash: string;
-  } | null>(null);
-  const [conflictDiff, setConflictDiff] = useState<PageVersionDiff | null>(null);
-  const [conflictDiffError, setConflictDiffError] = useState<string | null>(null);
-  const [conflictDiffLoading, setConflictDiffLoading] = useState(false);
-  const [conflictDiffOpen, setConflictDiffOpen] = useState(false);
+  const [conflict, setConflict] = useState<EditorConflict | null>(null);
+  const merge = useContextMerge();
   const [stalePublishState, setStalePublishState] =
     useState<StalePublishState>("idle");
   const [isSaving, setIsSaving] = useState(false);
@@ -703,7 +705,11 @@ export function PageEditor({
   const actorSessionGenerationRef = useRef(1);
   const editorGenerationRef = useRef(1);
   const uploadAuthorityKeyRef = useRef<string | null>(null);
-  const saveRef = useRef<(options?: SaveOptions) => void>(() => {});
+  // The latest render's save: work that resumes after an await (or from a
+  // dialog) saves the editor's text as it is now, not as it was then.
+  const saveRef = useRef<(options?: SaveOptions) => Promise<ContextMergeConflict | undefined>>(
+    async () => undefined,
+  );
   const autosaveBackstopRef = useRef<
     (options?: { allowInFlight?: boolean }) => boolean
   >(() => false);
@@ -753,9 +759,7 @@ export function PageEditor({
   const lastSavedRef = useRef<DraftSnapshot>(emptyDraft(mode, slug));
   const lastSavedFingerprintRef = useRef<string | null>(null);
   const [draftContainsChanges, setDraftContainsChanges] = useState(false);
-  const draftBaseSnapshotRef = useRef<{ body_md: string; page_metadata: Record<string, unknown> } | null>(null);
-  const [mergePublishPrompt, setMergePublishPrompt] = useState<{ preview: ContextMergePreview; resolve: (accepted: boolean) => void } | null>(null);
-  const mergePublishResolveRef = useRef<((accepted: boolean) => void) | null>(null);
+  const draftBaseSnapshotRef = useRef<DraftBaseSnapshot | null>(null);
   const preparedPublicationRef = useRef<{ key: string; command: PreparedPagePublication } | null>(null);
   const publicationKey = useCallback((workspace: string, page: string) => {
     return reviewDraftKey(actorIdRef.current ?? "", workspace, `context-page:${page}`) + ".publication";
@@ -772,37 +776,40 @@ export function PageEditor({
     writeReviewDraft(key, "");
     if (preparedPublicationRef.current?.key === key) preparedPublicationRef.current = null;
   }, []);
+  // A prepared publication whose outcome is unknown (its response was lost)
+  // ends the merge dialog and is replayed as it was, idempotency key and all,
+  // by the next Publish, so one publication is never sent twice. A command the
+  // server answered is settled and forgotten.
   async function publishEditorPage(workspace: string, id: string, versionId: string,
     intent: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash">,
     options: PageWriteOptions = {}) {
     const key = publicationKey(workspace, id);
-    try {
-      const result = await publishPageVersion(workspace, id, versionId, intent, { ...options,
-        preparedPublication: pendingPublication(key),
-        onPublicationPrepared(command) {
-          preparedPublicationRef.current = { key, command };
-          writeReviewDraft(key, JSON.stringify(command));
-        },
-      });
-      clearPendingPublication(key);
-      return result;
-    } catch (error) {
-      if (error instanceof ApiError && error.status >= 400 && error.status < 500) clearPendingPublication(key);
-      throw error;
-    }
-  }
-
-  useEffect(() => () => { mergePublishResolveRef.current?.(false); }, []);
-  function confirmAutomaticMerge(preview: ContextMergePreview): Promise<boolean> {
-    return new Promise((resolve) => {
-      mergePublishResolveRef.current = resolve;
-      setMergePublishPrompt({ preview, resolve });
+    const publish = async (mergeChoice?: PreparedMergeChoice) => {
+      try {
+        const result = await publishPageVersion(workspace, id, versionId, intent, {
+          ...options,
+          mergeChoice,
+          preparedPublication: mergeChoice ? undefined : pendingPublication(key),
+          onPublicationPrepared(command) {
+            preparedPublicationRef.current = { key, command };
+            writeReviewDraft(key, JSON.stringify(command));
+          },
+        });
+        clearPendingPublication(key);
+        return result;
+      } catch (error) {
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500) clearPendingPublication(key);
+        throw error;
+      }
+    };
+    return pendingPublication(key) ? publish() : merge.runMergeWrite({
+      kind: "publish",
+      workspaceId: workspace,
+      pageId: id,
+      publishedVersionNumber: page?.published_version_no ?? null,
+      loadPreview: () => previewPageMerge(workspace, id, versionId, { signal: options.signal }),
+      write: publish,
     });
-  }
-  function settleAutomaticMerge(accepted: boolean) {
-    mergePublishPrompt?.resolve(accepted);
-    mergePublishResolveRef.current = null;
-    setMergePublishPrompt(null);
   }
 
   const propertiesPopoverId = useId();
@@ -861,7 +868,7 @@ export function PageEditor({
     pageIdRef.current = updated.id;
     baseVersionIdRef.current = updated.version_id;
     sessionVersionIdRef.current = updated.version_id;
-    draftBaseSnapshotRef.current = { body_md: updated.body_md, page_metadata: updated.page_metadata ?? {} };
+    draftBaseSnapshotRef.current = draftBaseSnapshotOf(updated);
     setPage(updated);
     if (mode === "edit") {
       const url = new URL(window.location.href);
@@ -882,7 +889,7 @@ export function PageEditor({
     if (editableDraftPromiseRef.current) return editableDraftPromiseRef.current;
     const current = editablePageRef.current?.id === selected.id ? editablePageRef.current : selected;
     if (current.version_status === "draft") return current;
-    const promise = beginPageEdit(workspace, current, current.version_id).then((draft) => {
+    const promise = beginPageEdit(workspace, current.id, current.version_id).then((draft) => {
       if (!isEditorMountedRef.current || workspaceIdRef.current !== workspace ||
           editorGenerationRef.current !== generation || pageIdRef.current !== current.id) {
         throw new DOMException("Editor is no longer current.", "AbortError");
@@ -1206,26 +1213,16 @@ export function PageEditor({
   };
   const extensions = useMemo(
     () => [
-      history(),
       lineNumbers(),
       highlightActiveLineGutter(),
       foldGutter(),
       drawSelection(),
-      EditorView.lineWrapping,
-      // @uiw/react-codemirror does not reliably forward its aria-label prop
-      // to CodeMirror's actual contenteditable textbox in a real browser.
-      // Label the element CodeMirror owns so assistive technology names the
-      // same role="textbox" surface that receives keyboard input.
-      EditorView.contentAttributes.of({ "aria-label": bodyAriaLabel }),
       indentOnInput(),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       bracketMatching(),
       closeBrackets(),
       highlightActiveLine(),
       highlightSelectionMatches(),
-      markdown({
-        base: markdownLanguage,
-      }),
       autocompletion({
         override: [createEditorCompletionSource(pagesRef, sourceSuggestionsRef, workspaceIdRef, {
           label: t("references.choose"),
@@ -1267,33 +1264,33 @@ export function PageEditor({
           syncPreviewToCaretRef.current(update.view);
         }
       }),
-      keymap.of([
-        indentWithTab,
-        {
-          key: "Mod-s",
-          run() {
-            saveRef.current();
-            return true;
+      // These features' keys follow the standard keys, as they always have.
+      keymap.of([...closeBracketsKeymap, ...searchKeymap, ...foldKeymap]),
+    ],
+    [imageUploadOptions, t],
+  );
+  const keyBindings = useMemo(
+    () => [
+      indentWithTab,
+      {
+        key: "Mod-s",
+        run() {
+          saveRef.current();
+          return true;
+        },
+        preventDefault: true,
+      },
+      ...(EDITOR_COMMANDS as readonly EditorCommand[])
+        .filter((command) => command.shortcut)
+        .map((command) => ({
+          key: editorShortcutCodeMirrorKey(command.shortcut!),
+          run(view: EditorViewType) {
+            return commandRef.current(command.id, view);
           },
           preventDefault: true,
-        },
-        ...(EDITOR_COMMANDS as readonly EditorCommand[])
-          .filter((command) => command.shortcut)
-          .map((command) => ({
-            key: editorShortcutCodeMirrorKey(command.shortcut!),
-            run(view: EditorViewType) {
-              return commandRef.current(command.id, view);
-            },
-            preventDefault: true,
-          })),
-        ...defaultKeymap,
-        ...closeBracketsKeymap,
-        ...searchKeymap,
-        ...foldKeymap,
-        ...historyKeymap,
-      ]),
+        })),
     ],
-    [bodyAriaLabel, imageUploadOptions, t],
+    [],
   );
   const contextActiveNodeId = useMemo(
     () => contextTree.find((node) => node.target_id === page?.id)?.id ?? null,
@@ -1555,6 +1552,26 @@ export function PageEditor({
   useEffect(() => {
     bodyRef.current = body;
   }, [body]);
+
+  /** Shows a server draft's content in the editor (does not mark it saved). */
+  const showEditorContent = useCallback(({ draft, metadata }: EditorContent) => {
+    frontmatterExtraLinesRef.current = metadata.extraLines;
+    setPageIcon(metadata.icon);
+    setPageType(metadata.type);
+    setTagInput(metadata.tags);
+    setAliasInput(metadata.aliases);
+    setTitle(draft.title);
+    setPageSlug(draft.slug);
+    bodyRef.current = draft.body;
+    setBody(draft.body);
+    setDestinationNodeId(draft.destinationNodeId);
+  }, []);
+
+  /** Records a draft as the last saved state the editor compares against. */
+  const markEditorContentSaved = useCallback((draft: DraftSnapshot) => {
+    lastSavedRef.current = draft;
+    lastSavedFingerprintRef.current = draftSaveFingerprint(draft, frontmatterExtraLinesRef.current);
+  }, []);
 
   function markDraftMutation() {
     const nextRevision = editorRevisionRef.current + 1;
@@ -1831,16 +1848,6 @@ export function PageEditor({
   }, [contextMediaCapabilities]);
 
   useEffect(() => {
-    if (conflict) {
-      return;
-    }
-    setConflictDiff(null);
-    setConflictDiffError(null);
-    setConflictDiffLoading(false);
-    setConflictDiffOpen(false);
-  }, [conflict]);
-
-  useEffect(() => {
     latestDraftRef.current = {
       aliases: pageMetadata.aliases,
       body,
@@ -2018,15 +2025,7 @@ export function PageEditor({
           setIsEditorReady(true);
           return;
         }
-        const parsed = parsePageDocument(loaded.body_md, {
-          aliases: loaded.aliases,
-          tags: loaded.tags,
-          type: loaded.page_type as PageType,
-        });
-        const metadata = metadataFromPagePayload(parsed.metadata, loaded);
-        const loadedDestination =
-          contextNodes.find((node) => node.target_id === loaded.id)?.parent_id ??
-          chooseDefaultDestination(contextNodes);
+        const content = editorContentOf(serverDraftOf(loaded), contextNodes);
         const restoredPublication = readPagePublicationState(loaded);
         if (cancelled) return;
         // Expand the edited page's actual path so the tree opens to it. The
@@ -2034,39 +2033,21 @@ export function PageEditor({
         // left ancestorPathNodeIds empty and collapsed the selected path
         // (item 23 follow-up).
         setContextExpandedNodeIds(
-          ancestorPathNodeIds(contextNodes, loadedDestination),
+          ancestorPathNodeIds(contextNodes, content.draft.destinationNodeId),
         );
-        applyParsedMetadata(metadata);
         sessionVersionIdRef.current = restoredPublication.sessionVersionId;
         setPublicationState(restoredPublication.state);
         pageIdRef.current = loaded.id;
         setPage(loaded);
         setDraftContainsChanges(Boolean(selectedEditVersionId));
-        draftBaseSnapshotRef.current = { body_md: loaded.body_md, page_metadata: loaded.page_metadata ?? {} };
+        draftBaseSnapshotRef.current = draftBaseSnapshotOf(loaded);
         if (!selectedEditVersionId) {
           const url = new URL(window.location.href);
           url.searchParams.set("version_id", loaded.version_id);
           window.history.replaceState(window.history.state, "", url);
         }
-        setTitle(loaded.title);
-        setPageSlug(loaded.slug);
-        bodyRef.current = parsed.body;
-        setBody(parsed.body);
-        setDestinationNodeId(loadedDestination);
-        lastSavedRef.current = {
-          aliases: metadata.aliases,
-          body: parsed.body,
-          destinationNodeId: loadedDestination,
-          icon: metadata.icon,
-          pageType: metadata.type,
-          slug: loaded.slug,
-          tags: metadata.tags,
-          title: loaded.title,
-        };
-        lastSavedFingerprintRef.current = draftSaveFingerprint(
-          lastSavedRef.current,
-          frontmatterExtraLinesRef.current,
-        );
+        showEditorContent(content);
+        markEditorContentSaved(content.draft);
         acknowledgedRevisionRef.current = editorRevisionRef.current;
         setAcknowledgedRevision(editorRevisionRef.current);
       }
@@ -2099,7 +2080,7 @@ export function PageEditor({
     return () => {
       cancelled = true;
     };
-  }, [createInitialTitle, createParentNodeId, mode, pageId, routeWorkspaceId, slug, selectedEditVersionId, publicationKey, pendingPublication, clearPendingPublication, navigate]);
+  }, [createInitialTitle, createParentNodeId, mode, pageId, routeWorkspaceId, slug, selectedEditVersionId, publicationKey, pendingPublication, clearPendingPublication, navigate, showEditorContent, markEditorContentSaved]);
 
   useEffect(() => {
     if (mode === "create") {
@@ -3085,14 +3066,25 @@ export function PageEditor({
     });
   }
 
-  async function save(options: SaveOptions = {}) {
+  // A queued save runs after React re-renders, so it writes the editor's text
+  // as it is then; a draft passed for this render is already shown there.
+  function queueSave(options: SaveOptions) {
+    pendingPublishRef.current = { ...options, draft: undefined };
+  }
+
+  /** Saves the draft; resolves with the overlap when it overlapped another save. */
+  async function save(options: SaveOptions = {}): Promise<ContextMergeConflict | undefined> {
     const source = options.source ?? "manual";
-    const submittedBody = options.bodyOverride ?? body;
-    const serializedBody = serializeDraftBody(
-      { ...currentDraft, body: submittedBody, title: title.trim(), slug: mode === "edit" ? pageSlug : normalizedSlug },
-      frontmatterExtraLinesRef.current,
-    );
-    const inputError = inputTextError(title, TITLE_MAX_LENGTH) || markdownInputError(serializedBody);
+    // The draft this save writes: a caller's (a merge resolution) or the editor's.
+    const authored: DraftSnapshot = options.draft ?? {
+      ...currentDraft,
+      body: options.bodyOverride ?? body,
+      slug: mode === "edit" ? pageSlug : normalizedSlug,
+      title: title.trim(),
+    };
+    const submittedBody = authored.body;
+    const serializedBody = serializeDraftBody(authored, frontmatterExtraLinesRef.current);
+    const inputError = inputTextError(authored.title, TITLE_MAX_LENGTH) || markdownInputError(serializedBody);
     if (inputError) {
       setStatus(inputError);
       setSaveError(true);
@@ -3106,7 +3098,7 @@ export function PageEditor({
       if (source === "auto") {
         pendingAutosaveRef.current = true;
       } else {
-        pendingPublishRef.current = { ...options, source };
+        queueSave({ ...options, source });
       }
       return;
     }
@@ -3126,7 +3118,7 @@ export function PageEditor({
         return;
       }
     }
-    if (!canSave || conflict) {
+    if (!canSave || (conflict && !options.resolveConflict)) {
       if (!conflict && source !== "auto" && saveBlockedReason) {
         if (missingTitle) {
           titleRef.current?.focus();
@@ -3145,7 +3137,7 @@ export function PageEditor({
       // Dropping the request here loses the one thing only they can decide, so
       // the intent is remembered and re-run once the current save settles.
       if (source !== "auto") {
-        pendingPublishRef.current = { ...options, source };
+        queueSave({ ...options, source });
       } else {
         pendingAutosaveRef.current = true;
       }
@@ -3154,16 +3146,8 @@ export function PageEditor({
     const requestId = saveRequestIdRef.current + 1;
     saveRequestIdRef.current = requestId;
     const dispatchedRevision = editorRevisionRef.current;
-    const dispatchedDraft = {
-      ...currentDraft,
-      body: submittedBody,
-      slug: mode === "edit" ? pageSlug : normalizedSlug,
-      title: title.trim(),
-    };
-    const dispatchedFingerprint = draftSaveFingerprint(
-      dispatchedDraft,
-      frontmatterExtraLinesRef.current,
-    );
+    const dispatchedDraft = authored;
+    const dispatchedFingerprint = fingerprintOf(dispatchedDraft);
     const contentUnchanged =
       dispatchedFingerprint === lastSavedFingerprintRef.current &&
       !(source === "manual" && page?.block_map_stale);
@@ -3183,14 +3167,10 @@ export function PageEditor({
     setStatus(null);
     setConflict(null);
     let publishRequestStarted = false;
+    let targetVersionId: string | null = null;
     try {
       if (mode === "create" && !page) {
-        const submittedDraft = {
-          ...currentDraft,
-          body: submittedBody,
-          slug: normalizedSlug,
-          title: title.trim(),
-        };
+        const submittedDraft = authored;
         const created = await createPage(workspaceId, {
           title: submittedDraft.title,
           body_md: serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current),
@@ -3207,15 +3187,7 @@ export function PageEditor({
         setPublicationState("never-published");
         sessionVersionIdRef.current = created.version_id;
         acknowledgeEditorRevision(dispatchedRevision);
-        lastSavedRef.current = {
-          ...submittedDraft,
-          title: created.title,
-          slug: created.slug,
-        };
-        lastSavedFingerprintRef.current = draftSaveFingerprint(
-          lastSavedRef.current,
-          frontmatterExtraLinesRef.current,
-        );
+        markEditorContentSaved({ ...submittedDraft, title: created.title, slug: created.slug });
         let savedPage = created;
         let savedDraft = submittedDraft;
         const followUpRevision = editorRevisionRef.current;
@@ -3243,7 +3215,7 @@ export function PageEditor({
             base_content_hash: created.content_hash,
             expected_editing_revision: created.editing_revision,
             version_id: created.version_id,
-            base_snapshot: { body_md: created.body_md, page_metadata: created.page_metadata ?? {} },
+            base_snapshot: draftBaseSnapshotOf(created),
             destination_node_id: followUpDraft.destinationNodeId || null,
             idempotency_key: newIdempotencyKey(),
             on_stale: "conflict",
@@ -3256,15 +3228,7 @@ export function PageEditor({
         }
         adoptEditablePage(savedPage);
         setSaveRelativeNow(Date.now());
-        lastSavedRef.current = {
-          ...savedDraft,
-          title: savedPage.title,
-          slug: savedPage.slug,
-        };
-        lastSavedFingerprintRef.current = draftSaveFingerprint(
-          lastSavedRef.current,
-          frontmatterExtraLinesRef.current,
-        );
+        markEditorContentSaved({ ...savedDraft, title: savedPage.title, slug: savedPage.slug });
         setPublicationState("never-published");
         if (editorRevisionRef.current > acknowledgedRevisionRef.current) {
           return;
@@ -3288,7 +3252,7 @@ export function PageEditor({
             expected_content_hash: savedPage.content_hash,
             expected_references_hash: savedPage.references_hash,
           },
-          { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
+          { signal: controller.signal },
         );
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
@@ -3324,7 +3288,7 @@ export function PageEditor({
             expected_content_hash: page.content_hash,
             expected_references_hash: page.references_hash,
           },
-          { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
+          { signal: controller.signal },
         );
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
@@ -3342,16 +3306,12 @@ export function PageEditor({
         );
         return;
       }
-      const submittedDraft = {
-        ...currentDraft,
-        body: submittedBody,
-        slug: pageSlug,
-        title: title.trim(),
-      };
+      const submittedDraft = authored;
       if (editableDraftPromiseRef.current) await editableDraftPromiseRef.current;
       if (!isCurrentSaveRequest(requestId, saveRequestIdRef) || !isEditorMountedRef.current) return;
       const saveBase = editablePageRef.current ?? page;
       const requestedSessionVersionId = sessionVersionIdRef.current;
+      targetVersionId = requestedSessionVersionId ?? saveBase.version_id;
       const payload = {
         title: submittedDraft.title,
         body_md: serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current),
@@ -3362,7 +3322,7 @@ export function PageEditor({
         base_content_hash: saveBase.content_hash,
         expected_editing_revision: saveBase.editing_revision,
         version_id: requestedSessionVersionId ?? saveBase.version_id,
-        base_snapshot: draftBaseSnapshotRef.current ?? { body_md: saveBase.body_md, page_metadata: saveBase.page_metadata ?? {} },
+        base_snapshot: draftBaseSnapshotRef.current ?? draftBaseSnapshotOf(saveBase),
         destination_node_id: submittedDraft.destinationNodeId || null,
         idempotency_key: newIdempotencyKey(),
         on_stale: "conflict" as const,
@@ -3403,32 +3363,18 @@ export function PageEditor({
       // text (a consistent, non-dirty baseline) and reflects the normalized
       // body on the next load; the explicit "Format now" button is how an
       // author pulls normalization into the live buffer.
-      const hasLaterInput = editorRevisionRef.current > dispatchedRevision;
+      const hasLaterInput = hasInputSince(dispatchedRevision);
       draftBaseSnapshotRef.current = updated.autosave_merged && hasLaterInput
         ? { body_md: payload.body_md, page_metadata: {
           title: submittedDraft.title, page_type: submittedDraft.pageType,
           tags: submittedDraft.tags, aliases: submittedDraft.aliases,
           placement_parent_node_id: submittedDraft.destinationNodeId || null,
         } }
-        : { body_md: updated.body_md, page_metadata: updated.page_metadata ?? {} };
+        : draftBaseSnapshotOf(updated);
       if (updated.autosave_merged && !hasLaterInput) {
-        const parsedMerged = parsePageDocument(updated.body_md, {
-          aliases: updated.aliases, tags: updated.tags, type: updated.page_type as PageType,
-        });
-        const mergedMetadata = metadataFromPagePayload(parsedMerged.metadata, updated);
-        applyParsedMetadata(mergedMetadata);
-        setTitle(updated.title);
-        bodyRef.current = parsedMerged.body;
-        setBody(parsedMerged.body);
-        const mergedDestination = typeof updated.page_metadata?.placement_parent_node_id === "string"
-          ? updated.page_metadata.placement_parent_node_id : submittedDraft.destinationNodeId;
-        setDestinationNodeId(mergedDestination);
-        lastSavedRef.current = {
-          ...submittedDraft, body: parsedMerged.body, title: updated.title, slug: updated.slug,
-          tags: mergedMetadata.tags, aliases: mergedMetadata.aliases,
-          pageType: updated.page_type as PageType, destinationNodeId: mergedDestination,
-        };
-        lastSavedFingerprintRef.current = draftSaveFingerprint(lastSavedRef.current, frontmatterExtraLinesRef.current);
+        const merged = editorContentOf(serverDraftOf(updated), contextTree);
+        showEditorContent(merged);
+        markEditorContentSaved(merged.draft);
       } else {
         lastSavedRef.current = {
           ...submittedDraft, title: updated.title, slug: updated.slug,
@@ -3465,7 +3411,7 @@ export function PageEditor({
           expected_content_hash: updated.content_hash,
           expected_references_hash: updated.references_hash,
         },
-        { signal: controller.signal, onMergePreview: confirmAutomaticMerge },
+        { signal: controller.signal },
       );
       if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
       if (!isEditorMountedRef.current) return;
@@ -3542,15 +3488,17 @@ export function PageEditor({
         setStalePublishState("blocked");
         return;
       }
+      const overlap = contextMergeConflictOf(exc);
+      if (overlap) {
+        setConflict({ kind: "merge" });
+        return overlap;
+      }
       if (exc instanceof ApiError && exc.status === 409) {
         sessionVersionIdRef.current = null;
-        setConflict({
-          serverVersionId: exc.body.server_version_id || "",
-          serverContentHash: exc.body.server_content_hash || "",
-        });
-        setConflictDiff(null);
-        setConflictDiffError(null);
-        setConflictDiffOpen(false);
+        setConflict({ kind: "other" });
+        if (exc.body.error_code === "editing_revision_conflict" && targetVersionId) {
+          void detectEndedDraft(targetVersionId);
+        }
         return;
       }
       setStatus(
@@ -3670,9 +3618,7 @@ export function PageEditor({
   // pointing at a closure from a phantom render. Bind in useLayoutEffect so
   // the assignment happens synchronously after commit. Review §3.1 FP-C2.
   useLayoutEffect(() => {
-    saveRef.current = (options = { source: "manual" }) => {
-      void save(options);
-    };
+    saveRef.current = (options = { source: "manual" }) => save(options);
     autosaveBackstopRef.current = (options = {}) => {
       if (
         !hasUnsavedChanges ||
@@ -3689,10 +3635,7 @@ export function PageEditor({
       const draft = latestDraftRef.current;
       const serializedBody = serializeDraftBody(draft, frontmatterExtraLinesRef.current);
       if (markdownInputError(serializedBody)) return false;
-      if (
-        draftSaveFingerprint(draft, frontmatterExtraLinesRef.current) ===
-        lastSavedFingerprintRef.current
-      ) {
+      if (!draftDiffersFromSaved(draft)) {
         return false;
       }
       const saveBase = editablePageRef.current ?? page;
@@ -3706,7 +3649,7 @@ export function PageEditor({
         base_content_hash: saveBase.content_hash,
         expected_editing_revision: saveBase.editing_revision,
         version_id: sessionVersionIdRef.current ?? saveBase.version_id,
-        base_snapshot: draftBaseSnapshotRef.current ?? { body_md: saveBase.body_md, page_metadata: saveBase.page_metadata ?? {} },
+        base_snapshot: draftBaseSnapshotRef.current ?? draftBaseSnapshotOf(saveBase),
         destination_node_id: draft.destinationNodeId || null,
         idempotency_key: newIdempotencyKey(),
         on_stale: "conflict",
@@ -3715,56 +3658,100 @@ export function PageEditor({
     };
   });
 
-  async function viewConflictChanges() {
-    if (!page || !conflict || conflictDiffLoading || !workspaceId) {
+  function hasInputSince(revision: number) {
+    return editorRevisionRef.current > revision;
+  }
+
+  // Saves the editor's text while a conflict shows; if it overlaps another
+  // save, asks how to combine it -- with choices that hold everything typed.
+  async function saveAndCombine(): Promise<void> {
+    const revision = editorRevisionRef.current;
+    const overlap = await saveRef.current({ source: "manual", resolveConflict: true });
+    if (!overlap) return;
+    if (hasInputSince(revision)) return saveAndCombine();
+    askToCombine(overlap);
+  }
+
+  // Asks how to combine an overlapping save. The chosen result becomes the
+  // editor's text, based on the server draft the merge used, and the ordinary
+  // save writes it; if that save overlaps again, the newer choices are asked.
+  function askToCombine(overlap: ContextMergeConflict, refreshed = false) {
+    const pageId = pageIdRef.current ?? page?.id;
+    if (!workspaceId || !pageId) return;
+    merge.resolveConflict({
+      kind: "save",
+      workspaceId,
+      pageId,
+      preview: overlap.merge_preview,
+      refreshed,
+      async apply(resolution) {
+        const result = resolvedMergeResult(resolution);
+        const content = editorContentOf({ ...result.page_metadata, id: pageId, slug: pageSlug, body_md: result.body_md }, contextTree);
+        showEditorContent(content);
+        markDraftMutation();
+        rebaseOntoServerDraft(overlap);
+        const next = await saveRef.current({ source: "manual", draft: content.draft, resolveConflict: true });
+        if (next) askToCombine(next, true);
+      },
+    });
+  }
+
+  // Later saves are based on the server draft a merge was computed against.
+  function rebaseOntoServerDraft(overlap: ContextMergeConflict) {
+    const server = overlap.merge_preview;
+    const base = editablePageRef.current;
+    if (base) {
+      editablePageRef.current = {
+        ...base,
+        version_id: server.version_id,
+        editing_revision: overlap.server_editing_revision,
+        content_hash: server.content_hash,
+      };
+    }
+    sessionVersionIdRef.current = server.version_id;
+    draftBaseSnapshotRef.current = overlap.server_snapshot;
+    // The saved state is now that server draft, whose text the editor never
+    // held: nothing the editor holds counts as already saved.
+    lastSavedFingerprintRef.current = null;
+  }
+
+  // "Combine changes": send the editor's current text again, so the choices
+  // include everything typed since the conflict; with nothing of this
+  // session's own unsaved, take the server's draft instead.
+  function combineChanges() {
+    if (!draftDiffersFromSaved({ ...currentDraft, slug: pageSlug, title: title.trim() })) {
+      void reloadLatest();
       return;
     }
-    setConflictDiffOpen(true);
-    setConflictDiffError(null);
-    if (!conflict.serverVersionId) {
-      setConflictDiff(null);
-      setConflictDiffError(
-        t("editor.conflictVersionMissing", {
-          defaultValue: "The server did not return a version to compare.",
-        }),
-      );
-      return;
-    }
-    if (conflict.serverVersionId === page.version_id) {
-      // An in-place autosave overwrite (two tabs on the same draft) reports
-      // the conflict against the caller's own version id, so a version-diff
-      // request here would just diff the draft against itself.
-      setConflictDiff(null);
-      setConflictDiffError(
-        t("editor.conflictInPlaceOverwritten", {
-          defaultValue:
-            "This draft was overwritten in place by another session; there is no version-to-version comparison.",
-        }),
-      );
-      return;
-    }
-    setConflictDiffLoading(true);
+    void saveAndCombine();
+  }
+
+  // A draft that ended (published or withdrawn) is a commit; keep this
+  // session's text by starting a new draft from it and saving onto that.
+  async function detectEndedDraft(versionId: string) {
+    const pageId = pageIdRef.current ?? page?.id;
+    if (!workspaceId || !pageId) return;
     try {
-      setConflictDiff(
-        await diffPageVersions(
-          workspaceId,
-          page.id,
-          page.version_id,
-          conflict.serverVersionId,
-        ),
-      );
-    } catch (exc) {
-      setConflictDiff(null);
-      setConflictDiffError(
-        apiErrorMessage(
-          exc,
-          t("editor.loadServerChangesFailed", {
-            defaultValue: "Failed to load server changes",
-          }),
-        ),
-      );
-    } finally {
-      setConflictDiffLoading(false);
+      const target = await readPage(workspaceId, pageId, versionId);
+      if (isContextCommit(target.version_status)) {
+        setConflict({ kind: "ended", endedVersionId: versionId });
+      }
+    } catch { /* The generic conflict banner stays. */ }
+  }
+
+  async function startFromEndedDraft() {
+    const pageId = pageIdRef.current ?? page?.id;
+    if (!workspaceId || !pageId || conflict?.kind !== "ended" || savingRef.current) return;
+    try {
+      const sessionBase = draftBaseSnapshotRef.current;
+      const draft = await beginPageEdit(workspaceId, pageId, conflict.endedVersionId);
+      adoptEditablePage(draft);
+      // The editor's own base stays, so the server merges this session's
+      // changes onto the ended draft instead of overwriting it.
+      draftBaseSnapshotRef.current = sessionBase;
+      await saveAndCombine();
+    } catch (error) {
+      setStatus(apiErrorMessage(error, t("editor.saveFailed")));
     }
   }
 
@@ -3784,40 +3771,14 @@ export function PageEditor({
       if (!isCurrentReload()) return false;
       if (!latest) return false;
       const restoredPublication = readPagePublicationState(latest);
-      const parsed = parsePageDocument(latest.body_md, {
-        aliases: latest.aliases,
-        tags: latest.tags,
-        type: latest.page_type as PageType,
-      });
-      const metadata = metadataFromPagePayload(parsed.metadata, latest);
-      const latestDestination =
-        contextTree.find((node) => node.target_id === latest.id)?.parent_id ??
-        chooseDefaultDestination(contextTree);
-      applyParsedMetadata(metadata);
+      const content = editorContentOf(serverDraftOf(latest), contextTree);
       adoptEditablePage(latest);
       sessionVersionIdRef.current = restoredPublication.sessionVersionId;
       setPublicationState(restoredPublication.state);
-      setTitle(latest.title);
-      setPageSlug(latest.slug);
-      bodyRef.current = parsed.body;
-      setBody(parsed.body);
-      setDestinationNodeId(latestDestination);
+      showEditorContent(content);
+      markEditorContentSaved(content.draft);
       setConflict(null);
       setStalePublishState("idle");
-      lastSavedRef.current = {
-        aliases: metadata.aliases,
-        body: parsed.body,
-        destinationNodeId: latestDestination,
-        icon: metadata.icon,
-        pageType: metadata.type,
-        slug: latest.slug,
-        tags: metadata.tags,
-        title: latest.title,
-      };
-      lastSavedFingerprintRef.current = draftSaveFingerprint(
-        lastSavedRef.current,
-        frontmatterExtraLinesRef.current,
-      );
       acknowledgeCurrentEditorRevision();
       setSaveError(false);
       setTitleValidationRequested(false);
@@ -3856,57 +3817,6 @@ export function PageEditor({
     }
   }
 
-  async function preserveAlternative() {
-    if (!page || !conflict || savingRef.current || !workspaceId) return;
-    const preservedRevision = editorRevisionRef.current;
-    savingRef.current = true;
-    setIsSaving(true);
-    updateInFlightRevision(preservedRevision);
-    setStatus(null);
-    try {
-      const submittedDraft = { ...currentDraft, slug: pageSlug, title: title.trim() };
-      const serializedBody = serializeDraftBody(submittedDraft, frontmatterExtraLinesRef.current);
-      const inputError = markdownInputError(serializedBody);
-      if (inputError) { setStatus(inputError); return; }
-      const preserved = await updatePage(workspaceId, page.id, {
-        title: submittedDraft.title,
-        body_md: serializedBody,
-        page_type: submittedDraft.pageType,
-        tags: submittedDraft.tags,
-        aliases: submittedDraft.aliases,
-        base_version_id: page.version_id,
-        base_content_hash: page.content_hash,
-        expected_editing_revision: page.editing_revision,
-        destination_node_id: submittedDraft.destinationNodeId || null,
-        on_stale: "preserve_as_alternative",
-      });
-      sessionVersionIdRef.current = null;
-      // The preserved bytes now live on a branched version that is not the
-      // page's editable head (_preserve_alternative does not move
-      // page.current_version_id), so this session cannot keep autosaving onto
-      // it. Rebase the editor onto the server head instead of adopting the
-      // branch, and name the parked alternative in the status line.
-      await reloadLatest();
-      setStatus(
-        t("editor.alternativePreserved", {
-          id: preserved.alternative_draft_id?.slice(0, 8) ?? "",
-          defaultValue: "Preserved as alternative draft {{id}}",
-        }),
-      );
-    } catch (exc) {
-      setStatus(
-        apiErrorMessage(
-          exc,
-          t("editor.preserveFailed", { defaultValue: "Preserve failed" }),
-        ),
-      );
-    } finally {
-      savingRef.current = false;
-      updateInFlightRevision(null);
-      setIsSaving(false);
-    }
-  }
-
   function updateTitle(nextTitle: string) {
     const normalizedTitle = normalizeTitleInput(nextTitle);
     if (normalizedTitle === title) {
@@ -3939,12 +3849,18 @@ export function PageEditor({
     setTagSuggestions([]);
   }
 
-  function applyParsedMetadata(metadata: PageMetadata) {
-    frontmatterExtraLinesRef.current = metadata.extraLines;
-    setPageIcon(metadata.icon);
-    setPageType(metadata.type);
-    setTagInput(metadata.tags);
-    setAliasInput(metadata.aliases);
+  function fingerprintOf(draft: DraftSnapshot) {
+    return draftSaveFingerprint(draft, frontmatterExtraLinesRef.current);
+  }
+
+  function draftDiffersFromSaved(draft: DraftSnapshot) {
+    return fingerprintOf(draft) !== lastSavedFingerprintRef.current;
+  }
+
+  function updatePageType(nextType: PageType) {
+    if (nextType === pageType) return;
+    setPageType(nextType);
+    markDraftMutation();
   }
 
   function updateSlug(nextSlug: string) {
@@ -4383,7 +4299,7 @@ export function PageEditor({
             page_type: snapshot.pageType, tags: snapshot.tags, aliases: snapshot.aliases,
             base_version_id: savedPage.version_id, base_content_hash: savedPage.content_hash,
             expected_editing_revision: savedPage.editing_revision, version_id: savedPage.version_id,
-            base_snapshot: { body_md: savedPage.body_md, page_metadata: savedPage.page_metadata ?? {} },
+            base_snapshot: draftBaseSnapshotOf(savedPage),
             destination_node_id: snapshot.destinationNodeId || null,
             idempotency_key: newIdempotencyKey(), on_stale: "conflict", retry_only: false,
           });
@@ -5646,30 +5562,16 @@ export function PageEditor({
             tone="warning"
             action={
               <span className="banner-actions">
-                <button
-                  className="inline-action"
-                  type="button"
-                  onClick={viewConflictChanges}
-                  disabled={conflictDiffLoading}
-                >
-                  {conflictDiffLoading
-                    ? t("editor.loadingChanges", {
-                        defaultValue: "Loading changes",
-                      })
-                    : t("editor.viewTheirChanges", {
-                        defaultValue: "View their changes",
-                      })}
-                </button>
-                <button
-                  className="inline-action"
-                  type="button"
-                  onClick={preserveAlternative}
-                  disabled={isSaving}
-                >
-                  {t("editor.preserveAlternative", {
-                    defaultValue: "Preserve mine as alternative",
-                  })}
-                </button>
+                {conflict.kind === "merge" ? (
+                  <button className="inline-action" disabled={isSaving} onClick={combineChanges} type="button">
+                    {t("editor.combineChanges")}
+                  </button>
+                ) : null}
+                {conflict.kind === "ended" ? (
+                  <button className="inline-action" disabled={isSaving} onClick={() => void startFromEndedDraft()} type="button">
+                    {t("editor.startFromEnded")}
+                  </button>
+                ) : null}
                 <button aria-label={t("editor.conflictBannerReloadLatest", {
                     defaultValue: "Reload latest",
                   })}
@@ -5683,19 +5585,14 @@ export function PageEditor({
               </span>
             }
           >
-            {t("editor.conflictBannerMessage", {
-              defaultValue:
-                "Someone else updated this page. A newer version is available.",
-            })}
+            {conflict.kind === "merge"
+              ? t("editor.conflictOverlap")
+              : conflict.kind === "ended"
+                ? t("editor.conflictEnded")
+                : t("editor.conflictBannerMessage", {
+                    defaultValue: "Someone else updated this page. A newer version is available.",
+                  })}
           </StatusBanner>
-        ) : null}
-        {conflict && conflictDiffOpen ? (
-          <ConflictDiffPanel
-            diff={conflictDiff}
-            error={conflictDiffError}
-            loading={conflictDiffLoading}
-            onClose={() => setConflictDiffOpen(false)}
-          />
         ) : null}
         <div className="editor-page-header">
           <div className="editor-title-row">
@@ -5811,7 +5708,7 @@ export function PageEditor({
                     aria-describedby={ids.hintId}
                     disabled={isSaving}
                     id="editor-page-type"
-                    onChange={(event) => setPageType(event.target.value as PageType)}
+                    onChange={(event) => updatePageType(event.target.value as PageType)}
                     value={pageType}
                   >
                     {PAGE_TYPE_OPTIONS.map((option) => (
@@ -6013,19 +5910,7 @@ export function PageEditor({
             workspaceId={page.workspace_id}
           />
         ) : null}
-        {mergePublishPrompt?.preview.result ? (
-          <Dialog labelledBy="merge-publish-dialog-title" onClose={() => settleAutomaticMerge(false)}
-            title={t("editor.mergePreviewTitle")}>
-            <section className="dialog-form">
-              <p>{t("editor.mergePreviewDescription")}</p>
-              <ContextMergeResultPreview candidate={mergePublishPrompt.preview.result} workspaceId={workspaceId} />
-              <div className="dialog-actions">
-                <button type="button" className="icon-button text-button" onClick={() => settleAutomaticMerge(false)}>{t("editor.fencePublishCancel")}</button>
-                <button type="button" className="icon-button primary" onClick={() => settleAutomaticMerge(true)}>{t("editor.mergePreviewPublish")}</button>
-              </div>
-            </section>
-          </Dialog>
-        ) : null}
+        {merge.dialog}
         {fencePublishPrompt ? (
           <Dialog
             className="fence-publish-dialog"
@@ -6149,7 +6034,9 @@ export function PageEditor({
               ) : null}
               <MarkdownSourceEditor
                 value={body}
+                ariaLabel={bodyAriaLabel}
                 extensions={extensions}
+                keyBindings={keyBindings}
                 onChange={updateAuthoredBody}
                 onCreateEditor={(view) => {
                   editorViewRef.current = view;
@@ -6274,58 +6161,63 @@ function ToolbarButton({
   );
 }
 
-function ConflictDiffPanel({
-  diff,
-  error,
-  loading,
-  onClose,
-}: {
-  diff: PageVersionDiff | null;
-  error: string | null;
-  loading: boolean;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation("pages");
-  return (
-    <section
-      className="editor-conflict-panel"
-      aria-label={t("editor.conflictDiffPanelTitle", { defaultValue: "Server changes" })}
-    >
-      <div className="editor-conflict-panel-header">
-        <div>
-          <p className="eyebrow">
-            {t("editor.conflictDiffPanelEyebrow", { defaultValue: "Conflict" })}
-          </p>
-          <h2>
-            {t("editor.conflictDiffPanelTitle", { defaultValue: "Server changes" })}
-          </h2>
-        </div>
-        <button
-          aria-label={t("editor.closeServerChangesAria", { defaultValue: "Close server changes" })}
-          className="icon-button"
-          onClick={onClose}
-          type="button"
-        >
-          <X size={16} aria-hidden="true" />
-        </button>
-      </div>
-      {loading ? (
-        <p className="page-history-empty">
-          {t("editor.loadingServerChanges", { defaultValue: "Loading server changes…" })}
-        </p>
-      ) : null}
-      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
-      {!loading && !error && diff ? <DiffViewer diff={diff} /> : null}
-      {!loading && !error && !diff ? (
-        <p className="page-history-empty">
-          {t("editor.noServerChangesLoaded", { defaultValue: "No server changes loaded yet." })}
-        </p>
-      ) : null}
-    </section>
-  );
+/** The fields of a server draft the editor shows: a saved page or a merge result. */
+type ServerDraft = {
+  id: string;
+  slug: string;
+  body_md: string;
+  title: string;
+  page_type: string;
+  tags?: string[] | null;
+  aliases?: string[] | null;
+  /** The draft's recorded placement: null is Context / Inbox; absent is none recorded. */
+  placement_parent_node_id?: string | null;
+};
+type EditorContent = { draft: DraftSnapshot; metadata: PageMetadata };
+
+function serverDraftOf(page: PagePayload): ServerDraft {
+  const metadata = page.page_metadata ?? {};
+  const placement = metadata.placement_parent_node_id;
+  return {
+    ...page,
+    placement_parent_node_id: "placement_parent_node_id" in metadata
+      ? typeof placement === "string" ? placement : null
+      : undefined,
+  };
 }
 
-function metadataFromPagePayload(metadata: PageMetadata, page: PagePayload): PageMetadata {
+/**
+ * The editor's content for a server draft. A recorded placement wins; null
+ * (Context / Inbox) is the default destination, named by its node because a
+ * save reads a null destination as "unchanged". A draft that records none
+ * stays where the tree has it, otherwise at the default destination.
+ */
+function editorContentOf(server: ServerDraft, nodes: TreeNodePayload[]): EditorContent {
+  const parsed = parsePageDocument(server.body_md, {
+    aliases: server.aliases ?? [],
+    tags: server.tags ?? [],
+    type: server.page_type as PageType,
+  });
+  const metadata = metadataFromPagePayload(parsed.metadata, server);
+  const destinationNodeId = server.placement_parent_node_id !== undefined
+    ? server.placement_parent_node_id ?? chooseDefaultDestination(nodes)
+    : nodes.find((node) => node.target_id === server.id)?.parent_id ?? chooseDefaultDestination(nodes);
+  return {
+    metadata,
+    draft: {
+      aliases: metadata.aliases,
+      body: parsed.body,
+      destinationNodeId,
+      icon: metadata.icon,
+      pageType: metadata.type,
+      slug: server.slug,
+      tags: metadata.tags,
+      title: server.title,
+    },
+  };
+}
+
+function metadataFromPagePayload(metadata: PageMetadata, page: Pick<ServerDraft, "page_type" | "tags" | "aliases">): PageMetadata {
   return {
     ...metadata,
     aliases: normalizeAliases(page.aliases ?? []),

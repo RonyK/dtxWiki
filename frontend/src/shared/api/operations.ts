@@ -1,5 +1,5 @@
 import { ApiError, apiRequest, getApiBaseUrl } from "./client";
-import { previewPageMerge, type ContextMergePreview, type PagePayload } from "./pages";
+import { mergeResultPins, type PagePayload, type PreparedMergeChoice } from "./pages";
 import type { components } from "./types.gen";
 
 export type ActivityLane = "pending" | "advisory" | "history";
@@ -106,12 +106,6 @@ export async function createReviewSelection(
 
 export type ReviewBulkDecisionResult =
   components["schemas"]["ReviewBulkDecisionPayload"];
-
-// Retired reconciliation UI has no public API schema in the shared-draft model.
-export type ReviewReconciliationBulkDiscardResult = {
-  discarded_review_item_ids: string[];
-  skipped: Array<{ review_item_id: string; error_code: string }>;
-};
 
 // Derived from the generated OpenAPI schema (N4): every field is always
 // serialized, so the schema marks them required.
@@ -361,12 +355,23 @@ export async function getReview(
   return response.data;
 }
 
-export type ContextMergeBinding = {
-  expected_editing_revision: number;
-  expected_published_version_id: string | null;
-  result_hash: string;
-};
+/** Review decision pins: the published version the merge preview targeted. */
+export function decisionPins(choice: PreparedMergeChoice) {
+  return { ...mergeResultPins(choice), expected_published_version_id: choice.preview.target_version_id };
+}
 
+export type ContextMergeBinding = ReturnType<typeof decisionPins>;
+
+/** The Context page and draft a review approves, when it approves one. */
+export function contextMergeTargetOf(review: ReviewItem): { pageId: string; versionId: string } | null {
+  const operation = review.evidence?.operations.find((entry) =>
+    entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
+  const pageId = operation?.document?.document_id;
+  const versionId = operation?.content?.candidate_version_id;
+  return pageId && versionId ? { pageId, versionId } : null;
+}
+
+/** Sends a review decision; a Context approval carries the merge pins it was bound to. */
 export async function decideReview(
   workspaceId: string,
   reviewItemId: string,
@@ -376,38 +381,17 @@ export async function decideReview(
     audience_kind?: ReviewAudienceKind;
     decision_id?: string;
     expected_impact_fingerprint?: string | null;
-    onMergePreview?: (preview: ContextMergePreview) => Promise<boolean>;
     merge_binding?: ContextMergeBinding | null;
-    onDecisionPrepared?: (binding: ContextMergeBinding | null) => void;
   } = {},
 ) {
-  let mergeBinding: ContextMergeBinding | Record<string, never> = options.merge_binding ?? {};
-  if (decision_type === "approve" && !("merge_binding" in options)) {
-    const review = await getReview(workspaceId, reviewItemId);
-    const operation = review.evidence?.operations.find((entry) =>
-      entry.document?.document_kind === "context" && entry.document.document_id && entry.content?.candidate_version_id);
-    const pageId = operation?.document?.document_id;
-    const versionId = operation?.content?.candidate_version_id;
-    if (pageId && versionId) {
-      const preview = await previewPageMerge(workspaceId, pageId, versionId);
-      if (!preview.result) {
-        throw new ApiError(409, { error_code: "context_merge_conflict", message: "These changes conflict. Read the current draft before approving.", request_id: "", warnings: [] });
-      }
-      if (preview.kind === "automatic_merge" && options.onMergePreview && !await options.onMergePreview(preview)) {
-        throw new DOMException("Approval cancelled", "AbortError");
-      }
-      mergeBinding = { expected_editing_revision: preview.editing_revision,
-        expected_published_version_id: preview.published_version_id, result_hash: preview.result.result_hash };
-    }
-  }
-  options.onDecisionPrepared?.("result_hash" in mergeBinding ? mergeBinding as ContextMergeBinding : null);
+  const mergeBinding = options.merge_binding ?? null;
   const response = await apiRequest<{ data: ReviewItem }>(
     `/api/v1/workspaces/${workspaceId}/reviews/${reviewItemId}/decision`,
     {
       method: "POST",
       body: JSON.stringify({
         decision_type,
-        ...mergeBinding,
+        ...(mergeBinding ?? {}),
         decision_reason: decision_reason || null,
         ...(options.decision_id ? { decision_id: options.decision_id } : {}),
         // Reject only: binds the decision to the impact the dialog showed.
@@ -450,22 +434,6 @@ export async function decideReviewsBulk(
 ) {
   const response = await apiRequest<{ data: ReviewBulkDecisionResult }>(
     `/api/v1/workspaces/${workspaceId}/reviews/decide-bulk`,
-    {
-      method: "POST",
-      body: JSON.stringify(request),
-    },
-  );
-  return response.data;
-}
-
-export async function discardReviewReconciliationsBulk(
-  workspaceId: string,
-  request: { review_item_ids: string[]; reason: string },
-) {
-  const response = await apiRequest<{
-    data: ReviewReconciliationBulkDiscardResult;
-  }>(
-    `/api/v1/workspaces/${workspaceId}/reviews/reconciliations/discard-bulk`,
     {
       method: "POST",
       body: JSON.stringify(request),

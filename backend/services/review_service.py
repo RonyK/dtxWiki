@@ -70,6 +70,12 @@ from backend.services.actor_visible_read import (
 )
 from backend.services.audit_service import AuditService
 from backend.services.body_preparer import BodyPreparer
+from backend.services.context_version_refs import (
+    CONTEXT_VERSION_REF_PREFIX,
+    context_version_ref,
+    referenced_context_version_id,
+    written_context_version_id,
+)
 from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.job_queue import (
     JobQueueService,
@@ -229,13 +235,6 @@ class _RejectionImpact:
     # The restored draft has no open review, so the rejection opens one.
     restores_review: bool
     fingerprint: str
-
-
-def _context_version_id_from_diff_ref(diff_ref: str | None) -> UUID | None:
-    prefix = "context_page_version:"
-    if not isinstance(diff_ref, str) or not diff_ref.startswith(prefix):
-        return None
-    return parse_uuid_or_none(diff_ref[len(prefix) :])
 
 
 def review_decision_audience_clause(
@@ -407,7 +406,7 @@ class ReviewService:
                     ChangeOperation.operation == "patch_draft_diverged_manifest",
                 )
             )
-            version_id = _context_version_id_from_diff_ref(
+            version_id = referenced_context_version_id(
                 operation.diff_ref if operation is not None else None
             )
             page = (
@@ -1433,7 +1432,7 @@ class ReviewService:
                 conditions=(
                     ChangeOperation.change_set_id == change_set.id,
                     ChangeOperation.target_type == "context_page",
-                    ChangeOperation.diff_ref.startswith("context_page_version:"),
+                    ChangeOperation.diff_ref.startswith(CONTEXT_VERSION_REF_PREFIX),
                 ),
             )
             .order_by(ChangeOperation.created_at.desc(), ChangeOperation.id.desc())
@@ -1447,7 +1446,7 @@ class ReviewService:
             workspace_id=change_set.workspace_id,
             resource_id=operation.target_id,
         )
-        version_id = parse_uuid_or_none(operation.diff_ref.split(":", 1)[1])
+        version_id = referenced_context_version_id(operation.diff_ref)
         version = (
             get_in_workspace(
                 session,
@@ -1545,7 +1544,7 @@ class ReviewService:
                 target_type="context_page",
                 target_id=page.id,
                 operation="restore_after_rejection",
-                diff_ref=f"context_page_version:{destination.id}",
+                diff_ref=context_version_ref(destination.id),
             )
         )
         restored = ReviewItem(
@@ -1592,7 +1591,7 @@ class ReviewService:
             criteria=[
                 ChangeOperation.target_type == "context_page",
                 ChangeOperation.target_id == page.id,
-                ChangeOperation.diff_ref == f"context_page_version:{destination.id}",
+                ChangeOperation.diff_ref == context_version_ref(destination.id),
             ],
         ).with_only_columns(ChangeOperation.change_set_id)
         source_match = ReviewItem.change_set_id.in_(source_sets)
@@ -1700,7 +1699,7 @@ class ReviewService:
                         criteria=[
                             ChangeOperation.change_set_id.in_(change_set_ids),
                             ChangeOperation.diff_ref.startswith(
-                                "context_page_version:"
+                                CONTEXT_VERSION_REF_PREFIX
                             ),
                             ChangeOperation.diff_ref.not_in(refs),
                         ],
@@ -4524,12 +4523,7 @@ def _recent_context_target_metadata(
 def _context_version_id_for_operation(operation: ChangeOperation) -> UUID | None:
     if operation.target_type == "context_page_version":
         return operation.target_id
-    if not operation.diff_ref:
-        return None
-    kind, _, raw_id = operation.diff_ref.partition(":")
-    if kind != "context_page_version":
-        return None
-    return parse_uuid_or_none(raw_id)
+    return written_context_version_id(operation.diff_ref)
 
 
 def _review_context_target_metadata(

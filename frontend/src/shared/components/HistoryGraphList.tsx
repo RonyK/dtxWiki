@@ -328,7 +328,7 @@ export function HistoryGraphList<T>({
               <div aria-hidden="true" className="history-graph-visual">
                 <div className="history-graph-lanes">
                   <HistoryGraphSegments metrics={metrics} row={row} />
-                  <span className="history-graph-node" />
+                  <span className="history-graph-node" data-pending={row.node.pending ? "true" : undefined} />
                 </div>
               </div>
               <div className="history-graph-card-content">{renderCard(row)}</div>

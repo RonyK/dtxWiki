@@ -2281,104 +2281,6 @@ describe("ReviewScreen", () => {
     ).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/chats/chat-42");
   });
 
-  it("bulk-discards only explicitly eligible reconciliation reviews with a reason", async () => {
-    const items = [
-      reviewItem({
-        id: "reconcile-1",
-        reviewType: "context_reconciliation",
-        canDecide: false,
-        canDiscardReconciliation: true,
-        summary: "First reconciliation",
-      }),
-      reviewItem({
-        id: "reconcile-2",
-        reviewType: "context_reconciliation",
-        canDecide: false,
-        canDiscardReconciliation: true,
-        summary: "Second reconciliation",
-      }),
-    ];
-    const fetchMock = mockReviewFetch(
-      async (input) => {
-        const url = input.toString();
-        if (url === `${BASE}/api/v1/workspaces`) {
-          return jsonResponse(workspaceResponse("editor"));
-        }
-        if (isReviewCountsUrl(url)) {
-          return jsonResponse({ data: reviewCounts({ pending: 2 }) });
-        }
-        if (isRecentDecisionsUrl(url)) {
-          return jsonResponse(emptyReviewPage());
-        }
-        if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/settings/policies`) {
-          return jsonResponse({ data: {} });
-        }
-        if (
-          url
-          === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews?status=pending&limit=50`
-        ) {
-          return jsonResponse({ data: { items, next_cursor: null } });
-        }
-        if (
-          url
-          === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/reconciliations/discard-bulk`
-        ) {
-          return jsonResponse({
-            data: {
-              discarded_review_item_ids: ["reconcile-1"],
-              skipped: [
-                {
-                  review_item_id: "reconcile-2",
-                  error_code: "review_state_changed",
-                },
-              ],
-            },
-          });
-        }
-        throw new Error(`Unexpected request: ${url}`);
-      },
-    );
-
-    render(
-      <MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review"]}>
-        <ReviewScreen />
-      </MemoryRouter>,
-    );
-    await userEvent.click(
-      await screen.findByLabelText("Select all 2 shown"),
-    );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Discard selected branches" }),
-    );
-    const dialog = screen.getByRole("dialog", {
-      name: "Discard selected reconciliation branches?",
-    });
-    const confirm = within(dialog).getByRole("button", { name: "Discard" });
-    expect(confirm).toBeDisabled();
-    await userEvent.type(
-      within(dialog).getByLabelText("Discard reason"),
-      "Branches are obsolete",
-    );
-    await userEvent.click(confirm);
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/reconciliations/discard-bulk`,
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            review_item_ids: ["reconcile-1", "reconcile-2"],
-            reason: "Branches are obsolete",
-          }),
-        }),
-      ),
-    );
-    expect(
-      await screen.findByText(/Discarded 1 branches\. Skipped 1\./),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/review_state_changed/)).toBeInTheDocument();
-  });
-
   it("retains a failed deep link for an explicit detail retry", async () => {
     const user = userEvent.setup();
     let retry = false;
@@ -3127,7 +3029,7 @@ describe("ReviewScreen", () => {
 
   it("requires the exact candidate body and applies each server action capability separately", async () => {
     const user = userEvent.setup();
-    let finishBody: (page: pagesApi.PagePayload) => void = () => {};
+    let finishBody: (page: Awaited<ReturnType<typeof pagesApi.readPage>>) => void = () => {};
     vi.mocked(pagesApi.readPage).mockImplementationOnce(() => new Promise(resolve => { finishBody = resolve; }));
     const current = reviewItem({ reviewType: "context_update", targetId: "exact-page", targetTitle: "Exact candidate", targetVersionNo: 3 });
     current.evidence!.operations[0].diff_ref = "context_page_version:wrong-legacy-version";
@@ -3582,7 +3484,7 @@ function mockReviewFetch(handler: (input: RequestInfo | URL, init?: RequestInit)
     if (url.endsWith("/merge-preview")) {
       const request = JSON.parse(String(init?.body));
       return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
-        published_version_id: null, parent_version_ids: [], kind: "fast_forward",
+        published_version_id: null, target_version_id: null, parent_version_ids: [], kind: "fast_forward",
         result: { body_md: "Exact candidate body", page_metadata: {}, block_map: [], result_hash: "c".repeat(64) } } });
     }
     let response: Response;
@@ -3866,8 +3768,9 @@ function reviewItem(
   };
 }
 
-function exactPage(workspaceId: string, pageId: string, versionId: string): pagesApi.PagePayload {
+function exactPage(workspaceId: string, pageId: string, versionId: string): Awaited<ReturnType<typeof pagesApi.readPage>> {
   return {
+    open_review_count: 0,
     id: pageId, workspace_id: workspaceId, version_id: versionId, autosave_merged: false,
     block_map_stale: false,
     title: "Feedback Target", slug: "feedback-target", body_md: "Exact candidate body",

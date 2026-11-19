@@ -244,9 +244,11 @@ export function MarkdownView({
   const pageSourceLineNumbers = renderPolicy === "page" && sourceLineNumbers;
   // Reference positions are mapped to normalized line endings, including
   // page bodies that have no managed frontmatter to normalize them first.
-  const parsedBody = renderPolicy === "page"
-    ? parsePageDocument(body).body.replace(/\r\n?/g, "\n")
-    : body;
+  const parsedDocument = renderPolicy === "page" ? parsePageDocument(body) : null;
+  const parsedBody = parsedDocument ? parsedDocument.body.replace(/\r\n?/g, "\n") : body;
+  // data-source-line counts the lines of `body` as given: front matter that is
+  // not rendered still shifts the blocks below it.
+  const sourceLineOffset = pageSourceLineNumbers && parsedDocument ? parsedDocument.bodyStartLine - 1 : 0;
   // The editor split preview renders from the full body (no string-level strip)
   // so data-source-line maps 1:1 to the CodeMirror body; the duplicate leading
   // title is dropped at the node level (remarkDropDuplicateHeading) so it still
@@ -272,6 +274,7 @@ export function MarkdownView({
       ),
       resolveDeletedSource: buildDeletedSourceResolver(deletedSources),
       sourceLineNumbers: pageSourceLineNumbers,
+      sourceLineOffset,
       workspaceId,
       references: renderedReferences,
       referenceLabels,
@@ -284,6 +287,7 @@ export function MarkdownView({
       wikilinkTargets,
       deletedSources,
       pageSourceLineNumbers,
+      sourceLineOffset,
       workspaceId,
       renderedReferences,
       referenceLabels,
@@ -391,7 +395,9 @@ export function MarkdownView({
                 ignoreMissing: true,
                 languages: HIGHLIGHT_LANGUAGES,
               }],
-              ...(pageSourceLineNumbers ? [rehypeSourceLines] : []),
+              ...(pageSourceLineNumbers
+                ? [[rehypeSourceLines, { offset: sourceLineOffset }] as [typeof rehypeSourceLines, { offset: number }]]
+                : []),
             ]
           : renderPolicy === "confirmed-links"
             ? [
@@ -418,6 +424,7 @@ export function MarkdownView({
     renderPolicy,
     tokenPluginOptions,
     pageSourceLineNumbers,
+    sourceLineOffset,
     stripLeadingHeading,
     contextLinkPluginOptions,
     contextMediaPluginOptions,
@@ -450,7 +457,7 @@ export function MarkdownView({
           aria-hidden="true"
           className="markdown-scroll-sentinel"
           data-scroll-anchor="bottom"
-          data-source-line={sourceLineCount + 1}
+          data-source-line={sourceLineOffset + sourceLineCount + 1}
         />
       ) : null}
     </article>
@@ -900,6 +907,8 @@ type DtxTokenOptions = {
   // Maps an `@cite{...}` slug to a tombstone label when its source was deleted.
   resolveDeletedSource?: (sourceId: string) => string | undefined;
   sourceLineNumbers?: boolean;
+  /** Lines of the given body above the rendered Markdown (its front matter). */
+  sourceLineOffset?: number;
   workspaceId?: string | null;
 };
 
@@ -927,7 +936,7 @@ function buildDeletedSourceResolver(
 function remarkDtxTokens(options: DtxTokenOptions = {}) {
   return (tree: Root) => {
     options = { ...options, eligibleCitationOffsets: new Set(citationOccurrencesFromTree(options.source ?? "", tree).map((item) => item.start)) };
-    transformFencedBlocks(tree, options.sourceLineNumbers ?? false);
+    transformFencedBlocks(tree, options.sourceLineNumbers ? options.sourceLineOffset ?? 0 : null);
     transformInlineTokens(tree as unknown as DtxParent, options);
   };
 }
@@ -972,7 +981,7 @@ function remarkMarkMarkdownReferences() {
   };
 }
 
-function transformFencedBlocks(root: Root, sourceLineNumbers: boolean) {
+function transformFencedBlocks(root: Root, sourceLineOffset: number | null) {
   const rootParent = root as unknown as DtxParent;
   const nextChildren: DtxNode[] = [];
   const children = rootParent.children;
@@ -998,9 +1007,9 @@ function transformFencedBlocks(root: Root, sourceLineNumbers: boolean) {
     const end = "position" in closingNode ? closingNode.position?.end : undefined;
     if (start && end) {
       fencedBlock.position = { start, end };
-      if (sourceLineNumbers) {
-        fencedBlock.data.hProperties["data-source-line"] = start.line;
-        fencedBlock.data.hProperties["data-source-end-line"] = end.line;
+      if (sourceLineOffset !== null) {
+        fencedBlock.data.hProperties["data-source-line"] = start.line + sourceLineOffset;
+        fencedBlock.data.hProperties["data-source-end-line"] = end.line + sourceLineOffset;
       }
     }
     nextChildren.push(fencedBlock);
@@ -2607,7 +2616,7 @@ function shouldSkipAnchorHighlight(element: HastElement) {
 // similarly named data attributes, but it cannot opt itself into the editor's
 // scroll-anchor query because the private marker is added here to top-level
 // rendered blocks only.
-function rehypeSourceLines() {
+function rehypeSourceLines({ offset }: { offset: number }) {
   return (tree: HastRoot) => {
     for (const child of tree.children) {
       if (child.type !== "element") {
@@ -2619,8 +2628,8 @@ function rehypeSourceLines() {
       }
       child.properties = {
         ...child.properties,
-        "data-source-line": line,
-        "data-source-end-line": child.position?.end.line ?? line,
+        "data-source-line": line + offset,
+        "data-source-end-line": (child.position?.end.line ?? line) + offset,
         "data-scroll-sync-anchor": "true",
       };
     }

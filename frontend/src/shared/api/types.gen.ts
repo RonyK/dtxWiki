@@ -5024,6 +5024,14 @@ export interface components {
             /** On Conflict */
             on_conflict?: ("keep_both" | "latest") | null;
             /**
+             * Result Body Md
+             * @description The final stored Markdown, including managed frontmatter, must contain at most 1000000 Unicode code points.
+             */
+            result_body_md?: string | null;
+            /** Result Hash */
+            result_hash?: string | null;
+            result_page_metadata?: components["schemas"]["PageMetadataPatch"] | null;
+            /**
              * Version Id
              * Format: uuid
              */
@@ -5784,6 +5792,149 @@ export interface components {
             data: components["schemas"]["ContextMediaUploadPayload"];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** ContextMergeCandidate */
+        ContextMergeCandidate: {
+            /** Block Map */
+            block_map: {
+                [key: string]: unknown;
+            }[];
+            /** Body Md */
+            body_md: string;
+            /** Conflict Body Md */
+            conflict_body_md?: string | null;
+            /** Conflicts */
+            conflicts: components["schemas"]["ContextMergeConflict"][];
+            /**
+             * Offset Unit
+             * @constant
+             */
+            offset_unit: "unicode_code_points";
+            page_metadata: components["schemas"]["ContextMergeMetadata"];
+            /** Result Hash */
+            result_hash: string;
+        };
+        /** ContextMergeConflict */
+        ContextMergeConflict: {
+            /** Keep Both End */
+            keep_both_end: number;
+            /** Keep Both Start */
+            keep_both_start: number;
+            /** Latest End */
+            latest_end: number;
+            /** Latest Start */
+            latest_start: number;
+            /** Ours */
+            ours: string;
+            /** Theirs */
+            theirs: string;
+        };
+        /** ContextMergeConflictBody */
+        ContextMergeConflictBody: {
+            /** Blockers */
+            blockers?: components["schemas"]["RESTBlocker"][] | null;
+            /** Blocking Workspaces */
+            blocking_workspaces?: components["schemas"]["RESTBlockingWorkspace"][] | null;
+            /** Candidates */
+            candidates?: components["schemas"]["PageNameDisambiguationCandidate"][] | null;
+            envelope: components["schemas"]["RESTResultEnvelope"];
+            /** Error Code */
+            error_code: string;
+            /** Limit Bytes */
+            limit_bytes?: number | null;
+            merge_preview: components["schemas"]["ContextMergePreviewData"];
+            /** Message */
+            message: string;
+            /** Page Id */
+            page_id?: string | null;
+            /** Purge Grant */
+            purge_grant?: string | null;
+            /** Purge Grant Expires At */
+            purge_grant_expires_at?: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id?: string;
+            /** Server Content Hash */
+            server_content_hash?: string | null;
+            /** Server Editing Revision */
+            server_editing_revision: number;
+            server_snapshot: components["schemas"]["DraftBaseSnapshot"];
+            /** Server Version Id */
+            server_version_id?: string | null;
+            /** Settings Link */
+            settings_link?: string | null;
+            /** Warnings */
+            warnings?: components["schemas"]["EnvelopeWarning"][];
+        };
+        /** ContextMergeMetadata */
+        ContextMergeMetadata: {
+            /** Aliases */
+            aliases: string[];
+            /** Page Type */
+            page_type: string;
+            /** Placement Parent Node Id */
+            placement_parent_node_id: string | null;
+            /** Tags */
+            tags: string[];
+            /** Title */
+            title: string;
+        };
+        /** ContextMergePreviewData */
+        ContextMergePreviewData: {
+            /** Base Conflicted */
+            base_conflicted: boolean;
+            /**
+             * Content Hash
+             * @description Content hash of version_id.
+             */
+            content_hash: string;
+            /** Editing Revision */
+            editing_revision: number;
+            keep_both: components["schemas"]["ContextMergeCandidate"] | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "fast_forward" | "automatic_merge" | "conflict";
+            latest: components["schemas"]["ContextMergeCandidate"] | null;
+            /**
+             * Latest Side
+             * @enum {string}
+             */
+            latest_side: "ours" | "theirs";
+            /** Metadata Conflicts */
+            metadata_conflicts: string[];
+            /**
+             * Offset Unit
+             * @description Offsets are Unicode code points; when conflict_body_md is present the offsets index into it, otherwise into body_md.
+             * @constant
+             */
+            offset_unit: "unicode_code_points";
+            /**
+             * Page Id
+             * Format: uuid
+             */
+            page_id: string;
+            /** Parent Version Ids */
+            parent_version_ids: string[];
+            /** Published Version Id */
+            published_version_id: string | null;
+            /**
+             * References Hash
+             * @description Document references hash of version_id.
+             */
+            references_hash: string;
+            result: components["schemas"]["ContextMergeCandidate"] | null;
+            sides: components["schemas"]["ContextMergeSides"] | null;
+            /** Target Version Id */
+            target_version_id: string | null;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
         /** ContextMergePreviewRequest */
         ContextMergePreviewRequest: {
             /** Body Md */
@@ -5801,6 +5952,37 @@ export interface components {
              * Format: uuid
              */
             version_id: string;
+        };
+        /** ContextMergePreviewResponse */
+        ContextMergePreviewResponse: {
+            data: components["schemas"]["ContextMergePreviewData"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** ContextMergeSide */
+        ContextMergeSide: {
+            /** Last Saved At */
+            last_saved_at: string | null;
+            metadata: components["schemas"]["ContextMergeSideMetadata"];
+            saved_by: components["schemas"]["ContextDraftAuthor"] | null;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
+        /** ContextMergeSideMetadata */
+        ContextMergeSideMetadata: {
+            /** Page Type */
+            page_type: string;
+            /** Placement Parent Node Id */
+            placement_parent_node_id: string | null;
+            /** Title */
+            title: string;
+        };
+        /** ContextMergeSides */
+        ContextMergeSides: {
+            ours: components["schemas"]["ContextMergeSide"];
+            theirs: components["schemas"]["ContextMergeSide"];
         };
         /**
          * ContextPageCreateRequest
@@ -5941,6 +6123,11 @@ export interface components {
             /** Next Reconciliation Version Id */
             next_reconciliation_version_id?: string | null;
             open_drafts?: components["schemas"]["OpenDrafts"];
+            /**
+             * Open Review Count
+             * @default 0
+             */
+            open_review_count: number;
             /** Page Metadata */
             page_metadata?: {
                 [key: string]: unknown;
@@ -20495,7 +20682,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTConflictErrorBody"];
+                    "application/json": components["schemas"]["RESTConflictErrorBody"] | components["schemas"]["ContextMergeConflictBody"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -21290,7 +21477,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ContextMergePreviewResponse"];
                 };
             };
             /** @description Unauthorized */

@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.models.context import ContextPageVersion
+from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.services.page_service import PageConflictError
 from backend.services.read_errors import StaleBaseVersionError
@@ -45,7 +46,7 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
             from_version_id=source,
         )
 
-    def save(draft, body, writer=actor):
+    def save(draft, body, writer=actor, **changes):
         return page_service.autosave_page(
             page_id=initial.id,
             workspace_id=workspace_id,
@@ -59,6 +60,7 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
             idempotency_key=str(uuid4()),
             expected_editing_revision=draft.editing_revision,
             version_id=draft.version_id,
+            **changes,
         )
 
     def preview(draft):
@@ -148,6 +150,145 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
     assert conflict_preview["kind"] == "conflict"
     resolved = publish(conflict_right, conflict_preview, "latest")
     assert "Middle from right." in resolved.page.body_md
+
+    # Bringing the published version into a draft is bound to the result the
+    # person saw, edits included: an unedited result's hash is refused, and the
+    # edited result is saved with the commit added to the draft's parents.
+    behind, ahead = begin(), begin()
+    ahead = save(ahead, ahead.body_md.replace("Middle from right.", "Middle moved."))
+    moved = publish(ahead, preview(ahead)).page.version_id
+    edited = behind.body_md.replace("Middle from right.", "Middle moved.") + (
+        "\nKept while bringing in.\n"
+    )
+    seen = page_service.preview_context_merge(
+        initial.id,
+        behind.version_id,
+        workspace_id,
+        actor_id=actor,
+        commit_version_id=moved,
+        body_md=edited,
+    )
+
+    def bring(draft, result_hash, **result):
+        return page_service.bring_in_context_version(
+            page_id=initial.id,
+            version_id=draft.version_id,
+            workspace_id=workspace_id,
+            expected_editing_revision=draft.editing_revision,
+            idempotency_key=str(uuid4()),
+            actor_kind="human",
+            actor_id=actor,
+            actor_provenance="browser_session",
+            commit_version_id=moved,
+            result_hash=result_hash,
+            **result,
+        )
+
+    with pytest.raises(StaleBaseVersionError):
+        bring(behind, preview(behind)["result"]["result_hash"], result_body_md=edited)
+    brought = bring(behind, seen["result"]["result_hash"], result_body_md=edited)
+    assert "Kept while bringing in." in brought.body_md
+    assert "Middle moved." in brought.body_md
+    assert moved in brought.parent_version_ids
+
+    # Bringing in a commit the draft already contains is bound the same way:
+    # the edited result is saved (the commit is not added twice) and a wrong
+    # hash is refused. An explicit null placement (Context / Inbox) replaces
+    # the draft's folder; an omitted placement keeps it.
+    with page_service.session_factory() as session:
+        inbox = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == workspace_id,
+                WorkspaceTreeNode.section == "context",
+                WorkspaceTreeNode.slug == "inbox",
+            )
+        )
+    placed = save(brought, brought.body_md, destination_node_id=inbox)
+    again = placed.body_md + "\nBrought in again.\n"
+    to_inbox = {"placement_parent_node_id": None}
+
+    def contained(**edit):
+        return page_service.preview_context_merge(
+            initial.id,
+            placed.version_id,
+            workspace_id,
+            actor_id=actor,
+            commit_version_id=moved,
+            body_md=again,
+            **edit,
+        )["result"]
+
+    kept, inboxed = contained(), contained(page_metadata=to_inbox)
+    assert kept["page_metadata"]["placement_parent_node_id"] == str(inbox)
+    assert inboxed["page_metadata"]["placement_parent_node_id"] is None
+    with pytest.raises(StaleBaseVersionError):
+        bring(
+            placed,
+            kept["result_hash"],
+            result_body_md=again,
+            result_page_metadata=to_inbox,
+        )
+    rebrought = bring(
+        placed,
+        inboxed["result_hash"],
+        result_body_md=again,
+        result_page_metadata=to_inbox,
+    )
+    assert "Brought in again." in rebrought.body_md
+    assert rebrought.page_metadata["placement_parent_node_id"] is None
+    assert rebrought.parent_version_ids == brought.parent_version_ids
+
+    # REST History appends across the draft-to-commit boundary, even when a
+    # draft's merged parent is a newer commit. The default keeps version order.
+    from backend.policy.auth import ActorContext
+    from backend.services.domain_read import DomainReadService
+
+    editor = ActorContext(
+        actor_kind="human",
+        actor_id=actor,
+        token_kind="session",
+        scopes=("read",),
+        workspace_id=workspace_id,
+        workspace_role="editor",
+        role="editor",
+    )
+    with page_service.session_factory() as session:
+        history = DomainReadService().list_changes
+        options = {
+            "session": session,
+            "workspace_id": workspace_id,
+            "target_type": "context_page",
+            "target_id": initial.id,
+            "actor": editor,
+        }
+        first = history(**options, limit=1, drafts_first=True)
+        later = history(**options, limit=3, cursor=first.next_cursor, drafts_first=True)
+        commits = history(
+            **options, limit=50, cursor=later.next_cursor, drafts_first=True
+        )
+        # Every page is capped, and the second one crosses from drafts to commits.
+        assert len(first.versions) == 1 and len(later.versions) == 3
+        assert later.versions[0].version_status == "draft"
+        assert later.versions[-1].version_status != "draft"
+        assert commits.next_cursor is None
+
+        # The drafts lead and the commits follow, each newest first by version
+        # number (which never changes), so no row is repeated, lost or moved.
+        paged = first.versions + later.versions + commits.versions
+        drafts = [row for row in paged if row.version_status == "draft"]
+        assert paged[: len(drafts)] == drafts
+        assert {row.version_id for row in drafts} == {
+            behind.version_id,
+            merged.version_id,
+            restarted.version_id,
+        }
+        for phase in (drafts, paged[len(drafts) :]):
+            numbers = [row.version_no for row in phase]
+            assert numbers == sorted(numbers, reverse=True)
+        # The default (MCP) order stays newest first by version number.
+        legacy = [row.version_no for row in history(**options, limit=50).versions]
+        assert legacy == sorted(legacy, reverse=True)
+        assert sorted(row.version_no for row in paged) == sorted(legacy)
 
     rejected = begin()
     submitted = page_service.submit_context_edit_for_review(
@@ -278,3 +419,72 @@ def test_two_editors_merge_browser_baseline_but_mcp_requires_current_revision(
         stored = session.get(ContextPageVersion, UUID(draft["version_id"]))
         assert stored.body_md == merged["body_md"]
         assert stored.editing_revision == merged["editing_revision"]
+
+    # An overlapping browser save returns both choices and the draft the merge
+    # used; confirming a choice is an ordinary save on that draft, and the
+    # same confirmation merges onto the draft if it moved again meanwhile.
+    overlap = peer.post(
+        url,
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": draft["editing_revision"],
+            "base_snapshot": baseline,
+            "body_md": draft["body_md"].replace(
+                "First paragraph.", "First rewritten by peer."
+            ),
+            "idempotency_key": "concurrent-peer-overlap",
+        },
+    )
+    assert overlap.status_code == 409, overlap.text
+    conflict = overlap.json()
+    assert conflict["error_code"] == "context_merge_conflict"
+    choices = conflict["merge_preview"]
+    assert choices["kind"] == "conflict" and choices["latest_side"] == "ours"
+    assert choices["result"] is None
+    assert choices["sides"]["theirs"]["version_id"] == draft["version_id"]
+    assert conflict["server_editing_revision"] == merged["editing_revision"]
+    preview = peer.post(
+        f"{pages_url}/{draft['id']}/merge-preview",
+        json={"version_id": merged["version_id"]},
+    )
+    assert preview.status_code == 200, preview.text
+    for payload in (choices, preview.json()["data"]):
+        assert payload["version_id"] == merged["version_id"]
+        assert payload["content_hash"] == merged["content_hash"]
+        assert payload["references_hash"] == merged["references_hash"]
+    kept = choices["keep_both"]["body_md"]
+    assert "First edited by owner." in kept and "First rewritten by peer." in kept
+    confirm = {
+        "version_id": draft["version_id"],
+        "expected_editing_revision": conflict["server_editing_revision"],
+        "base_content_hash": conflict["server_content_hash"],
+        "base_snapshot": conflict["server_snapshot"],
+        "body_md": kept,
+    }
+    saved = peer.post(url, json={**confirm, "idempotency_key": "concurrent-confirm"})
+    assert saved.status_code == 200, saved.text
+    saved = saved.json()["data"]
+    assert saved["autosave_merged"] is False
+    assert "First rewritten by peer." in saved["body_md"]
+    moved = owner.post(
+        url,
+        json={
+            "version_id": draft["version_id"],
+            "expected_editing_revision": saved["editing_revision"],
+            "base_snapshot": {
+                "body_md": saved["body_md"],
+                "page_metadata": saved["page_metadata"],
+            },
+            "body_md": saved["body_md"].replace(
+                "Last edited by peer.", "Last moved by owner."
+            ),
+            "idempotency_key": "concurrent-owner-move",
+        },
+    )
+    assert moved.status_code == 200, moved.text
+    again = peer.post(url, json={**confirm, "idempotency_key": "concurrent-reconfirm"})
+    assert again.status_code == 200, again.text
+    again = again.json()["data"]
+    assert again["autosave_merged"] is True
+    assert "Last moved by owner." in again["body_md"]
+    assert "First rewritten by peer." in again["body_md"]

@@ -37,6 +37,11 @@ const NotFoundScreen = lazy(() =>
     default: module.NotFoundScreen,
   })),
 );
+const ShortPermalinkNotice = lazy(() =>
+  import("../features/errors/ShortPermalinkNotice").then((module) => ({
+    default: module.ShortPermalinkNotice,
+  })),
+);
 const PagePermalinkRedirect = lazy(() =>
   import("../features/pages/PagePermalinkRedirect").then((module) => ({
     default: module.PagePermalinkRedirect,
@@ -184,7 +189,7 @@ export function createAppRoutes() {
       <Route path="/settings/server" element={<RequireAuth><SettingsScreen scope="server" /></RequireAuth>} />
       <Route path={BROWSER_ROUTES.workspace_directory.path} element={<RequireAuth><WorkspaceDirectoryScreen /></RequireAuth>} />
       <Route path={BROWSER_ROUTES.context_permalink.path} element={<RequireAuth><PagePermalinkRedirect /></RequireAuth>} />
-      <Route path={AUTHORING_ROUTES.context_short.path} element={<RequireAuth><NotFoundScreen /></RequireAuth>} />
+      <Route path={AUTHORING_ROUTES.context_short.path} element={<RequireAuth><ShortPermalinkNotice /></RequireAuth>} />
       <Route path={BROWSER_ROUTES.workspace_home.path} element={<RequireAuth><WorkspaceHomeRedirect /></RequireAuth>} />
       <Route path={BROWSER_ROUTES.workspace_graph.path} element={<RequireAuth><WorkspaceGraphGate><WorkspaceGraphScreen /></WorkspaceGraphGate></RequireAuth>} />
       <Route path={BROWSER_ROUTES.workspace_dashboard.path} element={<RequireAuth><DashboardScreen /></RequireAuth>} />

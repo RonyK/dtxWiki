@@ -5,6 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.schemas.common import WIRE_EXPLICIT_FIELD, MCPResultEnvelope
 from backend.schemas.context_edit import EditOperation
+from backend.schemas.context_merge import (
+    ContextMergeCandidate,
+)
 from backend.schemas.context_write import (
     CiteResult as ReferenceCommandResult,
 )
@@ -347,39 +350,6 @@ class PreviewContextMergeInput(_ContextMergeInput):
             "result_body_md and result_page_metadata."
         ),
     )
-
-
-class ContextMergeMetadata(BaseModel):
-    title: str
-    page_type: str
-    tags: list[str]
-    aliases: list[str]
-    placement_parent_node_id: UUID | None
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class ContextMergeConflict(BaseModel):
-    ours: str
-    theirs: str
-    keep_both_start: int
-    keep_both_end: int
-    latest_start: int
-    latest_end: int
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class ContextMergeCandidate(BaseModel):
-    body_md: str
-    page_metadata: ContextMergeMetadata
-    block_map: list[dict[str, Any]]
-    result_hash: str = Field(pattern=CONTENT_HASH_PATTERN)
-    conflicts: list[ContextMergeConflict]
-    offset_unit: Literal["unicode_code_points"]
-    conflict_body_md: str | None = None
-
-    model_config = ConfigDict(extra="forbid")
 
 
 class PreviewContextMergeResult(BaseModel):

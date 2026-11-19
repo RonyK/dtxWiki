@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Combining Context changes in the browser
+
+- When changes overlap, the browser offers two choices -- "Keep both changes"
+  or "Prefer the latest change" -- and shows the whole result, which can be
+  edited before it is saved. The same dialog serves publishing, approving a
+  review, bringing the published version into a draft, and two people saving
+  one draft. A clean merge publishes without asking.
+- Drafts show their actions in the draft banner: edit, bring in the published
+  version, compare with it, and withdraw. Finished versions in History offer
+  "Start from this version"; History draws merged parents and shows open
+  drafts dashed at the top. `/p/<page_id>`, an MCP-only shortcut, explains the
+  `/p/<workspace_id>/<page_id>` form instead of a not-found page.
+- The reconciliation workbench, alternative-draft discard and review-queue
+  bulk discard are removed; their REST routes were already gone.
+- REST: `merge-preview` returns a typed `ContextMergePreviewData` with
+  `target_version_id` and both sides' saver, save time and metadata. A browser
+  autosave that conflicts returns `merge_preview`, `server_editing_revision`
+  and `server_snapshot` with its 409. `bring-in` accepts `result_hash`,
+  `result_body_md` and `result_page_metadata` pinned to the named commit, and
+  page detail reports `open_review_count`. The MCP contract is unchanged.
+
 ### Agent review switch
 
 - With "Review what agents write" turned off, an agent's write follows exactly

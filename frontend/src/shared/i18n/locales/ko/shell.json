@@ -496,5 +496,10 @@
     "revoke": "해지",
     "save": "저장",
     "unlink": "연결 해제"
+  },
+  "shortPermalink": {
+    "breadcrumb": "MCP 축약 주소",
+    "title": "MCP 전용 축약 주소입니다",
+    "body": "이 주소는 브라우저에서 열 수 없습니다. 브라우저에서는 workspace id가 들어간 주소를 쓰세요."
   }
 }

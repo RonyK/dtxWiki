@@ -496,5 +496,10 @@
     "revoke": "Revoke",
     "save": "Save",
     "unlink": "Unlink"
+  },
+  "shortPermalink": {
+    "breadcrumb": "MCP short link",
+    "title": "This is an MCP-only short link",
+    "body": "Browsers cannot open this address. In a browser, use the address with the workspace id."
   }
 }

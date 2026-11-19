@@ -153,8 +153,17 @@ test("creates, reads, edits, and shows stale conflict in the browser", async ({
   await page.keyboard.insertText("# Browser stale update");
   await page.getByRole("button", { name: "Save draft" }).click();
 
-  await expect(page.getByText(/Someone else updated this page/)).toBeVisible();
+  // Both saves rewrote the same line: the editor offers the two choices from
+  // the server's own merge and saves the chosen result on that draft.
+  await expect(page.getByText(/Someone else saved changes that overlap yours/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Reload latest" })).toBeVisible();
+  await page.getByRole("button", { name: "Combine changes" }).click();
+  const merge = page.getByRole("dialog", { name: "Combine changes" });
+  await merge.getByRole("radio", { name: /Keep both changes/ }).click();
+  await merge.getByRole("button", { name: "Combine with this result" }).click();
+  await expect(merge).toBeHidden();
+  await expect(page.locator(".cm-content")).toContainText("Browser stale update");
+  await expect(page.locator(".cm-content")).toContainText("Server update");
 });
 
 test("publishes a new Context page directly to its reader", async ({ page }, testInfo) => {

@@ -49,6 +49,8 @@ export type ContextPageDetail = ContextPageSummary & {
   block_map_stale: boolean;
   draft?: ContextDraftInfo | null;
   open_drafts?: OpenDrafts | null;
+  /** Open drafts of this page that carry an open review request. */
+  open_review_count: number;
   body_markdown: string | null;
   references?: ReferenceView[];
   references_hash?: string;
@@ -67,10 +69,6 @@ export type ContextPageDetail = ContextPageSummary & {
   warnings: string[];
   pending_draft_version_id: string | null;
   pending_review: PendingReviewInfo | null;
-  reconciliation_pending_count: number;
-  reconciliation_pending_count_truncated: boolean;
-  next_reconciliation_version_id: string | null;
-  reconciliation_available: boolean;
   published_version_info?: {
     version_id: string;
     version_no: number;
@@ -205,6 +203,7 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
     block_map_stale: raw.block_map_stale ?? false,
     draft: raw.draft ?? null,
     open_drafts: raw.open_drafts ?? null,
+    open_review_count: raw.open_review_count ?? 0,
     body_markdown: raw.body_md,
     references: raw.references ?? [],
     references_hash: raw.references_hash,
@@ -242,11 +241,6 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
     warnings: raw.warnings ?? [],
     pending_draft_version_id: raw.pending_draft_version_id ?? null,
     pending_review: raw.pending_review ?? null,
-    reconciliation_pending_count: raw.reconciliation_pending_count,
-    reconciliation_pending_count_truncated:
-      raw.reconciliation_pending_count_truncated,
-    next_reconciliation_version_id: raw.next_reconciliation_version_id ?? null,
-    reconciliation_available: raw.reconciliation_available,
     published_version_info: raw.published_version_info ?? null,
   };
 }

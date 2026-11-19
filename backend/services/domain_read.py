@@ -91,9 +91,12 @@ from backend.services.context_link_targets import (
 )
 from backend.services.context_links import format_stable_url
 from backend.services.context_review_disposition import (
+    OPEN_CONTEXT_REVIEW_STATUSES,
     context_version_review_disposition,
     context_version_review_metadata,
+    select_context_version_reviews,
 )
+from backend.services.context_version_refs import context_version_ref
 from backend.services.context_visibility import (
     visible_context_version_expression,
     visible_context_version_id,
@@ -150,6 +153,7 @@ def _encode_version_history_cursor(
     target_type: str,
     target_id: UUID,
     before_version_no: int,
+    drafts: bool = False,
 ) -> str:
     payload = json.dumps(
         {
@@ -158,6 +162,8 @@ def _encode_version_history_cursor(
             "target_type": target_type,
             "target_id": str(target_id),
             "before_version_no": before_version_no,
+            # Still paging the open drafts that lead REST Context History.
+            **({"drafts": True} if drafts else {}),
         },
         separators=(",", ":"),
     ).encode("utf-8")
@@ -170,9 +176,10 @@ def _decode_version_history_cursor(
     workspace_id: UUID,
     target_type: str,
     target_id: UUID,
-) -> int | None:
+) -> tuple[int | None, bool]:
+    """The cursor's version-number boundary and whether it is in the drafts phase."""
     if cursor is None:
-        return None
+        return None, False
     try:
         padding = "=" * (-len(cursor) % 4)
         payload = json.loads(
@@ -190,9 +197,10 @@ def _decode_version_history_cursor(
         or payload.get("target_id") != str(target_id)
         or not isinstance(payload.get("before_version_no"), int)
         or payload["before_version_no"] < 1
+        or not isinstance(payload.get("drafts", False), bool)
     ):
         raise ReadValidationError("cursor must be an opaque version pagination token")
-    return payload["before_version_no"]
+    return payload["before_version_no"], payload.get("drafts", False)
 
 
 _SAFE_EXTRACTION_SUMMARY = re.compile(
@@ -1006,31 +1014,13 @@ class DomainReadService:
                 and version is not None
                 and version.version_status == "draft"
             ):
-                draft_ref = f"context_page_version:{version.id}"
-                review_query = select_in_workspace(
-                    ReviewItem,
-                    workspace_id=workspace_id,
+                review_query = select_context_version_reviews(
+                    workspace_id,
+                    {page.id},
+                    review_type=None,
                     conditions=(
-                        ReviewItem.status.in_(("pending", "changes_requested")),
-                    ),
-                )
-                review_query = join_in_workspace(
-                    review_query,
-                    ReviewItem,
-                    ChangeSet,
-                    workspace_id=workspace_id,
-                    on=ReviewItem.change_set_id == ChangeSet.id,
-                )
-                review_query = join_in_workspace(
-                    review_query,
-                    ReviewItem,
-                    ChangeOperation,
-                    workspace_id=workspace_id,
-                    on=and_(
-                        ChangeOperation.change_set_id == ChangeSet.id,
-                        ChangeOperation.target_type == "context_page",
-                        ChangeOperation.target_id == page.id,
-                        ChangeOperation.diff_ref == draft_ref,
+                        ReviewItem.status.in_(OPEN_CONTEXT_REVIEW_STATUSES),
+                        ChangeOperation.diff_ref == context_version_ref(version.id),
                     ),
                 )
                 review_item = session.execute(
@@ -1667,6 +1657,7 @@ class DomainReadService:
         cursor: str | None = None,
         *,
         actor: ActorContext | None = None,
+        drafts_first: bool = False,
     ) -> ListChangesPayload:
         if not actor_can_read_audit_records(actor):
             raise ReadNotFoundError("target not found")
@@ -1677,13 +1668,17 @@ class DomainReadService:
             target_id=target_id,
             actor=actor,
         )
-        changeset_stmt = select(ChangeSet).where(
-            ChangeSet.workspace_id == workspace_id,
-            ChangeSet.operations.any(
-                and_(
-                    ChangeOperation.target_type == target_type,
-                    ChangeOperation.target_id == target_id,
-                )
+        changeset_stmt = select_in_workspace(
+            ChangeSet,
+            workspace_id=workspace_id,
+            conditions=(
+                ChangeSet.operations.any(
+                    and_(
+                        ChangeOperation.workspace_id == workspace_id,
+                        ChangeOperation.target_type == target_type,
+                        ChangeOperation.target_id == target_id,
+                    )
+                ),
             ),
         )
         if not actor_can_read_drafts(actor):
@@ -1695,37 +1690,27 @@ class DomainReadService:
         decisions = []
         if change_ids:
             decisions = session.scalars(
-                select(ReviewDecision)
-                .join(ReviewItem, ReviewDecision.review_item_id == ReviewItem.id)
-                .where(ReviewItem.change_set_id.in_(change_ids))
-                .order_by(ReviewDecision.created_at.desc())
+                join_in_workspace(
+                    select_in_workspace(
+                        ReviewDecision,
+                        workspace_id=workspace_id,
+                        conditions=(ReviewItem.change_set_id.in_(change_ids),),
+                    ),
+                    ReviewDecision,
+                    ReviewItem,
+                    workspace_id=workspace_id,
+                    on=ReviewDecision.review_item_id == ReviewItem.id,
+                ).order_by(ReviewDecision.created_at.desc())
             ).all()
-        before_version_no = _decode_version_history_cursor(
+        versions, next_cursor = self._version_history_page(
+            session,
+            workspace_id,
+            target_type,
+            target_id,
+            limit,
             cursor,
-            workspace_id=workspace_id,
-            target_type=target_type,
-            target_id=target_id,
-        )
-        version_page = self._version_entries(
-            session=session,
-            workspace_id=workspace_id,
-            target_type=target_type,
-            target_id=target_id,
-            limit=limit + 1,
-            actor=actor,
-            before_version_no=before_version_no,
-        )
-        has_more_versions = len(version_page) > limit
-        versions = version_page[:limit]
-        next_cursor = (
-            _encode_version_history_cursor(
-                workspace_id=workspace_id,
-                target_type=target_type,
-                target_id=target_id,
-                before_version_no=versions[-1].version_no,
-            )
-            if has_more_versions and versions
-            else None
+            actor,
+            drafts_first=drafts_first and target_type == "context_page",
         )
         return ListChangesPayload(
             versions=versions,
@@ -2391,7 +2376,7 @@ class DomainReadService:
         ids = ordered_parent_version_ids(session, version)
         if actor_can_read_drafts(actor):
             return list(ids)
-        return list(
+        visible = set(
             session.scalars(
                 select_in_workspace(
                     ContextPageVersion,
@@ -2406,6 +2391,204 @@ class DomainReadService:
                 ).with_only_columns(ContextPageVersion.id)
             )
         )
+        # Keep the parent order (first parent, then merged parents by ordinal).
+        return [key for key in ids if key in visible]
+
+    def _version_history_page(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        target_type: str,
+        target_id: UUID,
+        limit: int,
+        cursor: str | None,
+        actor: ActorContext | None,
+        *,
+        drafts_first: bool,
+    ) -> tuple[list[VersionEntry], str | None]:
+        """One page of versions, newest first, and the cursor of the next.
+
+        With ``drafts_first`` (REST Context History) the open drafts lead and
+        the commits follow. Both phases order by version number, which never
+        changes, so a later page only appends to the rows already shown.
+        """
+        before_version_no, in_drafts = _decode_version_history_cursor(
+            cursor,
+            workspace_id=workspace_id,
+            target_type=target_type,
+            target_id=target_id,
+        )
+
+        def next_cursor(last_version_no: int, *, drafts: bool = False) -> str:
+            return _encode_version_history_cursor(
+                workspace_id=workspace_id,
+                target_type=target_type,
+                target_id=target_id,
+                before_version_no=last_version_no,
+                drafts=drafts,
+            )
+
+        if target_type != "context_page":
+            entries = self._version_entries(
+                session,
+                workspace_id,
+                target_type,
+                target_id,
+                limit + 1,
+                actor,
+                before_version_no,
+            )
+            more = len(entries) > limit
+            entries = entries[:limit]
+            return entries, next_cursor(entries[-1].version_no) if more else None
+
+        page = get_in_workspace(
+            session, ContextPage, workspace_id=workspace_id, resource_id=target_id
+        )
+        if page is None:
+            return [], None
+        can_read_drafts = actor_can_read_drafts(actor)
+        drafts_phase = (
+            drafts_first and can_read_drafts and (cursor is None or in_drafts)
+        )
+
+        def newest(conditions, before: int | None, count: int):
+            if before is not None:
+                conditions = (*conditions, ContextPageVersion.version_no < before)
+            return session.scalars(
+                select_in_workspace(
+                    ContextPageVersion, workspace_id=workspace_id, conditions=conditions
+                )
+                .order_by(ContextPageVersion.version_no.desc())
+                .limit(count)
+            ).all()
+
+        on_page = ContextPageVersion.page_id == target_id
+        rows = (
+            list(
+                newest(
+                    (on_page, ContextPageVersion.version_status == "draft"),
+                    before_version_no,
+                    limit + 1,
+                )
+            )
+            if drafts_phase
+            else []
+        )
+        if len(rows) <= limit:
+            if not can_read_drafts:
+                status = ContextPageVersion.version_status.in_(
+                    PUBLISHED_CONTEXT_VERSION_STATUSES
+                )
+                commits = (on_page, status)
+            elif drafts_first:
+                commits = (on_page, ContextPageVersion.version_status != "draft")
+            else:
+                commits = (on_page,)
+            rows.extend(
+                newest(
+                    commits,
+                    None if drafts_phase else before_version_no,
+                    limit + 1 - len(rows),
+                )
+            )
+        selected = rows[:limit]
+        entries = self._context_version_entries(session, page, selected, actor)
+        if len(rows) <= limit:
+            return entries, None
+        last = selected[-1]
+        return entries, next_cursor(
+            last.version_no,
+            drafts=drafts_phase and last.version_status == "draft",
+        )
+
+    def _context_version_entries(
+        self,
+        session: Session,
+        page: ContextPage,
+        versions: list[ContextPageVersion],
+        actor: ActorContext | None,
+    ) -> list[VersionEntry]:
+        parent_ids = {
+            version.parent_version_id
+            for version in versions
+            if version.parent_version_id is not None
+        }
+        parents_by_id = (
+            {
+                parent.id: parent
+                for parent in session.scalars(
+                    select_in_workspace(
+                        ContextPageVersion,
+                        workspace_id=page.workspace_id,
+                        conditions=(ContextPageVersion.id.in_(parent_ids),),
+                    )
+                )
+            }
+            if parent_ids
+            else {}
+        )
+        review_metadata = context_version_review_metadata(
+            session, versions, workspace_id=page.workspace_id
+        )
+        missing_actor_keys = {
+            (version.actor_type, version.actor_id)
+            for version in versions
+            if not version.actor_display_name
+        }
+        actor_names = resolve_actor_display_names(session, missing_actor_keys)
+        visible_head_id = visible_context_version_id(page, actor)[0]
+        expose_draft_state = actor_can_read_drafts(actor)
+
+        entries: list[VersionEntry] = []
+        for version in versions:
+            prior_relation, visible_parent_id = context_parent_projection(
+                version,
+                parents_by_id.get(version.parent_version_id),
+                actor,
+            )
+            projection = project_context_version(
+                page,
+                version,
+                visible_version_id=visible_head_id,
+                expose_draft_state=expose_draft_state,
+            )
+            entries.append(
+                VersionEntry(
+                    version_id=version.id,
+                    version_no=version.version_no,
+                    version_status=version.version_status,
+                    review_disposition=review_metadata[version.id].disposition,
+                    history_status=projection.history_status,
+                    graph_status=projection.graph_status,
+                    actor_type=version.actor_type,
+                    actor_display_name=version.actor_display_name
+                    or actor_names[(version.actor_type, version.actor_id)],
+                    created_at=version.created_at,
+                    parent_version_id=visible_parent_id,
+                    parent_version_ids=self._visible_parent_ids(
+                        session, version, actor
+                    ),
+                    prior_version_id=visible_parent_id,
+                    prior_relation=prior_relation,
+                    actor_id=version.actor_id,
+                    is_current=(projection.is_visible_head),
+                    is_current_published=(
+                        version.id == page.current_published_version_id
+                    ),
+                    is_latest_draft=(False),
+                    is_visible_head=projection.is_visible_head,
+                    is_published_head=projection.is_published_head,
+                    is_draft_head=projection.is_draft_head,
+                    review_status=review_metadata[version.id].status,
+                    review_item_id=review_metadata[version.id].review_item_id,
+                    is_alternative=projection.is_alternative,
+                    is_discarded=projection.is_discarded,
+                    merged_into_version_id=None,
+                    reconciliation_available=False,
+                )
+            )
+        return entries
 
     def _version_entries(
         self,
@@ -2417,115 +2600,6 @@ class DomainReadService:
         actor: ActorContext | None,
         before_version_no: int | None = None,
     ) -> list[VersionEntry]:
-        if target_type == "context_page":
-            page = get_in_workspace(
-                session,
-                ContextPage,
-                workspace_id=workspace_id,
-                resource_id=target_id,
-            )
-            if page is None:
-                return []
-            stmt = (
-                select(ContextPageVersion)
-                .join(ContextPage, ContextPageVersion.page_id == ContextPage.id)
-                .where(ContextPageVersion.page_id == target_id)
-                .where(ContextPage.workspace_id == workspace_id)
-            )
-            if not actor_can_read_drafts(actor):
-                stmt = stmt.where(
-                    ContextPageVersion.version_status.in_(
-                        PUBLISHED_CONTEXT_VERSION_STATUSES
-                    )
-                )
-            if before_version_no is not None:
-                stmt = stmt.where(ContextPageVersion.version_no < before_version_no)
-            versions = session.scalars(
-                stmt.order_by(ContextPageVersion.version_no.desc()).limit(limit)
-            ).all()
-            versions = [
-                version
-                for version in versions
-                if context_version_is_visible(version, actor)
-            ]
-            parent_ids = {
-                version.parent_version_id
-                for version in versions
-                if version.parent_version_id is not None
-            }
-            parents_by_id = (
-                {
-                    parent.id: parent
-                    for parent in session.scalars(
-                        select(ContextPageVersion).where(
-                            ContextPageVersion.id.in_(parent_ids)
-                        )
-                    )
-                }
-                if parent_ids
-                else {}
-            )
-            review_metadata = context_version_review_metadata(
-                session, versions, workspace_id=workspace_id
-            )
-            missing_actor_keys = {
-                (version.actor_type, version.actor_id)
-                for version in versions
-                if not version.actor_display_name
-            }
-            actor_names = resolve_actor_display_names(session, missing_actor_keys)
-            visible_head_id = visible_context_version_id(page, actor)[0]
-            expose_draft_state = actor_can_read_drafts(actor)
-
-            entries: list[VersionEntry] = []
-            for version in versions:
-                prior_relation, visible_parent_id = context_parent_projection(
-                    version,
-                    parents_by_id.get(version.parent_version_id),
-                    actor,
-                )
-                projection = project_context_version(
-                    page,
-                    version,
-                    visible_version_id=visible_head_id,
-                    expose_draft_state=expose_draft_state,
-                )
-                entries.append(
-                    VersionEntry(
-                        version_id=version.id,
-                        version_no=version.version_no,
-                        version_status=version.version_status,
-                        review_disposition=review_metadata[version.id].disposition,
-                        history_status=projection.history_status,
-                        graph_status=projection.graph_status,
-                        actor_type=version.actor_type,
-                        actor_display_name=version.actor_display_name
-                        or actor_names[(version.actor_type, version.actor_id)],
-                        created_at=version.created_at,
-                        parent_version_id=visible_parent_id,
-                        parent_version_ids=self._visible_parent_ids(
-                            session, version, actor
-                        ),
-                        prior_version_id=visible_parent_id,
-                        prior_relation=prior_relation,
-                        actor_id=version.actor_id,
-                        is_current=(projection.is_visible_head),
-                        is_current_published=(
-                            version.id == page.current_published_version_id
-                        ),
-                        is_latest_draft=(False),
-                        is_visible_head=projection.is_visible_head,
-                        is_published_head=projection.is_published_head,
-                        is_draft_head=projection.is_draft_head,
-                        review_status=review_metadata[version.id].status,
-                        review_item_id=review_metadata[version.id].review_item_id,
-                        is_alternative=projection.is_alternative,
-                        is_discarded=projection.is_discarded,
-                        merged_into_version_id=None,
-                        reconciliation_available=False,
-                    )
-                )
-            return entries
         if target_type == "agent_page":
             page = get_in_workspace(
                 session,
@@ -2538,8 +2612,10 @@ class DomainReadService:
             current_version_id = (
                 page.latest_draft_version_id or page.current_active_version_id
             )
-            stmt = select(AgentPageVersion).where(
-                AgentPageVersion.agent_page_id == target_id
+            stmt = select_in_workspace(
+                AgentPageVersion,
+                workspace_id=workspace_id,
+                conditions=(AgentPageVersion.agent_page_id == target_id,),
             )
             if not actor_can_read_drafts(actor):
                 stmt = stmt.where(AgentPageVersion.version_status != "draft")
@@ -2573,10 +2649,11 @@ class DomainReadService:
             ]
         if target_type == "library_item":
             versions = session.scalars(
-                select(LibraryItemVersion)
-                .join(LibraryItem, LibraryItemVersion.library_item_id == LibraryItem.id)
-                .where(LibraryItemVersion.library_item_id == target_id)
-                .where(LibraryItem.workspace_id == workspace_id)
+                select_in_workspace(
+                    LibraryItemVersion,
+                    workspace_id=workspace_id,
+                    conditions=(LibraryItemVersion.library_item_id == target_id,),
+                )
                 .order_by(LibraryItemVersion.version_no.desc())
                 .limit(limit)
             ).all()
@@ -2623,8 +2700,10 @@ class DomainReadService:
         entries: list[dict[str, Any]] = []
         for change_set in changesets:
             operations = session.scalars(
-                select(ChangeOperation).where(
-                    ChangeOperation.change_set_id == change_set.id
+                select_in_workspace(
+                    ChangeOperation,
+                    workspace_id=change_set.workspace_id,
+                    conditions=(ChangeOperation.change_set_id == change_set.id,),
                 )
             ).all()
             for operation in operations:

@@ -1,19 +1,33 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { apiErrorMessage } from "../../shared/api/client";
 import { listContextDrafts, type ContextPageDetail, type OpenDrafts } from "../../shared/api/context";
+import { bringInPageVersion, discardPageEdit, previewPageMerge } from "../../shared/api/pages";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { TREE_VERSION_PARAM } from "../../shared/components/treeRouteState";
+import { isAbortError } from "../../shared/lib/abortError";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
-import { workspacePath } from "../../shared/lib/workspaceRoutes";
+import { contextEditHref, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { useContextMerge } from "../pages/useContextMerge";
 
-export function ContextDrafts({ detail, workspaceId }: {
+export function ContextDrafts({ detail, workspaceId, onCompareWithPublished, onChanged }: {
   detail: ContextPageDetail;
   workspaceId: string;
+  /** Opens the draft-against-published comparison; absent when there is nothing to compare. */
+  onCompareWithPublished?: (() => void) | null;
+  /** Reloads the page after a draft action changed it. */
+  onChanged: () => Promise<void> | void;
 }) {
   const { t } = useTranslation("context");
+  const withdrawTitleId = useId();
+  const merge = useContextMerge();
+  const [action, setAction] = useState<"bring_in" | "withdraw" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const [summary, setSummary] = useState<OpenDrafts | null>(detail.open_drafts ?? null);
   const [loading, setLoading] = useState(false);
@@ -41,8 +55,56 @@ export function ContextDrafts({ detail, workspaceId }: {
     next.delete("tab");
     next.delete("compareFrom");
     next.delete("compareTo");
-    next.delete("reconcile");
     setSearchParams(next);
+  }
+
+  const draftVersionId = detail.draft ? detail.version_info?.version_id ?? null : null;
+  const publishedVersionId = detail.current_published_version_id;
+  const failure = (error: unknown) => apiErrorMessage(error, t("drafts.actionError"));
+
+  // Brings the published version into this draft through the shared merge
+  // flow: a clean merge is saved at once, overlapping changes ask first.
+  async function bringIn() {
+    if (!draftVersionId || !publishedVersionId || action) return;
+    setAction("bring_in");
+    setActionError(null);
+    try {
+      await merge.runMergeWrite({
+        kind: "bring_in",
+        workspaceId,
+        pageId: detail.id,
+        publishedVersionNumber: detail.published_version_info?.version_no ?? null,
+        loadPreview: () => previewPageMerge(workspaceId, detail.id, draftVersionId),
+        write: (choice) => bringInPageVersion(workspaceId, detail.id, draftVersionId, choice),
+      });
+      await onChanged();
+    } catch (error) {
+      if (isAbortError(error)) return;
+      // Refused or unknown: say so and show the draft as it is now. If the
+      // write did land, the refreshed draft shows it; trying again is bound
+      // to the new state, so it is never applied twice.
+      setActionError(failure(error));
+      await onChanged();
+    } finally {
+      setAction(null);
+    }
+  }
+
+  // Withdrawing ends the draft as a finished version that History keeps.
+  async function withdraw() {
+    if (!draftVersionId || action) return;
+    setAction("withdraw");
+    setActionError(null);
+    try {
+      await discardPageEdit(workspaceId, detail.id, draftVersionId);
+      setConfirmWithdraw(false);
+      selectVersion(null);
+      await onChanged();
+    } catch (error) {
+      setActionError(failure(error));
+    } finally {
+      setAction(null);
+    }
   }
 
   async function loadDrafts(append: boolean) {
@@ -100,8 +162,47 @@ export function ContextDrafts({ detail, workspaceId }: {
               </button>
             ) : null}
           </div>
+          {draftVersionId ? (
+            <div aria-label={t("drafts.actionsLabel")} className="context-draft-actions" role="group">
+              <Link
+                className="icon-button text-button"
+                to={`${contextEditHref(workspaceId, detail.id)}?version_id=${encodeURIComponent(draftVersionId)}`}
+              >
+                {t("drafts.edit")}
+              </Link>
+              {draft.is_behind === true && publishedVersionId ? (
+                <button className="icon-button text-button" disabled={action !== null} onClick={() => void bringIn()} type="button">
+                  {action === "bring_in" ? t("drafts.bringingIn") : t("drafts.bringIn")}
+                </button>
+              ) : null}
+              {onCompareWithPublished ? (
+                <button className="icon-button text-button" onClick={onCompareWithPublished} type="button">
+                  {t("drafts.compare")}
+                </button>
+              ) : null}
+              <button className="icon-button text-button danger" disabled={action !== null} onClick={() => setConfirmWithdraw(true)} type="button">
+                {t("drafts.withdraw")}
+              </button>
+            </div>
+          ) : null}
+          {actionError ? <p className="context-draft-error" role="alert">{actionError}</p> : null}
         </StatusBanner>
       ) : null}
+      {confirmWithdraw ? (
+        <ConfirmDialog
+          busy={action === "withdraw"}
+          busyLabel={t("drafts.withdrawing")}
+          confirmLabel={t("drafts.withdraw")}
+          labelledBy={withdrawTitleId}
+          onCancel={() => setConfirmWithdraw(false)}
+          onConfirm={() => void withdraw()}
+          title={t("drafts.withdrawTitle")}
+          tone="danger"
+        >
+          <p>{t("drafts.withdrawConfirm")}</p>
+        </ConfirmDialog>
+      ) : null}
+      {merge.dialog}
       {summary ? (
         <details className="context-draft-list" onToggle={(event) => {
           if (event.currentTarget.open) void loadDrafts(false);

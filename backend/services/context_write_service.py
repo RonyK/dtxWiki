@@ -44,7 +44,11 @@ from backend.repositories.context_page_repo import (
     get_page_by_slug_for_update,
     insert_version,
 )
-from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
+from backend.repositories.workspace_scoped import (
+    get_in_workspace,
+    join_in_workspace,
+    select_in_workspace,
+)
 from backend.schemas.common import EnvelopeWarning
 from backend.schemas.context_edit import (
     DeleteBlockOperation,
@@ -121,6 +125,7 @@ from backend.services.context_push import (
 from backend.services.context_reconciliation_reminder import (
     enqueue_reconciliation_reminder,
 )
+from backend.services.context_version_refs import context_version_ref
 from backend.services.context_visibility import (
     editable_head_context_version_expression,
     editable_head_context_version_id,
@@ -1010,7 +1015,7 @@ class ContextWriteService:
                 target_id=page.id,
                 operation="create_draft",
                 diff_summary=request.reason,
-                diff_ref=f"context_page_version:{version.id}",
+                diff_ref=context_version_ref(version.id),
             )
             session.add(operation)
             record_metadata_snapshot(
@@ -2357,7 +2362,7 @@ class ContextWriteService:
                     "diverged context patch; reconciliation manifest is stored "
                     "on the referenced branch version"
                 ),
-                diff_ref=f"context_page_version:{version.id}",
+                diff_ref=context_version_ref(version.id),
             )
         )
         review = self._create_review_item(
@@ -2834,7 +2839,7 @@ class ContextWriteService:
                 target_id=page.id,
                 operation=classification.change_operation,
                 diff_summary=reason,
-                diff_ref=f"context_page_version:{version.id}",
+                diff_ref=context_version_ref(version.id),
             )
         )
         record_metadata_snapshot(
@@ -3088,8 +3093,8 @@ class ContextWriteService:
             from backend.services.context_draft_workflow import (
                 direct_publication_risk,
                 materialize_publication,
+                merge_write_candidate,
                 metadata_for,
-                publication_candidate,
             )
             from backend.services.page_service import PageService
 
@@ -3098,7 +3103,7 @@ class ContextWriteService:
                 body_preparer=self.body_preparer,
                 actor_context=self.actor_context,
             )
-            merge_preview, candidate = publication_candidate(
+            merge_preview, candidate = merge_write_candidate(
                 session,
                 page,
                 version,
@@ -3178,18 +3183,24 @@ class ContextWriteService:
                 and page.lifecycle_status == "published"
             ):
                 publish_operation = session.scalar(
-                    select(ChangeOperation)
-                    .join(ChangeSet, ChangeSet.id == ChangeOperation.change_set_id)
-                    .where(
-                        ChangeSet.workspace_id == workspace_id,
-                        ChangeSet.trigger_type == "context_page_publish",
-                        ChangeOperation.target_type == "context_page",
-                        ChangeOperation.target_id == page.id,
-                        ChangeOperation.operation == "publish",
-                        ChangeOperation.diff_ref
-                        == f"context_page_version:{version.id}",
-                    )
-                    .order_by(ChangeOperation.created_at.desc())
+                    join_in_workspace(
+                        select_in_workspace(
+                            ChangeOperation,
+                            workspace_id=workspace_id,
+                            conditions=(
+                                ChangeSet.trigger_type == "context_page_publish",
+                                ChangeOperation.target_type == "context_page",
+                                ChangeOperation.target_id == page.id,
+                                ChangeOperation.operation == "publish",
+                                ChangeOperation.diff_ref
+                                == context_version_ref(version.id),
+                            ),
+                        ),
+                        ChangeOperation,
+                        ChangeSet,
+                        workspace_id=workspace_id,
+                        on=ChangeSet.id == ChangeOperation.change_set_id,
+                    ).order_by(ChangeOperation.created_at.desc())
                 )
                 if publish_operation is None:
                     raise StaleContextDraftError(
@@ -3420,7 +3431,7 @@ class ContextWriteService:
                     ChangeOperation.change_set_id == ReviewItem.change_set_id,
                     ChangeOperation.target_type == "context_page",
                     ChangeOperation.target_id == version.page_id,
-                    ChangeOperation.diff_ref == f"context_page_version:{version.id}",
+                    ChangeOperation.diff_ref == context_version_ref(version.id),
                 ),
             )
             .with_only_columns(ChangeOperation.id)

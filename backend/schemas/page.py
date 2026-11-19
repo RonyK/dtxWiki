@@ -7,6 +7,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -14,10 +15,16 @@ from pydantic import (
 from backend.schemas.common import (
     ContextHistoryStatus,
     DraftReviewReason,
+    RESTConflictErrorBody,
     RESTResponseBase,
 )
-from backend.schemas.context_drafts import ContextDraftInfo, OpenDrafts
+from backend.schemas.context_drafts import (
+    ContextDraftAuthor,
+    ContextDraftInfo,
+    OpenDrafts,
+)
 from backend.schemas.context_ingress import ContextPageType
+from backend.schemas.context_merge import CONTENT_HASH_PATTERN, ContextMergeCandidate
 from backend.schemas.document_reference import ReferenceView
 from backend.schemas.edit_receipt import EditReceipt
 from backend.schemas.input_policy import InputRequest
@@ -33,7 +40,6 @@ BODY_MD_MAX_LENGTH = 1_000_000
 
 SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 PAGE_SLUG_PATTERN = r"^[\p{L}\p{N}-]+$"
-CONTENT_HASH_PATTERN = r"^[a-f0-9]{64}$"
 PAGE_LIST_LIMIT_MAX = 100
 PAGE_LIST_CURSOR_MAX_OFFSET = 10_000
 PAGE_LIST_CURSOR_MAX_LENGTH = 512
@@ -708,6 +714,75 @@ class ContextPageDetail(ContextPageWriteDetail):
 
     draft: ContextDraftInfo | None = None
     open_drafts: OpenDrafts = Field(default_factory=OpenDrafts)
+    open_review_count: int = Field(default=0, ge=0)
+
+
+class ContextMergeSideMetadata(BaseModel):
+    title: str
+    page_type: str
+    placement_parent_node_id: UUID | None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMergeSide(BaseModel):
+    version_id: UUID
+    saved_by: ContextDraftAuthor | None
+    last_saved_at: datetime | None
+    metadata: ContextMergeSideMetadata
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMergeSides(BaseModel):
+    ours: ContextMergeSide
+    theirs: ContextMergeSide
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMergePreviewData(BaseModel):
+    page_id: UUID
+    version_id: UUID
+    content_hash: str = Field(description="Content hash of version_id.")
+    references_hash: str = Field(description="Document references hash of version_id.")
+    editing_revision: int
+    published_version_id: UUID | None
+    target_version_id: UUID | None
+    parent_version_ids: list[UUID]
+    kind: Literal["fast_forward", "automatic_merge", "conflict"]
+    result: ContextMergeCandidate | None
+    keep_both: ContextMergeCandidate | None
+    latest: ContextMergeCandidate | None
+    metadata_conflicts: list[str]
+    base_conflicted: bool
+    latest_side: Literal["ours", "theirs"]
+    offset_unit: Literal["unicode_code_points"] = Field(
+        description=(
+            "Offsets are Unicode code points; when conflict_body_md is present "
+            "the offsets index into it, otherwise into body_md."
+        )
+    )
+    sides: ContextMergeSides | None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextMergeConflictBody(RESTConflictErrorBody):
+    server_editing_revision: int
+    server_snapshot: DraftBaseSnapshot
+    merge_preview: ContextMergePreviewData
+
+    @field_serializer("merge_preview")
+    def serialize_merge_preview(self, preview: ContextMergePreviewData):
+        # Keep required nullable fields while omitting unset candidate fields.
+        return preview.model_dump(mode="json", exclude_unset=True)
+
+
+class ContextMergePreviewResponse(RESTResponseBase):
+    data: ContextMergePreviewData
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ContextDraftListResponse(RESTResponseBase):
@@ -802,10 +877,19 @@ class ContextMergePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class BringInContextVersionRequest(BaseModel):
+class BringInContextVersionRequest(InputRequest):
     version_id: UUID
     commit_version_id: UUID | None = None
     expected_editing_revision: int = Field(ge=1)
     on_conflict: Literal["keep_both", "latest"] | None = None
+    result_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
+    result_body_md: str | None = Field(default=None, max_length=BODY_MD_MAX_LENGTH)
+    result_page_metadata: PageMetadataPatch | None = None
     idempotency_key: str = CONTEXT_COMMAND_IDEMPOTENCY_KEY_FIELD
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def result_requires_commit_pin(self):
+        if self.result_hash is not None and self.commit_version_id is None:
+            raise ValueError("result_hash requires commit_version_id")
+        return self

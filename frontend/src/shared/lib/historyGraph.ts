@@ -33,11 +33,8 @@
 // whole row height; accept a test that only checks a path string's shape or
 // that an element exists -- assert which lane each edge occupies per row.
 //
-// Known gap: the reconcile merge edge is recorded on the BRANCH row
-// (`merged_into_version_id`), so the merge version learns about it only once
-// that older row is loaded. Until the API also names merge parents on the
-// merge version, loading an older page that brings in a merged branch can
-// re-seat rows below the merge version (I5 holds for everything else).
+// Merge parents are named on the merge version itself, so its merge edges are
+// allocated in its own row and loading older pages never re-seats rows (I5).
 
 export type HistoryGraphRelation =
   | "root"
@@ -67,8 +64,12 @@ export type HistoryGraphNode<T> = {
   // that does not record what a version was made from (Agent). The layout
   // draws both the same; the wording must not present "previous" as ancestry.
   parentKind?: "source" | "previous";
-  // Reconcile merge: the newer version that folded this branch back in.
-  mergedIntoId?: string | null;
+  // A merge version's other parents (after the first): each one gets a merge
+  // edge departing right below this node. A parent not loaded yet runs to the
+  // bottom of the list like any unseen parent (I6).
+  mergeParentIds?: readonly string[];
+  // Still being written (an open draft, not a commit yet); drawn dashed.
+  pending?: boolean;
   // The surface already knows this version is off the main line (an
   // alternative or discarded draft). Siblings of one parent count as branches
   // regardless.
@@ -155,7 +156,10 @@ export function buildHistoryGraph<T>(
   const candidates = (options.headCandidateIds ?? []).filter(
     (id): id is string => Boolean(id),
   );
-  const trunkTipIndex = candidates
+  // The trunk follows the first head candidate. While older pages remain, a
+  // first candidate that is not loaded may still arrive below, so no later
+  // candidate stands in for it -- that would re-seat rows when it arrives (I5).
+  const trunkTipIndex = (options.complete === true ? candidates : candidates.slice(0, 1))
     .map((id) => indexById.get(id))
     .find((index) => index !== undefined);
   const trunk = new Set<number>();
@@ -174,21 +178,6 @@ export function buildHistoryGraph<T>(
       : candidates.length > 0 && options.complete !== true
         ? Number.POSITIVE_INFINITY
         : -1;
-
-  // The reconcile merge edge is recorded on the merged branch; the merge
-  // version is the newer row, so it is the one the edge departs from.
-  const mergedBranchesByIndex = new Map<number, string[]>();
-  nodes.forEach((node, index) => {
-    const mergeIndex = node.mergedIntoId
-      ? indexById.get(node.mergedIntoId)
-      : undefined;
-    if (mergeIndex !== undefined && mergeIndex < index) {
-      mergedBranchesByIndex.set(mergeIndex, [
-        ...(mergedBranchesByIndex.get(mergeIndex) ?? []),
-        node.id,
-      ]);
-    }
-  });
 
   // Pass 1: lanes, top-down, the way `git log --graph` assigns columns. Each
   // lane holds the edge travelling down it, and an edge keeps the lane it
@@ -235,11 +224,18 @@ export function buildHistoryGraph<T>(
         edges.push(edge);
       }
     }
-    for (const branchId of mergedBranchesByIndex.get(index) ?? []) {
+    for (const mergeParentId of node.mergeParentIds ?? []) {
+      const mergeParentIndex = indexById.get(mergeParentId);
+      // A merge parent loaded above its child cannot be drawn downwards.
+      if (mergeParentIndex !== undefined && mergeParentIndex <= index) continue;
       // Never the node's own lane: that slot belongs to the first-parent edge
       // or to a hidden-parent stub, and sharing it would hide the merge.
       const mergeLane = firstFreeLane(index, lane);
-      const edge: Edge = { target: branchId, lane: mergeLane, merge: true };
+      const edge: Edge = {
+        target: mergeParentIndex !== undefined ? mergeParentId : null,
+        lane: mergeLane,
+        merge: true,
+      };
       active[mergeLane] = edge;
       edges.push(edge);
     }
