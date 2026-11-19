@@ -2,8 +2,10 @@ import {
   BadgeCheck,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   FileText,
   Folder,
+  ListTree,
   MoreHorizontal,
   Plus,
   Search,
@@ -211,6 +213,7 @@ export function TreeRail({
     () => new Set<string>(),
   );
   const favoritesTreeId = useId();
+  const favoritesLabelId = useId();
   const favoritesToggleRef = useRef<HTMLButtonElement | null>(null);
   const treeListRef = useRef<HTMLDivElement | null>(null);
   const [contextMenuState, setContextMenu] = useState<{
@@ -1102,26 +1105,28 @@ export function TreeRail({
       <div className="tree-rail-body">
         {showFavorites ? (
           <div className="tree-favorites">
+            {/* A section title, not a tree row: its chevron sits at the far
+                end so it never reads as a level-1 folder. */}
             <button
               aria-controls={favoritesOpen ? favoritesTreeId : undefined}
               aria-expanded={favoritesOpen}
-              className="tree-favorites-toggle"
+              className="tree-section-header"
               onClick={toggleFavoritesOpen}
               ref={favoritesToggleRef}
               type="button"
             >
-              {favoritesOpen ? (
-                <ChevronDown size={14} aria-hidden="true" />
-              ) : (
-                <ChevronRight size={14} aria-hidden="true" />
-              )}
               <Star className="tree-favorites-star" size={13} aria-hidden="true" />
-              <span>{favoritesLabel}</span>
+              <span id={favoritesLabelId}>{favoritesLabel}</span>
               <CountChip compact value={favoriteContentNodeCount} />
+              {favoritesOpen ? (
+                <ChevronUp className="tree-section-chevron" size={14} aria-hidden="true" />
+              ) : (
+                <ChevronDown className="tree-section-chevron" size={14} aria-hidden="true" />
+              )}
             </button>
             {favoritesOpen ? (
               <div
-                aria-label={favoritesLabel}
+                aria-labelledby={favoritesLabelId}
                 className="tree-list"
                 id={favoritesTreeId}
                 role="tree"
@@ -1168,6 +1173,12 @@ export function TreeRail({
                 })}
               </div>
             ) : null}
+          </div>
+        ) : null}
+        {showFavorites ? (
+          <div className="tree-section-header">
+            <ListTree className="tree-section-icon" size={13} aria-hidden="true" />
+            <span>{t("favorite.all")}</span>
           </div>
         ) : null}
         {displayNodes.length === 0 ? (

@@ -1509,41 +1509,65 @@
   gap: 2px;
 }
 
-/* The favorites tree above the full tree. Its header chevron sits in the same
-   leading slot as the level-1 chevrons below and shares their hit size. */
+/* The favorites tree above the full tree. Both parts of the rail body get a
+   section title on a tinted band: it is a title, not a tree row, so it keeps
+   the control hit size (lower than a row) and puts the favorites chevron at
+   the far end, away from the folder chevrons' leading slot. */
 .tree-favorites {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
 }
 
-.tree-favorites-toggle {
+.tree-section-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
   min-height: var(--tree-control-hit-size);
-  padding: 0 8px 0 2px;
+  margin-bottom: 2px;
+  padding: 0 2px 0 8px;
   border: 0;
   border-radius: 6px;
-  background: transparent;
+  background: color-mix(in srgb, var(--surface-active) 80%, transparent);
   color: var(--ink-soft);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
   text-align: left;
+  text-transform: uppercase;
+}
+
+button.tree-section-header {
   cursor: pointer;
 }
 
-.tree-favorites-toggle:hover {
-  background: var(--surface-hover);
+button.tree-section-header:hover {
+  background: var(--surface-active);
 }
 
-.tree-favorites-toggle > svg:first-child {
-  flex: 0 0 var(--tree-leading-visual-slot);
+/* Inset, so the rail's scroll edge never clips the ring. The rail-body prefix
+   outranks the global :is(...):focus-visible ring, which is (0,3,0). */
+.tree-rail-body button.tree-section-header:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Forced colors drop the band; a system-colour edge keeps the title a band. */
+@media (forced-colors: active) {
+  .tree-section-header {
+    border: 1px solid CanvasText;
+  }
+}
+
+.tree-section-icon {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+}
+
+.tree-section-chevron {
+  flex: 0 0 var(--tree-control-hit-size);
+  margin-left: auto;
+  color: var(--ink-faint);
 }
 
 .tree-favorites-star {

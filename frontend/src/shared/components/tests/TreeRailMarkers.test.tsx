@@ -22,7 +22,7 @@ function node(overrides: Partial<TreeNodePayload> = {}): TreeNodePayload {
 }
 
 // Star markers on the full trees; the favorites tree repeats every favorite.
-const fullTreeStars = () => document.querySelectorAll('[role="tree"]:not([aria-label="Favorites"]) .tree-row-favorite');
+const fullTreeStars = () => document.querySelectorAll(".tree-rail-body > .tree-list .tree-row-favorite");
 
 describe("TreeRail document status and personal favorites", () => {
   beforeEach(() => {
@@ -267,6 +267,7 @@ describe("TreeRail document status and personal favorites", () => {
     expect(outline()).toEqual(["1:Design", "2:Overview", "3:Rules", "1:Ops", "2:Rules", "2:Backup"]);
     expect(favorites().querySelector(".tree-row-child-count")).toBeNull();
     expect(screen.getByRole("button", { name: /^Favorites/, expanded: true })).toHaveTextContent("Favorites3");
+    expect(screen.getByText("All")).toBeInTheDocument();
     // Both placements share one favorite, so removing it empties the Design branch.
     fireEvent.click(within(favorites()).getAllByRole("button", { name: "Open actions for Rules" })[1]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove from my favorites" }));
@@ -274,6 +275,7 @@ describe("TreeRail document status and personal favorites", () => {
     expect(screen.getByRole("button", { name: /^Favorites/ })).toHaveTextContent("Favorites1");
     fireEvent.change(screen.getByRole("searchbox", { name: "Filter Context tree" }), { target: { value: "back" } });
     expect(screen.queryByRole("tree", { name: "Favorites" })).not.toBeInTheDocument();
+    expect(screen.queryByText("All")).not.toBeInTheDocument();
   });
 
   it("keeps favorite-only folders and artifacts free of empty keyboard and pointer menus", () => {

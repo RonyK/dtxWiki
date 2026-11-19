@@ -148,6 +148,7 @@
   },
   "favorite": {
     "group": "Favorites",
+    "all": "All",
     "add": "Add to my favorites",
     "remove": "Remove from my favorites",
     "mine": "My favorite",
