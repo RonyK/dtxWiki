@@ -76,7 +76,7 @@ from backend.spi.types import (
     SearchResultType,
 )
 
-SPI_VERSION = "1.1"
+SPI_VERSION = "1.2"
 
 __all__ = [
     "AUTH_METHOD_SPI_VERSION",

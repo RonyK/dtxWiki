@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### LLM adapters
+
+- Add the public LLM adapter contract (`backend.spi.llm`, adapter SPI 1.0) and
+  the `DtxwikiPlugin.llm_adapters` hook. Core SPI is now 1.2, so a plugin that
+  pins `requires_spi="==1.1"` no longer loads.
+- Built-in adapters for Anthropic Messages, OpenAI Responses, OpenAI Chat
+  Completions (and compatible servers) and the Gemini API register the same
+  way plugin adapters do. Each makes one provider call per request and reports
+  a normalized result, token usage and error.
+- `DTXWIKI_LLM_PROVIDER` keeps its models, temperature and two retries. Ask
+  now uses only a completed answer: a refused, filtered or unrecognized reply
+  falls back to the evidence summary with `llm_composer_failed`, as an
+  unreadable success reply now does too. `openai` sends
+  `max_completion_tokens` instead of the deprecated `max_tokens`.
+
 ## 0.3.2 — 2026-11-21
 
 ### Important changes

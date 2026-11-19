@@ -17,11 +17,10 @@ from sqlalchemy import select
 from backend.app.container import assemble
 from backend.app.main import create_app
 from backend.app.settings import Settings
-from backend.llm.registry import (
-    resolve_embedding_provider,
-    resolve_llm_provider,
-    resolve_reranker,
-)
+from backend.llm.adapter_registry import LLMAdapterRegistry
+from backend.llm.adapters import build_builtin_llm_adapters
+from backend.llm.legacy import resolve_llm_provider
+from backend.llm.registry import resolve_embedding_provider, resolve_reranker
 from backend.models.workspace import Workspace
 from backend.services.ask_service import (
     LLM_COMPOSER_FAILED_WARNING,
@@ -55,7 +54,9 @@ def _misconfigured_settings() -> Settings:
 
 
 def test_resolve_llm_provider_reports_reason_instead_of_raising():
-    provider, reason = resolve_llm_provider(_misconfigured_settings())
+    provider, reason = resolve_llm_provider(
+        _misconfigured_settings(), LLMAdapterRegistry(build_builtin_llm_adapters())
+    )
 
     assert provider is None
     assert reason and "API key" in reason
@@ -68,7 +69,9 @@ def test_resolve_llm_provider_reports_unknown_provider():
         llm_provider="not-a-provider",
     )
 
-    provider, reason = resolve_llm_provider(settings)
+    provider, reason = resolve_llm_provider(
+        settings, LLMAdapterRegistry(build_builtin_llm_adapters())
+    )
 
     assert provider is None
     assert reason and "DTXWIKI_LLM_PROVIDER" in reason
@@ -177,17 +180,18 @@ def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
 ):
     """A transient provider error used to be `pass`-ed with no user signal."""
 
-    from backend.llm.base import LLMProviderError
     from backend.schemas.ask import AskSessionCreate, AskTurnCreate
     from backend.services.ask_service import AskService
+    from backend.spi.llm import LLMAdapterError
 
     class _FailingProvider:
-        def chat(self, request):
-            # `provider` is keyword-only with no default. Omitting it raised
-            # TypeError instead, which the service's generic `except Exception`
-            # arm also warns on -- so this test passed without ever exercising
-            # the LLMProviderError path it names.
-            raise LLMProviderError("anthropic API returned 401", provider="anthropic")
+        def generate(self, **_kwargs):
+            # A wrong signature would raise TypeError instead, which the
+            # service's generic `except Exception` arm also warns on -- so the
+            # failure must be the normalized LLMAdapterError this test names.
+            raise LLMAdapterError(
+                "authentication_failed", delivery="sent", status_code=401
+            )
 
     workspace_id = _workspace_id(session_factory)
     with session_factory.begin() as session:
@@ -240,7 +244,7 @@ def test_an_unexpected_composer_exception_does_not_promise_a_retry(
     )
 
     class _BuggyProvider:
-        def chat(self, request):
+        def generate(self, **_kwargs):
             raise TypeError("composer bug, not an upstream failure")
 
     workspace_id = _workspace_id(session_factory)

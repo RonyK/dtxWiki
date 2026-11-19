@@ -1,0 +1,177 @@
+"""Chat Completions wire format (``POST /chat/completions``).
+
+One implementation serves two registrations: OpenAI's own endpoint, and
+servers that declare compatibility with the format. They differ only in the
+values a :class:`ChatCompletionsDialect` holds.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from functools import partial
+from typing import Any
+
+from backend.llm.adapters._shared import (
+    NO_CONFIG_SCHEMA,
+    BuiltinAdapterFactory,
+    api_key_schema,
+    count,
+    mapping,
+    post_json_object,
+    sequence,
+    termination,
+    text_of,
+)
+from backend.llm.adapters.openai_errors import refine_openai_error
+from backend.spi.llm import (
+    CanonicalTextRequest,
+    CanonicalTextResult,
+    ExecutionContext,
+    LLMAdapterDescriptor,
+    LLMAdapterError,
+    LLMConnection,
+    LLMTransport,
+    Termination,
+    TokenUsage,
+)
+
+_TERMINATIONS: Mapping[str, Termination] = {
+    "stop": "completed",
+    "length": "truncated",
+    "content_filter": "blocked",
+    "tool_calls": "tool_request",
+    "function_call": "tool_request",
+}
+
+
+@dataclass(frozen=True)
+class ChatCompletionsDialect:
+    # OpenAI deprecated ``max_tokens``; compatible servers still expect it.
+    output_budget_field: str
+
+
+class ChatCompletionsAdapter:
+    def __init__(
+        self,
+        connection: LLMConnection,
+        transport: LLMTransport,
+        *,
+        dialect: ChatCompletionsDialect,
+    ) -> None:
+        self._connection = connection
+        self._transport = transport
+        self._dialect = dialect
+
+    async def generate(
+        self, request: CanonicalTextRequest, context: ExecutionContext
+    ) -> CanonicalTextResult:
+        api_key = self._connection.credential.get("api_key")
+        reply = await post_json_object(
+            self._transport,
+            f"{self._connection.base_url}/chat/completions",
+            headers={"authorization": f"Bearer {api_key}"} if api_key else {},
+            payload=self._payload(request),
+            context=context,
+            request_id_header="x-request-id",
+            refine_error=refine_openai_error,
+        )
+        body = reply.body
+        choices = sequence(body.get("choices"))
+        if not choices:
+            raise LLMAdapterError(
+                "invalid_response",
+                delivery="sent",
+                status_code=200,
+                provider_request_id=reply.request_id,
+            )
+        choice = mapping(choices[0])
+        message = mapping(choice.get("message"))
+        return CanonicalTextResult(
+            text=text_of(message.get("content")),
+            termination=_termination(choice, message),
+            model=text_of(body.get("model")) or None,
+            usage=_usage(mapping(body.get("usage"))),
+            provider_request_id=reply.request_id,
+        )
+
+    def _payload(self, request: CanonicalTextRequest) -> dict[str, object]:
+        messages = (
+            [{"role": "system", "content": request.system}] if request.system else []
+        )
+        messages.extend(
+            {"role": message.role, "content": message.text}
+            for message in request.messages
+        )
+        payload: dict[str, object] = {
+            "model": request.model,
+            "messages": messages,
+            self._dialect.output_budget_field: request.max_output_tokens,
+        }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        return payload
+
+
+def _termination(choice: Mapping[str, Any], message: Mapping[str, Any]) -> Termination:
+    return termination(
+        _TERMINATIONS.get(text_of(choice.get("finish_reason")), "unknown"),
+        refused=bool(text_of(message.get("refusal"))),
+        tool_request=bool(sequence(message.get("tool_calls"))),
+    )
+
+
+def _usage(usage: Mapping[str, Any]) -> TokenUsage:
+    # Cache reads and writes and reasoning tokens are inside the totals.
+    return TokenUsage(
+        input_tokens=count(usage.get("prompt_tokens")),
+        output_tokens=count(usage.get("completion_tokens")),
+        cache_read_input_tokens=count(
+            mapping(usage.get("prompt_tokens_details")).get("cached_tokens")
+        ),
+        cache_write_input_tokens=count(
+            mapping(usage.get("prompt_tokens_details")).get("cache_write_tokens")
+        ),
+        reasoning_output_tokens=count(
+            mapping(usage.get("completion_tokens_details")).get("reasoning_tokens")
+        ),
+    )
+
+
+OPENAI_FACTORY = BuiltinAdapterFactory(
+    descriptor=LLMAdapterDescriptor(
+        adapter_id="builtin.openai.chat_completions",
+        adapter_version="1.0.0",
+        display_name={
+            "en": "OpenAI Chat Completions API",
+            "ko": "OpenAI Chat Completions API",
+        },
+        config_schema=NO_CONFIG_SCHEMA,
+        credential_schema=api_key_schema(required=True),
+        options=frozenset({"temperature"}),
+        default_base_url="https://api.openai.com/v1",
+    ),
+    build=partial(
+        ChatCompletionsAdapter,
+        dialect=ChatCompletionsDialect(output_budget_field="max_completion_tokens"),
+    ),
+)
+
+COMPATIBLE_FACTORY = BuiltinAdapterFactory(
+    descriptor=LLMAdapterDescriptor(
+        adapter_id="builtin.openai_compatible.chat_completions",
+        adapter_version="1.0.0",
+        display_name={
+            "en": "OpenAI-compatible Chat Completions",
+            "ko": "OpenAI 호환 Chat Completions",
+        },
+        config_schema=NO_CONFIG_SCHEMA,
+        # Self-hosted compatible servers often run without a key.
+        credential_schema=api_key_schema(required=False),
+        options=frozenset({"temperature"}),
+    ),
+    build=partial(
+        ChatCompletionsAdapter,
+        dialect=ChatCompletionsDialect(output_budget_field="max_tokens"),
+    ),
+)

@@ -6,586 +6,780 @@ import httpx
 import pytest
 
 from backend.app.settings import Settings
-from backend.llm import (
-    AnthropicLLM,
-    LLMMessage,
-    LLMProviderError,
-    LLMRequest,
-    LLMToolCall,
-    OpenAILLM,
+from backend.llm.adapter_registry import LLMAdapterRegistry, LLMAdapterRegistryError
+from backend.llm.adapters import (
+    anthropic_messages,
+    build_builtin_llm_adapters,
+    chat_completions,
+    gemini_generate_content,
+    openai_responses,
 )
-from backend.llm.base import EmbeddingProvider, LLMProvider, LLMResponse
-from backend.llm.registry import build_llm_provider
+from backend.llm.adapters._shared import BuiltinAdapterFactory
+from backend.llm.base import EmbeddingProvider
+from backend.llm.generation import BlockingTextGenerator
+from backend.llm.legacy import RetryingTextGeneration, build_llm_provider
+from backend.llm.transport import HttpxLLMTransport
 from backend.schemas.read import RankedResult, SearchPayload
 from backend.services.ask_service import AskService
+from backend.spi.llm import (
+    CanonicalTextRequest,
+    CanonicalTextResult,
+    ExecutionContext,
+    LLMAdapterError,
+    LLMModelCapabilities,
+    TextMessage,
+    TokenUsage,
+    TransportResponse,
+)
+from backend.testing.spi_conformance import WireCase, assert_llm_adapter_contract
+
+KEY = "secret-test-key"
+REQUEST = CanonicalTextRequest(
+    model="model-x",
+    messages=(TextMessage(role="user", text="Needle?"),),
+    max_output_tokens=64,
+    system="Be brief.",
+)
+WARM_REQUEST = CanonicalTextRequest(
+    model="model-x",
+    messages=(TextMessage(role="user", text="Needle?"),),
+    max_output_tokens=64,
+    temperature=0.2,
+)
+
+
+def _reply(body, *, status=200, headers=None) -> TransportResponse:
+    return TransportResponse(
+        status_code=status,
+        headers=headers or {},
+        body=json.dumps(body).encode(),
+    )
+
+
+def _builtin_registry() -> LLMAdapterRegistry:
+    return LLMAdapterRegistry(build_builtin_llm_adapters())
+
+
+class RecordingTransport:
+    def __init__(self, reply: TransportResponse) -> None:
+        self.reply = reply
+        self.calls: list[dict] = []
+
+    async def post_json(self, url, *, headers, payload, timeout_seconds):
+        self.calls.append({"url": url, "headers": dict(headers), "payload": payload})
+        return self.reply
 
 
 def test_provider_abcs_are_abstract():
-    for provider_cls in [LLMProvider, EmbeddingProvider]:
-        with pytest.raises(TypeError):
-            provider_cls()
+    with pytest.raises(TypeError):
+        EmbeddingProvider()
 
 
 def test_registry_returns_none_by_default_and_builds_configured_providers():
-    assert build_llm_provider(Settings()) is None
+    registry = _builtin_registry()
+    assert build_llm_provider(Settings(_env_file=None), registry) is None
 
-    anthropic = build_llm_provider(
-        Settings(llm_provider="anthropic", anthropic_api_key="anthropic-key")
+    # Each accepted value keeps the model, temperature and token budget the
+    # server-wide answer model always used, on its built-in adapter.
+    for selection, key_field, url, budget_field, reply in (
+        (
+            "anthropic",
+            "anthropic_api_key",
+            "https://api.anthropic.com/v1/messages",
+            "max_tokens",
+            {"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn"},
+        ),
+        (
+            "openai",
+            "openai_api_key",
+            "https://api.openai.com/v1/chat/completions",
+            "max_completion_tokens",
+            {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]},
+        ),
+    ):
+        transport = RecordingTransport(_reply(reply))
+        generator = build_llm_provider(
+            Settings(_env_file=None, llm_provider=selection, **{key_field: KEY}),
+            registry,
+            transport=transport,
+        )
+        result = generator.generate(
+            system="sys",
+            messages=(TextMessage(role="user", text="q"),),
+            max_output_tokens=1024,
+        )
+        (call,) = transport.calls
+        assert (result.text, result.termination) == ("ok", "completed")
+        assert call["url"] == url
+        assert call["payload"]["temperature"] == 0.0
+        assert call["payload"][budget_field] == 1024
+
+    # An option the model cannot honor is refused before anything is sent.
+    transport = RecordingTransport(_reply({}))
+    unsupported = BlockingTextGenerator(
+        port=registry.create(
+            "builtin.anthropic.messages",
+            base_url=None,
+            config={},
+            credential={"api_key": KEY},
+            transport=transport,
+        ),
+        model="model-x",
+        capabilities=LLMModelCapabilities(),
+        context=ExecutionContext(timeout_seconds=5),
+        temperature=0.0,
     )
-    openai = build_llm_provider(Settings(llm_provider="openai", openai_api_key="key"))
-
-    assert isinstance(anthropic, AnthropicLLM)
-    assert isinstance(openai, OpenAILLM)
+    with pytest.raises(LLMAdapterError) as error:
+        unsupported.generate(
+            system=None,
+            messages=(TextMessage(role="user", text="q"),),
+            max_output_tokens=8,
+        )
+    assert (error.value.code, error.value.delivery) == (
+        "unsupported_option",
+        "not_sent",
+    )
+    assert transport.calls == []
 
 
 def test_registry_rejects_missing_keys_and_unknown_provider():
-    with pytest.raises(ValueError, match="Anthropic API key"):
-        build_llm_provider(Settings(llm_provider="anthropic"))
+    registry = _builtin_registry()
+    with pytest.raises(ValueError, match="DTXWIKI_ANTHROPIC_API_KEY"):
+        build_llm_provider(Settings(_env_file=None, llm_provider="anthropic"), registry)
 
-    with pytest.raises(ValueError, match="OpenAI API key"):
-        build_llm_provider(Settings(llm_provider="openai"))
+    with pytest.raises(ValueError, match="DTXWIKI_OPENAI_API_KEY"):
+        build_llm_provider(Settings(_env_file=None, llm_provider="openai"), registry)
 
     with pytest.raises(RuntimeError, match="DTXWIKI_LLM_PROVIDER"):
-        build_llm_provider(Settings(llm_provider="local"))
+        build_llm_provider(Settings(_env_file=None, llm_provider="local"), registry)
 
 
-def test_openai_provider_parses_text_and_tool_calls():
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers["authorization"] == "Bearer test-key"
-        payload = json.loads(request.content)
-        assert payload["model"] == "gpt-4o-mini"
-        assert payload["messages"][0]["role"] == "user"
-        return httpx.Response(
-            200,
-            json={
-                "model": "gpt-4o-mini",
-                "choices": [
-                    {
-                        "finish_reason": "tool_calls",
-                        "message": {
-                            "content": "answer",
-                            "tool_calls": [
-                                {
-                                    "id": "call-1",
-                                    "function": {
-                                        "name": "search",
-                                        "arguments": '{"query":"needle"}',
-                                    },
-                                }
-                            ],
-                        },
-                    }
-                ],
-            },
+class ScriptedPort:
+    def __init__(self, outcomes) -> None:
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    async def generate(self, request, context):
+        outcome = self.outcomes[self.calls]
+        self.calls += 1
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def test_legacy_retry_policy_keeps_its_statuses_and_backoff():
+    """The server-wide model keeps its two retries; adapters never retry."""
+
+    def failure(code, status=None, retry_after=None):
+        return LLMAdapterError(
+            code,
+            delivery="sent" if status else "unknown",
+            status_code=status,
+            retry_after_seconds=retry_after,
         )
 
-    provider = OpenAILLM(api_key="test-key", transport=httpx.MockTransport(handler))
-    response = provider.chat(
-        LLMRequest(messages=[LLMMessage(role="user", content="Needle")])
-    )
-
-    assert response.provider == "openai"
-    assert response.content == "answer"
-    assert response.tool_calls[0].name == "search"
-    assert response.tool_calls[0].arguments == {"query": "needle"}
-    assert response.stop_reason == "tool_calls"
-    assert response.truncated is False
-
-
-def test_anthropic_provider_parses_text_and_tool_calls():
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers["x-api-key"] == "test-key"
-        payload = json.loads(request.content)
-        assert payload["system"] == "system"
-        assert payload["messages"][0]["role"] == "user"
-        return httpx.Response(
-            200,
-            json={
-                "model": "claude-sonnet-4-6",
-                "stop_reason": "tool_use",
-                "content": [
-                    {"type": "text", "text": "answer"},
-                    {
-                        "type": "tool_use",
-                        "id": "tool-1",
-                        "name": "cite",
-                        "input": {"claim_text": "needle"},
-                    },
-                ],
-            },
-        )
-
-    provider = AnthropicLLM(
-        api_key="test-key",
-        transport=httpx.MockTransport(handler),
-    )
-    response = provider.chat(
-        LLMRequest(
-            messages=[
-                LLMMessage(role="system", content="system"),
-                LLMMessage(role="user", content="Needle"),
-            ]
-        )
-    )
-
-    assert response.provider == "anthropic"
-    assert response.content == "answer"
-    assert response.tool_calls[0].name == "cite"
-    assert response.tool_calls[0].arguments == {"claim_text": "needle"}
-    assert response.stop_reason == "tool_use"
-    assert response.truncated is False
-
-
-def test_stop_reason_surfaces_truncation_for_both_providers():
-    def anthropic_handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "model": "claude-sonnet-4-6",
-                "stop_reason": "max_tokens",
-                "content": [{"type": "text", "text": "cut off mid"}],
-            },
-        )
-
-    def openai_handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "model": "gpt-4o-mini",
-                "choices": [
-                    {
-                        "finish_reason": "length",
-                        "message": {"content": "cut off mid"},
-                    }
-                ],
-            },
-        )
-
-    anthropic = AnthropicLLM(
-        api_key="test-key",
-        transport=httpx.MockTransport(anthropic_handler),
-    )
-    openai = OpenAILLM(
-        api_key="test-key",
-        transport=httpx.MockTransport(openai_handler),
-    )
-    request = LLMRequest(messages=[LLMMessage(role="user", content="x")])
-
-    anthropic_response = anthropic.chat(request)
-    openai_response = openai.chat(request)
-
-    assert anthropic_response.stop_reason == "max_tokens"
-    assert anthropic_response.truncated is True
-    assert openai_response.stop_reason == "length"
-    assert openai_response.truncated is True
-
-
-def test_stop_reason_defaults_to_none_when_provider_omits_it():
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "model": "claude-sonnet-4-6",
-                "content": [{"type": "text", "text": "answer"}],
-            },
-        )
-
-    provider = AnthropicLLM(
-        api_key="test-key",
-        transport=httpx.MockTransport(handler),
-    )
-    response = provider.chat(
-        LLMRequest(messages=[LLMMessage(role="user", content="x")])
-    )
-
-    assert response.stop_reason is None
-    assert response.truncated is False
-
-
-def test_openai_async_provider_uses_same_contract():
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "model": "gpt-4o-mini",
-                "choices": [{"message": {"content": "async answer"}}],
-            },
-        )
-
-    provider = OpenAILLM(api_key="test-key", transport=httpx.MockTransport(handler))
-    response = asyncio.run(
-        provider.async_chat(
-            LLMRequest(messages=[LLMMessage(role="user", content="Needle")])
-        )
-    )
-
-    assert response.content == "async answer"
-
-
-def test_anthropic_retries_429_then_succeeds():
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if len(calls) == 1:
-            return httpx.Response(
-                429,
-                headers={"retry-after": "0"},
-                json={
-                    "type": "error",
-                    "error": {"type": "rate_limit_error", "message": "slow down"},
-                },
-            )
-        return httpx.Response(
-            200,
-            json={
-                "model": "claude-sonnet-4-6",
-                "content": [{"type": "text", "text": "recovered"}],
-            },
-        )
-
-    provider = AnthropicLLM(
-        api_key="test-key",
-        retry_base_delay=0.0,
-        transport=httpx.MockTransport(handler),
-    )
-    response = provider.chat(
-        LLMRequest(messages=[LLMMessage(role="user", content="Needle")])
-    )
-
-    assert response.content == "recovered"
-    assert len(calls) == 2
-
-
-def test_openai_retries_529_then_succeeds():
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if len(calls) == 1:
-            return httpx.Response(
-                529,
-                json={"error": {"type": "overloaded_error", "message": "overloaded"}},
-            )
-        return httpx.Response(
-            200,
-            json={
-                "model": "gpt-4o-mini",
-                "choices": [{"message": {"content": "recovered"}}],
-            },
-        )
-
-    provider = OpenAILLM(
-        api_key="test-key",
-        retry_base_delay=0.0,
-        transport=httpx.MockTransport(handler),
-    )
-    response = provider.chat(
-        LLMRequest(messages=[LLMMessage(role="user", content="Needle")])
-    )
-
-    assert response.content == "recovered"
-    assert len(calls) == 2
-
-
-def test_non_retryable_400_raises_provider_error_with_body_details():
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(
-            400,
-            json={
-                "type": "error",
-                "error": {
-                    "type": "invalid_request_error",
-                    "message": "tool_use ids must match",
-                },
-            },
-        )
-
-    provider = AnthropicLLM(
-        api_key="test-key",
-        retry_base_delay=0.0,
-        transport=httpx.MockTransport(handler),
-    )
-
-    with pytest.raises(LLMProviderError) as excinfo:
-        provider.chat(LLMRequest(messages=[LLMMessage(role="user", content="x")]))
-
-    assert len(calls) == 1
-    assert excinfo.value.status_code == 400
-    assert excinfo.value.error_type == "invalid_request_error"
-    assert excinfo.value.retryable is False
-    assert "tool_use ids must match" in str(excinfo.value)
-
-
-def test_retries_exhausted_raise_provider_error():
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(500, json={"error": {"message": "boom"}})
-
-    provider = OpenAILLM(
-        api_key="test-key",
-        max_retries=2,
-        retry_base_delay=0.0,
-        transport=httpx.MockTransport(handler),
-    )
-
-    with pytest.raises(LLMProviderError) as excinfo:
-        provider.chat(LLMRequest(messages=[LLMMessage(role="user", content="x")]))
-
-    assert len(calls) == 3
-    assert excinfo.value.status_code == 500
-    assert excinfo.value.retryable is True
-
-
-def test_timeout_is_retried_then_succeeds():
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if len(calls) == 1:
-            raise httpx.ReadTimeout("read timed out")
-        return httpx.Response(
-            200,
-            json={
-                "model": "gpt-4o-mini",
-                "choices": [{"message": {"content": "recovered"}}],
-            },
-        )
-
-    provider = OpenAILLM(
-        api_key="test-key",
-        retry_base_delay=0.0,
-        transport=httpx.MockTransport(handler),
-    )
-    response = provider.chat(
-        LLMRequest(messages=[LLMMessage(role="user", content="x")])
-    )
-
-    assert response.content == "recovered"
-    assert len(calls) == 2
-
-
-def test_timeout_exhaustion_raises_provider_error():
-    def handler(_request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectTimeout("connect timed out")
-
-    provider = AnthropicLLM(
-        api_key="test-key",
-        max_retries=1,
-        retry_base_delay=0.0,
-        transport=httpx.MockTransport(handler),
-    )
-
-    with pytest.raises(LLMProviderError) as excinfo:
-        provider.chat(LLMRequest(messages=[LLMMessage(role="user", content="x")]))
-
-    assert excinfo.value.provider == "anthropic"
-    assert excinfo.value.retryable is True
-    assert "connect timed out" in str(excinfo.value)
-
-
-def test_async_chat_retries_transient_errors():
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if len(calls) == 1:
-            return httpx.Response(503, json={"error": {"message": "unavailable"}})
-        return httpx.Response(
-            200,
-            json={
-                "model": "claude-sonnet-4-6",
-                "content": [{"type": "text", "text": "recovered"}],
-            },
-        )
-
-    provider = AnthropicLLM(
-        api_key="test-key",
-        retry_base_delay=0.0,
-        transport=httpx.MockTransport(handler),
-    )
-    response = asyncio.run(
-        provider.async_chat(LLMRequest(messages=[LLMMessage(role="user", content="x")]))
-    )
-
-    assert response.content == "recovered"
-    assert len(calls) == 2
-
-
-def test_retry_delay_uses_backoff_jitter_and_honors_retry_after():
-    provider = OpenAILLM(
-        api_key="test-key",
-        retry_base_delay=1.0,
-        retry_max_delay=8.0,
-    )
-
-    for _ in range(20):
-        assert 2.0 <= provider._retry_delay(2, None) <= 4.0
-
-    assert provider._retry_delay(0, "3") >= 3.0
-    assert provider._retry_delay(0, "120") <= 8.0
-    assert provider._retry_delay(0, "not-a-number") <= 1.0
-
-
-def test_timeout_is_configurable_per_request_with_sane_default():
-    provider = AnthropicLLM(api_key="test-key")
-
-    default = provider._request_timeout(
-        LLMRequest(messages=[LLMMessage(role="user", content="x")])
-    )
-    overridden = provider._request_timeout(
-        LLMRequest(messages=[LLMMessage(role="user", content="x")], timeout=300.0)
-    )
-
-    assert default.read == 120.0
-    assert default.connect == 10.0
-    assert overridden.read == 300.0
-    assert overridden.connect == 10.0
-
-
-def test_anthropic_serializes_tool_round_trip():
-    provider = AnthropicLLM(api_key="test-key")
-    request = LLMRequest(
-        messages=[
-            LLMMessage(role="user", content="Find the needle"),
-            LLMMessage(
-                role="assistant",
-                content="Searching now.",
-                tool_calls=[
-                    LLMToolCall(
-                        call_id="tool-1",
-                        name="search",
-                        arguments={"query": "needle"},
-                    )
-                ],
-            ),
-            LLMMessage(role="tool", content="found it", tool_call_id="tool-1"),
-        ]
-    )
-
-    payload = provider._payload(request)
-
-    assert payload["messages"][1] == {
-        "role": "assistant",
-        "content": [
-            {"type": "text", "text": "Searching now."},
-            {
-                "type": "tool_use",
-                "id": "tool-1",
-                "name": "search",
-                "input": {"query": "needle"},
-            },
-        ],
-    }
-    assert payload["messages"][2] == {
-        "role": "user",
-        "content": [
-            {
-                "type": "tool_result",
-                "tool_use_id": "tool-1",
-                "content": "found it",
-            }
-        ],
-    }
-
-
-def test_openai_serializes_tool_round_trip():
-    provider = OpenAILLM(api_key="test-key")
-    request = LLMRequest(
-        messages=[
-            LLMMessage(role="user", content="Find the needle"),
-            LLMMessage(
-                role="assistant",
-                content="",
-                tool_calls=[
-                    LLMToolCall(
-                        call_id="call-1",
-                        name="search",
-                        arguments={"query": "needle"},
-                    )
-                ],
-            ),
-            LLMMessage(role="tool", content="found it", tool_call_id="call-1"),
-        ]
-    )
-
-    payload = provider._payload(request)
-
-    assert payload["messages"][1] == {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": "call-1",
-                "type": "function",
-                "function": {
-                    "name": "search",
-                    "arguments": '{"query": "needle"}',
-                },
-            }
-        ],
-    }
-    assert payload["messages"][2] == {
-        "role": "tool",
-        "content": "found it",
-        "tool_call_id": "call-1",
-    }
-
-
-def test_tool_round_trip_reaches_the_wire_for_both_providers():
-    def anthropic_handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        assistant = payload["messages"][1]
-        assert assistant["content"][0]["type"] == "tool_use"
-        assert assistant["content"][0]["id"] == "tool-1"
-        assert payload["messages"][2]["content"][0]["tool_use_id"] == "tool-1"
-        return httpx.Response(
-            200,
-            json={
-                "model": "claude-sonnet-4-6",
-                "content": [{"type": "text", "text": "done"}],
-            },
-        )
-
-    def openai_handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        assistant = payload["messages"][1]
-        assert assistant["tool_calls"][0]["id"] == "tool-1"
-        assert payload["messages"][2]["tool_call_id"] == "tool-1"
-        return httpx.Response(
-            200,
-            json={
-                "model": "gpt-4o-mini",
-                "choices": [{"message": {"content": "done"}}],
-            },
-        )
-
-    messages = [
-        LLMMessage(role="user", content="Find the needle"),
-        LLMMessage(
-            role="assistant",
-            content="",
-            tool_calls=[LLMToolCall(call_id="tool-1", name="search")],
+    async def run(port):
+        try:
+            return await port.generate(REQUEST, ExecutionContext(5))
+        except LLMAdapterError as exc:
+            return exc
+
+    ok = CanonicalTextResult(text="ok", termination="completed")
+    for outcomes, expected_calls, expected_sleeps, expected in (
+        # Retries follow the old statuses, not the normalized code: a 429 is
+        # retried even as quota_exhausted, honoring Retry-After (capped at
+        # 8 s); a 503 backs off; then success.
+        (
+            [
+                failure("quota_exhausted", 429, 30.0),
+                failure("provider_unavailable", 503),
+                ok,
+            ],
+            3,
+            [8.0, 1.0],
+            ok,
         ),
-        LLMMessage(role="tool", content="found it", tool_call_id="tool-1"),
+        # A 401 is not transient, and neither was a 501.
+        ([failure("authentication_failed", 401)], 1, [], "authentication_failed"),
+        ([failure("provider_unavailable", 501)], 1, [], "provider_unavailable"),
+        # A status-less transport timeout is retried until the budget runs out.
+        ([failure("timeout")] * 3, 3, [0.5, 1.0], "timeout"),
+    ):
+        port = ScriptedPort(outcomes)
+        sleeps: list[float] = []
+
+        async def sleep(seconds, sleeps=sleeps):
+            sleeps.append(seconds)
+
+        outcome = asyncio.run(
+            run(RetryingTextGeneration(port, sleep=sleep, jitter=lambda: 1.0))
+        )
+        assert getattr(outcome, "code", outcome) == expected
+        assert (port.calls, sleeps) == (expected_calls, expected_sleeps)
+
+
+def _anthropic_cases():
+    def wire(call):
+        assert call.url == "https://api.anthropic.com/v1/messages"
+        assert call.headers == {"x-api-key": KEY, "anthropic-version": "2023-06-01"}
+        assert call.payload == {
+            "model": "model-x",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Needle?"}],
+            "system": "Be brief.",
+        }
+
+    return [
+        WireCase(
+            "completed with cache and thinking usage",
+            REQUEST,
+            _reply(
+                {
+                    "model": "claude-x",
+                    "stop_reason": "end_turn",
+                    "content": [
+                        {"type": "thinking", "thinking": "hidden"},
+                        {"type": "text", "text": "An "},
+                        {"type": "text", "text": "answer."},
+                    ],
+                    "usage": {
+                        "input_tokens": 10,
+                        "cache_creation_input_tokens": 3,
+                        "cache_read_input_tokens": 5,
+                        "output_tokens": 7,
+                        "output_tokens_details": {"thinking_tokens": 2},
+                    },
+                },
+                headers={"Request-Id": "req_1"},
+            ),
+            expected=CanonicalTextResult(
+                text="An answer.",
+                termination="completed",
+                model="claude-x",
+                usage=TokenUsage(18, 7, 5, 3, 2),
+                provider_request_id="req_1",
+            ),
+            check_wire=wire,
+        ),
+        WireCase(
+            "truncated without usage",
+            REQUEST,
+            _reply(
+                {
+                    "stop_reason": "max_tokens",
+                    "content": [{"type": "text", "text": "Par"}],
+                }
+            ),
+            expected=CanonicalTextResult(text="Par", termination="truncated"),
+        ),
+        WireCase(
+            "refusal",
+            REQUEST,
+            _reply(
+                {"stop_reason": "refusal", "content": [{"type": "text", "text": "No"}]}
+            ),
+            expected=CanonicalTextResult(text="No", termination="refused"),
+        ),
+        WireCase(
+            "rate limited",
+            REQUEST,
+            _reply({"error": {"type": "rate_limit_error"}}, status=429),
+            expected_error=("rate_limited", "sent"),
+        ),
     ]
 
-    anthropic = AnthropicLLM(
-        api_key="test-key",
-        transport=httpx.MockTransport(anthropic_handler),
-    )
-    openai = OpenAILLM(
-        api_key="test-key",
-        transport=httpx.MockTransport(openai_handler),
-    )
 
-    assert anthropic.chat(LLMRequest(messages=messages)).content == "done"
-    assert openai.chat(LLMRequest(messages=messages)).content == "done"
+def _responses_cases():
+    def wire(call):
+        assert call.url == "https://api.openai.com/v1/responses"
+        assert call.headers == {"authorization": f"Bearer {KEY}"}
+        assert call.payload == {
+            "model": "model-x",
+            "input": [{"role": "user", "content": "Needle?"}],
+            "max_output_tokens": 64,
+            "store": False,
+            "temperature": 0.2,
+        }
+
+    return [
+        WireCase(
+            "completed around a reasoning item",
+            WARM_REQUEST,
+            _reply(
+                {
+                    "model": "gpt-x",
+                    "status": "completed",
+                    "output": [
+                        {"type": "reasoning", "summary": []},
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "Answer."}],
+                        },
+                    ],
+                    "usage": {
+                        "input_tokens": 12,
+                        "input_tokens_details": {
+                            "cached_tokens": 4,
+                            "cache_write_tokens": 3,
+                        },
+                        "output_tokens": 9,
+                        "output_tokens_details": {"reasoning_tokens": 6},
+                    },
+                },
+                headers={"x-request-id": "req_2"},
+            ),
+            expected=CanonicalTextResult(
+                text="Answer.",
+                termination="completed",
+                model="gpt-x",
+                usage=TokenUsage(12, 9, 4, 3, 6),
+                provider_request_id="req_2",
+            ),
+            check_wire=wire,
+        ),
+        WireCase(
+            "incomplete at the output budget",
+            REQUEST,
+            _reply(
+                {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "output": [],
+                }
+            ),
+            expected=CanonicalTextResult(text="", termination="truncated"),
+        ),
+        WireCase(
+            "refusal part outranks completion",
+            REQUEST,
+            _reply(
+                {
+                    "status": "completed",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "refusal", "refusal": "No."}],
+                        }
+                    ],
+                }
+            ),
+            expected=CanonicalTextResult(text="", termination="refused"),
+        ),
+        WireCase(
+            "content filter",
+            REQUEST,
+            _reply(
+                {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "content_filter"},
+                    "output": [],
+                }
+            ),
+            expected=CanonicalTextResult(text="", termination="blocked"),
+        ),
+        WireCase(
+            "failed response object on HTTP 200",
+            REQUEST,
+            _reply({"status": "failed", "error": {"code": "server_error"}}),
+            expected_error=("provider_unavailable", "sent"),
+        ),
+        WireCase(
+            "spend limit on 429 is not a rate limit",
+            REQUEST,
+            _reply({"error": {"code": "project_spend_limit_exceeded"}}, status=429),
+            expected_error=("quota_exhausted", "sent"),
+        ),
+    ]
+
+
+def _chat_cases():
+    def wire(call):
+        assert call.url == "https://api.openai.com/v1/chat/completions"
+        assert call.headers == {"authorization": f"Bearer {KEY}"}
+        assert call.payload == {
+            "model": "model-x",
+            "messages": [
+                {"role": "system", "content": "Be brief."},
+                {"role": "user", "content": "Needle?"},
+            ],
+            "max_completion_tokens": 64,
+        }
+
+    def choice(finish, **message):
+        return _reply({"choices": [{"finish_reason": finish, "message": message}]})
+
+    return [
+        WireCase(
+            "completed with usage details",
+            REQUEST,
+            _reply(
+                {
+                    "model": "gpt-x",
+                    "choices": [
+                        {"finish_reason": "stop", "message": {"content": "Answer."}}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "prompt_tokens_details": {"cached_tokens": 2},
+                        "completion_tokens": 5,
+                        "completion_tokens_details": {"reasoning_tokens": 1},
+                    },
+                }
+            ),
+            expected=CanonicalTextResult(
+                text="Answer.",
+                termination="completed",
+                model="gpt-x",
+                usage=TokenUsage(11, 5, 2, None, 1),
+            ),
+            check_wire=wire,
+        ),
+        WireCase(
+            "length",
+            REQUEST,
+            choice("length", content="Par"),
+            expected=CanonicalTextResult(text="Par", termination="truncated"),
+        ),
+        WireCase(
+            "content filter outranks a tool call",
+            REQUEST,
+            choice("content_filter", content="", tool_calls=[{"id": "t"}]),
+            expected=CanonicalTextResult(text="", termination="blocked"),
+        ),
+        WireCase(
+            "tool call",
+            REQUEST,
+            choice("tool_calls", content=None, tool_calls=[{"id": "t"}]),
+            expected=CanonicalTextResult(text="", termination="tool_request"),
+        ),
+        WireCase(
+            "no choices",
+            REQUEST,
+            _reply({"choices": []}),
+            expected_error=("invalid_response", "sent"),
+        ),
+    ]
+
+
+def _gemini_cases():
+    def wire(call):
+        assert call.url == (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "model-x:generateContent"
+        )
+        assert call.headers == {"x-goog-api-key": KEY}
+        assert call.payload == {
+            "contents": [{"role": "user", "parts": [{"text": "Needle?"}]}],
+            "generationConfig": {"maxOutputTokens": 64},
+            "systemInstruction": {"parts": [{"text": "Be brief."}]},
+        }
+
+    def candidate(finish, *parts, **body):
+        return _reply(
+            {
+                "candidates": [
+                    {"finishReason": finish, "content": {"parts": list(parts)}}
+                ],
+                **body,
+            }
+        )
+
+    return [
+        WireCase(
+            "completed without thought text; omitted zero counts",
+            REQUEST,
+            candidate(
+                "STOP",
+                {"text": "plan", "thought": True},
+                {"text": "Answer."},
+                modelVersion="gemini-x-001",
+                responseId="resp_3",
+                usageMetadata={
+                    "promptTokenCount": 9,
+                    "candidatesTokenCount": 4,
+                    "thoughtsTokenCount": 3,
+                },
+            ),
+            expected=CanonicalTextResult(
+                text="Answer.",
+                termination="completed",
+                model="gemini-x-001",
+                usage=TokenUsage(9, 7, 0, None, 3),
+                provider_request_id="resp_3",
+            ),
+            check_wire=wire,
+        ),
+        WireCase(
+            "max tokens; a malformed count stays unknown",
+            REQUEST,
+            candidate(
+                "MAX_TOKENS",
+                {"text": "Par"},
+                usageMetadata={"promptTokenCount": 5, "candidatesTokenCount": "4"},
+            ),
+            expected=CanonicalTextResult(
+                text="Par",
+                termination="truncated",
+                usage=TokenUsage(5, None, 0, None, 0),
+            ),
+        ),
+        WireCase(
+            "candidate stopped for safety keeps no answer",
+            REQUEST,
+            candidate("SAFETY", {"text": "Partial"}),
+            expected=CanonicalTextResult(text="Partial", termination="blocked"),
+        ),
+        WireCase(
+            "blocked prompt outranks a candidate",
+            REQUEST,
+            candidate("STOP", {"text": "x"}, promptFeedback={"blockReason": "SAFETY"}),
+            expected=CanonicalTextResult(text="x", termination="blocked"),
+        ),
+        WireCase(
+            "a model id that would leave the path is never sent",
+            CanonicalTextRequest(
+                model="../files",
+                messages=(TextMessage(role="user", text="q"),),
+                max_output_tokens=8,
+            ),
+            None,
+            expected_error=("invalid_request", "not_sent"),
+            expected_sends=0,
+        ),
+        WireCase(
+            "invalid API key reported as 400",
+            REQUEST,
+            _reply(
+                {
+                    "error": {
+                        "status": "INVALID_ARGUMENT",
+                        "details": [{"reason": "API_KEY_INVALID"}],
+                    }
+                },
+                status=400,
+            ),
+            expected_error=("authentication_failed", "sent"),
+        ),
+    ]
+
+
+def _compatible_cases():
+    def wire(call):
+        assert call.url == "https://llm.internal.example/v1/chat/completions"
+        assert call.headers == {}
+        assert call.payload["max_tokens"] == 64
+
+    return [
+        WireCase(
+            "keyless compatible server",
+            REQUEST,
+            _reply(
+                {"choices": [{"finish_reason": "stop", "message": {"content": "ok"}}]}
+            ),
+            expected=CanonicalTextResult(text="ok", termination="completed"),
+            check_wire=wire,
+        )
+    ]
+
+
+# Budget exception: each built-in registration is an independent wire format
+# (the compatible one differs in endpoint, auth and budget field), so a mapping
+# bug in one is invisible to the others. The cases replace the former
+# per-provider parse, truncation, retry and tool tests.
+@pytest.mark.parametrize(
+    ("factory", "cases", "connection"),
+    [
+        (
+            anthropic_messages.FACTORY,
+            _anthropic_cases,
+            {"credential": {"api_key": KEY}},
+        ),
+        (openai_responses.FACTORY, _responses_cases, {"credential": {"api_key": KEY}}),
+        (
+            chat_completions.OPENAI_FACTORY,
+            _chat_cases,
+            {"credential": {"api_key": KEY}},
+        ),
+        (
+            chat_completions.COMPATIBLE_FACTORY,
+            _compatible_cases,
+            {"credential": {}, "base_url": "https://llm.internal.example/v1/"},
+        ),
+        (
+            gemini_generate_content.FACTORY,
+            _gemini_cases,
+            {"credential": {"api_key": KEY}},
+        ),
+    ],
+    ids=["anthropic", "responses", "chat", "compatible-chat", "gemini"],
+)
+def test_builtin_llm_adapters_meet_the_contract(factory, cases, connection):
+    asyncio.run(assert_llm_adapter_contract(factory, cases=cases(), **connection))
+
+
+def test_llm_adapter_registry_rejects_unsafe_registrations():
+    descriptor = anthropic_messages.DESCRIPTOR
+
+    def factory(**changes):
+        from dataclasses import replace
+
+        return BuiltinAdapterFactory(
+            descriptor=replace(descriptor, **changes),
+            build=anthropic_messages.AnthropicMessagesAdapter,
+        )
+
+    for builtin, plugins in (
+        ((), {"vendor": [factory()]}),  # a plugin claiming builtin.*
+        ((), {"builtin": [factory()]}),  # a plugin named "builtin"
+        ([factory(adapter_id="anthropic")], {}),  # not namespaced
+        ([factory(), factory()], {}),  # duplicate id
+        ([factory(spi_version="2.0")], {}),
+        ([factory(adapter_version="latest")], {}),
+        ([factory(config_schema={"type": "nonsense"})], {}),
+        # Validation must never fetch, or fail to find, a schema.
+        ([factory(credential_schema={"$ref": "https://schemas.example/k"})], {}),
+        ([factory(credential_schema={"$ref": "#/$defs/missing"})], {}),
+        ([factory(options=frozenset({"top_k"}))], {}),
+        ([factory(default_base_url="http://api.example/v1")], {}),
+        ([object()], {}),
+    ):
+        with pytest.raises(LLMAdapterRegistryError):
+            LLMAdapterRegistry(builtin, plugins)
+
+    registry = LLMAdapterRegistry(
+        [factory(), factory(adapter_id="builtin.keyless", default_base_url=None)],
+        {"vendor": [factory(adapter_id="vendor.custom_text")]},
+    )
+    # A registration without a default endpoint needs one from its connection.
+    with pytest.raises(LLMAdapterRegistryError, match="https base URL"):
+        registry.create(
+            "builtin.keyless",
+            base_url=None,
+            config={},
+            credential={"api_key": KEY},
+            transport=RecordingTransport(_reply({})),
+        )
+    assert [item.adapter_id for item in registry.descriptors()] == [
+        "builtin.anthropic.messages",
+        "builtin.keyless",
+        "vendor.custom_text",
+    ]
+    # Schema errors never echo the submitted credential.
+    with pytest.raises(LLMAdapterRegistryError) as rejected:
+        registry.create(
+            "vendor.custom_text",
+            base_url=None,
+            config={},
+            credential={"api_key": KEY, "extra": KEY},
+            transport=RecordingTransport(_reply({})),
+        )
+    assert KEY not in str(rejected.value)
+
+    # A port whose generate() cannot take (request, context) is refused.
+    class WrongSignature:
+        def __init__(self, connection, transport):
+            pass
+
+        async def generate(self, request):
+            return None
+
+    with pytest.raises(LLMAdapterRegistryError, match="text generation port"):
+        LLMAdapterRegistry(
+            [BuiltinAdapterFactory(descriptor=descriptor, build=WrongSignature)]
+        ).create(
+            descriptor.adapter_id,
+            base_url=None,
+            config={},
+            credential={"api_key": KEY},
+            transport=RecordingTransport(_reply({})),
+        )
+
+    # Core keeps every call of an execution under its endpoint, without the
+    # credential in the URL or a rerouting Host header.
+    for url, headers in (
+        ("https://api.anthropic.com/v1/%2e%2e/%2E%2E/evil", {}),
+        ("https://api.anthropic.com/v1/messages", {"Host": "evil.example"}),
+        (f"https://api.anthropic.com/v1/{KEY}", {}),
+    ):
+
+        class Exfiltrating:
+            def __init__(self, connection, transport, url=url, headers=headers):
+                self.transport, self.url, self.headers = transport, url, headers
+
+            async def generate(self, request, context):
+                await self.transport.post_json(
+                    self.url, headers=self.headers, payload={}, timeout_seconds=1
+                )
+
+        transport = RecordingTransport(_reply({}))
+        port = LLMAdapterRegistry(
+            [BuiltinAdapterFactory(descriptor=descriptor, build=Exfiltrating)]
+        ).create(
+            descriptor.adapter_id,
+            base_url=None,
+            config={},
+            credential={"api_key": KEY},
+            transport=transport,
+        )
+        with pytest.raises(LLMAdapterError) as escaped:
+            asyncio.run(port.generate(REQUEST, ExecutionContext(5)))
+        assert (escaped.value.code, escaped.value.delivery) == (
+            "invalid_request",
+            "not_sent",
+        )
+        assert transport.calls == []
+
+
+# Budget exception (transport): each row is a different delivery proof the
+# legacy retry and later billing decisions rely on; none is visible above the
+# transport.
+def test_httpx_transport_reports_what_reached_the_provider():
+    def raising(exc):
+        def handler(request):
+            raise exc
+
+        return handler
+
+    for handler, expected in (
+        (raising(httpx.ConnectError("refused")), ("network_error", "not_sent")),
+        (raising(httpx.ReadTimeout("slow")), ("timeout", "unknown")),
+        (raising(httpx.RemoteProtocolError("reset")), ("network_error", "unknown")),
+    ):
+        transport = HttpxLLMTransport(transport=httpx.MockTransport(handler))
+        with pytest.raises(LLMAdapterError) as error:
+            asyncio.run(
+                transport.post_json(
+                    "https://api.example/v1/x",
+                    headers={},
+                    payload={},
+                    timeout_seconds=1,
+                )
+            )
+        assert (error.value.code, error.value.delivery) == expected
+
+    def answer(request):
+        assert json.loads(request.content) == {"q": 1}
+        return httpx.Response(200, headers={"X-Request-Id": "r"}, json={"ok": True})
+
+    response = asyncio.run(
+        HttpxLLMTransport(transport=httpx.MockTransport(answer)).post_json(
+            "https://api.example/v1/x", headers={}, payload={"q": 1}, timeout_seconds=1
+        )
+    )
+    assert (response.status_code, response.headers["x-request-id"]) == (200, "r")
+
+    # A reply already read survives a failed connection teardown: reporting
+    # it as an unknown outcome would make the caller send it again.
+    class ClosingFails(httpx.MockTransport):
+        async def aclose(self):
+            raise httpx.CloseError("close failed")
+
+    response = asyncio.run(
+        HttpxLLMTransport(transport=ClosingFails(answer)).post_json(
+            "https://api.example/v1/x", headers={}, payload={"q": 1}, timeout_seconds=1
+        )
+    )
+    assert response.status_code == 200
 
 
 def test_ask_service_composes_from_evidence_when_provider_is_set():
@@ -671,7 +865,7 @@ def test_ask_service_falls_back_to_deterministic_pack_on_provider_failure(provid
             else (
                 UnexpectedErrorProvider()
                 if provider == "unexpected"
-                else FixedProvider("Incomplete", stop_reason="length")
+                else FixedProvider("Incomplete", termination="truncated")
             )
         ),
     )
@@ -704,38 +898,22 @@ class FakeSearchService:
         return self.payload
 
 
-class FixedProvider(LLMProvider):
-    def __init__(self, content: str, *, stop_reason: str | None = None) -> None:
-        self.content = content
-        self.stop_reason = stop_reason
+class FixedProvider:
+    def __init__(self, text: str, *, termination: str = "completed") -> None:
+        self.text = text
+        self.termination = termination
 
-    def chat(self, request: LLMRequest):
-        assert "[Evidence pack]" in request.messages[-1].content
-        assert (
-            "1. Needle Context: Needle evidence body." in request.messages[-1].content
-        )
-        return LLMResponse(
-            provider="test",
-            model="test",
-            content=self.content,
-            stop_reason=self.stop_reason,
-        )
-
-    async def async_chat(self, request: LLMRequest):
-        return self.chat(request)
+    def generate(self, *, system, messages, max_output_tokens):
+        assert "[Evidence pack]" in messages[-1].text
+        assert "1. Needle Context: Needle evidence body." in messages[-1].text
+        return CanonicalTextResult(text=self.text, termination=self.termination)
 
 
-class ErrorProvider(LLMProvider):
-    def chat(self, request: LLMRequest):
-        raise LLMProviderError("failed", provider="test")
-
-    async def async_chat(self, request: LLMRequest):
-        return self.chat(request)
+class ErrorProvider:
+    def generate(self, **_kwargs):
+        raise LLMAdapterError("provider_unavailable", delivery="sent", status_code=503)
 
 
-class UnexpectedErrorProvider(LLMProvider):
-    def chat(self, request: LLMRequest):
+class UnexpectedErrorProvider:
+    def generate(self, **_kwargs):
         raise RuntimeError("unexpected provider failure")
-
-    async def async_chat(self, request: LLMRequest):
-        return self.chat(request)

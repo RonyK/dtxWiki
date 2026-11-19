@@ -28,6 +28,7 @@ def test_plugin_allowlist_compatibility_and_settings_are_fail_closed(
         client_secret: SecretStr
         timeout: int = Field(default=30, gt=0)
 
+    llm_adapter = object()
     plugin = DtxwikiPlugin(
         name="sso",
         version="1.0.0",
@@ -35,6 +36,7 @@ def test_plugin_allowlist_compatibility_and_settings_are_fail_closed(
         requires_spi=">=1.1,<2",
         settings_model=PluginSettings,
         configure=configured.append,
+        llm_adapters=lambda: (llm_adapter,),
     )
 
     def entry(name, value):
@@ -57,6 +59,9 @@ def test_plugin_allowlist_compatibility_and_settings_are_fail_closed(
     current = settings()
     registry = plugins.load_plugins(current)
     assert registry.capabilities() == ("sso",)
+    # Adapters are grouped by plugin name, their namespace; the web container
+    # validates them, so loading never imports LLM code.
+    assert registry.llm_adapters() == {"sso": (llm_adapter,)}
     assert configured[0].timeout == 5
     assert configured[0].client_secret.get_secret_value() == "secret-value"
     assert plugins.load_plugins(current) is registry

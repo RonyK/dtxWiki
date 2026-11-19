@@ -1,49 +1,16 @@
 from backend.app.settings import Settings
-from backend.llm.anthropic import AnthropicLLM
-from backend.llm.base import EmbeddingProvider, LLMProvider, RerankProvider
+from backend.llm.base import EmbeddingProvider, RerankProvider
 from backend.llm.embedding import (
     DeterministicEmbedding,
     OpenAICompatibleEmbedding,
 )
-from backend.llm.openai import OpenAILLM
 from backend.llm.rerank import ApiReranker
-
-
-def build_llm_provider(settings: Settings) -> LLMProvider | None:
-    provider = settings.llm_provider.strip().lower()
-    if provider in {"", "none"}:
-        return None
-    if provider == "anthropic":
-        return AnthropicLLM(api_key=settings.anthropic_api_key or "")
-    if provider == "openai":
-        return OpenAILLM(api_key=settings.openai_api_key or "")
-    raise RuntimeError(
-        "DTXWIKI_LLM_PROVIDER must be one of: none, anthropic, openai"
-    )
-
-
-def resolve_llm_provider(
-    settings: Settings,
-) -> tuple[LLMProvider | None, str | None]:
-    """Build the LLM provider, turning a misconfiguration into a reason string.
-
-    Ask composes answers with the provider when one is available and falls back
-    to the deterministic evidence pack when it is not, so a bad provider setting
-    must not take the whole Ask surface down. ``build_llm_provider`` raises so
-    that setup/CLI paths still fail loudly; this wrapper is what the request
-    path uses, and the returned reason is surfaced to the user as a warning.
-    """
-
-    try:
-        return build_llm_provider(settings), None
-    except (ValueError, RuntimeError) as exc:
-        return None, str(exc)
 
 
 def resolve_embedding_provider(
     settings: Settings,
 ) -> tuple[EmbeddingProvider | None, str | None]:
-    """Same degrade contract as :func:`resolve_llm_provider` for embeddings.
+    """Turn an embedding misconfiguration into a reason string.
 
     A bad embedding setting only costs the semantic/hybrid lanes; keyword search
     still works, so search must degrade instead of failing the request.
@@ -58,7 +25,7 @@ def resolve_embedding_provider(
 def resolve_reranker(
     settings: Settings,
 ) -> tuple[RerankProvider | None, str | None]:
-    """Same degrade contract as :func:`resolve_llm_provider` for reranking."""
+    """Same degrade contract as :func:`resolve_embedding_provider` for reranking."""
 
     try:
         return build_reranker(settings), None

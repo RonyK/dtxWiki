@@ -574,8 +574,9 @@ ADVISORY_WARNING_MESSAGES = {
         "server's LLM provider settings."
     ),
     "llm_composer_failed": (
-        "The answer model did not respond, so this answer is the deterministic "
-        "evidence summary. Retrying may produce a composed answer."
+        "The answer model did not return a complete answer, so this answer is "
+        "the deterministic evidence summary. Retrying may produce a composed "
+        "answer."
     ),
     "job_fanout_incomplete": (
         "One or more workspaces could not be reached, so this result is "

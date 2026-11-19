@@ -12,12 +12,7 @@ from backend.domain.input_policy import (
     fit_generated_title,
     normalize_ask_user_message,
 )
-from backend.llm.base import (
-    LLMMessage,
-    LLMProvider,
-    LLMProviderError,
-    LLMRequest,
-)
+from backend.llm.generation import TextGenerator
 from backend.models.ask import (
     AskSession,
     AskTurn,
@@ -70,6 +65,7 @@ from backend.services.tree_service import (
     create_tree_node,
     resolve_tree_parent,
 )
+from backend.spi.llm import LLMAdapterError, TextMessage
 from backend.utils.uuid import parse_uuid_or_none
 
 USER_MESSAGE_MAX_CHARS = 8000
@@ -187,7 +183,7 @@ class AskService:
         search_service: SearchService | None = None,
         audit_service: AuditService | None = None,
         tree_read_service: TreeReadService | None = None,
-        provider: LLMProvider | None = None,
+        provider: TextGenerator | None = None,
         graph_service: GraphService | None = None,
         provider_unavailable_reason: str | None = None,
     ) -> None:
@@ -637,29 +633,32 @@ class AskService:
             search_warnings = [*search_warnings, LLM_PROVIDER_UNAVAILABLE_WARNING]
         if self.provider is not None:
             try:
-                response = self.provider.chat(
-                    LLMRequest(
-                        messages=[
-                            LLMMessage(role="system", content=_COMPOSER_SYSTEM),
-                            LLMMessage(
-                                role="user",
-                                content=(f"{question}\n\n[Evidence pack]\n{pack_text}"),
-                            ),
-                        ],
-                        max_tokens=1024,
-                    )
+                result = self.provider.generate(
+                    system=_COMPOSER_SYSTEM,
+                    messages=(
+                        TextMessage(
+                            role="user",
+                            text=f"{question}\n\n[Evidence pack]\n{pack_text}",
+                        ),
+                    ),
+                    max_output_tokens=1024,
                 )
-                if not response.truncated and response.content.strip():
-                    answer = response.content.strip()
+                # Only a completed answer replaces the pack: truncated,
+                # refused or filtered output is not an answer.
+                if result.termination == "completed" and result.text.strip():
+                    answer = result.text.strip()
                 else:
                     search_warnings = [
                         *search_warnings,
                         LLM_COMPOSER_FAILED_WARNING,
                     ]
-            except LLMProviderError:
-                # Transient upstream failure (auth, 5xx, timeout). The pack is a
-                # valid answer, but the user must know it is not the composed one.
-                logger.warning("Ask composer call failed; using deterministic pack")
+            except LLMAdapterError as exc:
+                # Upstream failure (auth, 5xx, timeout). The pack is a valid
+                # answer, but the user must know it is not the composed one.
+                logger.warning(
+                    "Ask composer call failed (%s); using deterministic pack",
+                    exc.code,
+                )
                 search_warnings = [*search_warnings, LLM_COMPOSER_FAILED_WARNING]
             except Exception:
                 # Not LLM_COMPOSER_FAILED_WARNING: that one tells the user
