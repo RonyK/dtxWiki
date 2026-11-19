@@ -147,6 +147,7 @@
     "previewEmpty": "This index has no entries."
   },
   "favorite": {
+    "group": "Favorites",
     "add": "Add to my favorites",
     "remove": "Remove from my favorites",
     "mine": "My favorite",

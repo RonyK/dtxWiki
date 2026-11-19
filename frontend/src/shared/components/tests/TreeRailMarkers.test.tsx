@@ -21,6 +21,9 @@ function node(overrides: Partial<TreeNodePayload> = {}): TreeNodePayload {
   };
 }
 
+// Star markers on the full trees; the favorites tree repeats every favorite.
+const fullTreeStars = () => document.querySelectorAll('[role="tree"]:not([aria-label="Favorites"]) .tree-row-favorite');
+
 describe("TreeRail document status and personal favorites", () => {
   beforeEach(() => {
     clearTreeFavoriteCache(); setTreeFavoriteActor(scope.actorId);
@@ -88,7 +91,7 @@ describe("TreeRail document status and personal favorites", () => {
     const page = node({ title: "A long full title", is_favorite: true,
       content_changed_at: isoAgo(12 * 86_400_000), review_status: "changes_requested", review_requested_at: isoAgo(2 * 86_400_000) });
     const { rerender } = render(<TreeRail title="Context" nodes={[page]} favoriteScope={scope} />);
-    const row = screen.getByRole("treeitem", { name: page.title });
+    const row = within(screen.getByRole("tree", { name: "Context" })).getByRole("treeitem", { name: page.title });
     expect(row).toHaveAccessibleDescription("Changes requested · Review requested 2 days ago · My favorite");
     fireEvent.mouseEnter(row);
     expect(screen.getByRole("tooltip")).toHaveTextContent(page.title);
@@ -160,7 +163,7 @@ describe("TreeRail document status and personal favorites", () => {
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for A page" }));
     expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "Add to my favorites" }));
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(3);
+    expect(fullTreeStars()).toHaveLength(3);
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for A page" }));
     expect(screen.getByRole("menuitem", { name: "Remove from my favorites" })).toBeDisabled();
     expect(screen.getByRole("menu")).toHaveFocus();
@@ -171,9 +174,9 @@ describe("TreeRail document status and personal favorites", () => {
     fetchMock.mockRejectedValueOnce(new Error("offline"));
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for A page" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove from my favorites" }));
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(0);
+    expect(fullTreeStars()).toHaveLength(0);
     await act(async () => {});
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(3);
+    expect(fullTreeStars()).toHaveLength(3);
     expect(screen.getAllByRole("status")[0]).toHaveTextContent("Could not update favorites for A page.");
   });
 
@@ -184,18 +187,18 @@ describe("TreeRail document status and personal favorites", () => {
     const { rerender } = render(<TreeRail {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "Open actions for A page" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Add to my favorites" }));
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Open actions for A page" }));
+    expect(fullTreeStars()).toHaveLength(1);
+    fireEvent.click(within(screen.getByRole("tree", { name: "Context" })).getByRole("button", { name: "Open actions for A page" }));
     rerender(<TreeRail {...props} favoriteScope={{ ...scope, actorId: "viewer-2" }} />);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(0);
+    expect(fullTreeStars()).toHaveLength(0);
     rerender(<TreeRail {...props} favoriteScope={{ ...scope, workspaceId: "workspace-2" }} />);
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(0);
+    expect(fullTreeStars()).toHaveLength(0);
     act(() => { clearTreeFavoriteCache(); });
     await act(async () => { respond(new Response(JSON.stringify({ data: { target_kind: "context_page", target_id: "page-1", is_favorite: true } }), { status: 200 })); });
     expect(getTreeFavoriteSnapshot().size).toBe(0);
     rerender(<TreeRail {...props} />);
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(0);
+    expect(fullTreeStars()).toHaveLength(0);
   });
 
   it("accepts authoritative favorite refreshes while fencing reads started before mutation settlement", async () => {
@@ -210,13 +213,13 @@ describe("TreeRail document status and personal favorites", () => {
     const duringMutationRead = listTreeData(scope.workspaceId, "context");
     const json = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 });
     await act(async () => { responses[1](json({ target_kind: "context_page", target_id: "page-1", is_favorite: true })); });
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(2);
+    expect(fullTreeStars()).toHaveLength(2);
     await act(async () => {
       responses[0](json({ nodes: [node({ is_favorite: false })], policies: {} }));
       responses[2](json({ nodes: [node({ is_favorite: false })], policies: {} }));
       await Promise.all([staleRead, duringMutationRead]);
     });
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(2);
+    expect(fullTreeStars()).toHaveLength(2);
     // A fresh server read (e.g. another device removed it) updates every
     // placement, including one whose original nodes prop has not reloaded.
     const authoritativeRead = listTreeData(scope.workspaceId, "context");
@@ -224,7 +227,7 @@ describe("TreeRail document status and personal favorites", () => {
       responses[3](json({ nodes: [node({ is_favorite: false })], policies: {} }));
       await authoritativeRead;
     });
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(0);
+    expect(fullTreeStars()).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Open actions for Second placement" }));
     expect(screen.getByRole("menuitem", { name: "Add to my favorites" })).toBeInTheDocument();
   });
@@ -237,7 +240,40 @@ describe("TreeRail document status and personal favorites", () => {
     expect(screen.queryByRole("button", { name: /Open actions/ })).not.toBeInTheDocument();
     unmount();
     render(<TreeRail title="Library" favoriteScope={scope} nodes={[node({ section: "library", target_kind: "library_item", is_favorite: true })]} />);
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(1);
+    expect(fullTreeStars()).toHaveLength(1);
+  });
+
+  it("lists favorites in their folder structure above the full tree and prunes branches left without one", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    const folder = (id: string, title: string, parentId: string | null, sortKey: string) => node({
+      id, title, parent_id: parentId, sort_key: sortKey, slug: parentId ? id : "context", node_kind: "folder",
+      target_kind: null, target_id: null, is_system_node: !parentId, can_have_children: true, children_count: 2 });
+    render(<TreeRail title="Context" favoriteScope={scope} hideSystemRootNodes nodes={[
+      folder("root", "Context", null, "0"),
+      folder("design", "Design", "root", "1"),
+      // A page can be a parent: it stays on the path without counting as a favorite.
+      node({ id: "overview", title: "Overview", parent_id: "design", sort_key: "1", target_id: "overview",
+        can_have_children: true, children_count: 1 }),
+      node({ id: "rules-1", title: "Rules", parent_id: "overview", target_id: "rules", is_favorite: true }),
+      node({ id: "other", title: "Other", parent_id: "design", sort_key: "2", target_id: "other" }),
+      folder("ops", "Ops", "root", "2"),
+      node({ id: "rules-2", title: "Rules", parent_id: "ops", sort_key: "1", target_id: "rules",
+        is_favorite: true, primary_placement: false }),
+      node({ id: "backup", title: "Backup", parent_id: "ops", sort_key: "2", target_id: "backup", is_favorite: true }),
+    ]} />);
+    const favorites = () => screen.getByRole("tree", { name: "Favorites" });
+    const outline = () => within(favorites()).getAllByRole("treeitem")
+      .map((row) => `${row.getAttribute("aria-level")}:${row.querySelector(".tree-row-title")?.textContent}`);
+    expect(outline()).toEqual(["1:Design", "2:Overview", "3:Rules", "1:Ops", "2:Rules", "2:Backup"]);
+    expect(favorites().querySelector(".tree-row-child-count")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Favorites/, expanded: true })).toHaveTextContent("Favorites3");
+    // Both placements share one favorite, so removing it empties the Design branch.
+    fireEvent.click(within(favorites()).getAllByRole("button", { name: "Open actions for Rules" })[1]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from my favorites" }));
+    expect(outline()).toEqual(["1:Ops", "2:Backup"]);
+    expect(screen.getByRole("button", { name: /^Favorites/ })).toHaveTextContent("Favorites1");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Context tree" }), { target: { value: "back" } });
+    expect(screen.queryByRole("tree", { name: "Favorites" })).not.toBeInTheDocument();
   });
 
   it("keeps favorite-only folders and artifacts free of empty keyboard and pointer menus", () => {

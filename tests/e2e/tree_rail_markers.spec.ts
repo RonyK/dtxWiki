@@ -654,8 +654,14 @@ async function openRail(page: Page, width: number) {
   return rail;
 }
 
+// The full tree, not the favorites tree above it that repeats favorite rows
+// and their folders.
+function fullTree(rail: Locator) {
+  return rail.locator(".tree-rail-body > .tree-list");
+}
+
 function treeRow(rail: Locator, targetId: string) {
-  return rail.locator(`.tree-row[data-target-id="${targetId}"]`);
+  return fullTree(rail).locator(`.tree-row[data-target-id="${targetId}"]`);
 }
 
 async function expandAncestors(rail: Locator, nodes: TreeNode[], targetId: string) {
@@ -669,7 +675,7 @@ async function expandAncestors(rail: Locator, nodes: TreeNode[], targetId: strin
     ancestors.unshift(parent);
   }
   for (const ancestor of ancestors) {
-    const row = rail.locator(`.tree-row[data-node-id="${ancestor.id}"]`);
+    const row = fullTree(rail).locator(`.tree-row[data-node-id="${ancestor.id}"]`);
     // Section roots are intentionally hidden by the shared rail.
     if (await row.count() && await row.getAttribute("aria-expanded") === "false") {
       await row.locator(".tree-row-chevron").click();

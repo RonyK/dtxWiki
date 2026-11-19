@@ -39,6 +39,7 @@ import { WorkspacePanelChrome } from "./WorkspacePanelChrome";
 import { useNowTick } from "./RelativeTime";
 import { contentChangedAt, TREE_RECENT_CHANGE_MS, treeNodeStatus, treeNodeStatusDescription } from "./treeNodeStatus";
 import { useTreeRowTooltip, type TreeRowTooltip } from "./useTreeRowTooltip";
+import { readWorkspacePanelState, writeWorkspacePanelState } from "./useWorkspaceRailState";
 
 type TreeRowStyle = CSSProperties & {
   "--tree-level": number;
@@ -66,6 +67,32 @@ const LONG_PRESS_MOVE_CANCEL_PX = 12;
 const TREE_NODE_DRAG_DATA = "application/x-dtxwiki-tree-node";
 const TOUCH_DROP_EDGE_RATIO = 0.375;
 const DROP_HINT_FINGER_GAP_PX = 48;
+// Rows of the favorites tree share node ids with the full tree below it, so
+// their focus and ref keys carry this prefix.
+const FAVORITE_ROW_KEY_PREFIX = "favorites:";
+
+function favoriteRowKey(nodeId: string) {
+  return `${FAVORITE_ROW_KEY_PREFIX}${nodeId}`;
+}
+
+function isFavoriteRowKey(rowKey: string) {
+  return rowKey.startsWith(FAVORITE_ROW_KEY_PREFIX);
+}
+
+// Favorites rows neither start drags nor accept drops: a drop there would
+// move the real node relative to siblings that tree does not show.
+function ignoreRowDrag() {}
+
+// One rendered tree (the full tree or the favorites tree): the rows in display
+// order and how its rows expand, so both share one keyboard handler.
+type TreeRowList = {
+  rows: TreeNodePayload[];
+  expanded: Set<string>;
+  canToggle: boolean;
+  toggle: (nodeId: string) => void;
+  hasChildren: (node: TreeNodePayload) => boolean;
+  rowKey: (nodeId: string) => string;
+};
 
 type TreeRailProps = {
   title: string;
@@ -176,9 +203,20 @@ export function TreeRail({
   }, [nodes, now]);
   const [favoriteFailure, setFavoriteFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
+  const favoritesStateKey = `${accent ?? title}:favorites`;
+  const [favoritesOpen, setFavoritesOpen] = useState(() =>
+    readWorkspacePanelState(favoritesStateKey, true),
+  );
+  const [collapsedFavoriteNodeIds, setCollapsedFavoriteNodeIds] = useState(
+    () => new Set<string>(),
+  );
+  const favoritesTreeId = useId();
+  const favoritesToggleRef = useRef<HTMLButtonElement | null>(null);
+  const treeListRef = useRef<HTMLDivElement | null>(null);
   const [contextMenuState, setContextMenu] = useState<{
     node: TreeNodePayload;
     position: { left: number; top: number };
+    rowKey: string;
     scopeKey: string;
   } | null>(null);
   const contextMenu = contextMenuState?.scopeKey === favoriteScopeKey ? contextMenuState : null;
@@ -274,6 +312,54 @@ export function TreeRail({
     () => countContentNodes(visibleNodes),
     [visibleNodes],
   );
+  // Favorites keep their folder structure: the filter's rule (a node plus its
+  // ancestors) with "is my favorite" as the predicate, above the full tree.
+  const favoriteNodes = useMemo(
+    () =>
+      favoriteScope
+        ? collectFavoriteNodes(orderedNodes, hiddenRootNodeIds)
+        : [],
+    [favoriteScope, hiddenRootNodeIds, orderedNodes],
+  );
+  const favoriteParentIds = useMemo(
+    () => new Set<string | null>(favoriteNodes.map((node) => node.parent_id)),
+    [favoriteNodes],
+  );
+  const favoriteExpandedNodeIds = useMemo(
+    () =>
+      new Set(
+        favoriteNodes
+          .filter(
+            (node) =>
+              favoriteParentIds.has(node.id) &&
+              !collapsedFavoriteNodeIds.has(node.id),
+          )
+          .map((node) => node.id),
+      ),
+    [collapsedFavoriteNodeIds, favoriteNodes, favoriteParentIds],
+  );
+  const visibleFavoriteNodes = useMemo(
+    () =>
+      filterVisibleNodes(
+        favoriteNodes,
+        favoriteExpandedNodeIds,
+        "",
+        new Set<string>(),
+        hiddenRootNodeIds,
+      ),
+    [favoriteExpandedNodeIds, favoriteNodes, hiddenRootNodeIds],
+  );
+  // Same content-row count as the rail header, over the favorite rows only:
+  // ancestor pages are in the tree for their path, not because they are
+  // favorites.
+  const favoriteContentNodeCount = useMemo(
+    () => countContentNodes(favoriteNodes.filter(isFavoriteNode)),
+    [favoriteNodes],
+  );
+  // The filtered tree already marks matching favorites, so the group steps
+  // aside while a query is active.
+  const showFavorites = favoriteNodes.length > 0 && !filterQuery.trim();
+  const favoritesLabel = t("favorite.group");
   const filterPlaceholder = t("filter", { title });
   const treeLabel = t("treeLabel", { title });
   const anchoredReorderEnabled = Boolean(onReorderNodeAt);
@@ -292,11 +378,13 @@ export function TreeRail({
     return available;
   }, [anchoredReorderEnabled, filterQuery, orderedNodes]);
 
-  function canOpenNodeContextMenu(node: TreeNodePayload) {
+  // Move up/down acts on siblings the favorites tree hides, so only the full
+  // tree offers it.
+  function canOpenNodeContextMenu(node: TreeNodePayload, inFavorites = false) {
     return Boolean(
       onCopyNodeLink || onRenameNode ||
       (!node.is_system_node && (onDeleteNode || onMoveNode)) ||
-      reorderableNodeIds.has(node.id) ||
+      (!inFavorites && reorderableNodeIds.has(node.id)) ||
       (node.can_have_children && (
         create.canCreateFolder || create.canCreatePage
       )) ||
@@ -326,12 +414,38 @@ export function TreeRail({
   )
     ? focusedNodeId
     : focusedFallbackNodeId;
+  // Each tree keeps its own single tab stop.
+  const effectiveFocusedFavoriteKey = visibleFavoriteNodes.some(
+    (node) => favoriteRowKey(node.id) === focusedNodeId,
+  )
+    ? focusedNodeId
+    : favoriteRowKey(
+        visibleFavoriteNodes.find((node) => rowIsActive(node))?.id ??
+          visibleFavoriteNodes[0]?.id ??
+          "",
+      );
 
   const activeVisibleNodeId = visibleNodes.find(
     (node) =>
       (activeNodeId != null && node.id === activeNodeId) ||
       (activeTargetId != null && node.target_id === activeTargetId),
   )?.id;
+
+  // The open document is revealed where it first appears: in the favorites
+  // tree when it is one, so opening a favorite does not scroll that tree away.
+  // The row is chosen when the reveal runs; folding favorites or typing a
+  // filter changes which copy shows, not which document is open, and must
+  // not scroll on its own.
+  const activeFavoriteNodeId =
+    showFavorites && favoritesOpen
+      ? visibleFavoriteNodes.find((node) => rowIsActive(node))?.id
+      : undefined;
+  const revealRowKeyRef = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    revealRowKeyRef.current = activeFavoriteNodeId
+      ? favoriteRowKey(activeFavoriteNodeId)
+      : activeVisibleNodeId;
+  });
 
   useEffect(() => {
     if (!activeVisibleNodeId) {
@@ -342,7 +456,9 @@ export function TreeRail({
       if (revision !== revealRevisionRef.current) {
         return;
       }
-      const row = rowRefs.current.get(activeVisibleNodeId);
+      const row = rowRefs.current.get(
+        revealRowKeyRef.current ?? activeVisibleNodeId,
+      );
       if (row?.isConnected) {
         row.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
@@ -365,6 +481,51 @@ export function TreeRail({
       next.add(nodeId);
     }
     onExpandedNodeIdsChange(Array.from(next));
+  }
+
+  // Folders in the favorites tree open and close on their own, so browsing
+  // favorites never rearranges the full tree.
+  function toggleFavoriteFolder(nodeId: string) {
+    tooltip.dismissForActivation();
+    setCollapsedFavoriteNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  }
+
+  function toggleFavoritesOpen() {
+    const next = !favoritesOpen;
+    setFavoritesOpen(next);
+    writeWorkspacePanelState(favoritesStateKey, next);
+  }
+
+  const treeRowList: TreeRowList = {
+    rows: visibleNodes,
+    expanded: expandedNodeIdSet,
+    canToggle: Boolean(onExpandedNodeIdsChange),
+    toggle: toggleExpanded,
+    hasChildren: nodeHasChildren,
+    rowKey: (nodeId) => nodeId,
+  };
+  const favoriteRowList: TreeRowList = {
+    rows: visibleFavoriteNodes,
+    expanded: favoriteExpandedNodeIds,
+    canToggle: true,
+    toggle: toggleFavoriteFolder,
+    hasChildren: (node) => favoriteParentIds.has(node.id),
+    rowKey: favoriteRowKey,
+  };
+
+  function rowIsActive(node: TreeNodePayload) {
+    return (
+      (activeNodeId != null && node.id === activeNodeId) ||
+      (activeTargetId != null && node.target_id === activeTargetId)
+    );
   }
 
   function draggableNode(node: TreeNodePayload) {
@@ -646,27 +807,43 @@ export function TreeRail({
     node: TreeNodePayload,
     position: { left: number; top: number },
     invoker: HTMLElement | null,
+    rowKey = node.id,
   ) {
     // Android fires contextmenu on the same long press that starts a drag.
-    if (dragState || !canOpenNodeContextMenu(node)) {
+    if (dragState || !canOpenNodeContextMenu(node, isFavoriteRowKey(rowKey))) {
       return;
     }
     contextMenuInvokerRef.current = invoker;
     setContextMenu({
       node,
       position: clampContextMenuPosition(position),
+      rowKey,
       scopeKey: favoriteScopeKey,
     });
   }
 
-  function restoreMenuFocus(nodeId: string, invoker: HTMLElement | null) {
+  // Removing a favorite can take its row, or the whole favorites tree, out of
+  // the rail; focus then falls back to the nearest place that still exists.
+  function restoreMenuFocus(rowKey: string, nodeId: string, invoker: HTMLElement | null) {
     window.requestAnimationFrame(() => {
-      tooltip.restoreFocus(invoker?.isConnected ? invoker : rowRefs.current.get(nodeId));
+      const candidates = [
+        invoker,
+        rowRefs.current.get(rowKey),
+        isFavoriteRowKey(rowKey) ? favoritesToggleRef.current : null,
+        rowRefs.current.get(nodeId),
+        treeListRef.current?.querySelector<HTMLElement>(
+          '[role="treeitem"][tabindex="0"]',
+        ),
+      ];
+      tooltip.restoreFocus(
+        candidates.find((element) => element?.isConnected) ?? undefined,
+      );
     });
   }
 
   function handleContextMenuAction(action: TreeNodeContextMenuAction) {
     const invoker = contextMenuInvokerRef.current;
+    const rowKey = contextMenu?.rowKey ?? action.node.id;
     contextMenuInvokerRef.current = null;
     setContextMenu(null);
     if (action.type === "new-item") {
@@ -695,7 +872,7 @@ export function TreeRail({
           direction === "up" ? "before" : "after",
         );
       }
-      restoreMenuFocus(action.node.id, invoker);
+      restoreMenuFocus(rowKey, action.node.id, invoker);
       return;
     }
     if (action.type === "delete") {
@@ -711,11 +888,11 @@ export function TreeRail({
           }
         });
       }
-      restoreMenuFocus(action.node.id, invoker);
+      restoreMenuFocus(rowKey, action.node.id, invoker);
       return;
     }
     onCopyNodeLink?.(action.node);
-    restoreMenuFocus(action.node.id, invoker);
+    restoreMenuFocus(rowKey, action.node.id, invoker);
   }
 
   function registerRowRef(nodeId: string) {
@@ -728,63 +905,69 @@ export function TreeRail({
     };
   }
 
-  function focusTreeNode(nodeId: string) {
-    setFocusedNodeId(nodeId);
-    const row = rowRefs.current.get(nodeId);
+  function focusTreeNode(list: TreeRowList, nodeId: string) {
+    const rowKey = list.rowKey(nodeId);
+    setFocusedNodeId(rowKey);
+    const row = rowRefs.current.get(rowKey);
     row?.focus();
     if (row) tooltip.focus(nodeId, row);
   }
 
-  function invokePrimaryAction(node: TreeNodePayload) {
+  function invokePrimaryAction(list: TreeRowList, node: TreeNodePayload) {
     tooltip.dismissForActivation();
     if (onSelectTarget) {
       onSelectTarget(node);
       return;
     }
-    if (nodeHasChildren(node) && onExpandedNodeIdsChange) {
-      toggleExpanded(node.id);
+    if (list.hasChildren(node) && list.canToggle) {
+      list.toggle(node.id);
     }
   }
 
   function handleTreeRowKeyDown(
+    list: TreeRowList,
     node: TreeNodePayload,
     event: KeyboardEvent<HTMLDivElement>,
   ) {
     if (event.target !== event.currentTarget) {
       return;
     }
+    const rows = list.rows;
     const currentIndex = Math.max(
       0,
-      visibleNodes.findIndex((candidate) => candidate.id === node.id),
+      rows.findIndex((candidate) => candidate.id === node.id),
     );
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      focusTreeNode(
-        visibleNodes[Math.min(currentIndex + 1, visibleNodes.length - 1)].id,
-      );
+      focusTreeNode(list, rows[Math.min(currentIndex + 1, rows.length - 1)].id);
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      focusTreeNode(visibleNodes[Math.max(currentIndex - 1, 0)].id);
+      focusTreeNode(list, rows[Math.max(currentIndex - 1, 0)].id);
       return;
     }
     if (event.key === "Home") {
       event.preventDefault();
-      focusTreeNode(visibleNodes[0].id);
+      focusTreeNode(list, rows[0].id);
       return;
     }
     if (event.key === "End") {
       event.preventDefault();
-      focusTreeNode(visibleNodes[visibleNodes.length - 1].id);
+      focusTreeNode(list, rows[rows.length - 1].id);
       return;
     }
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      invokePrimaryAction(node);
+      invokePrimaryAction(list, node);
       return;
     }
-    if (event.shiftKey && event.key === "F10" && canOpenNodeContextMenu(node)) {
+    const rowKey = list.rowKey(node.id);
+    if (
+      event.shiftKey &&
+      event.key === "F10" &&
+      canOpenNodeContextMenu(node, isFavoriteRowKey(rowKey))
+    ) {
       event.preventDefault();
       const target = event.currentTarget.getBoundingClientRect();
       openContextMenu(
@@ -794,40 +977,37 @@ export function TreeRail({
           top: target.top + 24,
         },
         event.currentTarget,
+        rowKey,
       );
       return;
     }
-    if (
-      nodeHasChildren(node) &&
-      onExpandedNodeIdsChange &&
-      event.key === "ArrowRight"
-    ) {
+    if (list.hasChildren(node) && list.canToggle && event.key === "ArrowRight") {
       event.preventDefault();
-      if (!expandedNodeIdSet.has(node.id)) {
-        toggleExpanded(node.id);
+      if (!list.expanded.has(node.id)) {
+        list.toggle(node.id);
         return;
       }
-      const firstChild = visibleNodes.find(
+      const firstChild = rows.find(
         (candidate) => candidate.parent_id === node.id,
       );
       if (firstChild) {
-        focusTreeNode(firstChild.id);
+        focusTreeNode(list, firstChild.id);
       }
       return;
     }
     if (event.key === "ArrowLeft") {
       if (
-        nodeHasChildren(node) &&
-        onExpandedNodeIdsChange &&
-        expandedNodeIdSet.has(node.id)
+        list.hasChildren(node) &&
+        list.canToggle &&
+        list.expanded.has(node.id)
       ) {
         event.preventDefault();
-        toggleExpanded(node.id);
+        list.toggle(node.id);
         return;
       }
-      if (node.parent_id && rowRefs.current.has(node.parent_id)) {
+      if (node.parent_id && rowRefs.current.has(list.rowKey(node.parent_id))) {
         event.preventDefault();
-        focusTreeNode(node.parent_id);
+        focusTreeNode(list, node.parent_id);
       }
     }
   }
@@ -920,13 +1100,85 @@ export function TreeRail({
         />
       </label>
       <div className="tree-rail-body">
+        {showFavorites ? (
+          <div className="tree-favorites">
+            <button
+              aria-controls={favoritesOpen ? favoritesTreeId : undefined}
+              aria-expanded={favoritesOpen}
+              className="tree-favorites-toggle"
+              onClick={toggleFavoritesOpen}
+              ref={favoritesToggleRef}
+              type="button"
+            >
+              {favoritesOpen ? (
+                <ChevronDown size={14} aria-hidden="true" />
+              ) : (
+                <ChevronRight size={14} aria-hidden="true" />
+              )}
+              <Star className="tree-favorites-star" size={13} aria-hidden="true" />
+              <span>{favoritesLabel}</span>
+              <CountChip compact value={favoriteContentNodeCount} />
+            </button>
+            {favoritesOpen ? (
+              <div
+                aria-label={favoritesLabel}
+                className="tree-list"
+                id={favoritesTreeId}
+                role="tree"
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setFocusedNodeId("");
+                  }
+                }}
+              >
+                {visibleFavoriteNodes.map((node) => {
+                  const rowKey = favoriteRowKey(node.id);
+                  return (
+                    <TreeRow
+                      key={rowKey}
+                      node={node}
+                      now={now}
+                      rowKey={rowKey}
+                      active={rowIsActive(node)}
+                      activePath={activePath.nodeIds.has(node.id)}
+                      actionsOpen={contextMenu?.rowKey === rowKey}
+                      canOpenContextMenu={canOpenNodeContextMenu(node, true)}
+                      canToggleExpanded
+                      draggable={false}
+                      dragState={null}
+                      expanded={favoriteExpandedNodeIds.has(node.id)}
+                      hasChildren={favoriteRowList.hasChildren(node)}
+                      showChildCount={false}
+                      onDragEnd={ignoreRowDrag}
+                      onDragLeave={ignoreRowDrag}
+                      onDragOver={ignoreRowDrag}
+                      onDragStart={ignoreRowDrag}
+                      onDrop={ignoreRowDrag}
+                      onFocusNode={setFocusedNodeId}
+                      onKeyDown={(row, event) => handleTreeRowKeyDown(favoriteRowList, row, event)}
+                      onOpenContextMenu={openContextMenu}
+                      refCallback={registerRowRef(rowKey)}
+                      tabIndex={rowKey === effectiveFocusedFavoriteKey ? 0 : -1}
+                      onToggleExpanded={toggleFavoriteFolder}
+                      onSelectTarget={onSelectTarget}
+                      visualLevel={visualTreeLevel(node, nodeById, hiddenRootNodeIds)}
+                      tooltip={tooltip}
+                    />
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {displayNodes.length === 0 ? (
           <div className="tree-empty">{emptyLabel}</div>
         ) : visibleNodes.length === 0 ? (
           <div className="tree-empty">{t("noMatches")}</div>
         ) : (
           <div
+            aria-label={title}
             className="tree-list"
+            ref={treeListRef}
             role="tree"
             onPointerDownCapture={(event) => {
               dragPointerTypeRef.current = event.pointerType || "mouse";
@@ -942,24 +1194,24 @@ export function TreeRail({
                 key={node.id}
                 node={node}
                 now={now}
-                active={
-                  (activeNodeId != null && node.id === activeNodeId) ||
-                  (activeTargetId != null && node.target_id === activeTargetId)
-                }
+                rowKey={node.id}
+                active={rowIsActive(node)}
                 activePath={activePath.nodeIds.has(node.id)}
-                actionsOpen={contextMenu?.node.id === node.id}
+                actionsOpen={contextMenu?.rowKey === node.id}
                 canOpenContextMenu={canOpenNodeContextMenu(node)}
                 canToggleExpanded={Boolean(onExpandedNodeIdsChange)}
                 draggable={draggableNode(node)}
                 dragState={dragState}
                 expanded={expandedNodeIdSet.has(node.id)}
+                hasChildren={nodeHasChildren(node)}
+                showChildCount
                 onDragEnd={handleRowDragEnd}
                 onDragLeave={handleRowDragLeave}
                 onDragOver={handleRowDragOver}
                 onDragStart={handleRowDragStart}
                 onDrop={handleRowDrop}
                 onFocusNode={setFocusedNodeId}
-                onKeyDown={handleTreeRowKeyDown}
+                onKeyDown={(row, event) => handleTreeRowKeyDown(treeRowList, row, event)}
                 onOpenContextMenu={openContextMenu}
                 refCallback={registerRowRef(node.id)}
                 tabIndex={node.id === effectiveFocusedNodeId ? 0 : -1}
@@ -991,11 +1243,13 @@ export function TreeRail({
           canMoveUp={
             anchoredReorderEnabled &&
             !filterQuery.trim() &&
+            !isFavoriteRowKey(contextMenu.rowKey) &&
             reorderAvailability(contextMenu.node, orderedNodes).up
           }
           canMoveDown={
             anchoredReorderEnabled &&
             !filterQuery.trim() &&
+            !isFavoriteRowKey(contextMenu.rowKey) &&
             reorderAvailability(contextMenu.node, orderedNodes).down
           }
           canRename={Boolean(onRenameNode)}
@@ -1006,11 +1260,11 @@ export function TreeRail({
           position={contextMenu.position}
           onAction={handleContextMenuAction}
           onClose={() => {
-            const nodeId = contextMenu.node.id;
+            const { node, rowKey } = contextMenu;
             const invoker = contextMenuInvokerRef.current;
             contextMenuInvokerRef.current = null;
             setContextMenu(null);
-            restoreMenuFocus(nodeId, invoker);
+            restoreMenuFocus(rowKey, node.id, invoker);
           }}
         />
       ) : null}
@@ -1022,6 +1276,7 @@ export function TreeRail({
 function TreeRow({
   node,
   now,
+  rowKey,
   active,
   activePath,
   actionsOpen,
@@ -1030,6 +1285,8 @@ function TreeRow({
   draggable,
   dragState,
   expanded,
+  hasChildren,
+  showChildCount,
   onToggleExpanded,
   onDragEnd,
   onDragLeave,
@@ -1047,6 +1304,8 @@ function TreeRow({
 }: {
   node: TreeNodePayload;
   now: number;
+  /** Focus/ref key: the node id in the full tree, prefixed in favorites. */
+  rowKey: string;
   active: boolean;
   activePath: boolean;
   actionsOpen: boolean;
@@ -1055,6 +1314,8 @@ function TreeRow({
   draggable: boolean;
   dragState: TreeDragState | null;
   expanded: boolean;
+  hasChildren: boolean;
+  showChildCount: boolean;
   onToggleExpanded: (nodeId: string) => void;
   onDragEnd: () => void;
   onDragLeave: (
@@ -1073,7 +1334,7 @@ function TreeRow({
     node: TreeNodePayload,
     event: ReactDragEvent<HTMLDivElement>,
   ) => void;
-  onFocusNode: (nodeId: string) => void;
+  onFocusNode: (rowKey: string) => void;
   onKeyDown: (
     node: TreeNodePayload,
     event: KeyboardEvent<HTMLDivElement>,
@@ -1082,6 +1343,7 @@ function TreeRow({
     node: TreeNodePayload,
     position: { left: number; top: number },
     invoker: HTMLElement | null,
+    rowKey: string,
   ) => void;
   refCallback: (element: HTMLDivElement | null) => void;
   tabIndex: number;
@@ -1100,8 +1362,7 @@ function TreeRow({
   const statusDescription = treeNodeStatusDescription(node, now, i18n.resolvedLanguage ?? i18n.language, t);
   const level = visualLevel;
   const Icon = node.node_kind === "folder" ? Folder : FileText;
-  const hasChildren = nodeHasChildren(node);
-  const hasCountBadge = node.children_count > 0;
+  const hasCountBadge = showChildCount && node.children_count > 0;
   const canSelect = Boolean(onSelectTarget);
   const targetGroup = targetKindGroup(node.target_kind);
   const isDragging = dragState?.draggedNodeId === node.id;
@@ -1189,7 +1450,7 @@ function TreeRow({
           // ignore vibration errors (unsupported platforms)
         }
       }
-      onOpenContextMenu(node, position, invoker);
+      onOpenContextMenu(node, position, invoker, rowKey);
     }, LONG_PRESS_CONTEXT_MENU_MS);
   }
 
@@ -1308,6 +1569,7 @@ function TreeRow({
                     top: target.bottom + 4,
                   },
                   event.currentTarget,
+                  rowKey,
                 );
               }}
             >
@@ -1353,11 +1615,12 @@ function TreeRow({
             top: event.clientY,
           },
           event.currentTarget,
+          rowKey,
         );
       }}
       onFocus={(event) => {
         tooltip.focus(node.id, event.currentTarget);
-        onFocusNode(node.id);
+        onFocusNode(rowKey);
       }}
       onBlur={(event) => {
         tooltip.blur(event.relatedTarget);
@@ -1511,6 +1774,31 @@ function filterVisibleNodes(
     }
     return true;
   });
+}
+
+function isFavoriteNode(node: TreeNodePayload) {
+  return Boolean(favoriteTargetKind(node) && node.is_favorite);
+}
+
+// The text filter's rule with "is my favorite" as the predicate: favorite
+// placements plus every ancestor below the hidden section root, in tree order.
+function collectFavoriteNodes(
+  nodes: TreeNodePayload[],
+  hiddenRootNodeIds: Set<string>,
+) {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const includedNodeIds = new Set<string>();
+  for (const node of nodes) {
+    if (isFavoriteNode(node)) {
+      addNodeAndAncestors(node, byId, includedNodeIds);
+    }
+  }
+  return nodes.filter(
+    (node) =>
+      !hiddenRootNodeIds.has(node.id) &&
+      includedNodeIds.has(node.id) &&
+      areAncestorsIncluded(node, byId, includedNodeIds, hiddenRootNodeIds),
+  );
 }
 
 function collectActivePath(

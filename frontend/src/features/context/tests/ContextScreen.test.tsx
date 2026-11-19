@@ -1317,7 +1317,12 @@ describe("ContextScreen", () => {
       expect.objectContaining({ body: JSON.stringify({ is_favorite: true }) }),
     ]);
     // The reader menu and the rail share one favorite store.
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(1);
+    expect(
+      screen.getByRole("tree", { name: "Context" }).querySelectorAll(".tree-row-favorite"),
+    ).toHaveLength(1);
+    expect(
+      within(screen.getByRole("tree", { name: "Favorites" })).getByRole("treeitem", { name: "Decision Log" }),
+    ).toBeInTheDocument();
     await userEvent.click(moreAction);
     expect(
       await screen.findByRole("menuitem", { name: "Remove from my favorites" }),

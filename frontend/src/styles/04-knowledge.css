@@ -1509,6 +1509,50 @@
   gap: 2px;
 }
 
+/* The favorites tree above the full tree. Its header chevron sits in the same
+   leading slot as the level-1 chevrons below and shares their hit size. */
+.tree-favorites {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tree-favorites-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--tree-control-hit-size);
+  padding: 0 8px 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-favorites-toggle:hover {
+  background: var(--surface-hover);
+}
+
+.tree-favorites-toggle > svg:first-child {
+  flex: 0 0 var(--tree-leading-visual-slot);
+}
+
+.tree-favorites-star {
+  flex: 0 0 auto;
+  fill: var(--tree-favorite-fill);
+  stroke: var(--tree-favorite-edge);
+  stroke-width: 1.4;
+}
+
 .tree-row {
   /* Matches the rail's own background so the hover overlay below reads as part
      of the row rather than as a floating chip. Each row state that repaints the
