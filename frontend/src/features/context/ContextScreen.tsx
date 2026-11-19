@@ -3491,20 +3491,32 @@ function ContextReaderNodeMenu({
     setMenuPosition({ left, top: rect.bottom + 6 });
   }
 
-  function handleAction(action: TreeNodeContextMenuAction) {
+  // The menu renders in a portal and takes focus with it when it closes.
+  // Focus goes back to its button, unless the user already moved it elsewhere.
+  function closeMenu() {
     setMenuPosition(null);
-    if (action.type === "rename") {
-      onRenameNode(action.node);
+    window.requestAnimationFrame(() => {
+      if (!document.activeElement || document.activeElement === document.body) {
+        triggerRef.current?.focus({ preventScroll: true });
+      }
+    });
+  }
+
+  function handleAction(action: TreeNodeContextMenuAction) {
+    if (
+      action.type === "rename" ||
+      action.type === "move" ||
+      action.type === "delete"
+    ) {
+      // A dialog remembers the focused element, so hand it the button first.
+      setMenuPosition(null);
+      triggerRef.current?.focus({ preventScroll: true });
+      if (action.type === "rename") onRenameNode(action.node);
+      else if (action.type === "move") onMoveNode(action.node);
+      else onDeleteNode(action.node);
       return;
     }
-    if (action.type === "move") {
-      onMoveNode(action.node);
-      return;
-    }
-    if (action.type === "delete") {
-      onDeleteNode(action.node);
-      return;
-    }
+    closeMenu();
     if (action.type === "favorite") {
       if (favoriteScope) {
         setActionStatus(null);
@@ -3565,7 +3577,7 @@ function ContextReaderNodeMenu({
           node={menuNode}
           position={menuPosition}
           onAction={handleAction}
-          onClose={() => setMenuPosition(null)}
+          onClose={closeMenu}
         />
       ) : null}
     </>
