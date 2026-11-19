@@ -1,7 +1,9 @@
 import logging
 import re
 from collections import Counter
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from types import MappingProxyType
 from uuid import UUID
 
 from sqlalchemy import func, select, tuple_
@@ -80,8 +82,13 @@ ASK_FORWARDABLE_WARNINGS = frozenset(
 )
 # Codes Ask raises about its OWN answer pipeline rather than about a search
 # lane. They travel back on the same list so they reach the turn unfiltered.
+# The answer-model codes say what the reader can do: ask an administrator
+# (provider unavailable), try again later (composer failed), or nothing, since
+# the model's own reply was unusable (incomplete) or declined (refused).
 LLM_PROVIDER_UNAVAILABLE_WARNING = "llm_provider_unavailable"
 LLM_COMPOSER_FAILED_WARNING = "llm_composer_failed"
+LLM_ANSWER_INCOMPLETE_WARNING = "llm_answer_incomplete"
+LLM_ANSWER_REFUSED_WARNING = "llm_answer_refused"
 # The workspace asked for a retrieval mode this deployment cannot serve. Already
 # registered in WARNING_CODES with no producer -- reserved for exactly this.
 UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING = "unsupported_retrieval_mode_fallback"
@@ -89,7 +96,28 @@ ASK_SELF_WARNINGS = frozenset(
     {
         LLM_PROVIDER_UNAVAILABLE_WARNING,
         LLM_COMPOSER_FAILED_WARNING,
+        LLM_ANSWER_INCOMPLETE_WARNING,
+        LLM_ANSWER_REFUSED_WARNING,
         UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING,
+    }
+)
+# A reply that is not a completed answer, by how it ended. Anything else
+# (including completed but blank) is incomplete.
+_TERMINATION_WARNINGS: Mapping[str, str] = MappingProxyType(
+    {
+        "refused": LLM_ANSWER_REFUSED_WARNING,
+        "blocked": LLM_ANSWER_REFUSED_WARNING,
+    }
+)
+# A failed call, by its normalized code. Codes not listed need an
+# administrator (credentials, permissions, model, quota, request shape).
+_ERROR_WARNINGS: Mapping[str, str] = MappingProxyType(
+    {
+        "rate_limited": LLM_COMPOSER_FAILED_WARNING,
+        "provider_unavailable": LLM_COMPOSER_FAILED_WARNING,
+        "timeout": LLM_COMPOSER_FAILED_WARNING,
+        "network_error": LLM_COMPOSER_FAILED_WARNING,
+        "invalid_response": LLM_ANSWER_INCOMPLETE_WARNING,
     }
 )
 PROMPT_INJECTION_PATTERNS = (
@@ -650,22 +678,26 @@ class AskService:
                 else:
                     search_warnings = [
                         *search_warnings,
-                        LLM_COMPOSER_FAILED_WARNING,
+                        _TERMINATION_WARNINGS.get(
+                            result.termination, LLM_ANSWER_INCOMPLETE_WARNING
+                        ),
                     ]
             except LLMAdapterError as exc:
-                # Upstream failure (auth, 5xx, timeout). The pack is a valid
-                # answer, but the user must know it is not the composed one.
+                # The pack is a valid answer, but the user must know it is not
+                # the composed one, and whether retrying or an admin can help.
                 logger.warning(
                     "Ask composer call failed (%s); using deterministic pack",
                     exc.code,
                 )
-                search_warnings = [*search_warnings, LLM_COMPOSER_FAILED_WARNING]
+                search_warnings = [
+                    *search_warnings,
+                    _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING),
+                ]
             except Exception:
-                # Not LLM_COMPOSER_FAILED_WARNING: that one tells the user
-                # "retrying may compose a full answer", which is true of an
-                # upstream hiccup and never true of a bug in our own composer.
-                # An unexpected exception here is the server's problem, so say
-                # the thing that is actionable — ask an admin.
+                # Not LLM_COMPOSER_FAILED_WARNING: that one suggests trying
+                # again, which helps an upstream hiccup and never a bug in our
+                # own composer. An unexpected exception here is the server's
+                # problem, so say the thing that is actionable — ask an admin.
                 logger.warning(
                     "Ask composer failed unexpectedly; using deterministic pack",
                     exc_info=True,

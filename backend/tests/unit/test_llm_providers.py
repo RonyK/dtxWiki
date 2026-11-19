@@ -875,15 +875,35 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
     assert warnings == []
 
 
-@pytest.mark.parametrize("provider", ["error", "truncated", "unexpected"])
-def test_ask_service_falls_back_to_deterministic_pack_on_provider_failure(provider):
-    result_id = uuid4()
+# Each case is one thing the reader can do about the fallback: try again
+# (a 503), nothing (a cut-off reply), or ask an administrator (a rejected key,
+# or a bug in the composer itself). A refused reply is checked end to end in
+# test_ask_llm_degrade, where the turn's warning allowlist applies.
+@pytest.mark.parametrize(
+    ("provider", "warning"),
+    [
+        (lambda: ErrorProvider(503, "provider_unavailable"), "llm_composer_failed"),
+        (
+            lambda: ErrorProvider(401, "authentication_failed"),
+            "llm_provider_unavailable",
+        ),
+        (
+            lambda: FixedProvider("Incomplete", termination="truncated"),
+            "llm_answer_incomplete",
+        ),
+        (lambda: UnexpectedErrorProvider(), "llm_provider_unavailable"),
+    ],
+    ids=["temporary", "credential", "truncated", "unexpected"],
+)
+def test_ask_service_falls_back_to_deterministic_pack_on_provider_failure(
+    provider, warning
+):
     service = AskService(
         search_service=FakeSearchService(
             SearchPayload(
                 ranked_results=[
                     RankedResult(
-                        id=result_id,
+                        id=uuid4(),
                         type="context_page",
                         title="Needle Context",
                         snippet="Needle evidence body.",
@@ -896,18 +916,10 @@ def test_ask_service_falls_back_to_deterministic_pack_on_provider_failure(provid
                 next_cursor=None,
             )
         ),
-        provider=(
-            ErrorProvider()
-            if provider == "error"
-            else (
-                UnexpectedErrorProvider()
-                if provider == "unexpected"
-                else FixedProvider("Incomplete", termination="truncated")
-            )
-        ),
+        provider=provider(),
     )
 
-    answer, *_ = service._answer(
+    answer, *_, warnings = service._answer(
         session=_NoPolicySession(),
         workspace_id=uuid4(),
         question="Needle",
@@ -916,6 +928,7 @@ def test_ask_service_falls_back_to_deterministic_pack_on_provider_failure(provid
     assert answer == (
         "Context-first retrieval summary:\n1. Needle Context: Needle evidence body."
     )
+    assert warnings == [warning]
 
 
 class _NoPolicySession:
@@ -947,8 +960,12 @@ class FixedProvider:
 
 
 class ErrorProvider:
+    def __init__(self, status: int, code: str) -> None:
+        self.status = status
+        self.code = code
+
     def generate(self, **_kwargs):
-        raise LLMAdapterError("provider_unavailable", delivery="sent", status_code=503)
+        raise LLMAdapterError(self.code, delivery="sent", status_code=self.status)
 
 
 class UnexpectedErrorProvider:

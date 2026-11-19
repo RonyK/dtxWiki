@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Important changes
+
+- The MCP tool contract adds the Ask warnings `llm_answer_incomplete` and
+  `llm_answer_refused`. Refresh cached tool catalogs and result schemas.
+
 ### LLM adapters
 
 - Add the public LLM adapter contract (`backend.spi.llm`, adapter SPI 1.0) and
@@ -11,11 +16,15 @@
   Completions (and compatible servers) and the Gemini API register the same
   way plugin adapters do. Each makes at most one provider call per request and
   reports a normalized result, token usage and error.
-- `DTXWIKI_LLM_PROVIDER` keeps its models, temperature and two retries. Ask
-  now uses only a completed answer: a refused, filtered or unrecognized reply
-  falls back to the evidence summary with `llm_composer_failed`, as an
-  unreadable success reply now does too. `openai` sends
-  `max_completion_tokens` instead of the deprecated `max_tokens`.
+- `DTXWIKI_LLM_PROVIDER` keeps its models, temperature and two retries.
+  `openai` sends `max_completion_tokens` instead of the deprecated
+  `max_tokens`.
+- Ask uses only a completed answer, and its evidence-summary warning now says
+  what happened: `llm_composer_failed` for a temporary failure (try again
+  later), new `llm_answer_incomplete` for a cut-off or unusable reply, new
+  `llm_answer_refused` for a declined or filtered reply, and
+  `llm_provider_unavailable` for anything an administrator must fix
+  (credentials, permissions, model, quota or an unexpected server error).
 
 ## 0.3.2 — 2026-11-21
 

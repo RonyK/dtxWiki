@@ -570,13 +570,21 @@ ADVISORY_WARNING_MESSAGES = {
     "borrowed_rerank_applied": "The calling client supplied the result reranking.",
     "llm_provider_unavailable": (
         "The configured answer model is not usable, so this answer is the "
-        "deterministic evidence summary. Ask a workspace admin to check the "
-        "server's LLM provider settings."
+        "deterministic evidence summary. Ask a server administrator to check "
+        "the LLM settings, provider account and server log."
     ),
     "llm_composer_failed": (
-        "The answer model did not return a complete answer, so this answer is "
-        "the deterministic evidence summary. Retrying may produce a composed "
-        "answer."
+        "The answer model did not answer this time, so this answer is the "
+        "deterministic evidence summary. Try again later; if it keeps failing, "
+        "ask an administrator."
+    ),
+    "llm_answer_incomplete": (
+        "The answer model's reply was cut off or unusable, so this answer is "
+        "the deterministic evidence summary."
+    ),
+    "llm_answer_refused": (
+        "The answer model declined to answer or its safety filter blocked the "
+        "reply, so this answer is the deterministic evidence summary."
     ),
     "job_fanout_incomplete": (
         "One or more workspaces could not be reached, so this result is "
