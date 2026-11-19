@@ -250,16 +250,18 @@ ack·재시도 한도와 지연을 관리합니다. 작업은 중복 전달에 �
 LLM adapter 하나는 API 규격 하나를 구현합니다. `adapter_id`는 `<플러그인 이름>.<규격>`
 형식이고 `builtin.` namespace는 core 전용입니다. `descriptor`는 구현 version, 표시
 이름, 비밀이 아닌 연결 설정과 입력 전용 credential의 JSON Schema, 인코딩할 수 있는
-공통 옵션(`COMMON_OPTIONS`)과 기본 HTTPS endpoint를 선언합니다. `create(connection,
+공통 옵션(`COMMON_OPTIONS`)과 기본 HTTPS endpoint를 선언합니다. schema는 Draft 2020-12
+형식이며 `$ref`·`$id`·anchor 없이 자기 완결적이어야 합니다. `create(connection,
 transport)`가 만든 `TextGenerationPort.generate()`는 provider를 최대 한 번 호출하고
 응답을 `CanonicalTextResult`(종료 유형·usage)로, 실패를 `LLMAdapterError`(code·delivery)로
 정규화합니다. 요청이 설정하지 않은 옵션은 보내지 않고, provider 오류 문구는 예외에
-담지 않습니다. 재시도·endpoint 정책·proxy·TLS는 core가 맡습니다. adapter는 주입된
-transport로만 통신하며 연결의 base URL 밖으로는 요청할 수 없습니다. 웹 앱은 시작할
-때 registry를 검증하고, worker와 CLI는 LLM adapter를 만들지 않습니다.
-`backend.testing.spi_conformance.llm.assert_llm_adapter_contract`에 provider 응답
-fixture를 넣어 계약을 확인합니다. 현재 Ask는 `DTXWIKI_LLM_PROVIDER`로 고른 내장
-adapter만 사용합니다.
+담지 않습니다. 재시도·endpoint 정책·proxy·TLS와 모델 capability 검사는 core가 맡습니다.
+adapter는 주입된 transport로만 통신하며 연결의 base URL 밖으로 요청하거나 URL에
+credential을 넣을 수 없습니다(query parameter는 허용). 웹 앱은 시작할 때 registry를
+검증하고, worker와 CLI는 LLM adapter를 만들지 않습니다.
+`backend.testing.spi_conformance.llm.assert_llm_adapter_contract`에 플러그인 이름과
+provider 응답 fixture를 넣어 계약을 확인합니다. 현재 Ask는 `DTXWIKI_LLM_PROVIDER`로
+고른 내장 adapter만 사용합니다.
 
 플러그인 migration은 core head 적용 뒤 단일 DB에 실행되며 core가 제공하는
 Alembic 환경과 별도 `alembic_version_<name>`을 사용합니다. 플러그인의 `env.py`는

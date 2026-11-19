@@ -9,8 +9,8 @@
   pins `requires_spi="==1.1"` no longer loads.
 - Built-in adapters for Anthropic Messages, OpenAI Responses, OpenAI Chat
   Completions (and compatible servers) and the Gemini API register the same
-  way plugin adapters do. Each makes one provider call per request and reports
-  a normalized result, token usage and error.
+  way plugin adapters do. Each makes at most one provider call per request and
+  reports a normalized result, token usage and error.
 - `DTXWIKI_LLM_PROVIDER` keeps its models, temperature and two retries. Ask
   now uses only a completed answer: a refused, filtered or unrecognized reply
   falls back to the evidence summary with `llm_composer_failed`, as an

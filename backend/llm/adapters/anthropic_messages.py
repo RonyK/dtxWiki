@@ -23,6 +23,7 @@ from backend.spi.llm import (
     ExecutionContext,
     LLMAdapterDescriptor,
     LLMConnection,
+    LLMErrorCode,
     LLMTransport,
     Termination,
     TokenUsage,
@@ -69,6 +70,7 @@ class AnthropicMessagesAdapter:
             payload=_payload(request),
             context=context,
             request_id_header="request-id",
+            refine_error=_refine_error,
         )
         body = reply.body
         return CanonicalTextResult(
@@ -117,6 +119,17 @@ def _usage(usage: Mapping[str, Any]) -> TokenUsage:
             mapping(usage.get("output_tokens_details")).get("thinking_tokens")
         ),
     )
+
+
+def _refine_error(error: Mapping[str, Any]) -> LLMErrorCode | None:
+    # The tier spend cap arrives as a 429 rate_limit_error; waiting does not
+    # lift it.
+    if (
+        mapping(error.get("details")).get("error_code")
+        == "enforced_spend_limit_reached"
+    ):
+        return "quota_exhausted"
+    return None
 
 
 FACTORY = BuiltinAdapterFactory(descriptor=DESCRIPTOR, build=AnthropicMessagesAdapter)

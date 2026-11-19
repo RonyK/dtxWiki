@@ -15,6 +15,7 @@ from backend.spi.llm import (
     LLMAdapterError,
     LLMAdapterFactory,
     LLMErrorCode,
+    LLMModelCapabilities,
     TransportResponse,
 )
 
@@ -70,6 +71,7 @@ class _ScriptedTransport:
 async def assert_llm_adapter_contract(
     factory: LLMAdapterFactory,
     *,
+    namespace: str,
     credential: Mapping[str, str],
     cases: Iterable[WireCase],
     base_url: str | None = None,
@@ -78,13 +80,18 @@ async def assert_llm_adapter_contract(
 ) -> None:
     """Register ``factory`` as Core would and run each case through it.
 
+    ``namespace`` is the plugin name ("builtin" for core adapters). The model
+    is given every option the adapter declares.
+
     Checks the registration rules, the canonical outcome of every case, one
     provider call per ``generate`` (no hidden retry), the execution timeout,
     and that no credential value is placed in the URL or the body.
     """
 
     adapter_id = factory.descriptor.adapter_id
-    namespace = adapter_id.split(".", 1)[0]
+    cases = list(cases)
+    assert cases, "at least one wire case is required"
+    capabilities = LLMModelCapabilities(options=factory.descriptor.options)
     registry = (
         LLMAdapterRegistry(builtin=[factory])
         if namespace == BUILTIN_NAMESPACE
@@ -102,6 +109,8 @@ async def assert_llm_adapter_contract(
             base_url=base_url,
             config=config or {},
             credential=credential,
+            model=case.request.model,
+            capabilities=capabilities,
             transport=transport,
         )
         try:

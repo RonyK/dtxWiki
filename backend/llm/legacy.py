@@ -133,18 +133,18 @@ def build_llm_provider(
             f"DTXWIKI_LLM_PROVIDER={selection} requires an API key in "
             f"DTXWIKI_{answer_model.api_key_setting.upper()}"
         )
-    adapters.require_capabilities(answer_model.adapter_id, _CAPABILITIES)
     port = adapters.create(
         answer_model.adapter_id,
         base_url=None,
         config={},
         credential={"api_key": api_key},
+        model=answer_model.model,
+        capabilities=_CAPABILITIES,
         transport=transport or HttpxLLMTransport(),
     )
     return BlockingTextGenerator(
         port=RetryingTextGeneration(port),
         model=answer_model.model,
-        capabilities=_CAPABILITIES,
         context=ExecutionContext(timeout_seconds=_TIMEOUT_SECONDS),
         temperature=_TEMPERATURE,
     )

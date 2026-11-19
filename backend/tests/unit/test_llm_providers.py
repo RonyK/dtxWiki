@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from uuid import uuid4
 
 import httpx
@@ -81,11 +82,12 @@ def test_registry_returns_none_by_default_and_builds_configured_providers():
 
     # Each accepted value keeps the model, temperature and token budget the
     # server-wide answer model always used, on its built-in adapter.
-    for selection, key_field, url, budget_field, reply in (
+    for selection, key_field, url, model, budget_field, reply in (
         (
             "anthropic",
             "anthropic_api_key",
             "https://api.anthropic.com/v1/messages",
+            "claude-sonnet-4-6",
             "max_tokens",
             {"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn"},
         ),
@@ -93,6 +95,7 @@ def test_registry_returns_none_by_default_and_builds_configured_providers():
             "openai",
             "openai_api_key",
             "https://api.openai.com/v1/chat/completions",
+            "gpt-4o-mini",
             "max_completion_tokens",
             {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]},
         ),
@@ -111,6 +114,7 @@ def test_registry_returns_none_by_default_and_builds_configured_providers():
         (call,) = transport.calls
         assert (result.text, result.termination) == ("ok", "completed")
         assert call["url"] == url
+        assert call["payload"]["model"] == model
         assert call["payload"]["temperature"] == 0.0
         assert call["payload"][budget_field] == 1024
 
@@ -122,10 +126,11 @@ def test_registry_returns_none_by_default_and_builds_configured_providers():
             base_url=None,
             config={},
             credential={"api_key": KEY},
+            model="model-x",
+            capabilities=LLMModelCapabilities(),
             transport=transport,
         ),
         model="model-x",
-        capabilities=LLMModelCapabilities(),
         context=ExecutionContext(timeout_seconds=5),
         temperature=0.0,
     )
@@ -281,6 +286,20 @@ def _anthropic_cases():
             expected=CanonicalTextResult(text="No", termination="refused"),
         ),
         WireCase(
+            "spend cap on 429 is not a rate limit",
+            REQUEST,
+            _reply(
+                {
+                    "error": {
+                        "type": "rate_limit_error",
+                        "details": {"error_code": "enforced_spend_limit_reached"},
+                    }
+                },
+                status=429,
+            ),
+            expected_error=("quota_exhausted", "sent"),
+        ),
+        WireCase(
             "rate limited",
             REQUEST,
             _reply({"error": {"type": "rate_limit_error"}}, status=429),
@@ -366,22 +385,21 @@ def _responses_cases():
             expected=CanonicalTextResult(text="", termination="refused"),
         ),
         WireCase(
-            "content filter",
-            REQUEST,
-            _reply(
-                {
-                    "status": "incomplete",
-                    "incomplete_details": {"reason": "content_filter"},
-                    "output": [],
-                }
-            ),
-            expected=CanonicalTextResult(text="", termination="blocked"),
-        ),
-        WireCase(
             "failed response object on HTTP 200",
             REQUEST,
-            _reply({"status": "failed", "error": {"code": "server_error"}}),
-            expected_error=("provider_unavailable", "sent"),
+            _reply({"status": "failed", "error": {"code": "invalid_prompt"}}),
+            expected_error=("invalid_request", "sent"),
+        ),
+        WireCase(
+            "a budget below the API minimum is never sent",
+            CanonicalTextRequest(
+                model="model-x",
+                messages=(TextMessage(role="user", text="q"),),
+                max_output_tokens=8,
+            ),
+            None,
+            expected_error=("invalid_request", "not_sent"),
+            expected_sends=0,
         ),
         WireCase(
             "spend limit on 429 is not a rate limit",
@@ -447,12 +465,6 @@ def _chat_cases():
             expected=CanonicalTextResult(text="", termination="blocked"),
         ),
         WireCase(
-            "tool call",
-            REQUEST,
-            choice("tool_calls", content=None, tool_calls=[{"id": "t"}]),
-            expected=CanonicalTextResult(text="", termination="tool_request"),
-        ),
-        WireCase(
             "no choices",
             REQUEST,
             _reply({"choices": []}),
@@ -486,8 +498,8 @@ def _gemini_cases():
 
     return [
         WireCase(
-            "completed without thought text; omitted zero counts",
-            REQUEST,
+            "resource-name model; no thought text; omitted zero counts",
+            replace(REQUEST, model="models/model-x"),
             candidate(
                 "STOP",
                 {"text": "plan", "thought": True},
@@ -522,12 +534,6 @@ def _gemini_cases():
                 termination="truncated",
                 usage=TokenUsage(5, None, 0, None, 0),
             ),
-        ),
-        WireCase(
-            "candidate stopped for safety keeps no answer",
-            REQUEST,
-            candidate("SAFETY", {"text": "Partial"}),
-            expected=CanonicalTextResult(text="Partial", termination="blocked"),
         ),
         WireCase(
             "blocked prompt outranks a candidate",
@@ -584,8 +590,12 @@ def _compatible_cases():
 
 # Budget exception: each built-in registration is an independent wire format
 # (the compatible one differs in endpoint, auth and budget field), so a mapping
-# bug in one is invisible to the others. The cases replace the former
-# per-provider parse, truncation, retry and tool tests.
+# bug in one is invisible to the others. Each adapter runs the design's
+# conformance list once (completed with usage and wire, truncated, refused or
+# blocked, a normalized error) plus only the edges its own format has (missing
+# or malformed usage, precedence, spend caps, a 200 failure, local refusals).
+# The cases replace the former per-provider parse, truncation, retry and tool
+# tests.
 @pytest.mark.parametrize(
     ("factory", "cases", "connection"),
     [
@@ -614,19 +624,27 @@ def _compatible_cases():
     ids=["anthropic", "responses", "chat", "compatible-chat", "gemini"],
 )
 def test_builtin_llm_adapters_meet_the_contract(factory, cases, connection):
-    asyncio.run(assert_llm_adapter_contract(factory, cases=cases(), **connection))
+    asyncio.run(
+        assert_llm_adapter_contract(
+            factory, namespace="builtin", cases=cases(), **connection
+        )
+    )
 
 
 def test_llm_adapter_registry_rejects_unsafe_registrations():
     descriptor = anthropic_messages.DESCRIPTOR
 
-    def factory(**changes):
-        from dataclasses import replace
-
+    def factory(build=anthropic_messages.AnthropicMessagesAdapter, **changes):
         return BuiltinAdapterFactory(
-            descriptor=replace(descriptor, **changes),
-            build=anthropic_messages.AnthropicMessagesAdapter,
+            descriptor=replace(descriptor, **changes), build=build
         )
+
+    class OneArgumentFactory:
+        def __init__(self) -> None:
+            self.descriptor = descriptor
+
+        def create(self, connection):
+            raise AssertionError("never registered")
 
     for builtin, plugins in (
         ((), {"vendor": [factory()]}),  # a plugin claiming builtin.*
@@ -636,46 +654,66 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
         ([factory(spi_version="2.0")], {}),
         ([factory(adapter_version="latest")], {}),
         ([factory(config_schema={"type": "nonsense"})], {}),
-        # Validation must never fetch, or fail to find, a schema.
-        ([factory(credential_schema={"$ref": "https://schemas.example/k"})], {}),
-        ([factory(credential_schema={"$ref": "#/$defs/missing"})], {}),
+        # References can fetch, miss or loop: forms must be self-contained.
+        ([factory(credential_schema={"$ref": "#"})], {}),
         ([factory(options=frozenset({"top_k"}))], {}),
         ([factory(default_base_url="http://api.example/v1")], {}),
+        ([factory(default_base_url="https://api.example/v1?")], {}),
+        ([OneArgumentFactory()], {}),
         ([object()], {}),
     ):
         with pytest.raises(LLMAdapterRegistryError):
             LLMAdapterRegistry(builtin, plugins)
 
+    def create(registry, adapter_id, **overrides):
+        arguments = {
+            "base_url": None,
+            "config": {},
+            "credential": {"api_key": KEY},
+            "model": REQUEST.model,
+            "capabilities": LLMModelCapabilities(),
+            "transport": RecordingTransport(_reply({})),
+        }
+        return registry.create(adapter_id, **{**arguments, **overrides})
+
     registry = LLMAdapterRegistry(
-        [factory(), factory(adapter_id="builtin.keyless", default_base_url=None)],
+        [
+            factory(),
+            factory(
+                adapter_id="builtin.plain", default_base_url=None, options=frozenset()
+            ),
+        ],
         {"vendor": [factory(adapter_id="vendor.custom_text")]},
     )
-    # A registration without a default endpoint needs one from its connection.
-    with pytest.raises(LLMAdapterRegistryError, match="https base URL"):
-        registry.create(
-            "builtin.keyless",
-            base_url=None,
-            config={},
-            credential={"api_key": KEY},
-            transport=RecordingTransport(_reply({})),
-        )
     assert [item.adapter_id for item in registry.descriptors()] == [
         "builtin.anthropic.messages",
-        "builtin.keyless",
+        "builtin.plain",
         "vendor.custom_text",
     ]
+    # A registration without a default endpoint needs one from its connection,
+    # and a model cannot use an option its adapter cannot encode.
+    with pytest.raises(LLMAdapterRegistryError, match="https base URL"):
+        create(registry, "builtin.plain")
+    with pytest.raises(LLMAdapterRegistryError, match="options"):
+        create(
+            registry,
+            "builtin.plain",
+            base_url="https://api.example/v1",
+            capabilities=LLMModelCapabilities(options=frozenset({"temperature"})),
+        )
+    # A port serves the one model its capabilities describe.
+    port = create(registry, "builtin.anthropic.messages", model="other-model")
+    with pytest.raises(LLMAdapterError) as other_model:
+        asyncio.run(port.generate(REQUEST, ExecutionContext(5)))
+    assert (other_model.value.code, other_model.value.delivery) == (
+        "invalid_request",
+        "not_sent",
+    )
     # Schema errors never echo the submitted credential.
     with pytest.raises(LLMAdapterRegistryError) as rejected:
-        registry.create(
-            "vendor.custom_text",
-            base_url=None,
-            config={},
-            credential={"api_key": KEY, "extra": KEY},
-            transport=RecordingTransport(_reply({})),
-        )
+        create(registry, "vendor.custom_text", credential={"api_key": KEY, "x": KEY})
     assert KEY not in str(rejected.value)
 
-    # A port whose generate() cannot take (request, context) is refused.
     class WrongSignature:
         def __init__(self, connection, transport):
             pass
@@ -684,22 +722,32 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
             return None
 
     with pytest.raises(LLMAdapterRegistryError, match="text generation port"):
-        LLMAdapterRegistry(
-            [BuiltinAdapterFactory(descriptor=descriptor, build=WrongSignature)]
-        ).create(
-            descriptor.adapter_id,
-            base_url=None,
-            config={},
-            credential={"api_key": KEY},
-            transport=RecordingTransport(_reply({})),
+        create(
+            LLMAdapterRegistry([factory(build=WrongSignature)]), descriptor.adapter_id
         )
+
+    # A provider request ID that carries the credential is dropped.
+    class EchoingKey:
+        def __init__(self, connection, transport):
+            pass
+
+        async def generate(self, request, context):
+            return CanonicalTextResult(
+                text="", termination="completed", provider_request_id=KEY
+            )
+
+    port = create(
+        LLMAdapterRegistry([factory(build=EchoingKey)]), descriptor.adapter_id
+    )
+    result = asyncio.run(port.generate(REQUEST, ExecutionContext(5)))
+    assert result.provider_request_id is None
 
     # Core keeps every call of an execution under its endpoint, without the
     # credential in the URL or a rerouting Host header.
     for url, headers in (
         ("https://api.anthropic.com/v1/%2e%2e/%2E%2E/evil", {}),
         ("https://api.anthropic.com/v1/messages", {"Host": "evil.example"}),
-        (f"https://api.anthropic.com/v1/{KEY}", {}),
+        (f"https://api.anthropic.com/v1/messages?key={KEY}", {}),
     ):
 
         class Exfiltrating:
@@ -712,13 +760,9 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
                 )
 
         transport = RecordingTransport(_reply({}))
-        port = LLMAdapterRegistry(
-            [BuiltinAdapterFactory(descriptor=descriptor, build=Exfiltrating)]
-        ).create(
+        port = create(
+            LLMAdapterRegistry([factory(build=Exfiltrating)]),
             descriptor.adapter_id,
-            base_url=None,
-            config={},
-            credential={"api_key": KEY},
             transport=transport,
         )
         with pytest.raises(LLMAdapterError) as escaped:
@@ -761,13 +805,6 @@ def test_httpx_transport_reports_what_reached_the_provider():
         assert json.loads(request.content) == {"q": 1}
         return httpx.Response(200, headers={"X-Request-Id": "r"}, json={"ok": True})
 
-    response = asyncio.run(
-        HttpxLLMTransport(transport=httpx.MockTransport(answer)).post_json(
-            "https://api.example/v1/x", headers={}, payload={"q": 1}, timeout_seconds=1
-        )
-    )
-    assert (response.status_code, response.headers["x-request-id"]) == (200, "r")
-
     # A reply already read survives a failed connection teardown: reporting
     # it as an unknown outcome would make the caller send it again.
     class ClosingFails(httpx.MockTransport):
@@ -779,7 +816,7 @@ def test_httpx_transport_reports_what_reached_the_provider():
             "https://api.example/v1/x", headers={}, payload={"q": 1}, timeout_seconds=1
         )
     )
-    assert response.status_code == 200
+    assert (response.status_code, response.headers["x-request-id"]) == (200, "r")
 
 
 def test_ask_service_composes_from_evidence_when_provider_is_set():

@@ -177,6 +177,12 @@ class LLMAdapterError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ExecutionContext:
+    """Limits for one generation.
+
+    ``timeout_seconds`` bounds each network operation (connect, write, every
+    read), not the whole call: a provider that keeps sending can run longer.
+    """
+
     timeout_seconds: float
 
     def __post_init__(self) -> None:
@@ -275,7 +281,9 @@ class LLMAdapterDescriptor:
 
     ``adapter_id`` is namespaced (``builtin.*`` or ``<plugin name>.*``) and
     never changes protocol. ``options`` lists the common options the adapter
-    can encode. ``credential_schema`` declares input-only secret fields.
+    can encode. Both schemas are self-contained JSON Schema 2020-12 documents
+    (no ``$schema``, references, ``$id`` or anchors); ``credential_schema``
+    declares input-only secret fields.
     """
 
     adapter_id: str
@@ -298,7 +306,8 @@ class TextGenerationPort(Protocol):
 
 
 class LLMAdapterFactory(Protocol):
-    descriptor: LLMAdapterDescriptor
+    @property
+    def descriptor(self) -> LLMAdapterDescriptor: ...
 
     def create(
         self, connection: LLMConnection, transport: LLMTransport

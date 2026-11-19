@@ -21,6 +21,9 @@ from packaging.version import InvalidVersion, Version
 from backend.spi.llm import (
     COMMON_OPTIONS,
     LLM_ADAPTER_SPI_VERSION,
+    CanonicalTextRequest,
+    CanonicalTextResult,
+    ExecutionContext,
     LLMAdapterDescriptor,
     LLMAdapterError,
     LLMAdapterFactory,
@@ -33,6 +36,7 @@ from backend.spi.llm import (
 
 BUILTIN_NAMESPACE = "builtin"
 _ADAPTER_ID = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\Z")
+_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 
 
 class LLMAdapterRegistryError(ValueError):
@@ -85,16 +89,6 @@ class LLMAdapterRegistry:
     def descriptors(self) -> tuple[LLMAdapterDescriptor, ...]:
         return tuple(self.descriptor(key) for key in sorted(self._registrations))
 
-    def require_capabilities(
-        self, adapter_id: str, capabilities: LLMModelCapabilities
-    ) -> None:
-        """A model can only use options its adapter knows how to encode."""
-
-        if not capabilities.options <= self.descriptor(adapter_id).options:
-            raise LLMAdapterRegistryError(
-                f"LLM adapter {adapter_id!r} cannot encode the model's options"
-            )
-
     def create(
         self,
         adapter_id: str,
@@ -102,11 +96,23 @@ class LLMAdapterRegistry:
         base_url: str | None,
         config: Mapping[str, object],
         credential: Mapping[str, str],
+        model: str,
+        capabilities: LLMModelCapabilities,
         transport: LLMTransport,
     ) -> TextGenerationPort:
-        """Build one execution's adapter from validated inputs."""
+        """Build one execution's adapter for one model from validated inputs.
+
+        Every caller gets the same Core rules around the adapter: requests
+        must name ``model`` and are checked against its capabilities before
+        anything is sent, calls stay under the connection's endpoint, and provider
+        request IDs are kept only when opaque and free of credentials.
+        """
 
         registration = self._registration(adapter_id)
+        if not capabilities.options <= registration.descriptor.options:
+            raise LLMAdapterRegistryError(
+                f"LLM adapter {adapter_id!r} cannot encode the model's options"
+            )
         for validator, instance, name in (
             (registration.config, config, "config"),
             (registration.credential, credential, "credential"),
@@ -127,19 +133,15 @@ class LLMAdapterRegistry:
             config=MappingProxyType(copy.deepcopy(dict(config))),
             credential=MappingProxyType(dict(credential)),
         )
+        secrets = tuple(value for value in credential.values() if value)
         port = registration.factory.create(
-            connection,
-            _EndpointScopedTransport(
-                transport,
-                endpoint,
-                secrets=tuple(value for value in credential.values() if value),
-            ),
+            connection, _EndpointScopedTransport(transport, endpoint, secrets=secrets)
         )
-        if not _is_generation_port(port):
+        if not _binds_two_arguments(getattr(port, "generate", None), coroutine=True):
             raise LLMAdapterRegistryError(
                 f"LLM adapter {adapter_id!r} did not build a text generation port"
             )
-        return port
+        return _GuardedPort(port, model, capabilities, secrets=secrets)
 
     def _registration(self, adapter_id: str) -> _Registration:
         try:
@@ -151,8 +153,8 @@ class LLMAdapterRegistry:
 
     def _register(self, factory: LLMAdapterFactory, *, namespace: str) -> None:
         descriptor = getattr(factory, "descriptor", None)
-        if not isinstance(descriptor, LLMAdapterDescriptor) or not callable(
-            getattr(factory, "create", None)
+        if not isinstance(descriptor, LLMAdapterDescriptor) or not _binds_two_arguments(
+            getattr(factory, "create", None), coroutine=False
         ):
             raise LLMAdapterRegistryError(
                 "LLM adapter does not implement LLMAdapterFactory"
@@ -186,12 +188,17 @@ class _Endpoint:
     segments: tuple[str, ...]
 
     @classmethod
-    def parse(cls, url: str) -> _Endpoint | None:
+    def parse(cls, url: str, *, query_allowed: bool = False) -> _Endpoint | None:
         # urlsplit silently drops tabs and newlines that the HTTP client would
         # reject, so such a URL is not the one being checked. Hosts are ASCII
         # (punycode) for the same reason.
-        if not url.isascii() or any(
-            ord(char) <= 0x20 or ord(char) == 0x7F for char in url
+        if (
+            not url.isascii()
+            or any(ord(char) <= 0x20 or ord(char) == 0x7F for char in url)
+            # An empty "?" or "#" parses as no query or fragment but still
+            # changes what is appended to the URL.
+            or "#" in url
+            or ("?" in url and not query_allowed)
         ):
             return None
         try:
@@ -205,8 +212,6 @@ class _Endpoint:
             or not parts.hostname
             or parts.username is not None
             or parts.password is not None
-            or parts.query
-            or parts.fragment
         ):
             return None
         segments = tuple(parts.path.split("/")[1:])
@@ -248,7 +253,9 @@ class _EndpointScopedTransport:
         payload: Mapping[str, object],
         timeout_seconds: float,
     ) -> TransportResponse:
-        target = _Endpoint.parse(url)
+        # A request may carry query parameters (an API version, say); the
+        # credential check below keeps secrets out of them.
+        target = _Endpoint.parse(url, query_allowed=True)
         if (
             target is None
             or not self._endpoint.contains(target)
@@ -261,12 +268,56 @@ class _EndpointScopedTransport:
         )
 
 
-def _is_generation_port(port: object) -> bool:
-    generate = getattr(port, "generate", None)
-    if not inspect.iscoroutinefunction(generate):
+class _GuardedPort:
+    """The Core rules around one execution's adapter (see ``create``)."""
+
+    def __init__(
+        self,
+        port: TextGenerationPort,
+        model: str,
+        capabilities: LLMModelCapabilities,
+        *,
+        secrets: tuple[str, ...],
+    ) -> None:
+        self._port = port
+        self._model = model
+        self._capabilities = capabilities
+        self._secrets = secrets
+
+    async def generate(
+        self, request: CanonicalTextRequest, context: ExecutionContext
+    ) -> CanonicalTextResult:
+        # The capabilities describe one model; another model is not covered.
+        if request.model != self._model:
+            raise LLMAdapterError("invalid_request", delivery="not_sent")
+        self._capabilities.require_supported(request)
+        try:
+            result = await self._port.generate(request, context)
+        except LLMAdapterError as exc:
+            exc.provider_request_id = self._opaque(exc.provider_request_id)
+            raise
+        if not isinstance(result, CanonicalTextResult):
+            raise LLMAdapterError("invalid_response", delivery="unknown")
+        return replace(
+            result, provider_request_id=self._opaque(result.provider_request_id)
+        )
+
+    def _opaque(self, request_id: str | None) -> str | None:
+        # Provider IDs come from response headers or bodies a server controls.
+        if (
+            isinstance(request_id, str)
+            and _REQUEST_ID.fullmatch(request_id)
+            and not any(secret in request_id for secret in self._secrets)
+        ):
+            return request_id
+        return None
+
+
+def _binds_two_arguments(function: object, *, coroutine: bool) -> bool:
+    if not callable(function) or inspect.iscoroutinefunction(function) != coroutine:
         return False
     try:
-        inspect.signature(generate).bind(None, None)
+        inspect.signature(function).bind(None, None)
     except (TypeError, ValueError):
         return False
     return True
@@ -311,9 +362,9 @@ def _validated_snapshot(descriptor: LLMAdapterDescriptor) -> LLMAdapterDescripto
             raise LLMAdapterRegistryError(
                 f"LLM adapter {adapter_id!r} has an invalid {name}"
             ) from None
-        if not _references_stay_local(schema):
+        if _uses_references(schema):
             raise LLMAdapterRegistryError(
-                f"LLM adapter {adapter_id!r} {name} references another schema"
+                f"LLM adapter {adapter_id!r} {name} must be self-contained"
             )
         schemas[name] = MappingProxyType(schema)
     return replace(
@@ -324,49 +375,31 @@ def _validated_snapshot(descriptor: LLMAdapterDescriptor) -> LLMAdapterDescripto
     )
 
 
-# Keywords that would let a reference resolve somewhere other than this
-# schema's own definitions.
-_RESOLUTION_KEYWORDS = frozenset({"$id", "$anchor", "$dynamicAnchor", "$dynamicRef"})
+# References can fetch, miss or loop, and "$schema" can switch to a dialect
+# with other reference keywords; connection and credential forms need none.
+_REFERENCE_KEYWORDS = frozenset(
+    {
+        "$schema",
+        "$ref",
+        "$dynamicRef",
+        "$recursiveRef",
+        "$id",
+        "$anchor",
+        "$dynamicAnchor",
+        "$recursiveAnchor",
+    }
+)
 
 
-def _references_stay_local(root: Mapping[str, object]) -> bool:
-    """Every ``$ref`` is a JSON pointer to an existing part of this schema, so
-    validation never fetches or fails to find a schema."""
-
-    def local(node: object) -> bool:
-        if isinstance(node, Mapping):
-            return all(
-                key not in _RESOLUTION_KEYWORDS
-                and (key != "$ref" or _points_into(root, value))
-                and local(value)
-                for key, value in node.items()
-            )
-        if isinstance(node, list):
-            return all(local(item) for item in node)
-        return True
-
-    return local(root)
-
-
-def _points_into(root: Mapping[str, object], reference: object) -> bool:
-    if not isinstance(reference, str) or not reference.startswith("#"):
-        return False
-    pointer = unquote(reference[1:])
-    if not pointer:
-        return True
-    if not pointer.startswith("/"):
-        return False
-    node: object = root
-    for token in pointer[1:].split("/"):
-        token = token.replace("~1", "/").replace("~0", "~")
-        if isinstance(node, Mapping) and token in node:
-            node = node[token]
-        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
-            node = node[int(token)]
-        else:
-            return False
-    # The target must itself be a schema.
-    return isinstance(node, (Mapping, bool))
+def _uses_references(schema: object) -> bool:
+    if isinstance(schema, Mapping):
+        return any(
+            key in _REFERENCE_KEYWORDS or _uses_references(value)
+            for key, value in schema.items()
+        )
+    if isinstance(schema, list):
+        return any(_uses_references(item) for item in schema)
+    return False
 
 
 __all__ = ["BUILTIN_NAMESPACE", "LLMAdapterRegistry", "LLMAdapterRegistryError"]

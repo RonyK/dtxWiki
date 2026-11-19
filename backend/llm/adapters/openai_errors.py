@@ -17,6 +17,7 @@ _ERROR_CODES: Mapping[str, LLMErrorCode] = {
     "rate_limit_exceeded": "rate_limited",
     "slow_down": "rate_limited",
     "model_not_found": "not_found",
+    "invalid_prompt": "invalid_request",
     "invalid_api_key": "authentication_failed",
     "server_error": "provider_unavailable",
 }

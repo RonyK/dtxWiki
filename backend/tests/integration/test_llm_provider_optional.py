@@ -6,7 +6,12 @@ import pytest
 from backend.llm.adapter_registry import LLMAdapterRegistry
 from backend.llm.adapters import build_builtin_llm_adapters
 from backend.llm.transport import HttpxLLMTransport
-from backend.spi.llm import CanonicalTextRequest, ExecutionContext, TextMessage
+from backend.spi.llm import (
+    CanonicalTextRequest,
+    ExecutionContext,
+    LLMModelCapabilities,
+    TextMessage,
+)
 
 RUN_REAL_LLM_TESTS = os.getenv("DTXWIKI_RUN_REAL_LLM_TESTS") == "1"
 
@@ -56,6 +61,8 @@ def test_builtin_adapter_real_key_smoke(adapter_id, model, key_names):
         base_url=None,
         config={},
         credential={"api_key": key},
+        model=model,
+        capabilities=LLMModelCapabilities(),
         transport=HttpxLLMTransport(),
     )
 

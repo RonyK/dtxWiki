@@ -72,11 +72,13 @@ class GeminiGenerateContentAdapter:
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext
     ) -> CanonicalTextResult:
-        if not _MODEL_ID.match(request.model):
+        # Accept the resource name the Models API lists ("models/<id>") too.
+        model = request.model.removeprefix("models/")
+        if not _MODEL_ID.match(model):
             raise LLMAdapterError("invalid_request", delivery="not_sent")
         reply = await post_json_object(
             self._transport,
-            f"{self._connection.base_url}/models/{request.model}:generateContent",
+            f"{self._connection.base_url}/models/{model}:generateContent",
             # A header keeps the key out of URLs, proxies and access logs.
             headers={"x-goog-api-key": self._connection.credential["api_key"]},
             payload=_payload(request),

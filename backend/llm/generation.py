@@ -11,7 +11,6 @@ from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
     ExecutionContext,
-    LLMModelCapabilities,
     TextGenerationPort,
     TextMessage,
 )
@@ -39,7 +38,6 @@ class BlockingTextGenerator:
 
     port: TextGenerationPort
     model: str
-    capabilities: LLMModelCapabilities
     context: ExecutionContext
     temperature: float | None = None
 
@@ -57,7 +55,6 @@ class BlockingTextGenerator:
             system=system,
             temperature=self.temperature,
         )
-        self.capabilities.require_supported(request)
         return asyncio.run(self.port.generate(request, self.context))
 
 

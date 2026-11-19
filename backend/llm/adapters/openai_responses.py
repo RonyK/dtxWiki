@@ -34,6 +34,9 @@ _INCOMPLETE_TERMINATIONS: Mapping[str, Termination] = {
     "max_messages": "truncated",
     "content_filter": "blocked",
 }
+# The API refuses a smaller output budget; raising it would spend more than
+# the caller allowed.
+_MIN_OUTPUT_TOKENS = 16
 # Calls the model asks the client to run. Hosted tools run at OpenAI and are
 # not requests to dtxWiki.
 _CLIENT_TOOL_CALLS = frozenset({"function_call", "custom_tool_call"})
@@ -57,6 +60,8 @@ class OpenAIResponsesAdapter:
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext
     ) -> CanonicalTextResult:
+        if request.max_output_tokens < _MIN_OUTPUT_TOKENS:
+            raise LLMAdapterError("invalid_request", delivery="not_sent")
         reply = await post_json_object(
             self._transport,
             f"{self._connection.base_url}/responses",
