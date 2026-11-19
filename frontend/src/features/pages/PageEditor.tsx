@@ -1,10 +1,6 @@
 import { inputTextError, markdownInputError, textInputLimit } from "../../shared/lib/inputPolicy";
 import { autocompletion, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
-  defaultKeymap,
-  history,
-  historyKeymap,
   indentWithTab,
   redo,
   undo,
@@ -1219,26 +1215,16 @@ export function PageEditor({
   };
   const extensions = useMemo(
     () => [
-      history(),
       lineNumbers(),
       highlightActiveLineGutter(),
       foldGutter(),
       drawSelection(),
-      EditorView.lineWrapping,
-      // @uiw/react-codemirror does not reliably forward its aria-label prop
-      // to CodeMirror's actual contenteditable textbox in a real browser.
-      // Label the element CodeMirror owns so assistive technology names the
-      // same role="textbox" surface that receives keyboard input.
-      EditorView.contentAttributes.of({ "aria-label": bodyAriaLabel }),
       indentOnInput(),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       bracketMatching(),
       closeBrackets(),
       highlightActiveLine(),
       highlightSelectionMatches(),
-      markdown({
-        base: markdownLanguage,
-      }),
       autocompletion({
         override: [createEditorCompletionSource(pagesRef, sourceSuggestionsRef, workspaceIdRef, {
           label: t("references.choose"),
@@ -1280,33 +1266,33 @@ export function PageEditor({
           syncPreviewToCaretRef.current(update.view);
         }
       }),
-      keymap.of([
-        indentWithTab,
-        {
-          key: "Mod-s",
-          run() {
-            saveRef.current();
-            return true;
+      // These features' keys follow the standard keys, as they always have.
+      keymap.of([...closeBracketsKeymap, ...searchKeymap, ...foldKeymap]),
+    ],
+    [imageUploadOptions, t],
+  );
+  const keyBindings = useMemo(
+    () => [
+      indentWithTab,
+      {
+        key: "Mod-s",
+        run() {
+          saveRef.current();
+          return true;
+        },
+        preventDefault: true,
+      },
+      ...(EDITOR_COMMANDS as readonly EditorCommand[])
+        .filter((command) => command.shortcut)
+        .map((command) => ({
+          key: editorShortcutCodeMirrorKey(command.shortcut!),
+          run(view: EditorViewType) {
+            return commandRef.current(command.id, view);
           },
           preventDefault: true,
-        },
-        ...(EDITOR_COMMANDS as readonly EditorCommand[])
-          .filter((command) => command.shortcut)
-          .map((command) => ({
-            key: editorShortcutCodeMirrorKey(command.shortcut!),
-            run(view: EditorViewType) {
-              return commandRef.current(command.id, view);
-            },
-            preventDefault: true,
-          })),
-        ...defaultKeymap,
-        ...closeBracketsKeymap,
-        ...searchKeymap,
-        ...foldKeymap,
-        ...historyKeymap,
-      ]),
+        })),
     ],
-    [bodyAriaLabel, imageUploadOptions, t],
+    [],
   );
   const contextActiveNodeId = useMemo(
     () => contextTree.find((node) => node.target_id === page?.id)?.id ?? null,
@@ -6063,7 +6049,9 @@ export function PageEditor({
               ) : null}
               <MarkdownSourceEditor
                 value={body}
+                ariaLabel={bodyAriaLabel}
                 extensions={extensions}
+                keyBindings={keyBindings}
                 onChange={updateAuthoredBody}
                 onCreateEditor={(view) => {
                   editorViewRef.current = view;

@@ -8,7 +8,7 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, type KeyBinding, keymap } from "@codemirror/view";
 import type { EditorView as EditorViewType } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import {
@@ -72,30 +72,58 @@ export type MarkdownEditorKernelProps = {
 };
 
 export type MarkdownSourceEditorProps = {
-  extensions: Extension[];
+  /** Names the textbox CodeMirror owns. */
+  ariaLabel: string;
+  /** The surface's own features. */
+  extensions?: readonly Extension[];
+  /** The surface's own keys; they win over the standard keys. */
+  keyBindings?: readonly KeyBinding[];
   onChange: (value: string) => void;
   onCreateEditor?: (view: EditorViewType) => void;
   placeholder: string;
   value: string;
 };
 
+const NO_EXTENSIONS: readonly Extension[] = [];
+const NO_KEY_BINDINGS: readonly KeyBinding[] = [];
+// The app's undo and redo shortcuts (its editor commands), on every surface.
+const HISTORY_SHORTCUTS: readonly KeyBinding[] = (["undo", "redo"] as const).map((id) => ({
+  key: editorShortcutCodeMirrorKey(editorCommandById(id)!.shortcut!),
+  run: id === "undo" ? undo : redo,
+  preventDefault: true,
+}));
+
 /**
- * Neutral CodeMirror host shared by Context pages and Library semantic
- * Markdown. Domain adapters keep ownership of their extensions, commands, and
- * persistence workflow while this component keeps the source surface itself
- * consistent.
+ * The one CodeMirror host for Markdown source: Context pages, the merge
+ * result and Library semantic Markdown. Every surface edits the same way --
+ * one undo history with the app's undo/redo shortcuts, the standard keys
+ * below its own, Markdown, line wrapping and a label on the textbox. A
+ * surface adds only its own keys and features.
  */
 export function MarkdownSourceEditor({
-  extensions,
+  ariaLabel,
+  extensions = NO_EXTENSIONS,
+  keyBindings = NO_KEY_BINDINGS,
   onChange,
   onCreateEditor,
   placeholder,
   value,
 }: MarkdownSourceEditorProps) {
+  const sourceExtensions = useMemo(() => [
+    history(),
+    keymap.of([...keyBindings, ...HISTORY_SHORTCUTS, ...defaultKeymap, ...historyKeymap]),
+    EditorView.lineWrapping,
+    // @uiw/react-codemirror does not reliably forward its aria-label prop to
+    // CodeMirror's contenteditable textbox in a real browser: label the
+    // element CodeMirror owns, the one that receives keyboard input.
+    EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
+    markdown({ base: markdownLanguage }),
+    ...extensions,
+  ], [ariaLabel, extensions, keyBindings]);
   return (
     <CodeMirror
       basicSetup={false}
-      extensions={extensions}
+      extensions={sourceExtensions}
       height="100%"
       onChange={onChange}
       onCreateEditor={onCreateEditor}
@@ -182,33 +210,30 @@ export function MarkdownEditorKernel({
 
   const extensions = useMemo(
     () => [
-      history(),
       foldGutter(),
-      EditorView.lineWrapping,
-      EditorView.contentAttributes.of({ "aria-label": labels.bodyAria }),
       indentOnInput(),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       bracketMatching(),
-      markdown({ base: markdownLanguage }),
       EditorView.updateListener.of((update) => {
         if (update.selectionSet || update.docChanged) syncCommandStates(update.view);
       }),
-      keymap.of([
-        indentWithTab,
-        ...MARKDOWN_KERNEL_COMMANDS.filter((command) => command.shortcut).map(
-          (command) => ({
-            key: editorShortcutCodeMirrorKey(command.shortcut!),
-            run(view: EditorViewType) {
-              return executeCommandInView(command.id, view);
-            },
-            preventDefault: true,
-          }),
-        ),
-        ...defaultKeymap,
-        ...historyKeymap,
-      ]),
     ],
-    [executeCommandInView, labels.bodyAria, syncCommandStates],
+    [syncCommandStates],
+  );
+  const keyBindings = useMemo(
+    () => [
+      indentWithTab,
+      ...MARKDOWN_KERNEL_COMMANDS.filter((command) => command.shortcut).map(
+        (command) => ({
+          key: editorShortcutCodeMirrorKey(command.shortcut!),
+          run(view: EditorViewType) {
+            return executeCommandInView(command.id, view);
+          },
+          preventDefault: true,
+        }),
+      ),
+    ],
+    [executeCommandInView],
   );
 
   const activeMode = singlePane && mode === "split" ? "source" : mode;
@@ -316,7 +341,9 @@ export function MarkdownEditorKernel({
           role="tabpanel"
         >
           <MarkdownSourceEditor
+            ariaLabel={labels.bodyAria}
             extensions={extensions}
+            keyBindings={keyBindings}
             onChange={onChange}
             onCreateEditor={(view) => {
               editorViewRef.current = view;

@@ -1,4 +1,3 @@
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { RangeSetBuilder, StateField, type Extension } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -281,15 +280,10 @@ function MergeResultEditor({ ariaLabel, onChange, ranges, value }: {
 }) {
   // Decorations start from the merge text and then follow the person's edits.
   const [initialRanges] = useState(ranges);
-  const extensions = useMemo(() => [
-    EditorView.lineWrapping,
-    EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
-    markdown({ base: markdownLanguage }),
-    mergedLinesField(initialRanges),
-  ], [ariaLabel, initialRanges]);
+  const extensions = useMemo(() => [mergedLinesField(initialRanges)], [initialRanges]);
   return (
     <div className="context-merge-editor">
-      <MarkdownSourceEditor extensions={extensions} onChange={onChange} placeholder="" value={value} />
+      <MarkdownSourceEditor ariaLabel={ariaLabel} extensions={extensions} onChange={onChange} placeholder="" value={value} />
     </div>
   );
 }
