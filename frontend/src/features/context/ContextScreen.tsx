@@ -1838,15 +1838,27 @@ function PendingDraftReview({
     setError(null);
     const pending = type === "approve" ? readPendingApproval() : null;
     const decisionId = pending?.decisionId ?? crypto.randomUUID();
-    const send = (mergeBinding: ContextMergeBinding | null) => {
+    // The replay record lives exactly as long as the decision's outcome is
+    // unknown: written before sending, settled once the server answers.
+    const settleRecord = () => {
+      pendingApprovalRef.current = null;
+      writeReviewDraft(pendingKey, "");
+    };
+    const send = async (mergeBinding: ContextMergeBinding | null) => {
       if (type === "approve") {
-        // Recorded before sending, so a lost response replays this exact approval.
         pendingApprovalRef.current = { key: pendingKey, decisionId, mergeBinding };
         writeReviewDraft(pendingKey, JSON.stringify({ decisionId, workspaceId, reviewId: review.review_item_id,
           decision: "approve", reason: null, mergeBinding }));
       }
-      return decideReview(workspaceId, review.review_item_id, type, type === "request_changes" ? reason : undefined,
-        { decision_id: decisionId, merge_binding: mergeBinding });
+      try {
+        const decided = await decideReview(workspaceId, review.review_item_id, type,
+          type === "request_changes" ? reason : undefined, { decision_id: decisionId, merge_binding: mergeBinding });
+        settleRecord();
+        return decided;
+      } catch (error) {
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500) settleRecord();
+        throw error;
+      }
     };
     try {
       // A replayed approval resends its recorded pins; a new Context approval
@@ -1864,15 +1876,9 @@ function PendingDraftReview({
           write: (choice) => send(decisionPins(choice)),
         })
         : await send(pending?.mergeBinding ?? null);
-      pendingApprovalRef.current = null;
-      writeReviewDraft(pendingKey, "");
       await onDecided(result);
     } catch (exc) {
       if (isAbortError(exc)) return;
-      if (exc instanceof ApiError && exc.status >= 400 && exc.status < 500) {
-        pendingApprovalRef.current = null;
-        writeReviewDraft(pendingKey, "");
-      }
       setError(
         type === "approve"
           ? t("pendingReview.approveError", {

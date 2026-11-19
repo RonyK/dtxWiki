@@ -416,21 +416,23 @@ export function cleanMergeChoice(preview: ContextMergePreview): PreparedMergeCho
 }
 
 /**
- * Binds a person's choice (and optional edits) to the preview they saw. An
+ * Binds the result a person confirmed -- one of the two choices, or a clean
+ * result (no choice) -- and its optional edits to the preview they saw. An
  * edited result is hashed by the server; if the draft or the other side moved
  * meanwhile, the caller gets the new preview instead of a silent overwrite.
  */
 export async function prepareMergeChoice(workspaceId: string, id: string, preview: ContextMergePreview,
-  choice: { onConflict: ContextMergeChoiceValue; bodyMd?: string | null; pageMetadata?: ContextMergeMetadataInput | null },
+  choice: { onConflict: ContextMergeChoiceValue | null; bodyMd?: string | null; pageMetadata?: ContextMergeMetadataInput | null },
   options: { signal?: AbortSignal } = {}): Promise<PreparedMergeChoice> {
   const edits = {
     ...(choice.bodyMd != null ? { bodyMd: choice.bodyMd } : {}),
     ...(choice.pageMetadata != null ? { pageMetadata: choice.pageMetadata } : {}),
   };
-  let resultHash = preview[choice.onConflict]?.result_hash;
+  const onConflict = choice.onConflict ?? undefined;
+  let resultHash = (onConflict ? preview[onConflict] : preview.result)?.result_hash;
   if (Object.keys(edits).length > 0 || !resultHash) {
     const target = { signal: options.signal, commitVersionId: preview.target_version_id };
-    const checked = await previewPageMerge(workspaceId, id, preview.version_id, { ...target, onConflict: choice.onConflict, ...edits });
+    const checked = await previewPageMerge(workspaceId, id, preview.version_id, { ...target, onConflict, ...edits });
     if (checked.editing_revision !== preview.editing_revision || checked.target_version_id !== preview.target_version_id || !checked.result) {
       throw new ContextMergePreviewChanged(await previewPageMerge(workspaceId, id, preview.version_id, target));
     }
@@ -440,7 +442,7 @@ export async function prepareMergeChoice(workspaceId: string, id: string, previe
     source: "chosen",
     preview: previewPins(preview),
     result_hash: resultHash,
-    on_conflict: choice.onConflict,
+    ...(onConflict ? { on_conflict: onConflict } : {}),
     ...(choice.bodyMd != null ? { result_body_md: choice.bodyMd } : {}),
     ...(choice.pageMetadata != null ? { result_page_metadata: choice.pageMetadata } : {}),
   };

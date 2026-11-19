@@ -50,6 +50,13 @@ function isRefused(error: unknown) {
   return error instanceof ApiError && error.status >= 400 && error.status < 500;
 }
 
+/** A write was sent and its outcome is unknown: only its caller can recover. */
+class MergeOutcomeUnknown extends Error {
+  constructor(readonly cause: unknown) {
+    super("The merge write's outcome is unknown");
+  }
+}
+
 function mergeClosed() {
   return new DOMException("Merge closed", "AbortError");
 }
@@ -80,14 +87,15 @@ export function useContextMerge() {
     previous?.fail(mergeClosed());
   }, []);
 
-  // The one transition. A conflicting preview is shown until the person
-  // answers; a clean preview, or an answer, is written. A stale answer shows
-  // the newer preview. A stale clean write is retried only when the newer
-  // preview needs a choice -- otherwise the refusal is the outcome, so a
-  // write whose own pins are out of date never repeats. An answer the server
-  // refused is asked again in the dialog; any other failure -- including a
-  // write whose outcome is unknown, which only its caller can recover -- ends
-  // the caller's wait.
+  // The one transition, with git's rules. A conflicting preview is shown
+  // until the person answers; a clean one is written without a question.
+  // Once the person has answered, a changed preview is never written as is:
+  // it is shown again (clean or conflicting) and confirmed again. A stale
+  // clean write is retried only when the newer preview needs a choice, so a
+  // write whose own pins are out of date never repeats. Only a write whose
+  // outcome is unknown ends the merge for its caller to recover; a failure
+  // before the write, or a write the server refused, stays in the dialog with
+  // the person's answer.
   const settle = useCallback(async function settle(
     session: MergeSession,
     preview: ContextMergePreview,
@@ -95,7 +103,7 @@ export function useContextMerge() {
     resolution?: ContextMergeResolution,
   ): Promise<void> {
     if (sessionRef.current !== session) return;
-    const asking = preview.kind === "conflict";
+    const asking = preview.kind === "conflict" || refreshed;
     if (asking) setView({ session, preview, refreshed, busy: Boolean(resolution), error: null });
     if (asking && !resolution) return;
     try {
@@ -104,16 +112,17 @@ export function useContextMerge() {
     } catch (error) {
       if (sessionRef.current !== session) return;
       try {
+        if (error instanceof MergeOutcomeUnknown) throw error;
         const newer = error instanceof ContextMergePreviewChanged ? error.preview
           : isStale(error) && session.reload ? await session.reload() : null;
-        if (!newer || (!asking && newer.kind !== "conflict")) throw error;
+        if (!newer || (!resolution && newer.kind !== "conflict")) throw error;
         await settle(session, newer, true);
       } catch (failure) {
         if (sessionRef.current !== session) return;
-        if (asking && isRefused(failure)) {
+        if (asking && !(failure instanceof MergeOutcomeUnknown)) {
           setView({ session, preview, refreshed, busy: false, error: session.errorMessage(failure) });
         } else {
-          finish(session, failure);
+          finish(session, failure instanceof MergeOutcomeUnknown ? failure.cause : failure);
         }
       }
     }
@@ -132,9 +141,18 @@ export function useContextMerge() {
     loadPreview: () => Promise<ContextMergePreview>;
     write: (choice: PreparedMergeChoice) => Promise<T>;
   }) => new Promise<T>((resolve, reject) => {
-    // Nothing is written for a merge that was closed or replaced meanwhile.
+    // The one place a merge write is sent. Nothing is written for a merge
+    // that was closed or replaced meanwhile; a write the server did not
+    // answer with a refusal has an unknown outcome.
     const commit = async (choice: PreparedMergeChoice) => {
-      if (sessionRef.current === session) resolve(await target.write(choice));
+      if (sessionRef.current !== session) return;
+      let result: T;
+      try {
+        result = await target.write(choice);
+      } catch (error) {
+        throw isRefused(error) ? error : new MergeOutcomeUnknown(error);
+      }
+      resolve(result);
     };
     const session: MergeSession = {
       ...target,

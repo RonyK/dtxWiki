@@ -68,7 +68,7 @@ export function ContextMergeDialog({
   const [view, setView] = useState<"result" | "edit">("result");
   const [editedBody, setEditedBody] = useState<string | null>(null);
   const [metadataChoices, setMetadataChoices] = useState<Partial<Record<ContextMergeMetadataField, MetadataChoice>>>({});
-  const previewKey = `${preview.version_id}:${preview.editing_revision}:${preview.target_version_id ?? ""}:${preview.keep_both?.result_hash ?? ""}:${preview.latest?.result_hash ?? ""}`;
+  const previewKey = `${preview.version_id}:${preview.editing_revision}:${preview.target_version_id ?? ""}:${preview.result?.result_hash ?? ""}:${preview.keep_both?.result_hash ?? ""}:${preview.latest?.result_hash ?? ""}`;
   useEffect(() => {
     // A new preview means new content: earlier edits no longer apply to it.
     setEditedBody(null);
@@ -76,9 +76,15 @@ export function ContextMergeDialog({
     setView("result");
   }, [previewKey]);
 
-  const candidate = choice ? preview[choice] ?? null : null;
+  // A conflict asks for one of the two choices; a clean result (shown again
+  // after a newer save resolved the overlap) is confirmed as it is.
+  const asksChoice = preview.kind === "conflict";
+  const candidate = asksChoice ? (choice ? preview[choice] ?? null : null) : preview.result ?? null;
   const sourceText = candidate ? mergeSourceText(candidate) : "";
-  const ranges = useMemo(() => (candidate && choice ? mergedLineRanges(candidate, choice) : []), [candidate, choice]);
+  const ranges = useMemo(
+    () => (candidate && asksChoice && choice ? mergedLineRanges(candidate, choice) : []),
+    [asksChoice, candidate, choice],
+  );
   const fields = conflictedMetadataFields(preview);
   const sides = preview.sides ?? null;
   const latestSide = sides ? sides[preview.latest_side] : null;
@@ -98,7 +104,7 @@ export function ContextMergeDialog({
   }
 
   function resolution(): ContextMergeResolution | null {
-    if (!choice || !candidate) return null;
+    if (!candidate) return null;
     const edit: ContextMergeMetadataEdit = {};
     for (const field of fields) {
       const chosen = metadataChoices[field];
@@ -110,7 +116,7 @@ export function ContextMergeDialog({
       else if (field === "title" && chosen.value) edit.title = chosen.value;
     }
     return {
-      choice,
+      choice: asksChoice ? choice : null,
       candidate,
       bodyMd: editedBody !== null && editedBody !== sourceText ? editedBody : null,
       pageMetadata: Object.keys(edit).length > 0 ? edit : null,
@@ -118,8 +124,8 @@ export function ContextMergeDialog({
   }
 
   const titleInvalid = metadataChoices.title?.source === "custom" && !metadataChoices.title.value?.trim();
-  const ready = Boolean(choice && candidate) && !titleInvalid;
-  const summary = kind === "save"
+  const ready = Boolean(candidate) && !titleInvalid;
+  const summary = !asksChoice ? t("merge.summaryClean") : kind === "save"
     ? t("merge.summarySave", { count: conflictCount, name: sideName(sides?.theirs ?? null), time: sideTime(sides?.theirs ?? null) })
     : t("merge.summary", {
       count: conflictCount,
@@ -138,7 +144,7 @@ export function ContextMergeDialog({
       footer={(
         <div className="context-merge-footer">
           {error ? <p className="form-error" role="alert">{error}</p> : null}
-          {!choice ? <p className="context-merge-hint">{t("merge.chooseFirst")}</p> : null}
+          {asksChoice && !choice ? <p className="context-merge-hint">{t("merge.chooseFirst")}</p> : null}
           <div className="dialog-actions">
             <button className="text-button" disabled={busy} onClick={onClose} type="button">{t("shell:dialog.close")}</button>
             <button
@@ -158,7 +164,7 @@ export function ContextMergeDialog({
       <div className="context-merge-body" inert={busy} aria-busy={busy}>
         {refreshed ? <p className="context-merge-refreshed" role="status">{t("merge.refreshed")}</p> : null}
         <p className="context-merge-summary">{summary}</p>
-        <SegmentedControl
+        {asksChoice ? <SegmentedControl
           className="context-merge-choices"
           label={t("merge.choiceLabel")}
           onChange={(value) => setChoice(value as ContextMergeChoice)}
@@ -184,7 +190,7 @@ export function ContextMergeDialog({
             },
           ]}
           value={choice ?? ""}
-        />
+        /> : null}
         {candidate ? (
           <section className="context-merge-result" aria-label={t("merge.resultLabel")}>
             <div className="context-merge-result-header">
