@@ -31,7 +31,7 @@ import {
   listReviews,
   undoReviewDecision,
 } from "../../shared/api/operations";
-import { previewPageMerge, restorePageVersion, type ContextMergePreview } from "../../shared/api/pages";
+import { ContextMergePreviewChanged, contextWriteStateMoved, previewPageMerge, restorePageVersion, type ContextMergePreview } from "../../shared/api/pages";
 import { isAbortError } from "../../shared/lib/abortError";
 import { useContextMerge } from "../pages/useContextMerge";
 import { MarkdownView } from "../pages/MarkdownView";
@@ -425,6 +425,20 @@ export function ReviewScreen() {
       && listedReview.updated_at === completedReview.updated_at));
   const selectedDetailKey = workspaceIsCurrent && reviewParam
     ? JSON.stringify([state?.workspaceId, reviewParam, listedReview?.updated_at ?? null, listedReview?.status ?? null]) : null;
+  // The merge an approval of the open review publishes, as shown on screen;
+  // the approval sends exactly this preview.
+  const approvalPreview = useContextApprovalPreview(
+    selectedDetail?.key === selectedDetailKey ? selectedDetail.review : null,
+    state?.workspaceId ?? null,
+  );
+  // The draft revisions the evidence shows; an approval publishes only one
+  // of those. contentReload re-reads the evidence after the draft moved.
+  const evidenceRevisionsRef = useRef<{
+    reviewId: string;
+    revisions: Record<string, number>;
+    publishedAgainst: Record<string, string | null>;
+  } | null>(null);
+  const [contentReload, setContentReload] = useState(0);
   useEffect(() => {
     const generation = ++reviewSelectionGenerationRef.current;
     const controller = new AbortController();
@@ -1186,20 +1200,32 @@ export function ReviewScreen() {
     }
   }
 
-  // A Context approval goes through the shared merge flow, which binds the
-  // decision to the merge preview the approver saw.
+  // A Context approval goes through the shared merge flow with the merge
+  // preview the approver saw (shown above the decision): it is never re-read
+  // at the click, so a draft or published version that moved meanwhile is
+  // refused and shown again instead of approved unseen.
   function approveContext(target: { pageId: string; versionId: string }) {
     const workspaceId = state?.workspaceId;
     const reviewId = reviewForCurrentParam()?.id;
     if (!workspaceId || !reviewId) return Promise.resolve<DecisionResult>("failed");
+    const shown = approvalPreview.preview;
+    const evidence = evidenceRevisionsRef.current;
+    const shownRevision = evidence?.reviewId === reviewId ? evidence.revisions[target.versionId] : undefined;
+    // A shown publish result was computed against a published version too.
+    const shownAgainst = evidence?.reviewId === reviewId ? evidence.publishedAgainst[target.versionId] : undefined;
+    if (!shown || shown.page_id !== target.pageId || shown.version_id !== target.versionId
+      || shownRevision !== shown.editing_revision
+      || (shownAgainst !== undefined && shownAgainst !== (shown.published_version_id ?? null))) {
+      return Promise.reject(new ContextMergePreviewChanged());
+    }
     // The review is reserved from the click: no other decision on it while
-    // its merge preview loads or its dialog is open.
+    // its merge dialog is open.
     setBusyId(reviewId);
     return merge.runMergeWrite({
       kind: "publish",
       workspaceId,
       pageId: target.pageId,
-      loadPreview: () => previewPageMerge(workspaceId, target.pageId, target.versionId),
+      preview: shown,
       write: async (choice) => {
         const result = await runDecision("approve", undefined, undefined, null, decisionPins(choice));
         if (result === "failed") throw new Error(t("errors.decide"));
@@ -1218,6 +1244,14 @@ export function ReviewScreen() {
       if (isAbortError(exc)) return "failed";
       if (decision === "reject" && exc instanceof ApiError
         && exc.body.error_code === "review_decision_impact_changed") throw exc;
+      if (decision === "approve" && contextWriteStateMoved(exc)) {
+        // Show the draft as it is now -- its content, comparison and merge --
+        // before anyone approves again.
+        approvalPreview.reload();
+        setContentReload((value) => value + 1);
+        setError(t("workflow.mergeChanged"));
+        return "failed";
+      }
       setError(reviewErrorMessage(exc, t("errors.decide")));
       return "failed";
     }
@@ -1821,6 +1855,11 @@ export function ReviewScreen() {
               <>
                 <ReviewDetail
                   key={rejectDialogKey?.reviewId === selectedReview.id ? rejectDialogKey.key : reviewContentKey(selectedReview)}
+                  approvalPreview={approvalPreview.preview}
+                  contentReload={contentReload}
+                  onEvidenceRevisions={(reviewId, revisions, publishedAgainst) => {
+                    evidenceRevisionsRef.current = { reviewId, revisions, publishedAgainst };
+                  }}
                   workspaceId={state.workspaceId}
                   decisionSaved={completedReviewIsCurrent}
                   nextDisabled={refreshFailed || refreshing || Boolean(busyId) || bulkBusy || Boolean(uncertainDecision) || (state.reviews.length === 0 && state.nextCursor === null)}
@@ -2480,26 +2519,38 @@ function ReconciliationProvenanceMeta({ review }: { review: ReviewItem }) {
 // common OS limit) yet short enough not to be noticed as a wait.
 const UNDO_ARM_DELAY_MS = 500;
 
-/**
- * What approving would publish when the published version moved: the combined
- * result for an automatic merge, or a note that approval asks for a choice.
- */
-function ContextApprovalResult({ review, workspaceId }: { review: ReviewItem; workspaceId: string }) {
-  const { t } = useTranslation("review");
-  const target = contextMergeTargetOf(review);
+/** The merge approving `review` would publish, read once per review state. */
+function useContextApprovalPreview(review: ReviewItem | null, workspaceId: string | null) {
+  const target = review ? contextMergeTargetOf(review) : null;
+  const open = Boolean(review && ["pending", "changes_requested"].includes(review.status));
+  const [reload, setReload] = useState(0);
+  const key = workspaceId && target && open
+    ? `${workspaceId}:${target.pageId}:${target.versionId}:${review?.updated_at ?? ""}:${reload}`
+    : null;
   const pageId = target?.pageId ?? null;
   const versionId = target?.versionId ?? null;
-  const key = pageId && versionId ? `${workspaceId}:${pageId}:${versionId}` : null;
   const [preview, setPreview] = useState<{ key: string; value: ContextMergePreview } | null>(null);
   useEffect(() => {
-    if (!key || !pageId || !versionId || !["pending", "changes_requested"].includes(review.status)) return;
+    if (!key || !workspaceId || !pageId || !versionId) return;
     let active = true;
     void previewPageMerge(workspaceId, pageId, versionId)
       .then((value) => { if (active) setPreview({ key, value }); })
       .catch(() => undefined);
     return () => { active = false; };
-  }, [key, pageId, review.status, versionId, workspaceId]);
-  const value = preview?.key === key ? preview.value : null;
+  }, [key, pageId, versionId, workspaceId]);
+  return {
+    preview: preview?.key === key ? preview.value : null,
+    reload: useCallback(() => setReload((value) => value + 1), []),
+  };
+}
+
+/**
+ * What approving would publish when the published version moved: the merged
+ * result for an automatic merge, or a note that approval asks for a choice.
+ */
+function ContextApprovalResult({ preview, workspaceId }: { preview: ContextMergePreview | null; workspaceId: string }) {
+  const { t } = useTranslation("review");
+  const value = preview;
   if (value?.kind === "automatic_merge" && value.result) {
     return (
       <StatusBanner tone="info">
@@ -2522,6 +2573,9 @@ function ContextApprovalResult({ review, workspaceId }: { review: ReviewItem; wo
 
 function ReviewDetail({
   review,
+  approvalPreview,
+  contentReload,
+  onEvidenceRevisions,
   workspaceId,
   decisionSaved,
   nextDisabled,
@@ -2543,6 +2597,15 @@ function ReviewDetail({
   onRouteChanges,
 }: {
   review: ReviewItem;
+  approvalPreview: ContextMergePreview | null;
+  /** Bumped to read the reviewed content again after the draft moved. */
+  contentReload: number;
+  /** The draft revisions whose content the evidence shows. */
+  onEvidenceRevisions: (
+    reviewId: string,
+    revisions: Record<string, number>,
+    publishedAgainst: Record<string, string | null>,
+  ) => void;
   workspaceId: string;
   decisionSaved: boolean;
   nextDisabled: boolean;
@@ -2877,7 +2940,7 @@ function ReviewDetail({
             type="button"
           >
             <Check size={15} aria-hidden="true" />
-            <span>{t("shell:actions.approve")}</span>
+            <span>{contextMergeTargetOf(review) ? t("detail.approvePublish") : t("shell:actions.approve")}</span>
           </button>
           <button
             className="icon-button warning"
@@ -3031,8 +3094,17 @@ function ReviewDetail({
         </StatusBanner>
       ) : null}
       {!isReadOnly && review.actions?.approve.reason_code ? <p className="review-action-unavailable" role="status">{reviewOutcomeReason(review.actions.approve.reason_code, null, t)}</p> : null}
-      {!isReadOnly ? <ContextApprovalResult review={review} workspaceId={workspaceId} /> : null}
-      <ReviewEvidencePanel workspaceId={workspaceId} review={review} onContentStateChange={({ reviewId, status }) => { if (reviewId === review.id) setContentState(status); }} />
+      {!isReadOnly ? <ContextApprovalResult preview={approvalPreview} workspaceId={workspaceId} /> : null}
+      <ReviewEvidencePanel
+        contentReload={contentReload}
+        onContentStateChange={({ reviewId, status, revisions, publishedAgainst }) => {
+          if (reviewId !== review.id) return;
+          setContentState(status);
+          onEvidenceRevisions(reviewId, revisions, publishedAgainst);
+        }}
+        review={review}
+        workspaceId={workspaceId}
+      />
       <details className="review-risk-explanation">
         <summary>{t("detail.whyRisk", { defaultValue: "Why this risk?" })}: {riskInsight.summary}</summary>
         <p>{riskInsight.summary}</p>

@@ -1,19 +1,14 @@
 import {
   Copy,
   ArrowRight,
-  Check,
-  ClipboardList,
   Edit,
   FileText,
   Folder,
   GitBranch,
-  GitCompareArrows,
   Globe,
-  MessageSquare,
   MoreHorizontal,
   Plus,
   RotateCcw,
-  Send,
   Share2,
 } from "lucide-react";
 import {
@@ -40,8 +35,7 @@ import { useWorkspaceGraphCapability } from "../graph/useWorkspaceGraphCapabilit
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { MarkdownView } from "../pages/MarkdownView";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
-import { useContextMerge } from "../pages/useContextMerge";
-import { ContextDrafts } from "./ContextDrafts";
+import { ContextVersionBar } from "./ContextVersionBar";
 import { citationKeyForSource } from "../pages/editorCompletions";
 import {
   contextGraphQuery,
@@ -64,7 +58,6 @@ import {
 import {
   beginPageEdit,
   diffPageVersions,
-  previewPageMerge,
   restorePageVersion,
 } from "../../shared/api/pages";
 import {
@@ -83,16 +76,11 @@ import {
   type TreeFavoriteScope,
 } from "../../shared/api/treeFavorites";
 import {
-  contextMergeTargetOf,
-  decideReview,
-  decisionPins,
   getContextPageNeighbors,
-  getReview,
   listContextPageActivity,
 } from "../../shared/api/operations";
 import type {
   ActivityItem,
-  ContextMergeBinding,
   GraphNeighborEntry,
   GraphNeighborsPayload,
 } from "../../shared/api/operations";
@@ -178,7 +166,6 @@ import {
 import { useAsyncLoad } from "../../shared/hooks/useAsyncLoad";
 import { useScreenEntryRefresh } from "../../shared/hooks/useScreenEntryRefresh";
 import { useDocumentTitle } from "../../shared/hooks/useDocumentTitle";
-import { isAbortError } from "../../shared/lib/abortError";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import {
   copyTextWithReason,
@@ -201,7 +188,6 @@ import { useVersionPairDiff } from "../../shared/hooks/useVersionPairDiff";
 import { domainLabel, humanizeEnum } from "../../shared/lib/domainLabel";
 import { searchResultHref } from "../../shared/lib/searchResultHref";
 import { isEditorRole } from "../../shared/workspace/permissions";
-import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
 import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { useOptionalWorkspaceContext } from "../../shared/workspace/WorkspaceContext";
 
@@ -910,6 +896,24 @@ function ScopedContextScreen() {
     });
   }
 
+  // Re-reads the version on screen (a draft keeps its ?version), for a write
+  // that was refused because the draft or the published version moved.
+  async function reloadDisplayedVersion(pageId: string) {
+    if (!state || requestedTargetId !== pageId) return;
+    const versionId = selectedReadVersionId;
+    const originRouteIdentity = routeIdentity;
+    const [detail, history] = await Promise.all([
+      readContextPage(state.workspaceId, pageId, versionId),
+      listContextChanges(state.workspaceId, pageId),
+    ]);
+    if (routeIdentityRef.current !== originRouteIdentity) return;
+    setState((current) =>
+      current && current.detail?.id === pageId
+        ? { ...current, detail, detailReadVersionId: versionId, history }
+        : current,
+    );
+  }
+
   async function reloadContextAfterRestore(pageId: string) {
     if (!state || requestedTargetId !== pageId) {
       return;
@@ -1394,6 +1398,9 @@ function ScopedContextScreen() {
                 onReviewDecided={() =>
                   reloadContextAfterRestore(displayedDetail.id)
                 }
+                onVersionRefresh={() =>
+                  reloadDisplayedVersion(displayedDetail.id)
+                }
                 onVersionRestored={() =>
                   reloadContextAfterRestore(displayedDetail.id)
                 }
@@ -1736,293 +1743,6 @@ function ContextPageList({
   );
 }
 
-function PendingDraftReview({
-  review,
-  canReview,
-  workspaceId,
-  onViewChanges,
-  viewChangesDisabledReason,
-  onDecided,
-}: {
-  review: NonNullable<ContextPageDetail["pending_review"]>;
-  canReview: boolean;
-  workspaceId: string;
-  onViewChanges: (() => void) | null;
-  viewChangesDisabledReason: string | null;
-  onDecided: (
-    result: Awaited<ReturnType<typeof decideReview>>,
-  ) => Promise<void> | void;
-}) {
-  const { t } = useTranslation("context");
-  const actorId = useOptionalAuth()?.user?.user_id ?? "preview";
-  const pendingKey = `${reviewDraftKey(actorId, workspaceId, review.review_item_id)}.pending`;
-  const pendingApprovalRef = useRef<{ key: string; decisionId: string; mergeBinding: ContextMergeBinding | null } | null>(null);
-  const merge = useContextMerge();
-  function readPendingApproval() {
-    if (pendingApprovalRef.current?.key === pendingKey) return pendingApprovalRef.current;
-    try {
-      const value = JSON.parse(readReviewDraft(pendingKey) || "null");
-      if (value?.decision === "approve" && value.workspaceId === workspaceId && value.reviewId === review.review_item_id
-        && typeof value.decisionId === "string") return value as { decisionId: string; mergeBinding: ContextMergeBinding | null };
-    } catch { /* The review remains available when storage is unavailable. */ }
-    return null;
-  }
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [reasonOpen, setReasonOpen] = useState(false);
-  const [reason, setReason] = useState("");
-  const impactKey = `${workspaceId ?? ""}:${review.review_item_id}`;
-  const [impact, setImpact] = useState<{
-    key: string;
-    earlierReviewCount: number;
-  } | null>(null);
-  const [impactErrorKey, setImpactErrorKey] = useState<string | null>(null);
-  const earlierReviewCount =
-    impact?.key === impactKey ? impact.earlierReviewCount : null;
-  const impactLoadFailed = impactErrorKey === impactKey;
-  const pagePendingReviewCount =
-    review.status !== "pending" || earlierReviewCount == null
-      ? null
-      : earlierReviewCount + 1;
-  const reviewPath = workspacePath(
-    workspaceId,
-    `review/${encodeURIComponent(review.review_item_id)}`,
-  );
-  const reviewHref =
-    review.status === "changes_requested"
-      ? `${reviewPath}?status=changes_requested`
-      : reviewPath;
-
-  useEffect(() => {
-    let active = true;
-    setImpact(null);
-    setImpactErrorKey(null);
-    if (!workspaceId || review.status !== "pending") {
-      return () => {
-        active = false;
-      };
-    }
-    void getReview(workspaceId, review.review_item_id)
-      .then((detail) => {
-        if (active) {
-          setImpact({
-            key: impactKey,
-            earlierReviewCount: Math.max(
-              0,
-              detail.superseded_review_count ?? 0,
-            ),
-          });
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setImpactErrorKey(impactKey);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [impactKey, review.review_item_id, review.status, workspaceId]);
-
-  async function decide(type: "approve" | "request_changes") {
-    if (
-      !workspaceId ||
-      busy ||
-      (type === "approve" &&
-        review.status === "pending" &&
-        earlierReviewCount == null)
-    ) {
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    const pending = type === "approve" ? readPendingApproval() : null;
-    const decisionId = pending?.decisionId ?? crypto.randomUUID();
-    // The replay record lives exactly as long as the decision's outcome is
-    // unknown: written before sending, settled once the server answers.
-    const settleRecord = () => {
-      pendingApprovalRef.current = null;
-      writeReviewDraft(pendingKey, "");
-    };
-    const send = async (mergeBinding: ContextMergeBinding | null) => {
-      if (type === "approve") {
-        pendingApprovalRef.current = { key: pendingKey, decisionId, mergeBinding };
-        writeReviewDraft(pendingKey, JSON.stringify({ decisionId, workspaceId, reviewId: review.review_item_id,
-          decision: "approve", reason: null, mergeBinding }));
-      }
-      try {
-        const decided = await decideReview(workspaceId, review.review_item_id, type,
-          type === "request_changes" ? reason : undefined, { decision_id: decisionId, merge_binding: mergeBinding });
-        settleRecord();
-        return decided;
-      } catch (error) {
-        if (error instanceof ApiError && error.status >= 400 && error.status < 500) settleRecord();
-        throw error;
-      }
-    };
-    try {
-      // A replayed approval resends its recorded pins; a new Context approval
-      // goes through the shared merge flow.
-      const target = type === "approve" && !pending
-        ? contextMergeTargetOf(await getReview(workspaceId, review.review_item_id))
-        : null;
-      const result = target
-        ? await merge.runMergeWrite({
-          kind: "publish",
-          workspaceId,
-          pageId: target.pageId,
-          loadPreview: () => previewPageMerge(workspaceId, target.pageId, target.versionId),
-          write: (choice) => send(decisionPins(choice)),
-        })
-        : await send(pending?.mergeBinding ?? null);
-      await onDecided(result);
-    } catch (exc) {
-      if (isAbortError(exc)) return;
-      setError(
-        type === "approve"
-          ? t("pendingReview.approveError", {
-              defaultValue:
-                "Could not approve and publish this version. Earlier pending reviews were not settled.",
-            })
-          : t("pendingReview.error", {
-              defaultValue: "Could not record the decision.",
-            }),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <StatusBanner tone="info">
-      <div className="pending-review">
-        <span className="pending-review-label">
-          {review.status === "changes_requested"
-            ? t("pendingReview.changesRequested", {
-                defaultValue: "Draft has changes requested",
-              })
-            : pagePendingReviewCount != null
-              ? t("pendingReview.pagePendingCount", {
-                  count: pagePendingReviewCount,
-                  defaultValue: "{{count}} pending reviews for this page",
-                })
-              : impactLoadFailed
-                ? t("pendingReview.countUnavailable", {
-                    defaultValue: "Pending review count unavailable",
-                  })
-                : t("pendingReview.countLoading", {
-                    defaultValue: "Checking pending reviews",
-                  })}
-          {" · "}
-          <StatusPill status={review.risk_level} compact />
-        </span>
-        {review.status === "pending" &&
-        earlierReviewCount != null &&
-        earlierReviewCount > 0 ? (
-          <p className="pending-review-impact">
-            {t("pendingReview.approveImpact", {
-              count: earlierReviewCount,
-              defaultValue:
-                "Approving will publish this version. {{count}} earlier pending reviews will be settled with it.",
-            })}
-          </p>
-        ) : null}
-        <div className="pending-review-actions">
-          <Link
-            className="icon-button text-button pending-review-action pending-review-open"
-            to={reviewHref}
-          >
-            <ClipboardList size={16} aria-hidden="true" />
-            <span>
-              {t("pendingReview.viewReview", { defaultValue: "View review" })}
-            </span>
-          </Link>
-          <button
-            type="button"
-            className="icon-button pending-review-action"
-            disabled={!onViewChanges}
-            onClick={onViewChanges ?? undefined}
-          >
-            <GitCompareArrows size={16} aria-hidden="true" />
-            <span>
-              {t("pendingReview.viewChanges", { defaultValue: "View changes" })}
-            </span>
-          </button>
-          {canReview ? (
-            <>
-              <button
-                type="button"
-                className="icon-button warning pending-review-action"
-                disabled={busy}
-                aria-expanded={reasonOpen}
-                onClick={() => setReasonOpen((open) => !open)}
-              >
-                <MessageSquare size={16} aria-hidden="true" />
-                <span>
-                  {t("pendingReview.requestChanges", {
-                    defaultValue: "Request changes",
-                  })}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="icon-button success pending-review-action"
-                disabled={
-                  busy ||
-                  (review.status === "pending" && earlierReviewCount == null)
-                }
-                onClick={() => decide("approve")}
-              >
-                <Check size={16} aria-hidden="true" />
-                <span>
-                  {t("shell:actions.approve")}
-                </span>
-              </button>
-            </>
-          ) : null}
-        </div>
-        {viewChangesDisabledReason ? (
-          <p className="pending-review-error">{viewChangesDisabledReason}</p>
-        ) : null}
-        {canReview && reasonOpen ? (
-          <div className="pending-review-reason">
-            <textarea
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder={t("pendingReview.reasonPlaceholder", {
-                defaultValue: "What should change before this is approved?",
-              })}
-            />
-            <button
-              type="button"
-              className="icon-button warning pending-review-action"
-              disabled={busy || !reason.trim()}
-              onClick={() => decide("request_changes")}
-            >
-              <Send size={16} aria-hidden="true" />
-              <span>
-                {t("pendingReview.submitChanges", {
-                  defaultValue: "Send request",
-                })}
-              </span>
-            </button>
-          </div>
-        ) : null}
-        {review.status === "pending" && impactLoadFailed ? (
-          <p className="pending-review-error">
-            {t("pendingReview.impactLoadError", {
-              defaultValue:
-                "Could not load what approval will settle. Open the review to decide safely.",
-            })}
-          </p>
-        ) : null}
-        {merge.dialog}
-        {error ? <p className="pending-review-error">{error}</p> : null}
-      </div>
-    </StatusBanner>
-  );
-}
-
 type ContextReaderTab = "view" | "history" | "graph" | "activity" | "children";
 type CompareOrigin = "banner" | "history" | "deep-link";
 type ComparePair = {
@@ -2091,17 +1811,6 @@ function normalizeComparePair(
   return normalizeVersionPair(contextHistoryNodes(versions), candidate);
 }
 
-function defaultHistoryCompareCandidate(
-  _versions: VersionEntry[],
-  selected: VersionEntry,
-): CompareCandidate {
-  return {
-    from: selected.prior_version_id ?? null,
-    to: selected.version_id,
-    origin: "history",
-  };
-}
-
 function comparePairCrossesLineage(
   versions: VersionEntry[],
   pair: ComparePair | null,
@@ -2134,41 +1843,6 @@ function comparePairCrossesLineage(
   return false;
 }
 
-function pendingReviewCompareCandidate(
-  detail: ContextPageDetail,
-  versions: VersionEntry[],
-): CompareCandidate | null {
-  const targetId = detail.pending_draft_version_id;
-  if (
-    !targetId ||
-    !detail.pending_review ||
-    !["pending", "changes_requested"].includes(detail.pending_review.status)
-  ) {
-    return null;
-  }
-  // A loaded target must be a draft; one on an older page is checked when the
-  // comparison loads it.
-  const target = versions.find((entry) => entry.version_id === targetId);
-  if (
-    target &&
-    !(
-      target.history_status === "current_draft" ||
-      versionStringField(target, "version_status") === "draft"
-    )
-  ) {
-    return null;
-  }
-  const publishedId = detail.current_published_version_id;
-  if (!publishedId) {
-    return target ? defaultHistoryCompareCandidate(versions, target) : null;
-  }
-  const published = versions.find((entry) => entry.version_id === publishedId);
-  if (target && published && published.version_no >= target.version_no) {
-    return null;
-  }
-  return { from: publishedId, to: targetId, origin: "banner" };
-}
-
 function ContextReader({
   canEdit,
   detail,
@@ -2184,6 +1858,7 @@ function ContextReader({
   onRenameNode,
   onSelectNode,
   onReviewDecided,
+  onVersionRefresh,
   onVersionRestored,
 }: {
   canEdit: boolean;
@@ -2200,6 +1875,8 @@ function ContextReader({
   onRenameNode: (node: TreeNodePayload) => void;
   onSelectNode: (node: TreeNodePayload) => void;
   onReviewDecided: () => Promise<void> | void;
+  /** Re-reads the version on screen, keeping a selected draft. */
+  onVersionRefresh?: () => Promise<void> | void;
   onVersionRestored: () => Promise<void> | void;
 }) {
   const { t } = useTranslation("context");
@@ -2867,20 +2544,6 @@ function ContextReader({
   const publishedVersionInfo = (detail as ContextDetailWithPublishedVersion)
     .published_version_info;
   const publishedTipId = `context-published-version-tip-${detail.id}`;
-  const displayedVersionIsDraft =
-    Boolean(detail.draft) ||
-    detail.version_info?.version_status === "draft";
-  const pendingCompareCandidate = pendingReviewCompareCandidate(
-    detail,
-    versions,
-  );
-  const pendingCompareDisabledReason =
-    detail.pending_review && !pendingCompareCandidate
-      ? tShell("diff.reviewComparisonUnavailable", {
-          defaultValue:
-            "View changes is unavailable because the pending review target is not a valid draft in this history.",
-        })
-      : null;
   return (
     <section className="feature-section detail-section context-reader">
       <div className="detail-heading">
@@ -2924,11 +2587,6 @@ function ContextReader({
         <span className="reader-chip">
           {domainLabel("context", "pageType", detail.page_type)}
         </span>
-        {displayedVersionIsDraft ? (
-          <span className="reader-chip">
-            {t("reader.viewingDraft", { defaultValue: "Editing draft" })}
-          </span>
-        ) : null}
         {!detail.current_published_version_id ? (
           <span className="reader-chip">
             {t("reader.readersSeeNone", {
@@ -2997,22 +2655,6 @@ function ContextReader({
             <span>{t("reader.webPublished")}</span>
           </button>
         ) : null}
-        {/* Open drafts and review requests are lifecycle state, not page
-            attributes, so they read as status pills beside the neutral chips. */}
-        {(detail.open_drafts?.total ?? 0) > 0 ? (
-          <StatusPill
-            compact
-            status="draft"
-            label={t("reader.draftCount", { count: detail.open_drafts?.total ?? 0 })}
-          />
-        ) : null}
-        {detail.open_review_count > 0 ? (
-          <StatusPill
-            compact
-            status="pending"
-            label={t("reader.openReviewCount", { count: detail.open_review_count })}
-          />
-        ) : null}
         <time
           className="reader-meta-date"
           dateTime={detail.updated_at}
@@ -3022,18 +2664,14 @@ function ContextReader({
         </time>
       </div>
       {canEdit && workspaceId ? (
-        <ContextDrafts
+        <ContextVersionBar
           detail={detail}
           onChanged={onVersionRestored}
-          onCompareWithPublished={
-            detail.draft && detail.current_published_version_id && detail.version_info
-              ? () => openComparison({
-                  from: detail.current_published_version_id,
-                  to: detail.version_info!.version_id,
-                  origin: "banner",
-                })
-              : null
-          }
+          onRefresh={onVersionRefresh ?? onVersionRestored}
+          onDecided={async (notice) => {
+            setReviewNotice(notice);
+            await onReviewDecided();
+          }}
           workspaceId={workspaceId}
         />
       ) : null}
@@ -3044,36 +2682,6 @@ function ContextReader({
         <StatusBanner tone="warning">
           {t("pages:editor.blockMapStaleWarning")}
         </StatusBanner>
-      ) : null}
-      {detail.pending_review ? (
-        <PendingDraftReview
-          review={detail.pending_review}
-          canReview={canEdit}
-          workspaceId={workspaceId ?? detail.workspace_id}
-          onViewChanges={
-            pendingCompareCandidate
-              ? () => openComparison(pendingCompareCandidate)
-              : null
-          }
-          viewChangesDisabledReason={pendingCompareDisabledReason}
-          onDecided={async (result) => {
-            if (result.published_version_id) {
-              const settled = result.superseded_review_count ?? 0;
-              setReviewNotice(
-                settled > 0
-                  ? t("pendingReview.approveSuccessSettled", {
-                      defaultValue:
-                        "Version published. {{count}} earlier pending reviews were settled with it.",
-                      count: settled,
-                    })
-                  : t("pendingReview.approveSuccess", {
-                      defaultValue: "Version published.",
-                    }),
-              );
-            }
-            await onReviewDecided();
-          }}
-        />
       ) : null}
       <ReaderTabs
         accent="context"
@@ -4264,7 +3872,8 @@ export function ContextHistory({
   function renderCard(row: HistoryGraphRow<VersionEntry>) {
     const { entry } = row;
     const historyStatus = entry.history_status ?? "state_inconsistent";
-    const presentation = contextHistoryPresentation(historyStatus);
+    const closedReason = entry.closed_reason ?? null;
+    const presentation = contextHistoryPresentation(historyStatus, closedReason);
     const comparing = comparePair?.to === entry.version_id;
     const isCurrent = versionBooleanField(entry, "is_current");
     const isLatestDraft =
@@ -4367,7 +3976,7 @@ export function ContextHistory({
             compact
             label={t(presentation.labelKey)}
             status={historyStatus}
-            tone={contextHistoryPillTone(historyStatus)}
+            tone={contextHistoryPillTone(historyStatus, closedReason)}
           />
         }
       />
@@ -4461,6 +4070,7 @@ export function ContextHistory({
               tabIndex: highlighted ? -1 : undefined,
               tone: contextHistoryPresentation(
                 row.entry.history_status ?? "state_inconsistent",
+                row.entry.closed_reason,
               ).tone,
             };
           }}
@@ -4763,7 +4373,7 @@ function ContextPropertiesPanel({ detail }: { detail: ContextPageDetail }) {
   const { t } = useTranslation("context");
   const version = detail.version_info;
   const versionPresentation = version
-    ? contextHistoryPresentation(version.history_status)
+    ? contextHistoryPresentation(version.history_status, version.closed_reason)
     : null;
   return (
     <ContentPropertiesPanel

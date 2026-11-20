@@ -239,6 +239,8 @@ class ContextMediaAssetVersionUsagePayload(BaseModel):
         "discarded_draft",
         "superseded_snapshot",
     ]
+    # history_status="closed" only: why the draft ended.
+    closed_reason: Literal["discarded", "merged", "rejected"] | None = None
     reference_count: int = Field(ge=1)
     """How many times this version's body references the asset."""
     created_at: datetime

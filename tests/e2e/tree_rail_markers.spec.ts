@@ -338,9 +338,9 @@ test.describe("TreeRail document states and personal favorites", () => {
       await focusedRow.click();
       await page.waitForURL(workspaceUrl(workspace.id, `context/pages/${reviewFavorite.id}`));
       // Editors read the published body by default; the submitted successor is
-      // announced as an open draft instead of replacing the body.
+      // announced in the version bar instead of replacing the body.
       await expect(page.getByText("Published TreeRail marker acceptance fixture.")).toBeVisible();
-      await expect(page.locator(".context-draft-list summary")).toHaveText("1 open draft");
+      await expect(page.getByRole("region", { name: "Version" })).toContainText("1 open draft");
       await openRail(page, viewport.width);
       await expect(focusedRow).toHaveClass(/\bactive\b/);
       await expect(focusedRow.locator(".tree-row-favorite")).toBeVisible();

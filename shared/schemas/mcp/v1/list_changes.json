@@ -709,6 +709,23 @@
             "title": "Actor Type",
             "type": "string"
           },
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Closed Reason"
+          },
           "created_at": {
             "anyOf": [
               {

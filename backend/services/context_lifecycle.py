@@ -126,6 +126,72 @@ class ContextHistoryRepairFailedError(RuntimeError):
         self.report = report
 
 
+# The reason each way of ending a draft records on its close operation. These
+# are the values the close paths write, so History can say why a draft ended.
+CLOSE_REASON_WITHDRAWN = "Draft withdrawn"
+CLOSE_REASON_MERGED = "Draft included in published merge"
+CLOSE_REASON_REJECTED = "Context review rejected"
+_CLOSED_REASON_BY_RECORD = {
+    CLOSE_REASON_WITHDRAWN: "discarded",
+    CLOSE_REASON_MERGED: "merged",
+    CLOSE_REASON_REJECTED: "rejected",
+}
+
+
+def context_closed_reasons(session, versions, *, dispositions=None):
+    """Why each closed draft among ``versions`` ended, as recorded when it ended.
+
+    The close operation records it: discarded (withdrawn), merged (included in
+    a published merge) or rejected (its review was rejected). A version closed
+    without such a record -- converted history, or a draft frozen when an
+    approval was undone -- counts as rejected only if its review was rejected;
+    otherwise no reason is claimed. Later merges of a closed commit into
+    other drafts do not change how it ended.
+    """
+    closed = [version for version in versions if version.version_status == "closed"]
+    if not closed:
+        return {}
+    recorded = {}
+    for workspace_id in {version.workspace_id for version in closed}:
+        refs = {
+            context_version_ref(version.id): version.id
+            for version in closed
+            if version.workspace_id == workspace_id
+        }
+        keys = list(refs)
+        for start in range(0, len(keys), 400):
+            rows = session.execute(
+                select_in_workspace(
+                    ChangeOperation,
+                    workspace_id=workspace_id,
+                    conditions=(
+                        ChangeOperation.operation == "close",
+                        ChangeOperation.diff_ref.in_(keys[start : start + 400]),
+                    ),
+                )
+                .with_only_columns(
+                    ChangeOperation.diff_ref, ChangeOperation.diff_summary
+                )
+                .order_by(ChangeOperation.created_at, ChangeOperation.id)
+            )
+            for diff_ref, summary in rows:
+                reason = _CLOSED_REASON_BY_RECORD.get(summary)
+                if reason is not None:
+                    recorded[refs[diff_ref]] = reason
+    unrecorded = [version for version in closed if version.id not in recorded]
+    if unrecorded:
+        if dispositions is None:
+            from backend.services.context_review_disposition import (
+                context_version_review_dispositions,
+            )
+
+            dispositions = context_version_review_dispositions(session, unrecorded)
+        for version in unrecorded:
+            if dispositions.get(version.id) == "rejected":
+                recorded[version.id] = "rejected"
+    return recorded
+
+
 def project_context_version(page, version, *, visible_version_id, expose_draft_state):
     published = version.id == page.current_published_version_id
     draft = expose_draft_state and version.version_status == "draft"

@@ -641,7 +641,10 @@ def merge_draft_references(session, *, source, head, target, self_origins=None):
 def materialize_publication(
     session, page, version, preview, candidate, *, writer, actor_kind, actor_id
 ):
-    from backend.services.context_lifecycle import record_context_decision
+    from backend.services.context_lifecycle import (
+        CLOSE_REASON_MERGED,
+        record_context_decision,
+    )
 
     reference_merge = None
     if preview.kind != "fast_forward" and page.current_published_version_id:
@@ -676,7 +679,7 @@ def materialize_publication(
                 context_version_writer=writer,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
-                reason="Draft included in published merge",
+                reason=CLOSE_REASON_MERGED,
             )
         target = ContextPageVersion(
             workspace_id=page.workspace_id,

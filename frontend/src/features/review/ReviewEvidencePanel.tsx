@@ -42,12 +42,18 @@ type EvidenceGroup = {
 export type ReviewEvidenceContentState = {
   reviewId: string;
   status: ContentStatus;
+  /** Candidate version id -> the draft revision whose content is shown. */
+  revisions: Record<string, number>;
+  /** Candidate version id -> the published version its publish result was compared with. */
+  publishedAgainst: Record<string, string | null>;
 };
 
 type ReviewEvidencePanelProps = {
   workspaceId: string;
   review: ReviewItem;
   onContentStateChange?: (state: ReviewEvidenceContentState) => void;
+  /** Bumped to read every candidate's content and comparison again. */
+  contentReload?: number;
 };
 
 /**
@@ -59,6 +65,7 @@ export function ReviewEvidencePanel({
   workspaceId,
   review,
   onContentStateChange,
+  contentReload = 0,
 }: ReviewEvidencePanelProps) {
   const { t } = useTranslation("review");
   const groups = useMemo(
@@ -75,6 +82,30 @@ export function ReviewEvidencePanel({
       current[key] === status ? current : { ...current, [key]: status },
     );
   }, []);
+  const [revisions, setRevisions] = useState<Record<string, number>>({});
+  const [publishedAgainst, setPublishedAgainst] = useState<Record<string, string | null>>({});
+  const onGroupPublished = useCallback((versionId: string, publishedId: string | null | undefined) => {
+    setPublishedAgainst((current) => {
+      if (publishedId === undefined) {
+        if (!(versionId in current)) return current;
+        const next = { ...current };
+        delete next[versionId];
+        return next;
+      }
+      return current[versionId] === publishedId ? current : { ...current, [versionId]: publishedId };
+    });
+  }, []);
+  const onGroupRevision = useCallback((versionId: string, revision: number | null) => {
+    setRevisions((current) => {
+      if (revision == null) {
+        if (!(versionId in current)) return current;
+        const next = { ...current };
+        delete next[versionId];
+        return next;
+      }
+      return current[versionId] === revision ? current : { ...current, [versionId]: revision };
+    });
+  }, []);
   const groupStatuses = groups.map((group) =>
     group.content?.mode === "metadata_only"
       ? "ready"
@@ -86,8 +117,8 @@ export function ReviewEvidencePanel({
       ? "loading"
       : "ready";
   useEffect(() => {
-    callbackRef.current?.({ reviewId: review.id, status });
-  }, [review.id, status]);
+    callbackRef.current?.({ reviewId: review.id, status, revisions, publishedAgainst });
+  }, [publishedAgainst, review.id, revisions, status]);
 
   return (
     <section className="review-evidence-panel" aria-label={t("document.targets", {
@@ -109,8 +140,11 @@ export function ReviewEvidencePanel({
         </StatusBanner>
       ) : groups.map((group) => (
         <ReviewDocumentEvidence
+          contentReload={contentReload}
           group={group}
           key={group.key}
+          onPublished={onGroupPublished}
+          onRevision={onGroupRevision}
           onStatusChange={onGroupStatusChange}
           workspaceId={workspaceId}
         />
@@ -120,12 +154,18 @@ export function ReviewEvidencePanel({
 }
 
 function ReviewDocumentEvidence({
+  contentReload,
   group,
   workspaceId,
+  onPublished,
+  onRevision,
   onStatusChange,
 }: {
+  contentReload: number;
   group: EvidenceGroup;
   workspaceId: string;
+  onPublished: (versionId: string, publishedId: string | null | undefined) => void;
+  onRevision: (versionId: string, revision: number | null) => void;
   onStatusChange: (key: string, status: ContentStatus) => void;
 }) {
   const { t } = useTranslation("review");
@@ -208,7 +248,10 @@ function ReviewDocumentEvidence({
         </p>
       ) : canReadExactContext(group) ? (
         <ExactContextContent
+          contentReload={contentReload}
           group={group}
+          onPublished={onPublished}
+          onRevision={onRevision}
           onStatusChange={onStatusChange}
           workspaceId={workspaceId}
         />
@@ -228,12 +271,18 @@ function ReviewDocumentEvidence({
 }
 
 function ExactContextContent({
+  contentReload,
   group,
   workspaceId,
+  onPublished,
+  onRevision,
   onStatusChange,
 }: {
+  contentReload: number;
   group: EvidenceGroup;
   workspaceId: string;
+  onPublished: (versionId: string, publishedId: string | null | undefined) => void;
+  onRevision: (versionId: string, revision: number | null) => void;
   onStatusChange: (key: string, status: ContentStatus) => void;
 }) {
   const { t } = useTranslation("review");
@@ -255,13 +304,20 @@ function ExactContextContent({
       || ((baselineKind === "published" || baselineKind === "parent")
         && Boolean(baselineId) && baselineId !== candidateId)
   );
+  // "What publishing changes" for the open draft is the current published
+  // version against the publish result: for a draft that is behind, the
+  // merge, so changes published meanwhile do not read as reverted.
+  const publishResult = !useDraftParent && baselineKind === "published" && content.is_current_candidate === true;
   const [tab, setTab] = useState<ContentTab>(canCompare ? "comparison" : "original");
   const [reload, setReload] = useState(0);
-  const requestKey = JSON.stringify([workspaceId, group.key, baselineKind, baselineId, baselineVersionNo, reload]);
+  const requestKey = JSON.stringify([workspaceId, group.key, baselineKind, baselineId, baselineVersionNo, publishResult, reload, contentReload]);
   const [result, setResult] = useState<{
     key: string;
     original: ReadResult<PagePayload>;
     comparison: ReadResult<PageVersionDiff>;
+    // The draft overlaps the published version: no single result yet, so
+    // the comparison is the published version against the draft.
+    mergeConflict?: boolean;
   } | null>(null);
   const current = result?.key === requestKey ? result : null;
   const original = current?.original ?? { status: "loading" as const };
@@ -294,23 +350,37 @@ function ExactContextContent({
       } : previous);
     });
     if (canCompare) {
-      void diffPageVersions(
+      const versionDiff = () => diffPageVersions(
         workspaceId,
         documentId,
         baselineKind === "empty" ? null : baselineId,
         candidateId,
         { signal: controller.signal },
-      ).then((diff) => {
+      );
+      const load = publishResult
+        ? diffPageVersions(workspaceId, documentId, null, candidateId, { signal: controller.signal, publishResult: true })
+          .then((diff) => ({ diff, mergeConflict: false }))
+          .catch((error: unknown) => {
+            if (error instanceof ApiError && error.body.error_code === "context_merge_conflict") {
+              return versionDiff().then((diff) => ({ diff, mergeConflict: true }));
+            }
+            throw error;
+          })
+        : versionDiff().then((diff) => ({ diff, mergeConflict: false }));
+      void load.then(({ diff, mergeConflict }) => {
         if (!active) return;
         const matches = diff.to_version_id === candidateId
-          && (diff.from_version_id ?? null) === (baselineKind === "empty" ? null : baselineId)
-          && diff.baseline === (baselineKind === "empty" ? "empty" : "version")
           && (content.candidate_version_no == null || diff.to_version_no === content.candidate_version_no)
-          && (baselineVersionNo == null || diff.from_version_no === baselineVersionNo);
+          && (diff.baseline === "publish_result"
+            ? publishResult
+            : (diff.from_version_id ?? null) === (baselineKind === "empty" ? null : baselineId)
+              && diff.baseline === (baselineKind === "empty" ? "empty" : "version")
+              && (baselineVersionNo == null || diff.from_version_no === baselineVersionNo));
         setResult((previous) => previous?.key === requestKey ? {
           ...previous,
           comparison: matches ? { status: "ready", data: diff }
             : { status: "unavailable", reason: "mismatch" },
+          mergeConflict,
         } : previous);
       }).catch((error: unknown) => {
         if (!active) return;
@@ -332,12 +402,18 @@ function ExactContextContent({
     candidateId,
     content.candidate_version_no,
     documentId,
+    publishResult,
     requestKey,
     workspaceId,
   ]);
   useEffect(() => {
     onStatusChange(group.key, original.status);
   }, [group.key, onStatusChange, original.status]);
+  // The draft revision shown here is what an approval may publish.
+  const shownRevision = original.status === "ready" ? original.data.editing_revision ?? null : null;
+  useEffect(() => {
+    onRevision(candidateId, shownRevision);
+  }, [candidateId, onRevision, shownRevision]);
   const resolveContextMediaAsset = useMemo<ContextMediaAssetUrlResolver>(
     () => (assetId) => ({
       status: "ready",
@@ -346,7 +422,20 @@ function ExactContextContent({
     [candidateId, documentId, workspaceId],
   );
   const version = content.candidate_version_no;
-  const baselineLabel = useDraftParent
+  // Any comparison of a draft names the revision it read.
+  const comparedRevision = comparison.status === "ready" ? comparison.data.editing_revision ?? null : null;
+  const comparedPublished = comparison.status === "ready" && comparison.data.baseline === "publish_result"
+    ? comparison.data.published_version_id ?? null
+    : undefined;
+  const revisionMismatch = shownRevision != null && comparedRevision != null && shownRevision !== comparedRevision;
+  const shownDiff = comparison.status === "ready" && !revisionMismatch ? comparison.data : null;
+  useEffect(() => {
+    onPublished(candidateId, revisionMismatch ? undefined : comparedPublished);
+  }, [candidateId, comparedPublished, onPublished, revisionMismatch]);
+  const mergedResult = shownDiff?.baseline === "publish_result" && shownDiff.merge_kind === "automatic_merge";
+  const baselineLabel = shownDiff?.baseline === "publish_result" && shownDiff.from_version_id
+    ? t("content.publishedBaseline", { version: shownDiff.from_version_no })
+    : useDraftParent
     ? t("content.draftParentBaseline", { version: baselineVersionNo })
     : baselineKind === "empty"
       ? t("content.emptyBaseline", { defaultValue: "Empty document" })
@@ -361,7 +450,9 @@ function ExactContextContent({
               defaultValue: "Parent version v{{version}}",
             })
           : t("content.unavailableBaseline", { defaultValue: "Comparison baseline unavailable" });
-  const candidateLabel = version == null
+  const candidateLabel = mergedResult
+    ? t("content.publishResult")
+    : version == null
     ? t("content.reviewVersionUnknown", { defaultValue: "Review version" })
     : t("content.reviewVersion", { version, defaultValue: "Review version v{{version}}" });
   const retry = () => setReload((value) => value + 1);
@@ -450,15 +541,18 @@ function ExactContextContent({
             </button>
           </div>
         ) : comparison.status === "loading" ? <ContentLoading />
-          : comparison.status === "unavailable" ? (
+          : comparison.status === "unavailable" || revisionMismatch ? (
             <div className="review-content-failure">
-              <ContentError reason={compareFailure!} onRetry={retry} />
+              <ContentError reason={revisionMismatch ? "mismatch" : compareFailure!} onRetry={retry} />
               <button className="icon-button" onClick={() => setTab("original")} type="button">
                 {t("content.showOriginal", { defaultValue: "Read review version" })}
               </button>
             </div>
           ) : (
             <>
+              {current?.mergeConflict ? (
+                <StatusBanner tone="warning">{t("content.publishConflict")}</StatusBanner>
+              ) : null}
               {comparison.data.metadata_changes?.length ? (
                 <p className="review-content-notice">
                   <strong>{t("content.metadataChanged", { defaultValue: "Changed metadata:" })}</strong>{" "}

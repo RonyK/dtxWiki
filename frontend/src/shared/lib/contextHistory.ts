@@ -22,9 +22,14 @@ export type ContextHistoryTone =
   | "muted"
   | "neutral";
 
+/** Why a closed draft ended: the server derives it from recorded facts. */
+export type ContextClosedReason = "discarded" | "merged" | "rejected";
+
+type ContextHistoryLabel = ContextHistoryStatus | `closed_${ContextClosedReason}`;
+
 export type ContextHistoryPresentation = {
-  descriptionKey: `history.states.${ContextHistoryStatus}.description`;
-  labelKey: `history.states.${ContextHistoryStatus}.label`;
+  descriptionKey: `history.states.${ContextHistoryLabel}.description`;
+  labelKey: `history.states.${ContextHistoryLabel}.label`;
   tone: ContextHistoryTone;
 };
 
@@ -85,14 +90,40 @@ export function isContextCommit(versionStatus: string | null | undefined): boole
   return CONTEXT_COMMIT_STATUSES.has(versionStatus ?? "");
 }
 
+// A closed draft says why it ended: discarded, merged into a published (or
+// another) version, or rejected in review. Without a reason it stays "closed".
+const CONTEXT_CLOSED_PRESENTATION: Record<ContextClosedReason, ContextHistoryPresentation> = {
+  discarded: {
+    labelKey: "history.states.closed_discarded.label",
+    descriptionKey: "history.states.closed_discarded.description",
+    tone: "muted",
+  },
+  merged: {
+    labelKey: "history.states.closed_merged.label",
+    descriptionKey: "history.states.closed_merged.description",
+    tone: "ok",
+  },
+  rejected: {
+    labelKey: "history.states.closed_rejected.label",
+    descriptionKey: "history.states.closed_rejected.description",
+    tone: "danger",
+  },
+};
+
 export function contextHistoryPresentation(
   status: ContextHistoryStatus,
+  closedReason?: ContextClosedReason | null,
 ): ContextHistoryPresentation {
-  return CONTEXT_HISTORY_PRESENTATION[status];
+  return status === "closed" && closedReason
+    ? CONTEXT_CLOSED_PRESENTATION[closedReason]
+    : CONTEXT_HISTORY_PRESENTATION[status];
 }
 
-export function contextHistoryPillTone(status: ContextHistoryStatus) {
-  const tone = CONTEXT_HISTORY_PRESENTATION[status].tone;
+export function contextHistoryPillTone(
+  status: ContextHistoryStatus,
+  closedReason?: ContextClosedReason | null,
+) {
+  const tone = contextHistoryPresentation(status, closedReason).tone;
   return tone === "neutral" ? "muted" : tone;
 }
 

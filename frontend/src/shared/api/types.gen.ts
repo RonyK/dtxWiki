@@ -5503,6 +5503,8 @@ export interface components {
          * @description One version, readable by the caller, that references the asset.
          */
         ContextMediaAssetVersionUsagePayload: {
+            /** Closed Reason */
+            closed_reason?: ("discarded" | "merged" | "rejected") | null;
             /**
              * Created At
              * Format: date-time
@@ -6049,6 +6051,8 @@ export interface components {
              * @description Direct child count; null until requested by the inspector.
              */
             children_count?: number | null;
+            /** Closed Reason */
+            closed_reason?: ("discarded" | "merged" | "rejected") | null;
             /** Content Hash */
             content_hash: string;
             /**
@@ -6358,6 +6362,8 @@ export interface components {
              * @description Direct child count; null until requested by the inspector.
              */
             children_count?: number | null;
+            /** Closed Reason */
+            closed_reason?: ("discarded" | "merged" | "rejected") | null;
             /** Content Hash */
             content_hash: string;
             /**
@@ -10182,17 +10188,23 @@ export interface components {
              * @default version
              * @enum {string}
              */
-            baseline: "version" | "empty";
+            baseline: "version" | "empty" | "publish_result";
             /** Deletions */
             deletions: number;
+            /** Editing Revision */
+            editing_revision?: number | null;
             /** From Version Id */
             from_version_id?: string | null;
             /** From Version No */
             from_version_no: number;
             /** Lines */
             lines?: string[];
+            /** Merge Kind */
+            merge_kind?: ("fast_forward" | "automatic_merge") | null;
             /** Metadata Changes */
             metadata_changes?: ("title" | "tags" | "aliases" | "page_type" | "placement" | "references")[];
+            /** Published Version Id */
+            published_version_id?: string | null;
             /** References After */
             references_after?: components["schemas"]["ReferenceView"][];
             /** References Before */
@@ -10216,6 +10228,8 @@ export interface components {
             actor_display_name?: string | null;
             /** Actor Type */
             actor_type: string;
+            /** Closed Reason */
+            closed_reason?: ("discarded" | "merged" | "rejected") | null;
             /** Content Hash */
             content_hash: string;
             /**
@@ -10577,6 +10591,11 @@ export interface components {
              * @description Required when a browser publishes an editing or draft version.
              */
             expected_references_hash?: string | null;
+            /**
+             * Expected Review Item Id
+             * @description The open review the caller showed for this draft, or null when it showed none. When sent, publication refuses with context_review_changed unless it is still the draft's latest open review (the one a publish approves).
+             */
+            expected_review_item_id?: string | null;
             /**
              * Idempotency Key
              * @description 24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.
@@ -12493,6 +12512,8 @@ export interface components {
             actor_id?: string | null;
             /** Actor Type */
             actor_type: string;
+            /** Closed Reason */
+            closed_reason?: ("discarded" | "merged" | "rejected") | null;
             /** Created At */
             created_at?: string | null;
             /** Graph Status */
@@ -12584,6 +12605,8 @@ export interface components {
         };
         /** VersionInfo */
         VersionInfo: {
+            /** Closed Reason */
+            closed_reason?: ("discarded" | "merged" | "rejected") | null;
             /** Content Hash */
             content_hash?: string | null;
             /** Created At */
@@ -21039,7 +21062,7 @@ export interface operations {
             query: {
                 to_version_id: string;
                 from_version_id?: string | null;
-                baseline?: "empty" | null;
+                baseline?: ("empty" | "publish_result") | null;
             };
             header?: never;
             path: {

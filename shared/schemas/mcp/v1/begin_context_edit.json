@@ -149,6 +149,23 @@
             "default": null,
             "title": "Change Set Id"
           },
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Closed Reason"
+          },
           "content_hash": {
             "pattern": "^[a-f0-9]{64}$",
             "title": "Content Hash",

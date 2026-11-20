@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas.common import (
+    ContextClosedReason,
     ContextHistoryStatus,
     RESTResponseBase,
     RetrievalMode,
@@ -224,6 +225,8 @@ class VersionInfo(BaseModel):
     version_status: str
     review_disposition: Literal["rejected", "pending", "approved", "none"] = "none"
     history_status: ContextHistoryStatus | None = None
+    # history_status="closed" only: why the draft ended.
+    closed_reason: ContextClosedReason | None = None
     graph_status: str | None = None
     parent_version_id: UUID | None = None
     parent_version_ids: list[UUID] = Field(default_factory=list)
@@ -502,6 +505,8 @@ class VersionEntry(BaseModel):
     version_status: str
     review_disposition: Literal["rejected", "pending", "approved", "none"] = "none"
     history_status: ContextHistoryStatus | None = None
+    # history_status="closed" only: why the draft ended.
+    closed_reason: ContextClosedReason | None = None
     graph_status: str | None = None
     actor_type: str
     actor_display_name: str | None = None

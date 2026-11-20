@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Combining Context changes in the browser
+
+- When changes overlap, the browser offers two choices -- "Keep both changes"
+  or "Prefer the latest change" -- and shows the whole result, which can be
+  edited before it is saved. The same dialog serves publishing, approving a
+  review, merging the published version into a draft, and two people saving
+  one draft. A clean merge publishes without asking when it is the merge the
+  screen showed.
+- One version bar on a Context page replaces the draft banner, the open-draft
+  list, the review banner and the header's draft and review counts. It names
+  the version on screen (switch to the published version or any open draft),
+  its state, and its actions: View changes, Review, Merge published (when the
+  draft is behind), Discard draft, Request changes, and Publish -- "Approve and
+  publish" when the draft has an open review, in the reader, the editor and
+  the Review screen alike. A published page with no open draft shows no bar.
+- Publishing and approving act on the draft on screen only, with the merge it
+  showed: "Publishing publishes this draft merged with the current published
+  version" or, for overlaps, how publishing will ask. If the draft, the
+  published version or its review changed meanwhile, nothing is written and
+  the new state is shown. View changes (and the Review screen's "What
+  publishing changes") compares the current published version with what
+  publishing would publish, so changes published meanwhile no longer read as
+  reverted.
+- History says why a draft ended: Discarded, Merged (published by a merge or
+  merged into another version) or Rejected; so does an attachment's usage list.
+- REST: Publishing a draft accepts `expected_review_item_id` (null: none was
+  shown) and refuses a different latest open review with `context_review_changed`.
+  A publish approves the draft's latest open review. `diff` accepts
+  `baseline=publish_result`, which reports `merge_kind`, `published_version_id`
+  and `editing_revision`. Version projections and attachment usage items add
+  `closed_reason`.
+
+### Important changes
+
+- MCP tool contract revision 31 adds `closed_reason` (discarded, merged or
+  rejected) to Context version projections. Refresh cached `tools/list` results
+  and result schemas.
+
 ## 0.3.1 — 2026-11-20
 
 ### Important changes

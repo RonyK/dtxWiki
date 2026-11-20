@@ -358,6 +358,8 @@ class AssetVersionUsage:
     reference_count: int
     created_at: datetime
     last_saved_at: datetime | None
+    # version_status "closed" only: why the draft ended.
+    closed_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

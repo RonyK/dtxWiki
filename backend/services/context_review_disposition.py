@@ -15,6 +15,40 @@ ContextReviewDisposition = Literal["rejected", "pending", "approved", "none"]
 OPEN_CONTEXT_REVIEW_STATUSES = frozenset({"pending", "changes_requested"})
 
 
+def shown_context_draft_review(session: Session, page, version):
+    """The open review shown for a draft: its latest open review that a
+    publish would approve (a Context update, not an inspection-only repair
+    note), else its latest open review of any kind. Reads show it; a publish
+    that names the review it showed must still find this one."""
+    query = select_context_version_reviews(
+        version.workspace_id,
+        {page.id},
+        review_type=None,
+        conditions=(
+            ReviewItem.status.in_(OPEN_CONTEXT_REVIEW_STATUSES),
+            ChangeOperation.diff_ref == context_version_ref(version.id),
+        ),
+    )
+    rows = session.execute(
+        query.with_only_columns(
+            ReviewItem.id,
+            ReviewItem.status,
+            ReviewItem.risk_level,
+            ReviewItem.review_type,
+            ReviewItem.risk_signals,
+        ).order_by(ReviewItem.created_at.desc(), ReviewItem.id.desc())
+    ).all()
+    for row in rows:
+        inspection_only = (
+            (row.risk_signals or {})
+            .get("migration_parent_repaired", {})
+            .get("inspection_only")
+        )
+        if row.review_type == "context_update" and not inspection_only:
+            return row
+    return rows[0] if rows else None
+
+
 def select_context_version_reviews(
     workspace_id: UUID,
     page_ids: Collection[UUID],

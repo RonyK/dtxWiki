@@ -101,6 +101,7 @@ import {
   newIdempotencyKey,
   PageEditingUnavailableError,
   contextMergeConflictOf,
+  ContextMergePreviewChanged,
   draftBaseSnapshotOf,
   executePreparedPagePublication,
   previewPageMerge,
@@ -110,7 +111,7 @@ import {
   sendPageAutosave,
   submitPageForReview,
 } from "../../shared/api/pages";
-import type { ContextMergeConflict, DraftBaseSnapshot, PagePayload, PageSummary, PreparedMergeChoice, PreparedPagePublication, PageWriteOptions, PublishPageVersionInput } from "../../shared/api/pages";
+import type { ContextMergeConflict, ContextMergePreview, DraftBaseSnapshot, PagePayload, PageSummary, PreparedMergeChoice, PreparedPagePublication, PageWriteOptions, PublishPageVersionInput } from "../../shared/api/pages";
 import { listLibraryItems } from "../../shared/api/library";
 import type { LibraryItemSummary } from "../../shared/api/library";
 import {
@@ -515,6 +516,14 @@ export function PageEditor({
   const [searchParams] = useSearchParams();
   const [pages, setPages] = useState<PageSummary[]>([]);
   const [page, setPage] = useState<PagePayload | null>(null);
+  const [editorMergePreview, setEditorMergePreview] = useState<{ key: string; value: ContextMergePreview } | null>(null);
+  // The open review of the draft being edited, as a read or a review request
+  // showed it. Write responses do not carry reviews: a save keeps it unless
+  // the save withdrew it.
+  const [editorReview, setEditorReview] = useState<{ versionId: string; reviewId: string } | null>(null);
+  const editorOpenReviewIdRef = useRef<string | null>(null);
+  const [editorMergeReload, setEditorMergeReload] = useState(0);
+  const editorMergePreviewRef = useRef<ContextMergePreview | null>(null);
   const [sourceSuggestions, setSourceSuggestions] = useState<LibraryItemSummary[]>([]);
   const [referencePickerMode, setReferencePickerMode] = useState<"metadata" | "inline" | null>(null);
   const [referenceQuery, setReferenceQuery] = useState("");
@@ -781,8 +790,11 @@ export function PageEditor({
   // by the next Publish, so one publication is never sent twice. A command the
   // server answered is settled and forgotten.
   async function publishEditorPage(workspace: string, id: string, versionId: string,
-    intent: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash">,
-    options: PageWriteOptions = {}) {
+    intent: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash" | "expected_review_item_id">,
+    options: PageWriteOptions & {
+      /** The merge shown beside Publish, when what is published is what was shown. */
+      shownPreview?: ContextMergePreview | null;
+    } = {}) {
     const key = publicationKey(workspace, id);
     const publish = async (mergeChoice?: PreparedMergeChoice) => {
       try {
@@ -802,13 +814,33 @@ export function PageEditor({
         throw error;
       }
     };
-    return pendingPublication(key) ? publish() : merge.runMergeWrite({
-      kind: "publish",
+    const shown = editorMergePreviewRef.current;
+    const target = {
+      kind: "publish" as const,
       workspaceId: workspace,
       pageId: id,
       publishedVersionNumber: page?.published_version_no ?? null,
-      loadPreview: () => previewPageMerge(workspace, id, versionId, { signal: options.signal }),
       write: publish,
+    };
+    if (pendingPublication(key)) return publish();
+    // Unchanged since it was shown: publish exactly that merge.
+    if (options.shownPreview && options.shownPreview.version_id === versionId) {
+      return merge.runMergeWrite({ ...target, preview: options.shownPreview });
+    }
+    // A save came first: its merge is new. Publishing the draft itself is
+    // what the author sees; a merge with the published version is published
+    // only if the bar showed the same kind of merge with the same version.
+    return merge.runMergeWrite({
+      ...target,
+      loadPreview: async () => {
+        const fresh = await previewPageMerge(workspace, id, versionId, { signal: options.signal });
+        if (fresh.kind !== "fast_forward" && (!shown || shown.kind !== fresh.kind
+          || (shown.published_version_id ?? null) !== (fresh.published_version_id ?? null))) {
+          setEditorMergePreview({ key: "refused", value: fresh });
+          throw new ContextMergePreviewChanged();
+        }
+        return fresh;
+      },
     });
   }
 
@@ -864,6 +896,10 @@ export function PageEditor({
   }, []);
   // Adopt server concurrency metadata immediately, including before React renders.
   const adoptEditablePage = useCallback((updated: PagePayload) => {
+    setEditorReview((current) =>
+      current && current.versionId === updated.version_id && !(updated.superseded_review_count ?? 0)
+        ? current
+        : null);
     editablePageRef.current = updated;
     pageIdRef.current = updated.id;
     baseVersionIdRef.current = updated.version_id;
@@ -1434,6 +1470,43 @@ export function PageEditor({
     stalePublishState === "idle" &&
     (saveState === "dirty" || (saveState === "error" && hasPreparedPublication) ||
       (saveState === "clean" && publicationState !== "published"));
+  // The review open on this draft, as loaded. Saving an edit withdraws it, so
+  // only an unchanged draft is approved by Publish.
+  const editorOpenReviewId = editorReview && page && editorReview.versionId === page.version_id
+    ? editorReview.reviewId
+    : null;
+  // Publishing approves the draft's open review, edited or not.
+  const editorPublishLabel = editorOpenReviewId
+    ? t("context:versionBar.approvePublish")
+    : undefined;
+  // What Publish would write while the draft is saved: the draft itself, or
+  // its merge with a published version that moved on. Shown beside Publish.
+  const editorMergeKey = workspaceId && page && page.version_status === "draft" && saveState === "clean"
+    ? `${workspaceId}:${page.id}:${page.version_id}:${page.editing_revision}:${page.current_published_version_id ?? ""}:${editorMergeReload}`
+    : null;
+  useEffect(() => {
+    if (!editorMergeKey || !workspaceId || !page) return;
+    // A superseded read is left to finish and ignored: it is a cheap read,
+    // and cancelling it on every keystroke-driven state change would only
+    // add aborted requests.
+    let active = true;
+    void previewPageMerge(workspaceId, page.id, page.version_id)
+      .then((value) => { if (active) setEditorMergePreview({ key: editorMergeKey, value }); })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+    // The key carries every value the read depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorMergeKey]);
+  const shownEditorMerge = editorMergePreview?.value && editorMergePreview.value.version_id === page?.version_id
+    ? editorMergePreview.value
+    : null;
+  // Async publish paths read what the screen last committed.
+  useLayoutEffect(() => {
+    editorMergePreviewRef.current = shownEditorMerge;
+    editorOpenReviewIdRef.current = editorOpenReviewId;
+  }, [editorOpenReviewId, shownEditorMerge]);
   // Existing drafts use server eligibility; a commit first starts a draft on request.
   const canRequestReview = canSave && saveState === "clean" && !conflict &&
     Boolean(page && (page.version_status === "draft" ? page.can_submit_for_review :
@@ -2039,6 +2112,7 @@ export function PageEditor({
         setPublicationState(restoredPublication.state);
         pageIdRef.current = loaded.id;
         setPage(loaded);
+        setEditorReview(openReviewOf(loaded));
         setDraftContainsChanges(Boolean(selectedEditVersionId));
         draftBaseSnapshotRef.current = draftBaseSnapshotOf(loaded);
         if (!selectedEditVersionId) {
@@ -3251,6 +3325,8 @@ export function PageEditor({
             publish_despite_findings: options.publishDespiteFindings ?? false,
             expected_content_hash: savedPage.content_hash,
             expected_references_hash: savedPage.references_hash,
+            // A page created here has no review yet.
+            expected_review_item_id: null,
           },
           { signal: controller.signal },
         );
@@ -3278,6 +3354,7 @@ export function PageEditor({
           return;
         }
         publishRequestStarted = true;
+        const shownMerge = editorMergePreviewRef.current;
         const publishedResult = await publishEditorPage(
           workspaceId,
           page.id,
@@ -3287,8 +3364,16 @@ export function PageEditor({
             publish_despite_findings: options.publishDespiteFindings ?? false,
             expected_content_hash: page.content_hash,
             expected_references_hash: page.references_hash,
+            // The review shown with this draft (none: null); publishing
+            // approves it, so a different one refuses the write.
+            expected_review_item_id: editorOpenReviewIdRef.current,
           },
-          { signal: controller.signal },
+          {
+            signal: controller.signal,
+            shownPreview: shownMerge && shownMerge.editing_revision === page.editing_revision
+              ? shownMerge
+              : null,
+          },
         );
         if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
         if (!isEditorMountedRef.current) return;
@@ -3410,6 +3495,10 @@ export function PageEditor({
           publish_despite_findings: options.publishDespiteFindings ?? false,
           expected_content_hash: updated.content_hash,
           expected_references_hash: updated.references_hash,
+          // The review the editor showed, unless this save withdrew it.
+          expected_review_item_id: (updated.superseded_review_count ?? 0) > 0
+            ? null
+            : editorOpenReviewIdRef.current,
         },
         { signal: controller.signal },
       );
@@ -3443,6 +3532,26 @@ export function PageEditor({
       }
       if (!isCurrentSaveRequest(requestId, saveRequestIdRef)) return;
       if (!isEditorMountedRef.current) return;
+      if (
+        exc instanceof ContextMergePreviewChanged ||
+        (exc instanceof ApiError && exc.status === 409 && exc.body.error_code === "context_review_changed")
+      ) {
+        // What publishing would write is no longer what was shown: show the
+        // new merge beside Publish and let the author decide again.
+        setStatus(t("context:versionBar.changed"));
+        setEditorMergeReload((value) => value + 1);
+        if (exc instanceof ApiError && page) {
+          void readPage(workspaceId, page.id, page.version_id).then((fresh) => {
+            if (!isEditorMountedRef.current) return;
+            setPage(fresh);
+            setEditorReview(openReviewOf(fresh));
+          }).catch(() => undefined);
+        }
+        setPublicationState((current) =>
+          current === "never-published" ? "never-published" : "staged",
+        );
+        return;
+      }
       if (
         exc instanceof ApiError &&
         exc.status === 403 &&
@@ -3773,6 +3882,7 @@ export function PageEditor({
       const restoredPublication = readPagePublicationState(latest);
       const content = editorContentOf(serverDraftOf(latest), contextTree);
       adoptEditablePage(latest);
+      setEditorReview(openReviewOf(latest));
       sessionVersionIdRef.current = restoredPublication.sessionVersionId;
       setPublicationState(restoredPublication.state);
       showEditorContent(content);
@@ -4250,6 +4360,9 @@ export function PageEditor({
       if (!isCurrent()) return;
       reviewSubmissionRef.current = null;
       adoptEditablePage(submitted);
+      if (submitted.review_item_id) {
+        setEditorReview({ versionId: submitted.version_id, reviewId: submitted.review_item_id });
+      }
       setStatus(t("editor.reviewRequested"));
     } catch (cause) {
       if (isCurrent()) setStatus(apiErrorMessage(cause, t("editor.reviewRequestFailed")));
@@ -5432,6 +5545,7 @@ export function PageEditor({
                 saving={draftSaving}
                 onPublish={() => void save({ publish: true })}
                 onSave={() => void save({ publish: false })}
+                publishLabel={editorPublishLabel}
                 webPublished={Boolean(page?.is_public)}
               />
             )}
@@ -5500,6 +5614,7 @@ export function PageEditor({
                 saving={draftSaving}
                 onPublish={() => void save({ publish: true })}
                 onSave={() => void save({ publish: false })}
+                publishLabel={editorPublishLabel}
                 webPublished={Boolean(page?.is_public)}
               />
             ) : null}
@@ -5516,6 +5631,23 @@ export function PageEditor({
         </header>
         )}
         {status ? <StatusBanner tone="warning">{status}</StatusBanner> : null}
+        {shownEditorMerge?.kind === "automatic_merge" && shownEditorMerge.result ? (
+          <StatusBanner tone="info">
+            <div className="editor-merge-result">
+              <span>{t("context:versionBar.mergeAutomatic")}</span>
+              <details>
+                <summary>{t("context:versionBar.mergeShowResult")}</summary>
+                <MarkdownView body={shownEditorMerge.result.body_md} workspaceId={workspaceId ?? undefined} />
+              </details>
+            </div>
+          </StatusBanner>
+        ) : shownEditorMerge?.kind === "conflict" ? (
+          <StatusBanner tone="warning">
+            {t("context:versionBar.mergeConflict", {
+              count: Math.max(1, (shownEditorMerge.keep_both?.conflicts.length ?? 0) + shownEditorMerge.metadata_conflicts.length),
+            })}
+          </StatusBanner>
+        ) : null}
         {page?.block_map_stale ? (
           <StatusBanner tone="warning">{t("editor.blockMapStaleWarning")}</StatusBanner>
         ) : null}
@@ -5868,6 +6000,7 @@ export function PageEditor({
               saving={draftSaving}
               onPublish={() => void save({ publish: true })}
               onSave={() => void save({ publish: false })}
+              publishLabel={editorPublishLabel}
               webPublished={Boolean(page?.is_public)}
             />
             <span className="meta-line">
@@ -7006,6 +7139,15 @@ function SyncPill({
   );
 }
 
+/** The open review a read shows for the draft it returned, if any. */
+function openReviewOf(page: PagePayload): { versionId: string; reviewId: string } | null {
+  const review = page.pending_review;
+  return review && ["pending", "changes_requested"].includes(review.status)
+    && page.pending_draft_version_id === page.version_id
+    ? { versionId: page.version_id, reviewId: review.review_item_id }
+    : null;
+}
+
 type EditorPublicationAction = "publish" | "review" | "save";
 
 function EditorPublicationActions({
@@ -7018,6 +7160,7 @@ function EditorPublicationActions({
   saveDisabledReason,
   onPublish,
   onSave,
+  publishLabel,
   webPublished = false,
 }: {
   actions?: readonly EditorPublicationAction[];
@@ -7029,6 +7172,8 @@ function EditorPublicationActions({
   saveDisabledReason?: string | null;
   onPublish: () => void;
   onSave: () => void;
+  /** "Approve and publish" when publishing also approves the draft's open review. */
+  publishLabel?: string;
   /** The page's web link follows each published version. */
   webPublished?: boolean;
 }) {
@@ -7048,7 +7193,7 @@ function EditorPublicationActions({
         type="button"
       >
         {webPublished ? <Globe aria-hidden="true" size={16} /> : null}
-        {t("editor.publish", { defaultValue: "Publish" })}
+        {publishLabel ?? t("editor.publish", { defaultValue: "Publish" })}
       </button>
     ),
     review: (

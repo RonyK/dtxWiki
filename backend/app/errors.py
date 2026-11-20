@@ -53,6 +53,7 @@ def build_rest_error_response(
 def rest_error_status(error_code: str) -> str:
     if error_code in {
         "content_hash_mismatch",
+        "context_review_changed",
         "decision_id_conflict",
         "disambiguation_required",
         "editing_revision_conflict",

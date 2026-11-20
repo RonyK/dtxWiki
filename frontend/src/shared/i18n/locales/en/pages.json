@@ -94,6 +94,18 @@
       "closed": {
         "label": "Closed",
         "description": "This draft ended and is preserved as a commit."
+      },
+      "closed_discarded": {
+        "label": "Discarded",
+        "description": "A discarded draft. It stays in History, and you can start again from it."
+      },
+      "closed_merged": {
+        "label": "Merged",
+        "description": "A draft merged into another version, as when it was published by a merge. Its changes are in that version."
+      },
+      "closed_rejected": {
+        "label": "Rejected",
+        "description": "A draft whose review was rejected. You can start again from it."
       }
     }
   },

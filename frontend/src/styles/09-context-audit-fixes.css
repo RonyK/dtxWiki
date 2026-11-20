@@ -1271,18 +1271,22 @@
 }
 
 .review-bulk-merge-preview summary,
-.review-merge-result summary {
+.review-merge-result summary,
+.editor-merge-result summary {
   cursor: pointer;
 }
 
 .review-bulk-merge-preview .markdown-body,
-.review-merge-result .markdown-body {
+.review-merge-result .markdown-body,
+.editor-merge-result .markdown-body,
+.context-version-merge .markdown-body {
   max-height: 40vh;
   margin-top: 8px;
   overflow: auto;
 }
 
-.review-merge-result {
+.review-merge-result,
+.editor-merge-result {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -1367,65 +1371,298 @@
 }
 
 @media (max-width: 1024px), (any-pointer: coarse) {
-  .segmented-control.context-merge-metadata-choices > button,
-  .context-draft-actions > * {
+  .segmented-control.context-merge-metadata-choices > button {
     min-height: 44px;
   }
 }
-.context-drafts {
+/* The version bar: the version on screen (a switcher to the published
+   version and every open draft), its state, the merge publishing would
+   write, and what can be done to it. One bar replaces the draft banner, the
+   open-draft list and the review banner. */
+.context-version-bar {
+  position: relative;
   display: grid;
   gap: 10px;
   min-width: 0;
-}
-
-.context-draft-banner,
-.context-draft-choice {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.context-draft-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.context-draft-error {
-  margin: 8px 0 0;
-  color: var(--danger-strong, var(--danger));
-}
-
-.context-draft-list {
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  color: var(--ink);
 }
 
-.context-draft-list summary {
+.context-version-bar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.context-version-switcher {
+  position: relative;
+  max-width: 100%;
+}
+
+.context-version-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
   cursor: pointer;
+  word-break: keep-all;
+}
+
+.context-version-switch[aria-expanded="true"] {
+  border-color: var(--context);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--context) 25%, transparent);
+}
+
+.context-version-switch > svg {
+  flex-shrink: 0;
+  color: var(--ink-muted);
+}
+
+.context-version-switch-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.context-version-switch-label .is-draft {
+  color: var(--agent-text);
+}
+
+.context-version-switch-label .is-published {
+  color: var(--ok-strong);
+}
+
+.context-version-sub {
+  color: var(--ink-muted);
+}
+
+.context-version-mine {
+  margin-inline-start: 6px;
+  color: var(--context);
+  font-size: 12px;
   font-weight: 600;
 }
 
-.context-draft-list ul {
+.context-version-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
   display: grid;
-  gap: 6px;
+  gap: 4px;
+  width: min(360px, calc(100vw - 48px));
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.context-version-menu ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.context-draft-choice {
+.context-version-menu-label {
+  margin: 4px 0 0;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.context-version-menu-empty {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.context-version-item {
+  display: grid;
+  gap: 2px;
   width: 100%;
   min-height: 44px;
-  padding: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
   text-align: start;
+  cursor: pointer;
   overflow-wrap: anywhere;
 }
 
-.context-draft-choice[aria-current="true"] {
+.context-version-item:hover {
+  background: var(--surface-hover);
+}
+
+.context-version-item small {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+/* Selection: the full box, tinted, with a ring on every side. */
+.context-version-item[aria-current="true"] {
+  padding: 7px 9px;
+  border: 2px solid var(--context);
+  background: var(--context-soft);
+}
+
+.context-version-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  word-break: keep-all;
+}
+
+.context-version-merge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  word-break: keep-all;
+}
+
+.context-version-merge.is-merge {
+  border: 1px solid #bfdbfe;
+  background: var(--info-soft);
+  color: #1d4ed8;
+}
+
+.context-version-merge.is-conflict {
+  border: 1px solid #fcd34d;
+  background: var(--warning-soft);
+  color: #92400e;
+}
+
+.context-version-merge details {
+  min-width: 0;
+}
+
+.context-version-merge summary {
   font-weight: 600;
   text-decoration: underline;
+  cursor: pointer;
+}
+
+.context-version-merge details[open] {
+  flex-basis: 100%;
+  color: var(--ink);
+}
+
+.context-version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.context-version-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.context-version-bar .context-version-action {
+  min-height: 32px;
+  padding: 6px 10px;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.context-version-action svg {
+  flex-shrink: 0;
+}
+
+.context-version-note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  word-break: keep-all;
+}
+
+.context-version-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.context-version-reason textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.context-version-reason .context-version-action {
+  align-self: flex-start;
+}
+
+.context-version-error {
+  margin: 0;
+  color: var(--danger-strong, var(--danger));
+  font-size: 13px;
+}
+
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .context-version-bar .context-version-action,
+  .context-version-switch,
+  .context-version-menu > .text-button,
+  .context-version-merge .text-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 640px) {
+  .context-version-switcher,
+  .context-version-switch {
+    width: 100%;
+  }
+
+  .context-version-switch {
+    justify-content: space-between;
+  }
+
+  /* The list spans the full-width switcher instead of a fixed width. */
+  .context-version-menu {
+    right: 0;
+    width: auto;
+  }
+
+  .context-version-actions {
+    justify-content: flex-start;
+  }
 }

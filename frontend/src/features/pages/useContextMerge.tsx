@@ -67,9 +67,15 @@ export function useContextMerge() {
   /**
    * Publish, approve or bring in. Resolves with the write's result; rejects
    * with its error, or with an AbortError when the person closes the dialog.
+   * `preview` is the merge the screen already showed: it is written as shown
+   * (a clean result at once, a conflict through the dialog) and never
+   * re-read at the click, so a draft or published version that moved since
+   * is refused by the server instead of published unseen.
    */
-  const runMergeWrite = useCallback(<T,>(target: MergeTarget & {
-    loadPreview: () => Promise<ContextMergePreview>;
+  const runMergeWrite = useCallback(<T,>(target: MergeTarget & (
+    | { preview: ContextMergePreview; loadPreview?: undefined }
+    | { preview?: undefined; loadPreview: () => Promise<ContextMergePreview> }
+  ) & {
     write: (choice: PreparedMergeChoice) => Promise<T>;
   }) => new Promise<T>((resolve, reject) => {
     const merge: Merge = { cancel: () => reject(mergeClosed()) };
@@ -86,7 +92,7 @@ export function useContextMerge() {
         fail(error);
       }
     };
-    target.loadPreview().then((preview) => {
+    (target.preview ? Promise.resolve(target.preview) : target.loadPreview()).then((preview) => {
       if (currentRef.current !== merge) return;
       if (preview.kind !== "conflict") return commit(cleanMergeChoice(preview));
       setAsk({

@@ -1020,6 +1020,8 @@ describe("PageEditor", () => {
       publish_despite_findings: true,
       expected_content_hash: expect.any(String),
       expected_references_hash: "b".repeat(64),
+      // The saved draft is published as shown: with no review open on it.
+      expected_review_item_id: null,
       expected_editing_revision: 1, expected_published_version_id: null,
       result_hash: "c".repeat(64), idempotency_key: expect.any(String),
     });
@@ -1250,7 +1252,7 @@ describe("PageEditor", () => {
     });
   });
 
-  it("publishes a dirty edit with the automatically merged result without asking", async () => {
+  it("shows an unseen automatic merge before publishing a dirty edit, then publishes it as shown", async () => {
     const fetchMock = mockPublicationFlow();
     const router = renderWithRouter(
       "/workspaces/11111111-1111-4111-8111-111111111111/context/pages/22222222-2222-4222-8222-222222222222/edit",
@@ -1265,7 +1267,14 @@ describe("PageEditor", () => {
     expect(publishButton).toBeEnabled();
 
     await typist().click(publishButton);
-    // A clean merge needs no question: the preview's pins go straight out.
+    // The save produced a merge with a published version the author never
+    // saw: nothing is published, and the merge is shown beside Publish.
+    expect(await screen.findByText(i18n.t("context:versionBar.mergeAutomatic"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("context:versionBar.changed"))).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish"))).toBe(false);
+
+    // Publishing again writes the merge now shown, with its pins.
+    await typist().click(publicationActions().getByRole("button", { name: "Publish" }));
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/publish")),
@@ -1290,6 +1299,7 @@ describe("PageEditor", () => {
       publish_despite_findings: false,
       expected_content_hash: "b".repeat(64),
       expected_references_hash: "b".repeat(64),
+      expected_review_item_id: null,
       expected_editing_revision: 1, expected_published_version_id: null,
       result_hash: "c".repeat(64), idempotency_key: expect.any(String),
     });

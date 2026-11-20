@@ -5594,6 +5594,22 @@
         "additionalProperties": false,
         "description": "One version, readable by the caller, that references the asset.",
         "properties": {
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Reason"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -7055,6 +7071,22 @@
             "description": "Direct child count; null until requested by the inspector.",
             "title": "Children Count"
           },
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Reason"
+          },
           "content_hash": {
             "pattern": "^[a-f0-9]{64}$",
             "title": "Content Hash",
@@ -7801,6 +7833,22 @@
             ],
             "description": "Direct child count; null until requested by the inspector.",
             "title": "Children Count"
+          },
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Reason"
           },
           "content_hash": {
             "pattern": "^[a-f0-9]{64}$",
@@ -18627,7 +18675,8 @@
             "default": "version",
             "enum": [
               "version",
-              "empty"
+              "empty",
+              "publish_result"
             ],
             "title": "Baseline",
             "type": "string"
@@ -18636,6 +18685,17 @@
             "minimum": 0.0,
             "title": "Deletions",
             "type": "integer"
+          },
+          "editing_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editing Revision"
           },
           "from_version_id": {
             "anyOf": [
@@ -18660,6 +18720,21 @@
             "title": "Lines",
             "type": "array"
           },
+          "merge_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "fast_forward",
+                  "automatic_merge"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merge Kind"
+          },
           "metadata_changes": {
             "items": {
               "enum": [
@@ -18674,6 +18749,18 @@
             },
             "title": "Metadata Changes",
             "type": "array"
+          },
+          "published_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Id"
           },
           "references_after": {
             "items": {
@@ -18742,6 +18829,22 @@
           "actor_type": {
             "title": "Actor Type",
             "type": "string"
+          },
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Reason"
           },
           "content_hash": {
             "pattern": "^[a-f0-9]{64}$",
@@ -19584,6 +19687,19 @@
             ],
             "description": "Required when a browser publishes an editing or draft version.",
             "title": "Expected References Hash"
+          },
+          "expected_review_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The open review the caller showed for this draft, or null when it showed none. When sent, publication refuses with context_review_changed unless it is still the draft's latest open review (the one a publish approves).",
+            "title": "Expected Review Item Id"
           },
           "idempotency_key": {
             "description": "24-hour retry key scoped to actor, workspace, and command. Generate and hold it before the first send.",
@@ -25127,6 +25243,22 @@
             "title": "Actor Type",
             "type": "string"
           },
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Reason"
+          },
           "created_at": {
             "anyOf": [
               {
@@ -25353,6 +25485,22 @@
       "VersionInfo": {
         "additionalProperties": false,
         "properties": {
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Reason"
+          },
           "content_hash": {
             "anyOf": [
               {
@@ -39374,7 +39522,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "const": "empty",
+                  "enum": [
+                    "empty",
+                    "publish_result"
+                  ],
                   "type": "string"
                 },
                 {

@@ -2608,7 +2608,10 @@ class ReviewService:
             version = rejection_impact.version
             plan = rejection_impact.plan
             if version.version_status == "draft":
-                from backend.services.context_lifecycle import record_context_decision
+                from backend.services.context_lifecycle import (
+                    CLOSE_REASON_REJECTED,
+                    record_context_decision,
+                )
 
                 record_context_decision(
                     session,
@@ -2618,7 +2621,7 @@ class ReviewService:
                     context_version_writer=self.context_version_writer,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    reason="Context review rejected",
+                    reason=CLOSE_REASON_REJECTED,
                     audit_service=self.audit_service,
                     review_decision_id=decision.id,
                 )

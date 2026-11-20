@@ -225,10 +225,14 @@ export async function diffPageVersions(
   id: string,
   fromVersionId: string | null,
   toVersionId: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; publishResult?: boolean } = {},
 ) {
   const query = new URLSearchParams();
-  if (fromVersionId === null) {
+  if (options.publishResult) {
+    // The current published version -> what publishing `toVersionId` would
+    // publish (the merge, for a draft that is behind).
+    query.set("baseline", "publish_result");
+  } else if (fromVersionId === null) {
     query.set("baseline", "empty");
   } else {
     query.set("from_version_id", fromVersionId);
@@ -359,6 +363,24 @@ export class ContextMergePreviewChanged extends Error {
   }
 }
 
+/**
+ * A publish, approval or bring-in refused because what it was bound to moved:
+ * the draft was saved, the published version or the merge changed, or the
+ * draft's open review changed. The caller shows the new state; other refusals
+ * keep their own message.
+ */
+const CONTEXT_STATE_MOVED = new Set([
+  "context_merge_conflict",
+  "context_review_changed",
+  "editing_revision_conflict",
+  "stale_base_version",
+  "stale_context_draft",
+]);
+export function contextWriteStateMoved(error: unknown) {
+  return error instanceof ContextMergePreviewChanged
+    || (error instanceof ApiError && error.status === 409 && CONTEXT_STATE_MOVED.has(error.body.error_code));
+}
+
 /** The preview facts a merge write is bound to. */
 type MergePreviewPins = Pick<ContextMergePreview, "editing_revision" | "target_version_id" | "content_hash" | "references_hash">;
 
@@ -478,16 +500,24 @@ export async function publishPageVersion(
   workspaceId: string,
   id: string,
   versionId: string,
-  payload: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash">,
+  payload: Pick<PublishPageVersionInput, "reason" | "publish_despite_findings" | "expected_content_hash" | "expected_references_hash" | "expected_review_item_id">,
   options: PageWriteOptions = {},
 ) {
   let command = options.preparedPublication;
   if (!command) {
     if (!options.mergeChoice) throw new Error("Publication needs a merge choice or a prepared command.");
-    const { reason, publish_despite_findings: publishDespiteFindings, ...saved } = payload;
+    const {
+      reason,
+      publish_despite_findings: publishDespiteFindings,
+      expected_review_item_id: expectedReviewItemId,
+      ...saved
+    } = payload;
     command = { versionId, request: {
       reason,
       publish_despite_findings: publishDespiteFindings,
+      // The review the person saw (null: none). A publish approves the
+      // draft's open review, so a different one refuses the write.
+      ...(expectedReviewItemId !== undefined ? { expected_review_item_id: expectedReviewItemId } : {}),
       ...publicationPins(options.mergeChoice, saved),
       idempotency_key: newIdempotencyKey(),
     } };
