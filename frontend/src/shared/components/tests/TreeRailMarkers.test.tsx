@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearTreeFavoriteCache, getTreeFavoriteSnapshot, setTreeFavoriteActor } from "../../api/treeFavorites";
@@ -243,12 +243,12 @@ describe("TreeRail document status and personal favorites", () => {
     expect(fullTreeStars()).toHaveLength(1);
   });
 
-  it("lists favorites in their folder structure above the full tree and prunes branches left without one", () => {
+  it("lists favorites in their folder structure above the full tree, reveals the open page in the tree in use, and prunes branches left without one", async () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
     const folder = (id: string, title: string, parentId: string | null, sortKey: string) => node({
       id, title, parent_id: parentId, sort_key: sortKey, slug: parentId ? id : "context", node_kind: "folder",
       target_kind: null, target_id: null, is_system_node: !parentId, can_have_children: true, children_count: 2 });
-    render(<TreeRail title="Context" favoriteScope={scope} hideSystemRootNodes nodes={[
+    const nodes = [
       folder("root", "Context", null, "0"),
       folder("design", "Design", "root", "1"),
       // A page can be a parent: it stays on the path without counting as a favorite.
@@ -260,7 +260,9 @@ describe("TreeRail document status and personal favorites", () => {
       node({ id: "rules-2", title: "Rules", parent_id: "ops", sort_key: "1", target_id: "rules",
         is_favorite: true, primary_placement: false }),
       node({ id: "backup", title: "Backup", parent_id: "ops", sort_key: "2", target_id: "backup", is_favorite: true }),
-    ]} />);
+    ];
+    const props = { title: "Context", favoriteScope: scope, hideSystemRootNodes: true, nodes, onSelectTarget: vi.fn() };
+    let { unmount } = render(<TreeRail {...props} />);
     const favorites = () => screen.getByRole("tree", { name: "Favorites" });
     const outline = () => within(favorites()).getAllByRole("treeitem")
       .map((row) => `${row.getAttribute("aria-level")}:${row.querySelector(".tree-row-title")?.textContent}`);
@@ -268,6 +270,20 @@ describe("TreeRail document status and personal favorites", () => {
     expect(favorites().querySelector(".tree-row-child-count")).toBeNull();
     expect(screen.getByRole("button", { name: /^Favorites/, expanded: true })).toHaveTextContent("Favorites3");
     expect(screen.getByText("All")).toBeInTheDocument();
+    // Opening a page reloads the screen, which mounts the rail again. A page
+    // opened from the full tree is revealed there once; reaching the same page
+    // again from outside the rail reveals it in favorites.
+    const scrolled = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+    const fullTree = () => within(screen.getByRole("tree", { name: "Context" }));
+    fireEvent.click(fullTree().getByRole("treeitem", { name: "Backup" }));
+    unmount();
+    ({ unmount } = render(<TreeRail {...props} activeTargetId="backup" />));
+    await waitFor(() => expect(scrolled.mock.contexts.at(-1)).toBe(fullTree().getByRole("treeitem", { name: "Backup" })));
+    unmount();
+    ({ unmount } = render(<TreeRail {...props} activeTargetId="backup" />));
+    await waitFor(() => expect(scrolled.mock.contexts.at(-1)).toBe(
+      within(favorites()).getByRole("treeitem", { name: "Backup" }),
+    ));
     // Both placements share one favorite, so removing it empties the Design branch.
     fireEvent.click(within(favorites()).getAllByRole("button", { name: "Open actions for Rules" })[1]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove from my favorites" }));

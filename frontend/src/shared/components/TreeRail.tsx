@@ -85,6 +85,31 @@ function isFavoriteRowKey(rowKey: string) {
 // move the real node relative to siblings that tree does not show.
 function ignoreRowDrag() {}
 
+// The row a rail just opened a document from. Opening a page can replace the
+// screen while it loads, so the rail is mounted again and loses focus; the
+// rail's next reveal uses this once, to show the page in the tree and
+// placement it was opened from, and drops it whatever it reveals. Any other
+// way of reaching the page (search, links, another screen) finds nothing.
+let pendingOpenedFrom: { railKey: string; targetId: string; rowKey: string } | null = null;
+
+function rememberOpenedFrom(railKey: string, targetId: string, rowKey: string) {
+  pendingOpenedFrom = { railKey, targetId, rowKey };
+}
+
+function openedFromRowKey(railKey: string, targetId: string | null | undefined) {
+  return pendingOpenedFrom &&
+    pendingOpenedFrom.railKey === railKey &&
+    pendingOpenedFrom.targetId === targetId
+    ? pendingOpenedFrom.rowKey
+    : null;
+}
+
+function forgetOpenedFrom(railKey: string) {
+  if (pendingOpenedFrom?.railKey === railKey) {
+    pendingOpenedFrom = null;
+  }
+}
+
 // One rendered tree (the full tree or the favorites tree): the rows in display
 // order and how its rows expand, so both share one keyboard handler.
 type TreeRowList = {
@@ -205,7 +230,8 @@ export function TreeRail({
   }, [nodes, now]);
   const [favoriteFailure, setFavoriteFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
-  const favoritesStateKey = `${accent ?? title}:favorites`;
+  const railKey = accent ?? title;
+  const favoritesStateKey = `${railKey}:favorites`;
   const [favoritesOpen, setFavoritesOpen] = useState(() =>
     readWorkspacePanelState(favoritesStateKey, true),
   );
@@ -434,20 +460,25 @@ export function TreeRail({
       (activeTargetId != null && node.target_id === activeTargetId),
   )?.id;
 
-  // The open document is revealed where it first appears: in the favorites
-  // tree when it is one, so opening a favorite does not scroll that tree away.
-  // The row is chosen when the reveal runs; folding favorites or typing a
-  // filter changes which copy shows, not which document is open, and must
-  // not scroll on its own.
+  // The open document is revealed in the tree it was opened from: a page
+  // opened from the full tree stays there even when it is also a favorite.
+  // Otherwise (the favorites tree, or navigation from outside the rail) it is
+  // revealed where it first appears, so opening a favorite does not scroll
+  // the favorites tree away. The row is chosen when the reveal runs; folding
+  // favorites or typing a filter changes which copy shows, not which
+  // document is open, and must not scroll on its own.
   const activeFavoriteNodeId =
     showFavorites && favoritesOpen
       ? visibleFavoriteNodes.find((node) => rowIsActive(node))?.id
       : undefined;
   const revealRowKeyRef = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
-    revealRowKeyRef.current = activeFavoriteNodeId
-      ? favoriteRowKey(activeFavoriteNodeId)
-      : activeVisibleNodeId;
+    const activeTarget = activeVisibleNodeId
+      ? nodeById.get(activeVisibleNodeId)?.target_id
+      : undefined;
+    revealRowKeyRef.current =
+      openedFromRowKey(railKey, activeTarget) ??
+      (activeFavoriteNodeId ? favoriteRowKey(activeFavoriteNodeId) : activeVisibleNodeId);
   });
 
   useEffect(() => {
@@ -459,9 +490,10 @@ export function TreeRail({
       if (revision !== revealRevisionRef.current) {
         return;
       }
-      const row = rowRefs.current.get(
-        revealRowKeyRef.current ?? activeVisibleNodeId,
-      );
+      const row =
+        rowRefs.current.get(revealRowKeyRef.current ?? activeVisibleNodeId) ??
+        rowRefs.current.get(activeVisibleNodeId);
+      forgetOpenedFrom(railKey);
       if (row?.isConnected) {
         row.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
@@ -470,7 +502,7 @@ export function TreeRail({
       revealRevisionRef.current += 1;
       window.cancelAnimationFrame(frame);
     };
-  }, [activeVisibleNodeId]);
+  }, [activeVisibleNodeId, railKey]);
 
   function toggleExpanded(nodeId: string) {
     if (!onExpandedNodeIdsChange) {
@@ -932,10 +964,18 @@ export function TreeRail({
     if (row) tooltip.focus(nodeId, row);
   }
 
+  function selectTargetFrom(list: TreeRowList, node: TreeNodePayload) {
+    // Re-opening the open document starts no reveal to consume the record.
+    if (node.target_id && !rowIsActive(node)) {
+      rememberOpenedFrom(railKey, node.target_id, list.rowKey(node.id));
+    }
+    onSelectTarget?.(node);
+  }
+
   function invokePrimaryAction(list: TreeRowList, node: TreeNodePayload) {
     tooltip.dismissForActivation();
     if (onSelectTarget) {
-      onSelectTarget(node);
+      selectTargetFrom(list, node);
       return;
     }
     if (list.hasChildren(node) && list.canToggle) {
@@ -1181,7 +1221,7 @@ export function TreeRail({
                       refCallback={registerRowRef(rowKey)}
                       tabIndex={rowKey === effectiveFocusedFavoriteKey ? 0 : -1}
                       onToggleExpanded={toggleFavoriteFolder}
-                      onSelectTarget={onSelectTarget}
+                      onSelectTarget={onSelectTarget ? (row) => selectTargetFrom(favoriteRowList, row) : undefined}
                       visualLevel={visualTreeLevel(node, nodeById, hiddenRootNodeIds)}
                       tooltip={tooltip}
                     />
@@ -1243,7 +1283,7 @@ export function TreeRail({
                 refCallback={registerRowRef(node.id)}
                 tabIndex={node.id === effectiveFocusedNodeId ? 0 : -1}
                 onToggleExpanded={toggleExpanded}
-                onSelectTarget={onSelectTarget}
+                onSelectTarget={onSelectTarget ? (row) => selectTargetFrom(treeRowList, row) : undefined}
                 visualLevel={visualTreeLevel(node, nodeById, hiddenRootNodeIds)}
                 tooltip={tooltip}
               />
