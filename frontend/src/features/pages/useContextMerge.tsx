@@ -14,6 +14,8 @@ type MergeTarget = {
   workspaceId: string;
   pageId: string;
   publishedVersionNumber?: number | null;
+  /** The person's own text when it is not a stored version (an editor save). */
+  oursBody?: string | null;
 };
 
 /** The merge in progress, from the click until it is written, failed or closed. */
@@ -140,6 +142,7 @@ export function useContextMerge() {
       busy={busy}
       kind={ask.kind}
       onClose={close}
+      oursBody={ask.oursBody}
       onConfirm={(resolution) => {
         setBusy(true);
         void ask.write(resolution);

@@ -3792,6 +3792,7 @@ export function PageEditor({
       kind: "save",
       workspaceId,
       pageId,
+      oursBody: serializeDraftBody(latestDraftRef.current, frontmatterExtraLinesRef.current),
       preview: overlap.merge_preview,
       refreshed,
       async apply(resolution) {

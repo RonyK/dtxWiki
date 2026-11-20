@@ -62,7 +62,7 @@ describe("Context reader static layout regressions", () => {
     );
   });
 
-  it("opens the merge dialog full screen on phones with the two choices stacked", () => {
+  it("opens the merge dialog full screen on phones with the two sides of a place stacked", () => {
     const styles = readAppStyles();
 
     expect(styles).toMatch(
@@ -78,10 +78,10 @@ describe("Context reader static layout regressions", () => {
       /@media \(max-width: 720px\) \{[\s\S]*?\.dialog-backdrop:has\(\.context-merge-dialog\) \{[^}]*padding: 0;/,
     );
     expect(styles).toMatch(
-      /@media \(max-width: 720px\) \{[\s\S]*?\.dialog-panel\.context-merge-dialog \{[^}]*width: 100vw;[^}]*max-height: 100dvh;/,
+      /@media \(max-width: 720px\) \{[\s\S]*?\.dialog-panel\.context-merge-dialog,[^{]*\{[^}]*width: 100vw;[^}]*max-height: 100dvh;/,
     );
     expect(styles).toMatch(
-      /@media \(max-width: 720px\) \{[\s\S]*?\.segmented-control\.context-merge-choices \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
+      /@media \(max-width: 720px\) \{[\s\S]*?\.context-merge-sides,[^{]*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
     );
   });
 

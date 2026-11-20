@@ -4,12 +4,19 @@
 
 ### Merging Context changes in the browser
 
-- When changes overlap, the browser offers two choices -- "Keep both changes"
-  or "Prefer the latest change" -- and shows the whole result, which can be
-  edited before it is saved. The same dialog serves publishing, approving a
-  review, merging the published version into a draft, and two people saving
-  one draft. A clean merge publishes without asking when it is the merge the
-  screen showed. Its confirm button names that write -- "Publish", "Approve
+- When changes overlap, the merge dialog shows each overlapping place as a
+  card in document order -- the title and type first -- with both sides and
+  the place's result, unchanged lines folded, changes merged automatically
+  marked, and a place list to move between them. The merge method "Keep both
+  changes" (chosen when it opens) or "Prefer the latest change" decides every
+  place; choosing a side, letting go of it (both kept) or editing one place
+  makes the method "Custom", and the other places keep the previous method's
+  result. Choosing a method again decides every place again, asking first if
+  a place was edited. Large places scroll side by side and open in a
+  full-screen three-column comparison. The same dialog serves publishing,
+  approving a review, merging the published version into a draft, and two
+  people saving one draft. A clean merge publishes without asking when it is
+  the merge the screen showed. Its confirm button names that write -- "Publish", "Approve
   and publish", "Merge" or "Save this result" -- and the version bar, the
   dialog, the editor and the Review screen count an overlapping title or type
   once.
