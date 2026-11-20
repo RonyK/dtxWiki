@@ -399,7 +399,7 @@
     "compareFailed": "Could not load the changes."
   },
   "merge": {
-    "title": "Combine changes",
+    "title": "Merge changes",
     "summary_one": "This draft ({{name}}, saved {{time}}) overlaps the published version {{version}} in {{count}} place.",
     "summary_other": "This draft ({{name}}, saved {{time}}) overlaps the published version {{version}} in {{count}} places.",
     "summarySave_one": "Your changes overlap what {{name}} saved {{time}} in {{count}} place.",
@@ -411,7 +411,7 @@
       "draft": "Draft",
       "published": "Published"
     },
-    "choiceLabel": "How to combine",
+    "choiceLabel": "How to merge",
     "keepBoth": "Keep both changes",
     "keepBothHint": "Keeps both versions where they overlap",
     "latest": "Prefer the latest change",
@@ -421,19 +421,30 @@
     "resultLabel": "Result",
     "viewLabel": "Result view",
     "viewResult": "Preview",
-    "viewEdit": "Edit",
-    "legend_one": "{{count}} combined section is highlighted",
-    "legend_other": "{{count}} combined sections are highlighted",
-    "editLabel": "Combined result Markdown",
+    "viewEdit": "Edit directly",
+    "legend_one": "{{count}} merged section is highlighted",
+    "legend_other": "{{count}} merged sections are highlighted",
+    "editLabel": "Merged body",
     "metadataLabel": "Properties",
     "fields": {
       "title": "Title",
       "page_type": "Type",
       "placement_parent_node_id": "Tree location"
     },
-    "customValue": "Edit myself",
-    "confirm": "Combine with this result",
-    "confirming": "Combining…",
+    "customValue": "Enter a value",
+    "customField": "{{field}} to enter",
+    "confirm": {
+      "publish": "Publish this result",
+      "approve": "Approve and publish this result",
+      "bring_in": "Merge this result",
+      "save": "Save this result"
+    },
+    "confirming": {
+      "publish": "Publishing…",
+      "approve": "Approving and publishing…",
+      "bring_in": "Merging…",
+      "save": "Saving…"
+    },
     "refreshed": "The content changed, so the preview was refreshed"
   }
 }

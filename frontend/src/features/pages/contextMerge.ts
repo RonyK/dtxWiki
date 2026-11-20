@@ -29,6 +29,44 @@ export function conflictedMetadataFields(preview: Pick<ContextMergePreview, "met
   return METADATA_FIELDS.filter((field) => preview.metadata_conflicts.includes(field));
 }
 
+/** The leading frontmatter block: its line count and its length, both 0 when there is none. */
+export function frontmatterExtent(text: string): { lines: number; length: number } {
+  if (!text.startsWith("---\n")) return { lines: 0, length: 0 };
+  const lines = text.split("\n");
+  let length = lines[0].length + 1;
+  for (let index = 1; index < lines.length; index += 1) {
+    length += lines[index].length + 1;
+    if (lines[index] === "---") return { lines: index + 1, length: Math.min(length, text.length) };
+  }
+  return { lines: 0, length: 0 };
+}
+
+/**
+ * How many places of a conflict the person decides, one count for every
+ * screen that states it: each overlapping region of the body, each conflicted
+ * property, and the tree location, which the Markdown does not hold. Title and
+ * type are frontmatter lines, so an overlap there is a property's own line and
+ * is counted with the properties, never twice; the frontmatter counts more
+ * only when it has more overlaps than conflicted properties (tags, aliases).
+ */
+export function mergeOverlapCount(preview: Pick<ContextMergePreview, "keep_both" | "metadata_conflicts">): number {
+  const fields = conflictedMetadataFields(preview);
+  const outsideText = fields.filter((field) => field === "placement_parent_node_id").length;
+  let frontmatterRegions = 0;
+  let bodyRegions = 0;
+  if (preview.keep_both) {
+    const text = mergeSourceText(preview.keep_both);
+    const frontmatterEnd = frontmatterExtent(text).length;
+    for (const conflict of preview.keep_both.conflicts) {
+      if (codePointOffsetToIndex(text, conflict.keep_both_start) < frontmatterEnd) frontmatterRegions += 1;
+      else bodyRegions += 1;
+    }
+  }
+  const properties = Math.max(frontmatterRegions, fields.length - outsideText) + outsideText;
+  // A virtual-base conflict can need a choice without a region of its own.
+  return Math.max(1, bodyRegions + properties);
+}
+
 /** The text the merge module produced; conflict offsets index into it. */
 export function mergeSourceText(candidate: ContextMergeCandidate): string {
   return candidate.conflict_body_md ?? candidate.body_md;

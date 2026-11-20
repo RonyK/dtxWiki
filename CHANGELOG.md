@@ -2,14 +2,19 @@
 
 ## Unreleased
 
-### Combining Context changes in the browser
+### Merging Context changes in the browser
 
 - When changes overlap, the browser offers two choices -- "Keep both changes"
   or "Prefer the latest change" -- and shows the whole result, which can be
   edited before it is saved. The same dialog serves publishing, approving a
   review, merging the published version into a draft, and two people saving
   one draft. A clean merge publishes without asking when it is the merge the
-  screen showed.
+  screen showed. Its confirm button names that write -- "Publish", "Approve
+  and publish", "Merge" or "Save this result" -- and the version bar, the
+  dialog, the editor and the Review screen count an overlapping title or type
+  once.
+- Korean labels use one word per concept across the app: 병합 (merge), 리뷰
+  (review), 거절 (reject), 변경 요청 (request changes) and 게시 (publish).
 - One version bar on a Context page replaces the draft banner, the open-draft
   list, the review banner and the header's draft and review counts. It names
   the version on screen (switch to the published version or any open draft),
@@ -37,8 +42,9 @@
 ### Important changes
 
 - MCP tool contract revision 31 adds `closed_reason` (discarded, merged or
-  rejected) to Context version projections. Refresh cached `tools/list` results
-  and result schemas.
+  rejected) to Context version projections. `bring_in_context_version` is titled
+  "Merge context version", and Korean tool titles use the app's merge and review
+  wording. Refresh cached `tools/list` results and result schemas.
 
 ## 0.3.1 — 2026-11-20
 

@@ -157,10 +157,10 @@ test("creates, reads, edits, and shows stale conflict in the browser", async ({
   // the server's own merge and saves the chosen result on that draft.
   await expect(page.getByText(/Someone else saved changes that overlap yours/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Reload latest" })).toBeVisible();
-  await page.getByRole("button", { name: "Combine changes" }).click();
-  const merge = page.getByRole("dialog", { name: "Combine changes" });
+  await page.getByRole("button", { name: "Merge changes" }).click();
+  const merge = page.getByRole("dialog", { name: "Merge changes" });
   await merge.getByRole("radio", { name: /Keep both changes/ }).click();
-  await merge.getByRole("button", { name: "Combine with this result" }).click();
+  await merge.getByRole("button", { name: "Save this result" }).click();
   await expect(merge).toBeHidden();
   await expect(page.locator(".cm-content")).toContainText("Browser stale update");
   await expect(page.locator(".cm-content")).toContainText("Server update");

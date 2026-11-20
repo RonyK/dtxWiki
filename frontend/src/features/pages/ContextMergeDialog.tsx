@@ -5,13 +5,14 @@ import { useTranslation } from "react-i18next";
 
 import { listTree, readTreeNode, type TreeNodePayload } from "../../shared/api/workspace";
 import { Dialog } from "../../shared/components/Dialog";
-import { FormField } from "../../shared/components/FormField";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { TreePickerDropdown } from "../../shared/components/TreePickerDropdown";
 import { formatRelativeTimestamp } from "../../shared/lib/datetime";
 import {
   conflictedMetadataFields,
+  frontmatterExtent,
   mergedLineRanges,
+  mergeOverlapCount,
   mergeSourceText,
   metadataValue,
   type ContextMergeChoice,
@@ -25,8 +26,8 @@ import { MarkdownSourceEditor } from "./MarkdownEditorKernel";
 import { MarkdownView } from "./MarkdownView";
 import { PAGE_TYPE_OPTIONS } from "./pageFrontmatter";
 
-/** Where the merge happens; it only changes which side each label names. */
-export type ContextMergeDialogKind = "publish" | "bring_in" | "save";
+/** The write the merge belongs to: it names the two sides and the confirm action. */
+export type ContextMergeDialogKind = "publish" | "approve" | "bring_in" | "save";
 
 type MetadataSource = "ours" | "theirs" | "custom";
 type MetadataChoice = { source: MetadataSource; value: string | null };
@@ -82,8 +83,13 @@ export function ContextMergeDialog({
   const fields = conflictedMetadataFields(preview);
   const sides = preview.sides ?? null;
   const latestSide = sides ? sides[preview.latest_side] : null;
-  // A virtual-base conflict can need a choice without a text region of its own.
-  const conflictCount = Math.max(1, (preview.keep_both?.conflicts.length ?? 0) + fields.length);
+  const conflictCount = mergeOverlapCount(preview);
+  // The legend counts what the current view marks: reading does not render the
+  // frontmatter, and an edited body is no longer the merge's own text.
+  const frontmatterLines = frontmatterExtent(sourceText).lines;
+  const markedCount = view === "edit"
+    ? ranges.length
+    : editedBody === null ? ranges.filter(([, end]) => end > frontmatterLines).length : 0;
   const sideName = (side: ContextMergeSide | null) => side?.saved_by?.display_name || t("merge.someone");
   const sideTime = (side: ContextMergeSide | null) => formatRelativeTimestamp(side?.last_saved_at ?? null, i18n.language);
   const sideLabel = (key: "ours" | "theirs") => {
@@ -142,12 +148,12 @@ export function ContextMergeDialog({
           <div className="dialog-actions">
             <button className="text-button" disabled={busy} onClick={onClose} type="button">{t("shell:dialog.close")}</button>
             <button
-              className="icon-button success"
+              className={kind === "publish" || kind === "approve" ? "icon-button success" : "icon-button primary"}
               disabled={!ready || busy}
               onClick={() => { const value = resolution(); if (value) onConfirm(value); }}
               type="button"
             >
-              {busy ? t("merge.confirming") : t("merge.confirm")}
+              {busy ? t(`merge.confirming.${kind}`) : t(`merge.confirm.${kind}`)}
             </button>
           </div>
         </div>
@@ -197,7 +203,7 @@ export function ContextMergeDialog({
                 value={view}
               />
             </div>
-            {ranges.length > 0 ? <p className="context-merge-legend">{t("merge.legend", { count: ranges.length })}</p> : null}
+            {markedCount > 0 ? <p className="context-merge-legend">{t("merge.legend", { count: markedCount })}</p> : null}
             {view === "result" ? (
               <MergeResultView body={editedBody ?? sourceText} ranges={editedBody === null ? ranges : []} workspaceId={workspaceId} />
             ) : (
@@ -299,7 +305,6 @@ function MetadataConflictRow({ choice, field, labels, onChange, pageId, sides, w
 }) {
   const { t } = useTranslation("context");
   const { t: tPages } = useTranslation("pages");
-  const inputId = useId();
   const display = (value: string | null) => {
     if (field === "page_type") return value ? tPages(`editor.pageTypes.${value}.label`, { defaultValue: value }) : "—";
     if (field === "placement_parent_node_id") return <PlacementLabel nodeId={value} workspaceId={workspaceId} />;
@@ -334,25 +339,25 @@ function MetadataConflictRow({ choice, field, labels, onChange, pageId, sides, w
       {choice.source === "custom" ? (
         <div className="context-merge-metadata-custom">
           {field === "title" ? (
-            <FormField htmlFor={inputId} label={t("merge.fields.title")}>
-              <input
-                id={inputId}
-                onChange={(event) => onChange({ source: "custom", value: event.target.value })}
-                type="text"
-                value={choice.value ?? ""}
-              />
-            </FormField>
+            <input
+              aria-label={t("merge.customField", { field: t("merge.fields.title") })}
+              onChange={(event) => onChange({ source: "custom", value: event.target.value })}
+              type="text"
+              value={choice.value ?? ""}
+            />
           ) : null}
           {field === "page_type" ? (
-            <FormField htmlFor={inputId} label={t("merge.fields.page_type")}>
-              <select id={inputId} onChange={(event) => onChange({ source: "custom", value: event.target.value })} value={choice.value ?? ""}>
-                {PAGE_TYPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {tPages(`editor.pageTypes.${option.value}.label`, { defaultValue: option.label })}
-                  </option>
-                ))}
-              </select>
-            </FormField>
+            <select
+              aria-label={t("merge.customField", { field: t("merge.fields.page_type") })}
+              onChange={(event) => onChange({ source: "custom", value: event.target.value })}
+              value={choice.value ?? ""}
+            >
+              {PAGE_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {tPages(`editor.pageTypes.${option.value}.label`, { defaultValue: option.label })}
+                </option>
+              ))}
+            </select>
           ) : null}
           {field === "placement_parent_node_id" ? (
             <PlacementPicker
@@ -411,15 +416,13 @@ function PlacementPicker({ onChange, pageId, selectedId, workspaceId }: {
     return () => { active = false; };
   }, [pageId, workspaceId]);
   return (
-    <FormField label={t("editor.destinationLabel")}>
-      <TreePickerDropdown
-        ariaLabel={t("editor.destinationLabel")}
-        disabled={!nodes || nodes.length === 0}
-        emptyLabel={t("editor.destinationEmptyLabel")}
-        nodes={nodes ?? []}
-        onChange={(value) => onChange(value || null)}
-        selectedId={selectedId ?? ""}
-      />
-    </FormField>
+    <TreePickerDropdown
+      ariaLabel={t("editor.destinationLabel")}
+      disabled={!nodes || nodes.length === 0}
+      emptyLabel={t("editor.destinationEmptyLabel")}
+      nodes={nodes ?? []}
+      onChange={(value) => onChange(value || null)}
+      selectedId={selectedId ?? ""}
+    />
   );
 }

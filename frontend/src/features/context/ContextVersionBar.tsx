@@ -32,6 +32,7 @@ import { isAbortError } from "../../shared/lib/abortError";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
 import { contextEditHref, workspacePath } from "../../shared/lib/workspaceRoutes";
+import { mergeOverlapCount } from "../pages/contextMerge";
 import { MarkdownView } from "../pages/MarkdownView";
 import { useContextMerge } from "../pages/useContextMerge";
 
@@ -362,7 +363,7 @@ export function ContextVersionBar({
         // draft's, and the pins are the merge shown for its revision, so a
         // review of any other version cannot match them.
         result = await merge.runMergeWrite({
-          kind: "publish",
+          kind: "approve",
           workspaceId,
           pageId: detail.id,
           publishedVersionNumber: publishedNo,
@@ -434,9 +435,7 @@ export function ContextVersionBar({
   const draftItems = summary?.items ?? [];
   const viewedIsMine = draftItems.find((item) => item.version_id === draftVersionId)?.is_mine ?? false;
   const behind = draft?.is_behind === true && Boolean(publishedId);
-  const conflictCount = shownPreview?.kind === "conflict"
-    ? Math.max(1, (shownPreview.keep_both?.conflicts.length ?? 0) + shownPreview.metadata_conflicts.length)
-    : 0;
+  const conflictCount = shownPreview?.kind === "conflict" ? mergeOverlapCount(shownPreview) : 0;
   const ready = Boolean(shownPreview && previewMatchesScreen);
   const publishLabel = openReview ? t("versionBar.approvePublish") : t("versionBar.publish");
 

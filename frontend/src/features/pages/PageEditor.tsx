@@ -164,7 +164,7 @@ import {
 } from "../../shared/media/formatCapabilities";
 import { normalizeSlugInput, slugify } from "../../shared/text/slug";
 import { ContextMediaManagerDialog } from "./ContextMediaManagerDialog";
-import { resolvedMergeResult } from "./contextMerge";
+import { mergeOverlapCount, resolvedMergeResult } from "./contextMerge";
 import { useContextMerge } from "./useContextMerge";
 import { EditorActionBar } from "./EditorActionBar";
 import {
@@ -264,7 +264,7 @@ type StalePublishState = "idle" | "blocked" | "reloading" | "error";
 type EditorConflict =
   // A save that overlapped another save of the same draft.
   | { kind: "merge" }
-  // The draft this session saved to ended (published or withdrawn) meanwhile.
+  // The draft this session saved to ended (published or discarded) meanwhile.
   | { kind: "ended"; endedVersionId: string }
   | { kind: "other" };
 type ExecuteEditorCommandOptions = {
@@ -816,7 +816,8 @@ export function PageEditor({
     };
     const shown = editorMergePreviewRef.current;
     const target = {
-      kind: "publish" as const,
+      // Publishing that names an open review approves it.
+      kind: intent.expected_review_item_id ? "approve" as const : "publish" as const,
       workspaceId: workspace,
       pageId: id,
       publishedVersionNumber: page?.published_version_no ?? null,
@@ -3824,7 +3825,7 @@ export function PageEditor({
     lastSavedFingerprintRef.current = null;
   }
 
-  // "Combine changes": send the editor's current text again, so the choices
+  // "Merge changes": send the editor's current text again, so the choices
   // include everything typed since the conflict; with nothing of this
   // session's own unsaved, take the server's draft instead.
   function combineChanges() {
@@ -3835,7 +3836,7 @@ export function PageEditor({
     void saveAndCombine();
   }
 
-  // A draft that ended (published or withdrawn) is a commit; keep this
+  // A draft that ended (published or discarded) is a commit; keep this
   // session's text by starting a new draft from it and saving onto that.
   async function detectEndedDraft(versionId: string) {
     const pageId = pageIdRef.current ?? page?.id;
@@ -5644,7 +5645,7 @@ export function PageEditor({
         ) : shownEditorMerge?.kind === "conflict" ? (
           <StatusBanner tone="warning">
             {t("context:versionBar.mergeConflict", {
-              count: Math.max(1, (shownEditorMerge.keep_both?.conflicts.length ?? 0) + shownEditorMerge.metadata_conflicts.length),
+              count: mergeOverlapCount(shownEditorMerge),
             })}
           </StatusBanner>
         ) : null}

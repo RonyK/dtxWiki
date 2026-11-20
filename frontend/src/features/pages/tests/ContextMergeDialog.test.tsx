@@ -21,8 +21,11 @@ const metadata = (title: string) => ({
 // emoji: one Unicode code point on the server, two UTF-16 units in the
 // browser. A region that starts on the next line must mark only that line's
 // block; reading the code-point offset as a string index would land on the
-// heading's newline and mark the heading too.
-const frontMatter = "---\ntype: guide\n---\n";
+// heading's newline and mark the heading too. The title is a front matter
+// line, so its conflict is also a region there, as the server reports it: one
+// place for the person, counted once, and not marked in the rendered result.
+const titleLine = 'title: "Draft title"\n';
+const frontMatter = `---\n${titleLine}type: guide\n---\n`;
 const keepBothBody = `${frontMatter}## 😀\nours\ntheirs\n\nend\n`;
 const latestBody = `${frontMatter}## 😀\nours\n\nend\n`;
 
@@ -34,7 +37,10 @@ function conflictPreview(): ContextMergePreview {
     page_metadata: metadata(title),
     block_map: [],
     result_hash: (title === "Draft title" ? "a" : "b").repeat(64),
-    conflicts: [{ ours: "ours\n", theirs: "theirs\n", keep_both_start: start, keep_both_end: end, latest_start: start, latest_end: end }],
+    conflicts: [
+      { ours: titleLine, theirs: 'title: "Published title"\n', keep_both_start: 4, keep_both_end: 4 + titleLine.length, latest_start: 4, latest_end: 4 + titleLine.length },
+      { ours: "ours\n", theirs: "theirs\n", keep_both_start: start, keep_both_end: end, latest_start: start, latest_end: end },
+    ],
     offset_unit: "unicode_code_points" as const,
   });
   return {
@@ -82,9 +88,9 @@ it("offers the two choices, marks combined blocks by code point, and returns the
         preview={conflictPreview()} publishedVersionNumber={12} workspaceId="ws-1" />
     </MemoryRouter>,
   );
-  const dialog = await screen.findByRole("dialog", { name: "Combine changes" });
+  const dialog = await screen.findByRole("dialog", { name: "Merge changes" });
   expect(within(dialog).getByText(/overlaps the published version \(v12\) in 2 places/)).toBeInTheDocument();
-  const confirm = within(dialog).getByRole("button", { name: "Combine with this result" });
+  const confirm = within(dialog).getByRole("button", { name: "Publish this result" });
   // Nothing is chosen for the person: the result appears after a choice.
   expect(confirm).toBeDisabled();
   expect(within(dialog).getByText("Choose one of the two options above")).toBeInTheDocument();
@@ -93,18 +99,19 @@ it("offers the two choices, marks combined blocks by code point, and returns the
   const marked = () => Array.from(dialog.querySelectorAll("[data-merged-region='true']")).map((node) => node.textContent);
   expect(within(dialog).getByText(/theirs/)).toBeInTheDocument();
   expect(marked()).toEqual(["ours\ntheirs"]);
+  expect(within(dialog).getByText("1 merged section is highlighted")).toBeInTheDocument();
 
   await user.click(within(dialog).getByRole("radio", { name: /Prefer the latest change/ }));
   expect(within(dialog).queryByText(/theirs/)).toBeNull();
   expect(marked()).toEqual(["ours"]);
 
   // The conflicted title starts at the later save's value; one click takes the
-  // other side's, and "Edit myself" allows any title.
+  // other side's, and "Enter a value" allows any title.
   const titles = within(dialog).getByRole("radiogroup", { name: "Title" });
   expect(within(titles).getByRole("radio", { name: /Draft title/ })).toHaveAttribute("aria-checked", "true");
   await user.click(within(titles).getByRole("radio", { name: /Published title/ }));
-  await user.click(within(titles).getByRole("radio", { name: "Edit myself" }));
-  const titleInput = within(dialog).getByRole("textbox", { name: "Title" });
+  await user.click(within(titles).getByRole("radio", { name: "Enter a value" }));
+  const titleInput = within(dialog).getByRole("textbox", { name: "Title to enter" });
   await user.clear(titleInput);
   expect(confirm).toBeDisabled();
   await user.type(titleInput, "Agreed title");

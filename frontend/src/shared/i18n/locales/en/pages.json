@@ -433,10 +433,10 @@
     "relatedLinkCopyUnavailable": "Copying isn't available here. Select the text and copy it.",
     "relatedLinkDismiss": "Dismiss",
     "mergeDestinationUnavailable": "Destination unavailable",
-    "combineChanges": "Combine changes",
+    "combineChanges": "Merge changes",
     "startFromEnded": "Start a new draft with my changes",
-    "conflictOverlap": "Someone else saved changes that overlap yours. Choose how to combine them.",
-    "conflictEnded": "This draft was published or withdrawn. Your changes are not saved yet."
+    "conflictOverlap": "Someone else saved changes that overlap yours. Choose how to merge them.",
+    "conflictEnded": "This draft was published or discarded. Your changes are not saved yet."
   },
   "blocks": {
     "groups": {

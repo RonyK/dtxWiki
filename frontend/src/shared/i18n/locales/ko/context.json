@@ -99,9 +99,9 @@
   "publishArrival": {
     "published": "게시했습니다.",
     "published_with_findings": "게시했지만 형식 문제가 발견되었습니다.",
-    "review_completed": "게시하고 검토 요청을 완료했습니다.",
-    "review_failed": "게시했지만 검토 요청을 완료하지 못했습니다: {{error}}",
-    "review_superseded": "게시했습니다. 이 편집으로 검토 요청이 대체되었습니다."
+    "review_completed": "게시하고 리뷰 요청을 완료했습니다.",
+    "review_failed": "게시했지만 리뷰 요청을 완료하지 못했습니다: {{error}}",
+    "review_superseded": "게시했습니다. 이 편집으로 리뷰 요청이 대체되었습니다."
   },
   "empty": {
     "title": "아직 Context 페이지가 없습니다",
@@ -399,7 +399,7 @@
     "compareFailed": "변경 내용을 불러오지 못했습니다."
   },
   "merge": {
-    "title": "변경 내용 합치기",
+    "title": "변경 내용 병합",
     "summary_one": "이 초안({{name}} · {{time}} 저장)이 게시본{{version}}과 {{count}}곳에서 겹칩니다.",
     "summary_other": "이 초안({{name}} · {{time}} 저장)이 게시본{{version}}과 {{count}}곳에서 겹칩니다.",
     "summarySave_one": "{{name}}님이 {{time}} 저장한 내용과 내 변경이 {{count}}곳에서 겹칩니다.",
@@ -411,7 +411,7 @@
       "draft": "초안",
       "published": "게시본"
     },
-    "choiceLabel": "합치는 방법",
+    "choiceLabel": "병합 방법",
     "keepBoth": "양쪽 변경 모두 유지",
     "keepBothHint": "겹친 곳에 두 내용을 모두 남깁니다",
     "latest": "최신 변경 우선",
@@ -421,19 +421,30 @@
     "resultLabel": "결과",
     "viewLabel": "결과 보기 방식",
     "viewResult": "미리보기",
-    "viewEdit": "고치기",
-    "legend_one": "표시한 {{count}}곳이 합친 구간입니다",
-    "legend_other": "표시한 {{count}}곳이 합친 구간입니다",
-    "editLabel": "합친 결과 Markdown",
+    "viewEdit": "직접 편집",
+    "legend_one": "표시한 {{count}}곳이 병합된 구간입니다",
+    "legend_other": "표시한 {{count}}곳이 병합된 구간입니다",
+    "editLabel": "병합 결과 본문",
     "metadataLabel": "속성",
     "fields": {
       "title": "제목",
       "page_type": "종류",
       "placement_parent_node_id": "트리 위치"
     },
-    "customValue": "직접 고치기",
-    "confirm": "이 결과로 합치기",
-    "confirming": "합치는 중…",
+    "customValue": "직접 입력",
+    "customField": "직접 입력할 {{field}}",
+    "confirm": {
+      "publish": "이 결과로 게시",
+      "approve": "이 결과로 승인 및 게시",
+      "bring_in": "이 결과로 병합",
+      "save": "이 결과로 저장"
+    },
+    "confirming": {
+      "publish": "게시하는 중…",
+      "approve": "승인 및 게시하는 중…",
+      "bring_in": "병합하는 중…",
+      "save": "저장하는 중…"
+    },
     "refreshed": "내용이 바뀌어 다시 미리봅니다"
   }
 }

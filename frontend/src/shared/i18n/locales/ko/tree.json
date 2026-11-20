@@ -156,7 +156,7 @@
     "normal": "일반",
     "recent": "최근 변경",
     "pending": "리뷰 대기",
-    "changesRequested": "수정 요청",
+    "changesRequested": "변경 요청",
     "noReviewTime": "리뷰 요청 시각 없음",
     "noContentTime": "내용 변경 시각 없음",
     "reviewTime": "리뷰 요청 {{time}}",

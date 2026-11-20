@@ -1071,7 +1071,6 @@
   padding-top: 4px;
 }
 
-.context-merge-summary,
 .context-merge-hint,
 .context-merge-legend {
   margin: 0;
@@ -1243,6 +1242,22 @@
   min-width: 0;
 }
 
+/* The row already names the field: the value box stands alone under it. */
+.context-merge-metadata-custom input,
+.context-merge-metadata-custom select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+}
+
+.context-merge-metadata-custom input {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
 .context-merge-footer {
   display: grid;
   gap: 8px;
@@ -1371,7 +1386,9 @@
 }
 
 @media (max-width: 1024px), (any-pointer: coarse) {
-  .segmented-control.context-merge-metadata-choices > button {
+  .segmented-control.context-merge-metadata-choices > button,
+  .context-merge-metadata-custom input,
+  .context-merge-metadata-custom select {
     min-height: 44px;
   }
 }
@@ -1541,7 +1558,8 @@
   word-break: keep-all;
 }
 
-.context-version-merge {
+.context-version-merge,
+.context-merge-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1559,7 +1577,8 @@
   color: #1d4ed8;
 }
 
-.context-version-merge.is-conflict {
+.context-version-merge.is-conflict,
+.context-merge-summary {
   border: 1px solid #fcd34d;
   background: var(--warning-soft);
   color: #92400e;

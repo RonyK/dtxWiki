@@ -34,6 +34,7 @@ import {
 import { ContextMergePreviewChanged, contextWriteStateMoved, previewPageMerge, restorePageVersion, type ContextMergePreview } from "../../shared/api/pages";
 import { isAbortError } from "../../shared/lib/abortError";
 import { useContextMerge } from "../pages/useContextMerge";
+import { mergeOverlapCount } from "../pages/contextMerge";
 import { MarkdownView } from "../pages/MarkdownView";
 import type {
   ContextMergeBinding,
@@ -1222,7 +1223,7 @@ export function ReviewScreen() {
     // its merge dialog is open.
     setBusyId(reviewId);
     return merge.runMergeWrite({
-      kind: "publish",
+      kind: "approve",
       workspaceId,
       pageId: target.pageId,
       preview: shown,
@@ -2565,8 +2566,7 @@ function ContextApprovalResult({ preview, workspaceId }: { preview: ContextMerge
     );
   }
   if (value?.kind === "conflict") {
-    const count = Math.max(1, (value.keep_both?.conflicts.length ?? 0) + value.metadata_conflicts.length);
-    return <StatusBanner tone="warning">{t("workflow.mergeConflictNotice", { count })}</StatusBanner>;
+    return <StatusBanner tone="warning">{t("workflow.mergeConflictNotice", { count: mergeOverlapCount(value) })}</StatusBanner>;
   }
   return null;
 }

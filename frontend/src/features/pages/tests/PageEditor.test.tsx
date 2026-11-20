@@ -2461,7 +2461,7 @@ describe("PageEditor", () => {
   it("combines an overlapping save with one of the two choices on the server draft it saw", async () => {
     // A save that overlaps another save of the same draft offers both choices;
     // confirming is an ordinary save based on the server draft the merge used.
-    // Text typed while the Combine retry is in flight is sent again before the
+    // Text typed while the Merge retry is in flight is sent again before the
     // dialog asks. When the draft moved again, the dialog shows the newer
     // preview instead of overwriting it, and the next confirm uses the newer base.
     // The page sits in a folder; the chosen result places it in Context / Inbox.
@@ -2518,20 +2518,20 @@ describe("PageEditor", () => {
 
     await setEditorTitle(await findTitleEditor(), "My edit");
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-    await typist().click(await screen.findByRole("button", { name: "Combine changes" }));
+    await typist().click(await screen.findByRole("button", { name: "Merge changes" }));
     await waitFor(() => expect(autosaveCalls(fetchMock)).toHaveLength(2));
     await setEditorTitle(getTitleEditor(), "My later edit");
     releaseRetry(jsonResponse(overlap(2, "# Hello\n\nTheirs", "# Hello\n\nMine\nTheirs"), 409));
-    let dialog = await screen.findByRole("dialog", { name: "Combine changes" });
+    let dialog = await screen.findByRole("dialog", { name: "Merge changes" });
     await typist().click(within(dialog).getByRole("radio", { name: /Keep both changes/ }));
-    await typist().click(within(dialog).getByRole("button", { name: "Combine with this result" }));
+    await typist().click(within(dialog).getByRole("button", { name: "Save this result" }));
 
     // The save overlapped again: as in git, the newer overlap is a new question.
-    dialog = await screen.findByRole("dialog", { name: "Combine changes" });
+    dialog = await screen.findByRole("dialog", { name: "Merge changes" });
     expect(await within(dialog).findByText("The content changed, so the preview was refreshed")).toBeInTheDocument();
     await typist().click(within(dialog).getByRole("radio", { name: /Keep both changes/ }));
-    await typist().click(within(dialog).getByRole("button", { name: "Combine with this result" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Combine changes" })).toBeNull());
+    await typist().click(within(dialog).getByRole("button", { name: "Save this result" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Merge changes" })).toBeNull());
 
     const saves = autosaveCalls(fetchMock).map((call) => JSON.parse(String(call[1]?.body)));
     expect(saves).toHaveLength(5);
@@ -2554,7 +2554,7 @@ describe("PageEditor", () => {
     // server acknowledged it.
     await expectEditorTitle("Hello");
     await waitFor(() => expect(document.querySelector(".page-workspace")).toHaveAttribute("data-save-state", "clean"));
-    expect(screen.queryByRole("button", { name: "Combine changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Merge changes" })).toBeNull();
   });
 
   it("shows a conflict banner on stale updates and blocks stale retry saves", async () => {
