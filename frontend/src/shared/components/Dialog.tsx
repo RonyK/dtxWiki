@@ -54,6 +54,9 @@ export type DialogOverlayScope = {
 
 const DialogOverlayContext = createContext<DialogOverlayScope | null>(null);
 
+/** Open dialogs in the order they opened; the last one is on top. */
+const openDialogs: object[] = [];
+
 /**
  * Returns the overlay surface owned by the nearest dialog. Anchored popovers
  * can portal into this surface to escape the dialog's scroll clipping while
@@ -212,7 +215,12 @@ export function Dialog({
   );
 
   useEffect(() => {
+    const token = {};
+    openDialogs.push(token);
     function handleKeyDown(event: KeyboardEvent) {
+      // Only the dialog on top answers the keyboard: a dialog opened from
+      // another one closes first, and Tab stays inside it.
+      if (openDialogs[openDialogs.length - 1] !== token) return;
       // An inner popup owns Escape when it has already handled the event.
       // This is important for listboxes such as TreePickerDropdown nested in
       // a mutation dialog: the first Escape closes only the popup.
@@ -231,6 +239,7 @@ export function Dialog({
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      openDialogs.splice(openDialogs.indexOf(token), 1);
     };
   }, []);
 

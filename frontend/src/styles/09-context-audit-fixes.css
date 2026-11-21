@@ -1043,13 +1043,15 @@
   }
 }
 
-/* The merge dialog: two plain choices first, the whole result below them,
-   editing optional. It shows the merge module's result as it is. */
+/* The merge dialog: the merge method on top, then one card per overlapping
+   place in document order -- both sides (press one to use it) above the
+   place's result -- with unchanged lines folded between the cards. */
 .dialog-panel.context-merge-dialog {
   display: flex;
   flex-direction: column;
-  width: min(960px, calc(100vw - 32px));
-  max-width: 960px;
+  width: min(1200px, calc(100vw - 32px));
+  max-width: 1200px;
+  height: calc(100dvh - 32px);
   max-height: calc(100dvh - 32px);
   overflow: hidden;
 }
@@ -1058,6 +1060,7 @@
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
+  padding-top: 0;
 }
 
 .dialog-panel.context-merge-dialog > .dialog-footer {
@@ -1066,20 +1069,39 @@
 
 .context-merge-body {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
-  padding-top: 4px;
+  padding-bottom: 8px;
 }
 
-.context-merge-summary,
+.context-merge-top {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 12px;
+}
+
+.context-merge-between,
 .context-merge-hint,
-.context-merge-legend {
+.context-merge-switched {
   margin: 0;
   color: var(--ink-muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.5;
   word-break: keep-all;
   overflow-wrap: anywhere;
+}
+
+.context-merge-hint.is-error {
+  color: var(--danger-strong);
+}
+
+.context-merge-switched {
+  padding: 8px 12px;
+  border: 1px solid #c4b5fd;
+  border-radius: var(--radius-control);
+  background: var(--context-soft);
+  color: #5b21b6;
 }
 
 .context-merge-refreshed {
@@ -1092,155 +1114,471 @@
   word-break: keep-all;
 }
 
-/* Two large, equal choice cards rather than a compact segmented strip: they
-   are the whole decision for most people. A chosen card is the full box --
-   tint plus a 2px ring on every side. */
-.segmented-control.context-merge-choices {
+/* Which side is which: the published version blue, the draft purple. */
+.context-merge-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.context-merge-pill.is-theirs {
+  background: var(--info-soft);
+  color: #1d4ed8;
+}
+
+.context-merge-pill.is-ours {
+  background: var(--context-soft);
+  color: #6d28d9;
+}
+
+/* The three methods: equal cards; the chosen one is the full box. */
+.segmented-control.context-merge-methods {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
   gap: 10px;
 }
 
-.segmented-control.context-merge-choices > button {
+.segmented-control.context-merge-methods > button {
   display: block;
-  min-height: 72px;
-  padding: 12px 14px;
+  min-height: 64px;
+  padding: 10px 12px;
   border-radius: var(--radius-card);
   color: var(--ink);
   font-weight: 400;
   text-align: start;
 }
 
-.segmented-control.context-merge-choices > button.active {
+.segmented-control.context-merge-methods > button.active {
   border-color: var(--context);
   background: var(--context-soft);
   box-shadow: 0 0 0 1px var(--context);
 }
 
-.context-merge-choice {
+.context-merge-method {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
 
-.context-merge-choice strong {
-  font-size: 15px;
+.context-merge-method strong {
+  font-size: 14px;
   font-weight: 700;
 }
 
-.context-merge-choice > span {
+.context-merge-method > span {
   color: var(--ink-muted);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
-.context-merge-choice .context-merge-choice-side {
-  color: var(--ink-soft);
-  font-size: 12px;
-}
-
-.context-merge-result,
-.context-merge-metadata {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.context-merge-result-header {
+/* The places row stays in view while the cards scroll under it. */
+.context-merge-nav {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-}
-
-.context-merge-result h3,
-.context-merge-metadata h3 {
-  margin: 0;
-  font-size: 14px;
-}
-
-.context-merge-preview,
-.context-merge-editor {
-  min-width: 0;
-  max-height: 52vh;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 
-.context-merge-preview {
-  padding: 4px 16px;
+/* One line of places that scrolls sideways, so the sticky row stays short. */
+.context-merge-chips {
+  display: flex;
+  flex: 1 1 240px;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
-.context-merge-editor .cm-editor {
-  min-height: 240px;
+.context-merge-chips > .context-merge-chip {
+  flex: 0 0 auto;
 }
 
-/* A combined region: a left rule plus a pale fill on every rendered block or
-   source line the merge joined, in the caution tone. */
-.context-merge-preview [data-merged-region="true"],
-.context-merge-editor .context-merge-line {
-  box-shadow: inset 3px 0 0 var(--warning);
+.context-merge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  max-width: 100%;
+  white-space: nowrap;
+  padding: 3px 10px 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.context-merge-chip.is-current {
+  border: 2px solid var(--warning);
   background: var(--warning-soft);
 }
 
-.context-merge-preview [data-merged-region="true"] {
-  padding-inline-start: 10px;
+.context-merge-chip.is-static {
+  min-height: 0;
+  font-weight: 700;
 }
 
-.context-merge-metadata-row {
+.context-merge-number {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--warning);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.context-merge-nav-spacer {
+  flex: 1 1 auto;
+}
+
+.context-merge-steps,
+.context-merge-footer-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.context-merge-places {
   display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.context-merge-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 2px solid var(--warning);
+  border-radius: 10px;
+  background: var(--surface);
+  scroll-margin-top: 64px;
+}
+
+.context-merge-card.is-current {
+  box-shadow: 0 0 0 4px rgb(245 158 11 / 25%);
+}
+
+.context-merge-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
+  background: var(--warning-soft);
+  color: #92400e;
+  font-size: 13px;
+}
+
+.context-merge-card-title {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+.context-merge-state {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.context-merge-state.is-custom {
+  border-color: var(--context);
+  background: var(--context-soft);
+  color: #6d28d9;
+}
+
+.context-merge-card-tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.context-merge-sides {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+}
+
+.context-merge-sides.is-stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.context-merge-sides.is-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+/* A side: press it to use it. Chosen = the full box ringed; both kept =
+   dashed; not used = dimmed. */
+.context-merge-side {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.context-merge-side.is-theirs {
+  background: #f8fbff;
+}
+
+.context-merge-side.is-ours {
+  background: #fbfaff;
+}
+
+.context-merge-side.is-included {
+  border-style: dashed;
+  border-color: #94a3b8;
+}
+
+.context-merge-side.is-selected {
+  border-color: var(--context);
+  background: var(--context-soft);
+}
+
+.context-merge-side.is-dimmed {
+  opacity: 0.5;
+}
+
+.context-merge-side-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.context-merge-radio {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 2px solid #94a3b8;
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.context-merge-side.is-selected .context-merge-radio {
+  border-color: var(--context);
+  background: radial-gradient(var(--context) 45%, var(--surface) 50%);
+}
+
+.context-merge-side-meta {
+  min-width: 0;
+}
+
+.context-merge-side-tag {
+  margin-inline-start: auto;
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.context-merge-side.is-selected .context-merge-side-tag {
+  color: #6d28d9;
+}
+
+.context-merge-side-body {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.context-merge-side-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.context-merge-side-text.is-large {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.context-merge-card.is-large .context-merge-result-text {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.context-merge-card.is-expanded .context-merge-side-text,
+.context-merge-card.is-expanded .context-merge-result-text {
+  max-height: none;
+}
+
+.context-merge-side-text pre,
+.context-merge-result-text,
+.context-merge-context,
+.context-merge-auto pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.context-merge-side-text mark {
+  border-radius: 2px;
+  background: #dcfce7;
+  color: inherit;
+}
+
+/* Where in a long side its changed lines are. */
+.context-merge-minimap {
+  position: relative;
+  flex: 0 0 8px;
+  border-radius: 4px;
+  background: var(--border);
+}
+
+.context-merge-minimap i {
+  position: absolute;
+  inset-inline: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ok);
+}
+
+.context-merge-result {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.context-merge-sides.is-three .context-merge-result {
+  align-content: start;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
 }
 
-.context-merge-metadata-field {
-  font-size: 13px;
+.context-merge-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-merge-result-label {
+  color: var(--ink-soft);
+  font-size: 12px;
   font-weight: 700;
 }
 
-.segmented-control.context-merge-metadata-choices {
-  flex-wrap: wrap;
+.context-merge-result-text {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: #fafafa;
+  color: var(--ink);
+  font-size: 13px;
 }
 
-.segmented-control.context-merge-metadata-choices > button {
-  min-height: 36px;
-  max-width: 100%;
-  font-weight: 400;
+.context-merge-edit {
+  color: #6d28d9;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.segmented-control.context-merge-metadata-choices > button.active {
-  border-color: var(--context);
-  background: var(--context-soft);
-  box-shadow: 0 0 0 1px var(--context);
+textarea.context-merge-editor,
+input.context-merge-editor,
+select.context-merge-editor {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 2px solid var(--info);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+textarea.context-merge-editor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+/* Lines between places: muted context, automatic changes in green, folds. */
+.context-merge-lines {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.context-merge-context {
+  padding: 0 12px;
+  color: var(--ink-soft);
+}
+
+.context-merge-auto {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0;
+  padding: 6px 10px;
+  border-inline-start: 3px solid var(--ok);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: var(--ok-soft);
   color: var(--ink);
 }
 
-.context-merge-metadata-option {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: keep-all;
-}
-
-.context-merge-metadata-option > span {
-  color: var(--ink-muted);
+.context-merge-auto-label,
+.context-merge-auto.is-removed {
+  color: var(--ok-strong);
   font-size: 12px;
+  font-weight: 700;
 }
 
-.context-merge-metadata-custom {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
+.context-merge-fold {
+  min-height: 32px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  background: #f8fafc;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
 }
 
 .context-merge-footer {
@@ -1249,12 +1587,52 @@
   width: 100%;
 }
 
-.context-merge-footer .dialog-actions {
+.context-merge-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.context-merge-footer-row .dialog-actions {
+  margin-inline-start: auto;
   justify-content: flex-end;
+}
+
+.context-merge-footer-nav {
+  display: none;
+}
+
+.context-merge-status {
+  margin: 0;
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.context-merge-status.is-ready {
+  color: var(--ok-strong);
+}
+
+.context-merge-status.is-ready::before {
+  content: "✓ ";
 }
 
 .context-merge-footer button {
   min-height: 44px;
+}
+
+/* The full-screen comparison and the result preview over the merge dialog. */
+.dialog-panel.context-merge-compare {
+  width: calc(100vw - 32px);
+  max-width: none;
+  height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 32px);
+}
+
+.context-merge-result-document {
+  min-width: 0;
+  padding: 4px 8px;
 }
 
 .review-bulk-actions {
@@ -1271,18 +1649,22 @@
 }
 
 .review-bulk-merge-preview summary,
-.review-merge-result summary {
+.review-merge-result summary,
+.editor-merge-result summary {
   cursor: pointer;
 }
 
 .review-bulk-merge-preview .markdown-body,
-.review-merge-result .markdown-body {
+.review-merge-result .markdown-body,
+.editor-merge-result .markdown-body,
+.context-version-merge .markdown-body {
   max-height: 40vh;
   margin-top: 8px;
   overflow: auto;
 }
 
-.review-merge-result {
+.review-merge-result,
+.editor-merge-result {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -1336,14 +1718,15 @@
   overflow-wrap: anywhere;
 }
 
-/* Phones: the dialog takes the whole screen, the two choices stack, and the
-   result and its editor share one place. */
+/* Phones: the dialog takes the whole screen, the methods sit in one row,
+   sides stack, and moving between places joins the confirm at the bottom. */
 @media (max-width: 720px) {
   .dialog-backdrop:has(.context-merge-dialog) {
     padding: 0;
   }
 
-  .dialog-panel.context-merge-dialog {
+  .dialog-panel.context-merge-dialog,
+  .dialog-panel.context-merge-compare {
     width: 100vw;
     max-width: none;
     height: 100dvh;
@@ -1351,81 +1734,355 @@
     border-radius: 0;
   }
 
-  .segmented-control.context-merge-choices {
+  .segmented-control.context-merge-methods > button {
+    min-height: 44px;
+    padding: 8px;
+    text-align: center;
+  }
+
+  .context-merge-method > span {
+    display: none;
+  }
+
+  .context-merge-chips,
+  .context-merge-steps,
+  .context-merge-nav-spacer {
+    display: none;
+  }
+
+  .context-merge-sides,
+  .context-merge-sides.is-three {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .context-merge-preview,
-  .context-merge-editor {
-    max-height: none;
+  .context-merge-card-tools {
+    display: none;
   }
 
-  .context-merge-footer .dialog-actions {
+  .context-merge-footer-nav {
+    display: inline-flex;
+  }
+
+  .context-merge-footer-row .dialog-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: repeat(3, minmax(0, auto));
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .context-merge-status {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .context-merge-footer-row .dialog-actions {
+    flex: 1 1 100%;
   }
 }
 
 @media (max-width: 1024px), (any-pointer: coarse) {
-  .segmented-control.context-merge-metadata-choices > button,
-  .context-draft-actions > * {
+  .context-merge-chip,
+  .context-merge-side-pick,
+  .context-merge-fold,
+  .context-merge-edit,
+  .context-merge-editor {
     min-height: 44px;
   }
 }
-.context-drafts {
+/* The version bar: the version on screen (a switcher to the published
+   version and every open draft), its state, the merge publishing would
+   write, and what can be done to it. One bar replaces the draft banner, the
+   open-draft list and the review banner. */
+.context-version-bar {
+  position: relative;
   display: grid;
   gap: 10px;
   min-width: 0;
-}
-
-.context-draft-banner,
-.context-draft-choice {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.context-draft-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.context-draft-error {
-  margin: 8px 0 0;
-  color: var(--danger-strong, var(--danger));
-}
-
-.context-draft-list {
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  color: var(--ink);
 }
 
-.context-draft-list summary {
+.context-version-bar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.context-version-switcher {
+  position: relative;
+  max-width: 100%;
+}
+
+.context-version-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
   cursor: pointer;
+  word-break: keep-all;
+}
+
+.context-version-switch[aria-expanded="true"] {
+  border-color: var(--context);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--context) 25%, transparent);
+}
+
+.context-version-switch > svg {
+  flex-shrink: 0;
+  color: var(--ink-muted);
+}
+
+.context-version-switch-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.context-version-switch-label .is-draft {
+  color: var(--agent-text);
+}
+
+.context-version-switch-label .is-published {
+  color: var(--ok-strong);
+}
+
+.context-version-switch-label .is-earlier {
+  color: var(--ink-muted);
+}
+
+.context-version-sub {
+  color: var(--ink-muted);
+}
+
+.context-version-mine {
+  margin-inline-start: 6px;
+  color: var(--context);
+  font-size: 12px;
   font-weight: 600;
 }
 
-.context-draft-list ul {
+.context-version-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
   display: grid;
-  gap: 6px;
+  gap: 4px;
+  width: min(360px, calc(100vw - 48px));
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.context-version-menu ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.context-draft-choice {
+.context-version-menu-label {
+  margin: 4px 0 0;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.context-version-menu-empty {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.context-version-item {
+  display: grid;
+  gap: 2px;
   width: 100%;
   min-height: 44px;
-  padding: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
   text-align: start;
+  cursor: pointer;
   overflow-wrap: anywhere;
 }
 
-.context-draft-choice[aria-current="true"] {
+.context-version-item:hover {
+  background: var(--surface-hover);
+}
+
+.context-version-item small {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+/* Selection: the full box, tinted, with a ring on every side. */
+.context-version-item[aria-current="true"] {
+  padding: 7px 9px;
+  border: 2px solid var(--context);
+  background: var(--context-soft);
+}
+
+.context-version-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  word-break: keep-all;
+}
+
+.context-version-merge,
+.context-merge-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  word-break: keep-all;
+}
+
+.context-version-merge.is-merge {
+  border: 1px solid #bfdbfe;
+  background: var(--info-soft);
+  color: #1d4ed8;
+}
+
+.context-version-merge.is-conflict,
+.context-merge-notice {
+  border: 1px solid #fcd34d;
+  background: var(--warning-soft);
+  color: #92400e;
+}
+
+.context-version-merge details {
+  min-width: 0;
+}
+
+.context-version-merge summary {
   font-weight: 600;
   text-decoration: underline;
+  cursor: pointer;
+}
+
+.context-version-merge details[open] {
+  flex-basis: 100%;
+  color: var(--ink);
+}
+
+.context-version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.context-version-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.context-version-bar .context-version-action {
+  min-height: 32px;
+  padding: 6px 10px;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.context-version-action svg {
+  flex-shrink: 0;
+}
+
+.context-version-note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  word-break: keep-all;
+}
+
+.context-version-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.context-version-reason textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.context-version-reason .context-version-action {
+  align-self: flex-start;
+}
+
+.context-version-error {
+  margin: 0;
+  color: var(--danger-strong, var(--danger));
+  font-size: 13px;
+}
+
+@media (max-width: 1024px), (any-pointer: coarse) {
+  .context-version-bar .context-version-action,
+  .context-version-switch,
+  .context-version-menu > .text-button,
+  .context-version-merge .text-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 640px) {
+  .context-version-switcher,
+  .context-version-switch {
+    width: 100%;
+  }
+
+  .context-version-switch {
+    justify-content: space-between;
+  }
+
+  /* The list spans the full-width switcher instead of a fixed width. */
+  .context-version-menu {
+    right: 0;
+    width: auto;
+  }
+
+  .context-version-actions {
+    justify-content: flex-start;
+  }
 }

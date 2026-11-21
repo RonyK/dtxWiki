@@ -7,6 +7,7 @@ import {
   getContextMediaAssetUsage,
   type ContextMediaAssetUsageData,
 } from "../api/contextMedia";
+import { contextHistoryPresentation } from "../lib/contextHistory";
 import { formatVersionTimestamp } from "../lib/datetime";
 import { contextPageHref, VERSION_QUERY_PARAM } from "../lib/workspaceRoutes";
 import { StatusPill } from "./StatusPill";
@@ -129,7 +130,7 @@ function UsageHistory({ workspaceId, pageId, assetId }: HistoryProps) {
                   return (
                     <li key={item.version_id}>
                       <span className="context-media-usage-status">
-                        {t(`history.states.${item.history_status}.label`)}
+                        {t(contextHistoryPresentation(item.history_status, item.closed_reason).labelKey)}
                       </span>
                       <span className="context-media-usage-version">
                         v{item.version_no}

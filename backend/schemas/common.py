@@ -258,13 +258,16 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        revision, published head and result hash; commit_version_id enables
 #        bring-in previews. Register context_merge_conflict and
 #        human_approval_required. Refresh cached tool catalogs and schemas.
+#  31 -- Context version projections add closed_reason -- discarded, merged
+#        or rejected -- for a closed draft. Tool titles use the app's merge
+#        and review wording. Refresh cached tools and schemas.
 # The revision the latest release shipped and its tool contract digest.
 # `make set-version` records the current revision and live digest here; release
 # verification rejects an artifact whose MCP_TOOL_CONTRACT_REVISION is not
 # recorded.
 MCP_RELEASED_TOOL_CONTRACT_REVISION = 30
 MCP_RELEASED_TOOL_CONTRACT_DIGEST = "7f825bd114a8"
-MCP_TOOL_CONTRACT_REVISION = 30
+MCP_TOOL_CONTRACT_REVISION = 31
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be
@@ -393,6 +396,11 @@ ERROR_CODES = (
     "media_unavailable",
     "request_too_large",
 )
+
+# Why a closed (ended) draft ended, from recorded facts: its review was
+# rejected, a later version merged it in (it was published by a merge), or
+# else it was discarded.
+ContextClosedReason = Literal["discarded", "merged", "rejected"]
 
 ContextHistoryStatus = Literal[
     "closed",

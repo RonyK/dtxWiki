@@ -713,6 +713,23 @@
       "VersionInfo": {
         "additionalProperties": false,
         "properties": {
+          "closed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "discarded",
+                  "merged",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Closed Reason"
+          },
           "content_hash": {
             "anyOf": [
               {

@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### Merging Context changes in the browser
+
+- When changes overlap, the merge dialog shows each overlapping place as a
+  card in document order -- the title and type first -- with both sides and
+  the place's result, unchanged lines folded, changes merged automatically
+  marked, and a place list to move between them. The merge method "Keep both
+  changes" (chosen when it opens) or "Prefer the latest change" decides every
+  place; choosing a side, letting go of it (both kept) or editing one place
+  makes the method "Custom", and the other places keep the previous method's
+  result. Choosing a method again decides every place again, asking first if
+  a place was edited. Large places scroll side by side and open in a
+  full-screen three-column comparison. The same dialog serves publishing,
+  approving a review, merging the published version into a draft, and two
+  people saving one draft. A clean merge publishes without asking when it is
+  the merge the screen showed. Its confirm button names that write -- "Publish", "Approve
+  and publish", "Merge" or "Save this result" -- and the version bar, the
+  dialog, the editor and the Review screen count an overlapping title or type
+  once.
+- Korean labels use one word per concept across the app: 병합 (merge), 리뷰
+  (review), 거절 (reject), 변경 요청 (request changes) and 게시 (publish).
+- One version bar on a Context page replaces the draft banner, the open-draft
+  list, the review banner and the header's draft and review counts. It names
+  the version on screen (switch to the published version or any open draft),
+  its state, and its actions: View changes, Review, Merge published (when the
+  draft is behind), Discard draft, Request changes, and Publish -- "Approve and
+  publish" when the draft has an open review, in the reader, the editor and
+  the Review screen alike. A published page with no open draft shows no bar.
+- Publishing and approving act on the draft on screen only, with the merge it
+  showed: "Publishing publishes this draft merged with the current published
+  version" or, for overlaps, how publishing will ask. If the draft, the
+  published version or its review changed meanwhile, nothing is written and
+  the new state is shown. View changes (and the Review screen's "What
+  publishing changes") compares the current published version with what
+  publishing would publish, so changes published meanwhile no longer read as
+  reverted.
+- History says why a draft ended: Discarded, Merged (published by a merge or
+  merged into another version) or Rejected; so does an attachment's usage list.
+- REST: Publishing a draft accepts `expected_review_item_id` (null: none was
+  shown) and refuses a different latest open review with `context_review_changed`.
+  A publish approves the draft's latest open review. `diff` accepts
+  `baseline=publish_result`, which reports `merge_kind`, `published_version_id`
+  and `editing_revision`. Version projections and attachment usage items add
+  `closed_reason`.
+
+### Important changes
+
+- MCP tool contract revision 31 adds `closed_reason` (discarded, merged or
+  rejected) to Context version projections. `bring_in_context_version` is titled
+  "Merge context version", and Korean tool titles use the app's merge and review
+  wording. Refresh cached `tools/list` results and result schemas.
+
 ## 0.3.1 — 2026-11-20
 
 ### Important changes

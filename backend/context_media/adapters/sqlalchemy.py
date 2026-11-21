@@ -713,6 +713,22 @@ class SqlAlchemyContextMediaRepository:
             asset_ids=(asset_id,),
             reader=reader,
         )
+        closed_ids = [row.id for row in rows if row.version_status == "closed"]
+        closed_reasons = {}
+        if closed_ids:
+            # The same rule History uses to say why a draft ended.
+            from backend.services.context_lifecycle import context_closed_reasons
+
+            closed_reasons = context_closed_reasons(
+                self._session,
+                self._session.scalars(
+                    select_in_workspace(
+                        ContextPageVersion,
+                        workspace_id=workspace_id,
+                        conditions=(ContextPageVersion.id.in_(closed_ids),),
+                    )
+                ).all(),
+            )
         return AssetVersionUsagePage(
             items=tuple(
                 AssetVersionUsage(
@@ -722,6 +738,7 @@ class SqlAlchemyContextMediaRepository:
                     reference_count=row.reference_count,
                     created_at=row.created_at,
                     last_saved_at=row.last_saved_at,
+                    closed_reason=closed_reasons.get(row.id),
                 )
                 for row in rows
             ),

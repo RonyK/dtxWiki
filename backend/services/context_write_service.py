@@ -3448,12 +3448,14 @@ class ContextWriteService:
         ]
         if only_open:
             conditions.append(ReviewItem.status.in_(("pending", "changes_requested")))
+        # Latest first, the order the reader projects a draft's review in, so
+        # a publish that approves "the open review" approves the shown one.
         reviews = session.scalars(
             select_in_workspace(
                 ReviewItem,
                 workspace_id=version.workspace_id,
                 conditions=conditions,
-            )
+            ).order_by(ReviewItem.created_at.desc(), ReviewItem.id.desc())
         ).all()
         return [
             review

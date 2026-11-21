@@ -269,6 +269,8 @@ describe("ContextScreen", () => {
           reconciliation_pending_count_truncated: false,
           next_reconciliation_version_id: null,
           reconciliation_available: false,
+          // The server always sends the open-draft summary to editors.
+          open_drafts: { total: 0, items: [], next_cursor: null },
         },
       },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/publish`]: {
@@ -811,7 +813,7 @@ describe("ContextScreen", () => {
     });
   });
 
-  it("says a displayed draft is unpublished and names the reader-visible head", async () => {
+  it("shows the displayed draft in the version bar and names the reader-visible head", async () => {
     const fetchMock = await renderDecisionLog();
     const originalFetch = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input, init) => {
@@ -835,11 +837,15 @@ describe("ContextScreen", () => {
     );
 
     expect(await screen.findByText("Selected second page")).toBeInTheDocument();
-    expect(screen.getByText("Editing draft")).toBeInTheDocument();
-    expect(screen.getByText("Draft · Not published")).toBeInTheDocument();
-    expect(screen.getByText("Earlier Author")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Rejected" })).toBeInTheDocument();
-    expect(screen.getByText("0 open drafts")).toBeInTheDocument();
+    const bar = screen.getByRole("region", { name: "Version" });
+    expect(within(bar).getByRole("button", { name: "Switch the version shown" }))
+      .toHaveTextContent(/Draft.*Earlier Author/);
+    // A closed review is not an open one: the draft reads as being written.
+    expect(within(bar).getByText("Writing")).toBeInTheDocument();
+    expect(within(bar).queryByRole("link", { name: "Review" })).toBeNull();
+    // The bar is the one place for draft facts: no meta chip repeats them.
+    expect(screen.queryByText("Editing draft")).toBeNull();
+    expect(screen.queryByText(/open drafts?$/)).toBeNull();
     const readerVersion = screen.getByRole("button", {
       name: /Readers see v2; open this version in History/,
     });
@@ -907,26 +913,32 @@ describe("ContextScreen", () => {
     );
 
     await screen.findByText("Published body");
-    await userEvent.click(screen.getByText("2 open drafts"));
+    const switcher = () => screen.getByRole("button", { name: "Switch the version shown" });
+    expect(switcher()).toHaveTextContent(/Published/);
+    await userEvent.click(switcher());
     await waitFor(() => expect(screen.getByRole("button", { name: "More drafts" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "More drafts" }));
     await userEvent.click(await screen.findByRole("button", { name: /Review Author/ }));
     await screen.findByText("Selected reviewing-1");
-    expect(screen.getByText("Draft · Not published")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Pending" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Back to published version" }));
+    expect(switcher()).toHaveTextContent(/Draft.*Review Author/);
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute(
+      "href", `/workspaces/${WORKSPACE_ID}/review/review-1`,
+    );
+    await userEvent.click(switcher());
+    await userEvent.click(await screen.findByRole("button", { name: /What readers see/ }));
     await screen.findByText("Published body");
 
-    await userEvent.click(screen.getByText("2 open drafts"));
-    await userEvent.click(screen.getByRole("button", { name: /Draft Author/ }));
+    await userEvent.click(switcher());
+    await userEvent.click(await screen.findByRole("button", { name: /Draft Author/ }));
     await screen.findByText("Selected writing-1");
-    expect(screen.getByText("Draft · Not published")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Back to published version" }));
+    expect(switcher()).toHaveTextContent(/Draft.*Draft Author/);
+    await userEvent.click(switcher());
+    await userEvent.click(await screen.findByRole("button", { name: /What readers see/ }));
     await screen.findByText("Published body");
 
     delayWriting = true;
-    await userEvent.click(screen.getByText("2 open drafts"));
-    await userEvent.click(screen.getByRole("button", { name: /Draft Author/ }));
+    await userEvent.click(switcher());
+    await userEvent.click(await screen.findByRole("button", { name: /Draft Author/ }));
     expect(screen.queryByText("Published body")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
     await screen.findByText("Published body");
@@ -936,6 +948,43 @@ describe("ContextScreen", () => {
     } })));
     expect(screen.queryByText("Late writing body")).not.toBeInTheDocument();
     expect(screen.getByText("Published body")).toBeInTheDocument();
+  });
+
+  it("names an earlier or closed version as History does, not as the version readers see", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const pageUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
+    const base = (await (await originalFetch(pageUrl, undefined)).json()).data;
+    const writing = {
+      version_id: "writing-1", version_status: "draft", last_saved_at: "2026-05-11T01:00:00Z",
+      author: { actor_kind: "human", actor_id: "author-1", display_name: "Draft Author" },
+      is_editing: true, review: null, is_behind: false, is_mine: false, state: "writing",
+    };
+    const openDrafts = { total: 1, items: [writing], next_cursor: null };
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `${new URL(pageUrl).pathname}/drafts`) return jsonResponse({ data: openDrafts });
+      if (url.pathname === new URL(pageUrl).pathname) {
+        // Another draft is open while a rejected draft is on screen.
+        return jsonResponse({ data: {
+          ...base, open_drafts: openDrafts, draft: null, version_id: "rejected-1", version_status: "closed",
+          history_status: "closed", closed_reason: "rejected", is_published_head: false, body_md: "Rejected body",
+        } });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?version=rejected-1`]}>
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Rejected body");
+    const switcher = screen.getByRole("button", { name: "Switch the version shown" });
+    expect(switcher).toHaveTextContent(/Rejected/);
+    expect(switcher).not.toHaveTextContent(/Published/);
+    await userEvent.click(switcher);
+    expect(await screen.findByRole("button", { name: /What readers see/ })).not.toHaveAttribute("aria-current");
   });
 
   it("presents the reader-visible version as one described action with a decorative arrow", async () => {
@@ -4897,8 +4946,65 @@ describe("ContextScreen", () => {
             status: reviewStatus,
             risk_level: "medium",
           },
+          editing_revision: 1,
+          references_hash: "sha256:refs",
+          published_version_info: { version_id: "version-1", version_no: 1, published_at: "2026-05-08T01:00:00Z" },
+          // The draft on screen, as the server describes every displayed draft.
+          draft: {
+            author: { actor_kind: "human", actor_id: "author-1", display_name: "Draft Author" },
+            last_saved_at: "2026-05-09T01:00:00Z",
+            is_editing: false,
+            review: { id: "rev-1", status: reviewStatus },
+            is_behind: false,
+          },
+          open_drafts: { total: 1, items: [], next_cursor: null },
+          open_review_count: 1,
         },
       },
+      // What publishing (or approving) the draft on screen would write.
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/merge-preview`]: {
+        data: {
+          page_id: PAGE_ID,
+          version_id: "version-2",
+          content_hash: "sha256:draft",
+          references_hash: "sha256:refs",
+          editing_revision: 1,
+          published_version_id: "version-1",
+          target_version_id: "version-1",
+          parent_version_ids: ["version-1"],
+          kind: "fast_forward",
+          result: { body_md: "# Decision Log\n\nBody", page_metadata: {}, block_map: [], result_hash: "c".repeat(64), conflicts: [], offset_unit: "unicode_code_points" },
+          keep_both: null,
+          latest: null,
+          metadata_conflicts: [],
+          base_conflicted: false,
+          latest_side: "ours",
+          offset_unit: "unicode_code_points",
+          sides: null,
+        },
+      },
+      [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}/diff?baseline=publish_result&to_version_id=version-2`]:
+        {
+          data: {
+            baseline: "publish_result",
+            merge_kind: "fast_forward",
+            published_version_id: "version-1",
+            editing_revision: 1,
+            from_version_id: "version-1",
+            to_version_id: "version-2",
+            from_version_no: 1,
+            to_version_no: 2,
+            lines: [
+              "--- v1",
+              "+++ v2",
+              "@@ -1 +1 @@",
+              "-Published body",
+              "+Newest draft body",
+            ],
+            additions: 1,
+            deletions: 1,
+          },
+        },
       [`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/changesets?target_type=context_page&target_id=${PAGE_ID}`]:
         {
           data: {
@@ -5094,7 +5200,7 @@ describe("ContextScreen", () => {
     await userEvent.click(readerTabs.getByRole("tab", { name: /^Graph, Preview$/ }));
     await screen.findByTestId("graph-view");
     expect(screen.getByTestId("context-graph-canvas")).toHaveAttribute("data-nodes", "3");
-    const approve = await screen.findByRole("button", { name: "Approve" });
+    const approve = await screen.findByRole("button", { name: "Approve and publish" });
     await waitFor(() => expect(approve).toBeEnabled());
     await userEvent.click(approve);
     await waitFor(() => expect(screen.getByTestId("context-graph-canvas"))
@@ -5107,7 +5213,7 @@ describe("ContextScreen", () => {
     expect(graphCalls).toBe(2);
   });
 
-  it("opens the pending draft comparison with the newer draft on the right in one click", async () => {
+  it("compares the published version with what publishing the draft publishes, in one click", async () => {
     mockFetch(pendingReviewFetch());
     render(
       <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
@@ -5123,12 +5229,8 @@ describe("ContextScreen", () => {
     );
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Changes in v2 since v1",
+      name: "What publishing changes",
     });
-    expect(screen.getByRole("tab", { name: /History/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
     const split = within(dialog).getByRole("table", {
       name: "Side-by-side diff",
     });
@@ -5139,15 +5241,11 @@ describe("ContextScreen", () => {
       "diff-viewer-cell-add",
     );
     expect(
-      within(split).getByRole("columnheader", {
-        name: /Base version \(earlier\)/,
-      }),
-    ).toHaveAttribute("data-current-published", "true");
+      within(split).getByRole("columnheader", { name: /Current published v1/ }),
+    ).toBeInTheDocument();
     expect(
-      within(split).getByRole("columnheader", {
-        name: /Compared version \(later\)/,
-      }),
-    ).not.toHaveAttribute("data-current-published");
+      within(split).getByRole("columnheader", { name: /Publish result/ }),
+    ).toBeInTheDocument();
   });
 
   it("offers Restore on the published default read but not on the current draft", async () => {
@@ -5807,25 +5905,23 @@ describe("ContextScreen", () => {
     await userEvent.click(
       await screen.findByRole("treeitem", { name: "Decision Log" }),
     );
+    const bar = await screen.findByRole("region", { name: "Version" });
+    expect(within(bar).getByText("Waiting for review")).toBeInTheDocument();
+    expect(within(bar).getByText("Risk Medium")).toBeInTheDocument();
+    await waitFor(() => expect(within(bar).getByRole("button", { name: "Approve and publish" })).toBeEnabled());
+    // One bar, one of each action: no second banner repeating the review.
+    const actions = within(bar).getByRole("group", { name: "Draft actions" });
     expect(
-      await screen.findByText(/1 pending review for this page/),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
-    expect(
-      screen.getByRole("button", { name: "Request changes" }),
-    ).toBeInTheDocument();
-    const banner = screen.getByText(/1 pending review for this page/)
-      .closest('[role="status"]') as HTMLElement;
-    expect(
-      [...banner.querySelectorAll("a, button")].map((action) => action.textContent?.trim()),
-    ).toEqual(["View review", "View changes", "Request changes", "Approve"]);
+      [...actions.querySelectorAll("a, button")].map((action) => action.textContent?.trim()),
+    ).toEqual(["View changes", "Review", "Discard draft", "Request changes", "Approve and publish"]);
+    expect(screen.getAllByRole("button", { name: "View changes" })).toHaveLength(1);
     const requestedUrls = fetchMock.mock.calls.map(([input]) => String(input));
     expect(requestedUrls).toContain(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/rev-1`);
     expect(requestedUrls.filter((url) => /\/(?:inspector|neighbors|lint)(?:[/?]|$)/.test(url)))
       .toEqual([]);
   });
 
-  it("hides pending-draft reviewer actions for viewers (F1 RBAC)", async () => {
+  it("shows no version bar or reviewer actions to viewers (F1 RBAC)", async () => {
     ctxWorkspace.current = {
       selectedWorkspace: { role: "viewer", id: WORKSPACE_ID },
     };
@@ -5838,31 +5934,24 @@ describe("ContextScreen", () => {
     await userEvent.click(
       await screen.findByRole("treeitem", { name: "Decision Log" }),
     );
-    expect(
-      await screen.findByText(/1 pending review for this page/),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    await screen.findByText("Body");
+    expect(screen.queryByRole("region", { name: "Version" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve and publish" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull();
-    expect(screen.getByRole("link", { name: "View review" }))
-      .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
   });
 
   it.each([
     {
       earlierCount: 1,
-      totalCopy: "2 pending reviews for this page",
-      impactCopy:
-        "Approving will publish this version. 1 earlier pending review will be settled with it.",
+      impactCopy: "Approving also closes 1 other review of this draft.",
     },
     {
       earlierCount: 2,
-      totalCopy: "3 pending reviews for this page",
-      impactCopy:
-        "Approving will publish this version. 2 earlier pending reviews will be settled with it.",
+      impactCopy: "Approving also closes 2 other reviews of this draft.",
     },
   ])(
-    "shows the full pending count and $earlierCount-review approval impact before approval",
-    async ({ earlierCount, totalCopy, impactCopy }) => {
+    "says approving also closes $earlierCount other review(s) of the same draft",
+    async ({ earlierCount, impactCopy }) => {
       ctxWorkspace.current = {
         selectedWorkspace: { role: "owner", id: WORKSPACE_ID },
       };
@@ -5877,16 +5966,11 @@ describe("ContextScreen", () => {
         await screen.findByRole("treeitem", { name: "Decision Log" }),
       );
 
+      expect(await screen.findByText(impactCopy)).toBeInTheDocument();
       expect(
-        await screen.findByText(new RegExp(totalCopy)),
-      ).toBeInTheDocument();
-      expect(screen.getByText(impactCopy)).toBeInTheDocument();
-      expect(
-        screen.getByRole("link", {
-          name: "View review",
-        }),
+        screen.getByRole("link", { name: "Review" }),
       ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
-      expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+      await waitFor(() => expect(screen.getByRole("button", { name: "Approve and publish" })).toBeEnabled());
     },
   );
 
@@ -5905,16 +5989,59 @@ describe("ContextScreen", () => {
       await screen.findByRole("treeitem", { name: "Decision Log" }),
     );
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Approve and publish" })).toBeEnabled();
     });
 
+    expect(screen.queryByText(/other reviews? of this draft/i)).toBeNull();
     expect(
-      screen.getByText(/1 pending review for this page/),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/earlier pending reviews?/i)).toBeNull();
-    expect(
-      screen.getByRole("link", { name: "View review" }),
+      screen.getByRole("link", { name: "Review" }),
     ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
+  });
+
+  it("approves the merge shown for the draft on screen and never resends it after the draft moved", async () => {
+    ctxWorkspace.current = {
+      selectedWorkspace: { role: "owner", id: WORKSPACE_ID },
+    };
+    const fetchMock = mockFetch(pendingReviewFetch(0));
+    const base = fetchMock.getMockImplementation()!;
+    const decision = deferredResponse();
+    fetchMock.mockImplementation(async (input, init) =>
+      String(input).endsWith("/reviews/rev-1/decision") ? decision.promise : base(input, init));
+    const calls = (suffix: string) =>
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith(suffix));
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context`]}>
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+    await userEvent.click(
+      await screen.findByRole("treeitem", { name: "Decision Log" }),
+    );
+    const approve = await screen.findByRole("button", { name: "Approve and publish" });
+    await waitFor(() => expect(approve).toBeEnabled());
+    const shownPreviews = calls("/merge-preview").length;
+
+    await userEvent.click(approve);
+    // Sent with the pins of the merge shown on screen; nothing re-read at the click.
+    await waitFor(() => expect(calls("/reviews/rev-1/decision")).toHaveLength(1));
+    expect(calls("/merge-preview")).toHaveLength(shownPreviews);
+    expect(JSON.parse(String(calls("/reviews/rev-1/decision")[0][1]?.body))).toMatchObject({
+      decision_type: "approve",
+      expected_editing_revision: 1,
+      expected_published_version_id: "version-1",
+      result_hash: "c".repeat(64),
+    });
+
+    // The draft moved meanwhile: the refusal shows the new state, and the
+    // approval is not sent again on its own.
+    await act(async () => decision.resolve(jsonResponse({
+      error_code: "stale_base_version",
+      message: "The merge preview changed; request a new preview",
+      warnings: [],
+    }, 409)));
+    expect(await screen.findByText(i18n.t("context:versionBar.changed"))).toBeInTheDocument();
+    await waitFor(() => expect(calls("/merge-preview").length).toBeGreaterThan(shownPreviews));
+    expect(calls("/reviews/rev-1/decision")).toHaveLength(1);
   });
 
   it("keeps review navigation available while approval impact is loading and after it fails", async () => {
@@ -5932,19 +6059,18 @@ describe("ContextScreen", () => {
     await userEvent.click(
       await screen.findByRole("treeitem", { name: "Decision Log" }),
     );
-    expect(await screen.findByText(/Checking pending reviews/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View review" }))
+    expect(await screen.findByRole("link", { name: "Review" }))
       .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve and publish" })).toBeDisabled();
 
     await act(async () => {
       pendingImpact.resolve({ error: new Error("Review details unavailable") });
     });
 
-    expect(await screen.findByText(/Pending review count unavailable/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View review" }))
+    expect(await screen.findByText(i18n.t("context:pendingReview.impactLoadError"))).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review" }))
       .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1`);
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve and publish" })).toBeDisabled();
   });
 
   it("does not promise publication or settlement for a changes-requested draft", async () => {
@@ -5962,13 +6088,12 @@ describe("ContextScreen", () => {
       await screen.findByRole("treeitem", { name: "Decision Log" }),
     );
 
+    const bar = await screen.findByRole("region", { name: "Version" });
+    expect(within(bar).getByText("Changes requested")).toBeInTheDocument();
+    expect(screen.queryByText(/other reviews? of this draft/i)).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve and publish" })).toBeEnabled());
     expect(
-      await screen.findByText(/Draft has changes requested/),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/Approving will publish/i)).toBeNull();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
-    expect(
-      screen.getByRole("link", { name: "View review" }),
+      screen.getByRole("link", { name: "Review" }),
     ).toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/review/rev-1?status=changes_requested`);
   });
 
@@ -5992,6 +6117,9 @@ describe("ContextScreen", () => {
       renderAtCanonicalRoute(`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`);
 
       expect(await screen.findByText("Needle body")).toBeInTheDocument();
+      // The published version with no open draft has no version bar (no
+      // "0 open drafts" box).
+      expect(screen.queryByRole("region", { name: "Version" })).toBeNull();
     });
 
     it("leaves a deleted canonical page route instead of retaining its stale :pageId", async () => {

@@ -21,7 +21,7 @@ test("reads review evidence, approves a document group and a single review, and 
   await page.goto(workspaceUrl(workspace.id, `review/${first.review_item_id}`));
   const detail = page.locator(".review-detail-card");
   await expect(detail.locator("#review-detail-title")).toHaveText(first.title);
-  await expect(detail.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
+  await expect(detail.getByRole("button", { name: "Approve and publish", exact: true })).toBeEnabled();
   await expect(detail.locator(".review-publication-notice")).toHaveText("First publication · nothing published yet → v1");
   await expect(detail.locator(".diff-viewer")).toContainText("Exact reviewed body");
   await detail.getByRole("tab", { name: "Review version content", exact: true }).click();
@@ -60,7 +60,7 @@ test("reads review evidence, approves a document group and a single review, and 
   await detail.getByLabel("Decision reason").fill("Cross-screen workflow reviewed");
   const decisionResponsePromise = page.waitForResponse((response) => response.request().method() === "POST"
     && new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/reviews/${second.review_item_id}/decision`);
-  await detail.getByRole("button", { name: "Approve", exact: true }).click();
+  await detail.getByRole("button", { name: "Approve and publish", exact: true }).click();
   const decided = await responseData<{ id: string }>(await decisionResponsePromise);
   expect(decided.id).toBe(second.review_item_id);
   await expect(detail.getByRole("button", { name: "Next review", exact: true })).toBeVisible();
@@ -111,7 +111,7 @@ test("keeps focused review content and mobile review targets usable @cross-brows
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(workspaceUrl(workspace.id, `review/${candidate.review_item_id}`));
   const detail = page.locator(".review-detail-card");
-  await expect(detail.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
+  await expect(detail.getByRole("button", { name: "Approve and publish", exact: true })).toBeEnabled();
   await expectNoDocumentOverflow(page);
   const comparison = detail.getByRole("tab", { name: "Compare changes", exact: true });
   await detail.getByRole("link", { name: /Open current document:/ }).focus();

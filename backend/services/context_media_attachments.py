@@ -159,6 +159,7 @@ def asset_usage_read_projection(page: AssetVersionUsagePage) -> dict[str, Any]:
                     visible_version_id=None,
                     expose_draft_state=True,
                 ).history_status,
+                "closed_reason": item.closed_reason,
                 "reference_count": item.reference_count,
                 "created_at": item.created_at,
                 "last_saved_at": item.last_saved_at,

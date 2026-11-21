@@ -45,13 +45,22 @@ describe("ReviewScreen", () => {
     })));
     vi.spyOn(pagesApi, "readPage").mockImplementation(async (workspaceId, pageId, versionId) =>
       exactPage(workspaceId, pageId, versionId ?? "version-1"));
-    vi.spyOn(pagesApi, "diffPageVersions").mockImplementation(async (_workspaceId, _pageId, from, to) => ({
-      from_version_id: from, to_version_id: to,
-      from_version_no: from ? Number(from.split("-").at(-1)) : 0,
-      to_version_no: Number(to.split("-").at(-1)),
-      baseline: from ? "version" : "empty", additions: 1, deletions: 0,
-      lines: ["+Exact candidate body"], metadata_changes: [],
-    }));
+    vi.spyOn(pagesApi, "diffPageVersions").mockImplementation(async (_workspaceId, _pageId, from, to, options) => (
+      options?.publishResult ? {
+        // The current published version (the one before the candidate here)
+        // against what publishing the candidate publishes: itself.
+        from_version_id: `version-${Number(to.split("-").at(-1)) - 1}`, to_version_id: to,
+        from_version_no: Number(to.split("-").at(-1)) - 1,
+        to_version_no: Number(to.split("-").at(-1)),
+        baseline: "publish_result", merge_kind: "fast_forward", additions: 1, deletions: 0,
+        lines: ["+Exact candidate body"], metadata_changes: [],
+      } : {
+        from_version_id: from, to_version_id: to,
+        from_version_no: from ? Number(from.split("-").at(-1)) : 0,
+        to_version_no: Number(to.split("-").at(-1)),
+        baseline: from ? "version" : "empty", additions: 1, deletions: 0,
+        lines: ["+Exact candidate body"], metadata_changes: [],
+      }));
   });
 
   it("defines routing dialog radio layout styles", () => {
@@ -248,7 +257,7 @@ describe("ReviewScreen", () => {
       "77a2c536-ff53-4479-a0ae-65fb20c64fdc",
     );
     expect(await screen.findByRole("button", { name: "Change Set ID copied" })).toBeVisible();
-    const approveButton = screen.getByRole("button", { name: "Approve" });
+    const approveButton = screen.getByRole("button", { name: /^Approve( and publish)?$/ });
     const requestChangesButton = screen.getByRole("button", {
       name: "Request changes",
     });
@@ -549,7 +558,7 @@ describe("ReviewScreen", () => {
 
       await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^Settlement impact ${count} · v1 ·`) }));
       expect(await screen.findByText(copy)).toBeInTheDocument();
-      await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
     },
   );
 
@@ -2113,10 +2122,10 @@ describe("ReviewScreen", () => {
     });
     render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "First detail", level: 2 });
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /^Second detail · v1 ·/ }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
     await act(async () => { finishFirst(jsonResponse({ data: first })); });
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
@@ -2187,7 +2196,7 @@ describe("ReviewScreen", () => {
       "false",
     );
     expect(screen.getByText("Publish the selected Context draft")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve( and publish)?$/ })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Request changes" }),
     ).not.toBeInTheDocument();
@@ -2218,7 +2227,7 @@ describe("ReviewScreen", () => {
     expect(
       screen.getByText(/stays pending until it is reconciled or explicitly discarded/),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Approve( and publish)?$/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
     expect(screen.queryByLabelText("Decision reason")).toBeNull();
@@ -2615,8 +2624,8 @@ describe("ReviewScreen", () => {
     render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "Decided first", level: 2 });
     await user.click(screen.getByRole("button", { name: "Load more" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: /^Approve( and publish)?$/ }));
     expect(await screen.findByText(savedDecisionLabel())).toBeVisible();
     await act(async () => { releaseStalePage(); });
     const rail = screen.getByRole("complementary", { name: "Review queue" });
@@ -3027,6 +3036,31 @@ describe("ReviewScreen", () => {
     expect(decisionBodies).toHaveLength(1); // Preview never submits an approval.
   });
 
+  it("approves only the draft revision whose content it shows", async () => {
+    const user = userEvent.setup();
+    // The evidence shows the candidate saved at revision 2 while the merge
+    // preview is of revision 1: a co-author saved in between.
+    vi.mocked(pagesApi.readPage).mockImplementation(async (workspaceId, pageId, versionId) =>
+      ({ ...exactPage(workspaceId, pageId, versionId ?? "version-1"), editing_revision: 2 }));
+    const current = reviewItem({ reviewType: "context_update", targetId: "exact-page", targetTitle: "Exact candidate", targetVersionNo: 3 });
+    let decisions = 0;
+    mockReviewQueue([current], null, (url) => {
+      if (url.endsWith("/decision")) decisions += 1;
+      return undefined;
+    });
+    render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Exact candidate", level: 2 });
+    const approve = screen.getByRole("button", { name: /^Approve( and publish)?$/ });
+    await waitFor(() => expect(approve).toBeEnabled());
+    const reads = vi.mocked(pagesApi.readPage).mock.calls.length;
+
+    await user.click(approve);
+    expect(await screen.findByText(i18n.t("review:workflow.mergeChanged"))).toBeVisible();
+    expect(decisions).toBe(0);
+    // The reviewed content is read again before anyone approves.
+    await waitFor(() => expect(vi.mocked(pagesApi.readPage).mock.calls.length).toBeGreaterThan(reads));
+  });
+
   it("requires the exact candidate body and applies each server action capability separately", async () => {
     const user = userEvent.setup();
     let finishBody: (page: Awaited<ReturnType<typeof pagesApi.readPage>>) => void = () => {};
@@ -3054,12 +3088,13 @@ describe("ReviewScreen", () => {
     await screen.findByRole("heading", { name: "Exact candidate", level: 2 });
     expect(screen.getByText(/Current published version v2 → Review version v3/)).toBeVisible();
     expect(await screen.findByText("Approving publishes v3 in place of v2.")).toBeVisible();
-    const approve = screen.getByRole("button", { name: "Approve" });
+    const approve = screen.getByRole("button", { name: /^Approve( and publish)?$/ });
     expect(approve).toBeDisabled();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
     await waitFor(() => expect(screen.getByRole("button", { name: "Request changes" })).toBeEnabled());
     expect(pagesApi.readPage).toHaveBeenCalledWith(WORKSPACE_ID, "exact-page", "version-3");
-    expect(pagesApi.diffPageVersions).toHaveBeenCalledWith(WORKSPACE_ID, "exact-page", "version-2", "version-3", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    // The open candidate is compared with what publishing it publishes.
+    expect(pagesApi.diffPageVersions).toHaveBeenCalledWith(WORKSPACE_ID, "exact-page", null, "version-3", expect.objectContaining({ publishResult: true, signal: expect.any(AbortSignal) }));
     const documentLink = screen.getByRole("link", { name: "Open current document: Exact candidate (new tab)" });
     expect(documentLink).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/context/pages/exact-page");
     expect(documentLink).toHaveAttribute("target", "_blank");
@@ -3095,19 +3130,19 @@ describe("ReviewScreen", () => {
     current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     await waitFor(() => expect(screen.queryByText("Approving publishes v3 in place of v2.")).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
     current.review_type = "context_update";
     current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     current.actions!.approve = { allowed: false, reason_code: "claim_conflict" };
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeDisabled());
     expect(screen.queryByText("Approving publishes v3 in place of v2.")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
     current.actions!.approve = { allowed: true };
     current.updated_at = new Date(Date.parse(current.updated_at) + 1000).toISOString();
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     expect(await screen.findByText("Approving publishes v3 in place of v2.")).toBeVisible();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
     const otherCandidate: ReviewEvidenceOperation = {
       ...placement, operation_id: "other-candidate-placement", diff_summary: "Metadata for a different candidate.",
       content: { ...placement.content!, candidate_version_id: "version-2", candidate_version_no: 2 },
@@ -3122,7 +3157,7 @@ describe("ReviewScreen", () => {
     expect(within(evidenceCards[0]).queryByText(otherCandidate.diff_summary!)).not.toBeInTheDocument();
     expect(within(evidenceCards[1]).getByText(otherCandidate.diff_summary!)).toBeVisible();
     expect(within(evidenceCards[1]).getByText("Review version v2")).toBeVisible();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
     expect(vi.mocked(pagesApi.readPage).mock.calls.every(([, , version]) => version === "version-3")).toBe(true);
 
     // An unsupported target must remain separate and must still block readiness,
@@ -3135,7 +3170,7 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Refresh reviews" }));
     expect(await screen.findByText(i18n.t("review:content.unsupported"))).toBeVisible();
     expect(document.querySelectorAll(".review-evidence-document")).toHaveLength(3);
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeDisabled();
     for (const [kind, label] of [["parent", "Parent version v2"], ["empty", "Empty document"], ["unavailable", "Comparison baseline unavailable"]] as const) {
       current.evidence!.operations[0].content!.baseline_kind = kind;
       current.evidence!.operations[0].content!.baseline_version_id = kind === "parent" ? "version-2" : null;
@@ -3147,7 +3182,7 @@ describe("ReviewScreen", () => {
     const reads = vi.mocked(pagesApi.readPage).mock.calls.length;
     await user.click(screen.getByRole("button", { name: /^Metadata target · v1 ·/ }));
     await screen.findByRole("heading", { name: "Metadata target", level: 2 });
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled());
     expect(screen.getByText(i18n.t("review:workflow.reasons.claim_conflict"))).toBeVisible();
@@ -3188,12 +3223,12 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByText("Add a decision reason (optional)"));
     await user.type(screen.getByRole("textbox", { name: "Decision reason" }), "Reviewed carefully");
     const key = reviewDraftKey("actor-1", WORKSPACE_ID, current.id);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: /^Approve( and publish)?$/ }));
     expect(await screen.findByText(i18n.t("review:workflow.savedRefreshFailed"))).toBeVisible();
     expect(screen.getByText(savedDecisionLabel())).toBeVisible();
     expect(document.querySelector(".review-publication-notice")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve( and publish)?$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve selected" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next review" })).toBeDisabled();
     expect(screen.getByRole("tab", { name: "Pending" })).toBeVisible();
@@ -3237,8 +3272,8 @@ describe("ReviewScreen", () => {
     });
     render(<MemoryRouter initialEntries={["/workspaces/00000000-0000-4000-8000-000000000001/review/review-1"]}><ReviewScreen /></MemoryRouter>);
     await screen.findByRole("heading", { name: "Undo target", level: 2 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: /^Approve( and publish)?$/ }));
     // Undo takes Approve's place, so it ignores the second click of a
     // double-click before it arms.
     const undo = await screen.findByRole("button", { name: "Undo approval" });
@@ -3248,7 +3283,7 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Undo approval" }));
     expect(await screen.findByText("Approval undone. The review is waiting again.")).toBeVisible();
     expect(undoCalls).toEqual([`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/reviews/review-1/decisions/decision-1/undo`]);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
   });
 
   it("recovers uncertain decisions after remount with read-first retries and one decision identity", async () => {
@@ -3286,10 +3321,10 @@ describe("ReviewScreen", () => {
     await screen.findByRole("heading", { name: "Feedback Target", level: 2 });
     await user.click(screen.getByText("Add a decision reason (optional)"));
     await user.type(screen.getByRole("textbox", { name: "Decision reason" }), "Preserve this note");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: /^Approve( and publish)?$/ }));
     expect(await screen.findByText(i18n.t("review:workflow.decisionOutcomeUnknown"))).toBeVisible();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeDisabled();
     expect(screen.queryByText(savedDecisionLabel())).not.toBeInTheDocument();
     const key = reviewDraftKey("actor-1", WORKSPACE_ID, current.id);
     expect(JSON.parse(sessionStorage.getItem(`${key}.pending`)!)).toMatchObject({ decisionId: bodies[0].decision_id, reason: "Preserve this note" });
@@ -3297,7 +3332,7 @@ describe("ReviewScreen", () => {
     mount();
     await screen.findByText("Authenticated actor: actor-1");
     await screen.findByRole("heading", { name: "Feedback Target", level: 2 });
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeDisabled();
     expect(bodies).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Retry the same decision" }));
     await waitFor(() => expect(bodies).toHaveLength(2));
@@ -3312,7 +3347,7 @@ describe("ReviewScreen", () => {
     expect(bodies).toHaveLength(2);
     expect(sessionStorage.getItem(`${key}.pending`)).toBeNull();
     expect(sessionStorage.getItem(key)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve( and publish)?$/ })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Next review" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Next review" }));
     expect(await screen.findByRole("heading", { name: "Loaded next", level: 2 })).toBeVisible();
@@ -3405,7 +3440,7 @@ describe("ReviewScreen", () => {
       resolveClaim(new Response(JSON.stringify({ error: { code: "claim_conflict", message: "Previous review claim failed" } }), { status: 409, headers: { "content-type": "application/json" } }));
     });
     expect(screen.queryByText(/Previous review claim failed|Failed to claim Review/)).toBeNull();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Approve( and publish)?$/ })).toBeEnabled();
   });
 
   it("keeps a missing review deep link explicit and shows Not Found", async () => {
@@ -3483,7 +3518,8 @@ function mockReviewFetch(handler: (input: RequestInfo | URL, init?: RequestInit)
     const url = input.toString();
     if (url.endsWith("/merge-preview")) {
       const request = JSON.parse(String(init?.body));
-      return jsonResponse({ data: { version_id: request.version_id, editing_revision: 1,
+      const pageId = url.match(/\/context\/pages\/([^/]+)\/merge-preview$/)?.[1];
+      return jsonResponse({ data: { page_id: pageId, version_id: request.version_id, editing_revision: 1,
         published_version_id: null, target_version_id: null, parent_version_ids: [], kind: "fast_forward",
         result: { body_md: "Exact candidate body", page_metadata: {}, block_map: [], result_hash: "c".repeat(64) } } });
     }

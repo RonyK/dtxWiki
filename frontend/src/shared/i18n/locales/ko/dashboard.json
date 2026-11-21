@@ -91,7 +91,7 @@
       },
       "review": {
         "label": "저장 또는 리뷰",
-        "description": "워크스페이스에 반영되기 전에 제안된 변경 사항을 검토합니다.",
+        "description": "워크스페이스에 반영되기 전에 제안된 변경 사항을 리뷰합니다.",
         "action": "리뷰 큐 열기"
       }
     }
@@ -102,7 +102,7 @@
     "title": "첫 워크스페이스 시작",
     "next": "다음: {{label}}",
     "progress": "설정 단계 {{total}}개 중 {{count}}개 완료.",
-    "description": "신뢰할 수 있는 자료를 추가하고, 오래 유지될 페이지를 정리한 뒤 위키가 업데이트되기 전에 변경 사항을 검토하세요.",
+    "description": "신뢰할 수 있는 자료를 추가하고, 오래 유지될 페이지를 정리한 뒤 위키가 업데이트되기 전에 변경 사항을 리뷰하세요.",
     "progressLabel": "워크스페이스 설정 진행률",
     "customizeWorkspaceTitle": "이 워크스페이스를 나에게 맞게 설정하세요",
     "customizeWorkspaceDescription": "이 워크스페이스의 이름을 바꿀 수 있습니다. 지속적인 팀 협업에는 워크스페이스 전환 메뉴에서 별도의 협업 워크스페이스를 만드세요.",
@@ -112,7 +112,7 @@
     "findWorkspaceAction": "워크스페이스 찾기",
     "review": "리뷰 큐",
     "libraryDescription": "답변이 인용할 수 있는 원본 자료를 모읍니다.",
-    "contextDescription": "팀이 읽고 편집할 수 있는 검토된 페이지를 유지합니다.",
+    "contextDescription": "팀이 읽고 편집할 수 있는 리뷰를 거친 페이지를 유지합니다.",
     "reviewDescription": "업데이트가 오래 유지되기 전에 승인, 거절, 변경 요청을 처리합니다."
   }
 }

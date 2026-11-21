@@ -134,7 +134,7 @@ TOOL_META = {
         True,
     ),
     "bring_in_context_version": (
-        "Bring in context version",
+        "Merge context version",
         "Merge a commit of this page into the named draft (default: the current "
         "published version) and return the draft's new editing_revision. A draft "
         "that already contains it is not saved. A conflict saves nothing until "

@@ -89,6 +89,8 @@ from backend.services.context_editing import (
     block_operation_provenance,
 )
 from backend.services.context_lifecycle import (
+    CLOSE_REASON_WITHDRAWN,
+    context_closed_reasons,
     project_context_version,
     record_context_decision,
     record_metadata_snapshot,
@@ -1071,8 +1073,17 @@ class PageService:
                 if parent_ids
                 else {}
             )
+            closed_reasons = context_closed_reasons(
+                session,
+                versions,
+                dispositions={
+                    version.id: review_metadata[version.id].disposition
+                    for version in versions
+                },
+            )
             entries = [
                 PageVersionEntry(
+                    closed_reason=closed_reasons.get(version.id),
                     version_id=version.id,
                     version_no=version.version_no,
                     parent_version_id=context_parent_projection(
@@ -1642,7 +1653,14 @@ class PageService:
         idempotency_key: str | None = None,
         result_body_md: str | None = None,
         result_page_metadata: dict | None = None,
+        expected_review: tuple[UUID | None] | None = None,
     ) -> PagePublishResult:
+        """Publish a draft; with an open review, publishing approves it.
+
+        ``expected_review`` is ``(review_id,)`` or ``(None,)`` when the caller
+        showed that review (or none): a different latest open review refuses
+        the write. ``None`` skips the check (in-process and MCP callers).
+        """
         from backend.schemas.context_write import PublishContextPageRequest
         from backend.services.context_write_service import ContextWriteService
 
@@ -1702,6 +1720,25 @@ class PageService:
                         .get("inspection_only")
                     )
                 ]
+                # The caller showed the draft's open review (or none); reads
+                # and this check pick it by one rule. A publish approves the
+                # latest approvable open review (_reviews_for_version's order).
+                if expected_review is not None:
+                    from backend.services.context_review_disposition import (
+                        shown_context_draft_review,
+                    )
+
+                    shown = shown_context_draft_review(session, page, staged)
+                if (
+                    expected_review is not None
+                    and (shown.id if shown is not None else None) != expected_review[0]
+                ):
+                    raise PageConflictError(
+                        server_version_id=staged.id,
+                        server_content_hash=staged.content_hash,
+                        server_editing_revision=staged.editing_revision,
+                        error_code="context_review_changed",
+                    )
                 if open_reviews:
                     from backend.schemas.context_write import ReviewDecisionRequest
                     from backend.services.context_draft_workflow import (
@@ -1884,6 +1921,11 @@ class PageService:
                         "result_body_md": result_body_md,
                         "result_page_metadata": result_page_metadata,
                         "publish_despite_findings": publish_despite_findings,
+                        **(
+                            {"expected_review_item_id": expected_review[0]}
+                            if expected_review is not None
+                            else {}
+                        ),
                     }
                 ),
                 result_model=PagePayload,
@@ -1905,6 +1947,14 @@ class PageService:
             if page is None:
                 raise PageNotFoundError("page not found")
             to_version = self._require_page_version(session, page, to_version_id)
+            if baseline == "publish_result":
+                return self._diff_publish_result(
+                    session,
+                    page,
+                    to_version,
+                    from_version_id=from_version_id,
+                    actor=actor,
+                )
             if baseline == "empty":
                 if from_version_id is not None:
                     raise PageValidationError(
@@ -1913,7 +1963,9 @@ class PageService:
                 from_version = None
             else:
                 if baseline is not None:
-                    raise PageValidationError("baseline must be empty when provided")
+                    raise PageValidationError(
+                        "baseline must be empty or publish_result when provided"
+                    )
                 if from_version_id is None:
                     raise PageValidationError(
                         "from_version_id is required unless baseline=empty"
@@ -1926,70 +1978,153 @@ class PageService:
                 and not context_version_is_visible(from_version, actor)
             ) or not context_version_is_visible(to_version, actor):
                 raise PageNotFoundError("page version not found")
-            from_body = (
-                ""
-                if from_version is None
-                else parse_page_frontmatter(from_version.body_md).body
+            return self._version_diff(session, page, from_version, to_version, actor)
+
+    def _version_diff(
+        self,
+        session: Session,
+        page: ContextPage,
+        from_version: ContextPageVersion | None,
+        to_version: ContextPageVersion,
+        actor: ActorContext | None,
+    ) -> PageVersionDiff:
+        from backend.services.document_references import read_document_references
+
+        from_version_no = 0 if from_version is None else from_version.version_no
+        return PageVersionDiff(
+            references_before=read_document_references(
+                session,
+                version=from_version,
+                actor=actor,
+                self_origins=self.body_preparer.self_origins,
             )
-            to_body = parse_page_frontmatter(to_version.body_md).body
-            if len(from_body) + len(to_body) > PAGE_DIFF_MAX_INPUT_CHARS:
-                raise PageDiffTooLargeError(
-                    "These versions are too large to compare here. Open each "
-                    "version separately and compare smaller excerpts instead."
-                )
-            from_version_no = 0 if from_version is None else from_version.version_no
-            lines = list(
-                difflib.unified_diff(
-                    from_body.splitlines(),
-                    to_body.splitlines(),
-                    fromfile=(
-                        "empty" if from_version is None else f"v{from_version_no}"
-                    ),
-                    tofile=f"v{to_version.version_no}",
-                    lineterm="",
-                )
-            )
-            metadata_changes = _page_version_metadata_changes(
+            if from_version
+            else [],
+            references_after=read_document_references(
+                session,
+                version=to_version,
+                actor=actor,
+                self_origins=self.body_preparer.self_origins,
+            ),
+            baseline="empty" if from_version is None else "version",
+            from_version_id=(None if from_version is None else from_version.id),
+            to_version_id=to_version.id,
+            from_version_no=from_version_no,
+            to_version_no=to_version.version_no,
+            editing_revision=to_version.editing_revision,
+            metadata_changes=_page_version_metadata_changes(
                 session,
                 page=page,
                 from_version=from_version,
                 to_version=to_version,
-            )
-            from backend.services.document_references import read_document_references
+            ),
+            **_body_diff(
+                ""
+                if from_version is None
+                else parse_page_frontmatter(from_version.body_md).body,
+                parse_page_frontmatter(to_version.body_md).body,
+                fromfile="empty" if from_version is None else f"v{from_version_no}",
+                tofile=f"v{to_version.version_no}",
+            ),
+        )
 
-            return PageVersionDiff(
-                references_before=read_document_references(
-                    session,
-                    version=from_version,
-                    actor=actor,
-                    self_origins=self.body_preparer.self_origins,
-                )
-                if from_version
-                else [],
-                references_after=read_document_references(
-                    session,
-                    version=to_version,
-                    actor=actor,
-                    self_origins=self.body_preparer.self_origins,
-                ),
-                baseline="empty" if from_version is None else "version",
-                from_version_id=(None if from_version is None else from_version.id),
-                to_version_id=to_version.id,
-                from_version_no=from_version_no,
-                to_version_no=to_version.version_no,
-                lines=lines,
-                additions=sum(
-                    1
-                    for line in lines
-                    if line.startswith("+") and not line.startswith("+++")
-                ),
-                deletions=sum(
-                    1
-                    for line in lines
-                    if line.startswith("-") and not line.startswith("---")
-                ),
-                metadata_changes=metadata_changes,
+    def _diff_publish_result(
+        self,
+        session: Session,
+        page: ContextPage,
+        version: ContextPageVersion,
+        *,
+        from_version_id: UUID | None,
+        actor: ActorContext | None,
+    ) -> PageVersionDiff:
+        """The current published version -> what publishing ``version`` publishes.
+
+        Reviewing a draft that is behind against the published version alone
+        would show the published changes it lacks as reverted; the publish
+        merge keeps them. A fast-forward result is the draft itself, so it is
+        the ordinary version diff. A conflict has no single result yet.
+        """
+        from backend.services.context_draft_workflow import metadata_for, preview_merge
+
+        if from_version_id is not None:
+            raise PageValidationError(
+                "baseline=publish_result cannot be combined with from_version_id"
             )
+        if not context_version_is_visible(version, actor):
+            raise PageNotFoundError("page version not found")
+        published = (
+            self._require_page_version(session, page, page.current_published_version_id)
+            if page.current_published_version_id is not None
+            else None
+        )
+        preview = preview_merge(session, page, version)
+        if preview.clean is None:
+            raise PageConflictError(
+                server_version_id=version.id,
+                server_content_hash=version.content_hash,
+                server_editing_revision=version.editing_revision,
+                error_code="context_merge_conflict",
+            )
+        merge_facts = {
+            "baseline": "publish_result",
+            "merge_kind": preview.kind,
+            "published_version_id": page.current_published_version_id,
+            "editing_revision": version.editing_revision,
+        }
+        if preview.kind == "fast_forward":
+            return self._version_diff(
+                session, page, published, version, actor
+            ).model_copy(update=merge_facts)
+        # An automatic merge is not a stored version yet: compare its body and
+        # page metadata with the published version. Its bibliography is merged
+        # by the publication's own rule: competing edits refuse publishing
+        # (so this is a conflict too), and a change is reported as
+        # "references"; the merged entries are listed once it is published.
+        from backend.services.document_reference_merge import (
+            merge_authored_document_references,
+        )
+
+        try:
+            references = merge_authored_document_references(
+                session, source=version, head=published
+            )
+        except ReadValidationError as exc:
+            # Publishing refuses this the same way: the draft's References
+            # must change first; no merge choice resolves it.
+            raise PageConflictError(
+                server_version_id=version.id,
+                server_content_hash=version.content_hash,
+                server_editing_revision=version.editing_revision,
+                error_code=exc.error_code,
+            ) from exc
+        before = metadata_for(page, published)
+        after = preview.clean.metadata
+        fields = (
+            ("title", "title"),
+            ("page_type", "page_type"),
+            ("tags", "tags"),
+            ("aliases", "aliases"),
+            ("placement_parent_node_id", "placement"),
+        )
+        return PageVersionDiff(
+            from_version_id=published.id,
+            to_version_id=version.id,
+            from_version_no=published.version_no,
+            to_version_no=version.version_no,
+            metadata_changes=[
+                name
+                for attribute, name in fields
+                if getattr(before, attribute) != getattr(after, attribute)
+            ]
+            + (["references"] if references.changed else []),
+            **merge_facts,
+            **_body_diff(
+                parse_page_frontmatter(published.body_md).body,
+                parse_page_frontmatter(preview.clean.body_md).body,
+                fromfile=f"v{published.version_no}",
+                tofile="publish",
+            ),
+        )
 
     def restore_version(
         self,
@@ -2801,7 +2936,7 @@ class PageService:
                     context_version_writer=self.context_version_writer,
                     actor_kind=actor_kind,
                     actor_id=actor_id,
-                    reason="Draft withdrawn",
+                    reason=CLOSE_REASON_WITHDRAWN,
                     event_action="page.discard_context_edit",
                 )
                 for review in self._context_reviews_for_version(
@@ -5045,6 +5180,7 @@ class PageService:
             ),
             version_status=version.version_status,
             history_status=projection.history_status,
+            closed_reason=context_closed_reasons(session, (version,)).get(version.id),
             inconsistency_reasons=list(projection.inconsistency_reasons),
             graph_status=projection.graph_status,
             is_visible_head=projection.is_visible_head,
@@ -5174,6 +5310,7 @@ class PageService:
             ),
             version_status=version.version_status,
             history_status=projection.history_status,
+            closed_reason=context_closed_reasons(session, (version,)).get(version.id),
             inconsistency_reasons=list(projection.inconsistency_reasons),
             graph_status=projection.graph_status,
             is_visible_head=projection.is_visible_head,
@@ -5488,6 +5625,33 @@ def effective_metadata_for_payload(
         list(metadata.tags),
         list(metadata.aliases),
     )
+
+
+def _body_diff(from_body: str, to_body: str, *, fromfile: str, tofile: str) -> dict:
+    """Unified diff lines and counts between two page bodies."""
+    if len(from_body) + len(to_body) > PAGE_DIFF_MAX_INPUT_CHARS:
+        raise PageDiffTooLargeError(
+            "These versions are too large to compare here. Open each "
+            "version separately and compare smaller excerpts instead."
+        )
+    lines = list(
+        difflib.unified_diff(
+            from_body.splitlines(),
+            to_body.splitlines(),
+            fromfile=fromfile,
+            tofile=tofile,
+            lineterm="",
+        )
+    )
+    return {
+        "lines": lines,
+        "additions": sum(
+            1 for line in lines if line.startswith("+") and not line.startswith("+++")
+        ),
+        "deletions": sum(
+            1 for line in lines if line.startswith("-") and not line.startswith("---")
+        ),
+    }
 
 
 def _page_version_metadata_changes(

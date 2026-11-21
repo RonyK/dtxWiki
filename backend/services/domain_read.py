@@ -83,7 +83,10 @@ from backend.services.actor_visible_read import (
     library_item_visible,
 )
 from backend.services.context_drafts import project_context_draft, project_open_drafts
-from backend.services.context_lifecycle import project_context_version
+from backend.services.context_lifecycle import (
+    context_closed_reasons,
+    project_context_version,
+)
 from backend.services.context_link_targets import (
     context_link_targets,
     legacy_wikilink_targets,
@@ -91,12 +94,10 @@ from backend.services.context_link_targets import (
 )
 from backend.services.context_links import format_stable_url
 from backend.services.context_review_disposition import (
-    OPEN_CONTEXT_REVIEW_STATUSES,
     context_version_review_disposition,
     context_version_review_metadata,
-    select_context_version_reviews,
+    shown_context_draft_review,
 )
-from backend.services.context_version_refs import context_version_ref
 from backend.services.context_visibility import (
     visible_context_version_expression,
     visible_context_version_id,
@@ -1014,22 +1015,7 @@ class DomainReadService:
                 and version is not None
                 and version.version_status == "draft"
             ):
-                review_query = select_context_version_reviews(
-                    workspace_id,
-                    {page.id},
-                    review_type=None,
-                    conditions=(
-                        ReviewItem.status.in_(OPEN_CONTEXT_REVIEW_STATUSES),
-                        ChangeOperation.diff_ref == context_version_ref(version.id),
-                    ),
-                )
-                review_item = session.execute(
-                    review_query.with_only_columns(
-                        ReviewItem.id, ReviewItem.status, ReviewItem.risk_level
-                    )
-                    .order_by(ReviewItem.created_at.desc(), ReviewItem.id.desc())
-                    .limit(1)
-                ).first()
+                review_item = shown_context_draft_review(session, page, version)
             if review_item is not None:
                 pending_review = PendingReviewInfo(
                     review_item_id=review_item.id,
@@ -2299,6 +2285,7 @@ class DomainReadService:
                 session, version, workspace_id=page.workspace_id
             ),
             history_status=projection.history_status,
+            closed_reason=context_closed_reasons(session, (version,)).get(version.id),
             graph_status=projection.graph_status,
             parent_version_id=visible_parent_id,
             parent_version_ids=DomainReadService._visible_parent_ids(
@@ -2540,6 +2527,14 @@ class DomainReadService:
         visible_head_id = visible_context_version_id(page, actor)[0]
         expose_draft_state = actor_can_read_drafts(actor)
 
+        closed_reasons = context_closed_reasons(
+            session,
+            versions,
+            dispositions={
+                version.id: review_metadata[version.id].disposition
+                for version in versions
+            },
+        )
         entries: list[VersionEntry] = []
         for version in versions:
             prior_relation, visible_parent_id = context_parent_projection(
@@ -2560,6 +2555,7 @@ class DomainReadService:
                     version_status=version.version_status,
                     review_disposition=review_metadata[version.id].disposition,
                     history_status=projection.history_status,
+                    closed_reason=closed_reasons.get(version.id),
                     graph_status=projection.graph_status,
                     actor_type=version.actor_type,
                     actor_display_name=version.actor_display_name

@@ -162,10 +162,10 @@ describe("shared activity entry", () => {
   it("makes the whole pending card one review link with a plain status, without an extra review button or invented actor", async () => {
     await i18n.changeLanguage("ko");
     const { container } = show(entry({ actor: null, lane: "pending", review_item_id: "review-1", operation: "review" }));
-    const title = screen.getByRole("link", { name: /^검토 열기:/ });
+    const title = screen.getByRole("link", { name: /^리뷰 열기:/ });
     expect(title).toHaveAttribute("href", "/workspaces/00000000-0000-4000-8000-000000000001/review/review-1");
     expect(screen.getAllByRole("link")).toHaveLength(1);
-    const status = screen.getByText("검토 필요");
+    const status = screen.getByText("리뷰 필요");
     expect(status.closest("[data-action=pending]")).toBeInTheDocument();
     expect(status.closest("a")).toBeNull();
     expect(container.querySelectorAll("button")).toHaveLength(0);

@@ -14,6 +14,8 @@ type MergeTarget = {
   workspaceId: string;
   pageId: string;
   publishedVersionNumber?: number | null;
+  /** The person's own text when it is not a stored version (an editor save). */
+  oursBody?: string | null;
 };
 
 /** The merge in progress, from the click until it is written, failed or closed. */
@@ -67,9 +69,15 @@ export function useContextMerge() {
   /**
    * Publish, approve or bring in. Resolves with the write's result; rejects
    * with its error, or with an AbortError when the person closes the dialog.
+   * `preview` is the merge the screen already showed: it is written as shown
+   * (a clean result at once, a conflict through the dialog) and never
+   * re-read at the click, so a draft or published version that moved since
+   * is refused by the server instead of published unseen.
    */
-  const runMergeWrite = useCallback(<T,>(target: MergeTarget & {
-    loadPreview: () => Promise<ContextMergePreview>;
+  const runMergeWrite = useCallback(<T,>(target: MergeTarget & (
+    | { preview: ContextMergePreview; loadPreview?: undefined }
+    | { preview?: undefined; loadPreview: () => Promise<ContextMergePreview> }
+  ) & {
     write: (choice: PreparedMergeChoice) => Promise<T>;
   }) => new Promise<T>((resolve, reject) => {
     const merge: Merge = { cancel: () => reject(mergeClosed()) };
@@ -86,7 +94,7 @@ export function useContextMerge() {
         fail(error);
       }
     };
-    target.loadPreview().then((preview) => {
+    (target.preview ? Promise.resolve(target.preview) : target.loadPreview()).then((preview) => {
       if (currentRef.current !== merge) return;
       if (preview.kind !== "conflict") return commit(cleanMergeChoice(preview));
       setAsk({
@@ -134,6 +142,7 @@ export function useContextMerge() {
       busy={busy}
       kind={ask.kind}
       onClose={close}
+      oursBody={ask.oursBody}
       onConfirm={(resolution) => {
         setBusy(true);
         void ask.write(resolution);

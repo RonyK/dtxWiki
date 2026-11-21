@@ -230,7 +230,8 @@
     "previousDecision": "Previous decision",
     "submitted": "Submitted",
     "enteredQueue": "Entered the decision queue",
-    "approvalImpact": "This version will be published; {{count}} other reviews of this version or its earlier drafts will also be settled."
+    "approvalImpact": "This version will be published; {{count}} other reviews of this version or its earlier drafts will also be settled.",
+    "approvePublish": "Approve and publish"
   },
   "actions": {
     "moreActivities": "View all activity",
@@ -444,11 +445,12 @@
       "superseded_by_newer_draft": "Replaced by a newer draft",
       "superseded_by_decision_undo": "Closed by an undone decision"
     },
-    "mergeAutomaticSummary": "Publishes the result combined with the published version · Show result",
-    "mergeAutomaticNotice": "The published version changed. Approving publishes the result combined with it.",
-    "mergeAutomaticShow": "Show combined result",
-    "mergeConflictNotice_one": "Overlaps the published version in {{count}} place. You choose how to combine when approving.",
-    "mergeConflictNotice_other": "Overlaps the published version in {{count}} places. You choose how to combine when approving."
+    "mergeAutomaticSummary": "Publishes this draft merged with the current published version · Show result",
+    "mergeAutomaticNotice": "Approving publishes this draft merged with the current published version.",
+    "mergeAutomaticShow": "Show merged result",
+    "mergeConflictNotice_one": "{{count}} place overlaps the current published version. Approving asks you to choose “Keep both changes” or “Prefer the latest change”.",
+    "mergeConflictNotice_other": "{{count}} places overlap the current published version. Approving asks you to choose “Keep both changes” or “Prefer the latest change”.",
+    "mergeChanged": "The draft or the published version changed, so the new result is shown. Check it and approve again."
   },
   "document": {
     "targets": "Review targets",
@@ -502,7 +504,9 @@
     "publishingChange": "What publishing changes (published v{{baseline}} → v{{candidate}})",
     "publishingEmptyChange": "What publishing changes (empty document → v{{candidate}})",
     "draftParentBaseline": "Previous draft v{{version}}",
-    "metadataReferences": "References"
+    "metadataReferences": "References",
+    "publishResult": "Publish result",
+    "publishConflict": "This draft overlaps the current published version, so there is no single result yet. This compares the published version with the draft; approving asks how to merge."
   },
   "undo": {
     "action": {

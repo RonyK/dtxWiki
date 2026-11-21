@@ -9,6 +9,8 @@
   "chats.json:detail.flow.sessionInfoSubtitle",
   "chats.json:detail.inputFields.id",
   "context.json:folder.pageFolderCount",
+  "context.json:merge.position",
+  "context.json:merge.sideMeta",
   "graph.json:graph.timeline.entityEvent",
   "graph.json:graph.timeline.edgeEvent",
   "graph.json:graph.list.counts",

@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from backend.schemas.common import (
+    ContextClosedReason,
     ContextHistoryStatus,
     DraftReviewReason,
     RESTConflictErrorBody,
@@ -83,6 +84,8 @@ class PageSummary(BaseModel):
     # backwards-compatible schema generation and hand-constructed summaries.
     version_status: str | None = None
     history_status: ContextHistoryStatus | None = None
+    # history_status="closed" only: why the draft ended.
+    closed_reason: ContextClosedReason | None = None
     # Set only with history_status="state_inconsistent": which invariant
     # failed, as stable codes.
     inconsistency_reasons: list[str] = Field(default_factory=list)
@@ -222,6 +225,15 @@ class PublishPageVersionRequest(InputRequest):
         pattern=CONTENT_HASH_PATTERN,
         description=("Required when a browser publishes an editing or draft version."),
     )
+    expected_review_item_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The open review the caller showed for this draft, or null when it "
+            "showed none. When sent, publication refuses with "
+            "context_review_changed unless it is still the draft's latest open "
+            "review (the one a publish approves)."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -329,6 +341,8 @@ class PageVersionEntry(BaseModel):
     version_status: str
     review_disposition: Literal["rejected", "pending", "approved", "none"] = "none"
     history_status: ContextHistoryStatus
+    # history_status="closed" only: why the draft ended.
+    closed_reason: ContextClosedReason | None = None
     graph_status: str
     actor_type: str
     actor_display_name: str | None = None
@@ -352,7 +366,16 @@ class PageVersionEntry(BaseModel):
 class PageVersionDiff(BaseModel):
     references_before: list[ReferenceView] = Field(default_factory=list)
     references_after: list[ReferenceView] = Field(default_factory=list)
-    baseline: Literal["version", "empty"] = "version"
+    baseline: Literal["version", "empty", "publish_result"] = "version"
+    # baseline="publish_result" only: the merge the diff shows (the current
+    # published version -> what publishing `to_version_id` would publish) and
+    # the published version it was computed against, so a caller can tell it
+    # still matches the merge preview it shows next to the publish button.
+    merge_kind: Literal["fast_forward", "automatic_merge"] | None = None
+    published_version_id: UUID | None = None
+    # The save revision of `to_version_id` the diff read: a draft row changes
+    # in place, so a caller can tell which revision of it was compared.
+    editing_revision: int | None = None
     from_version_id: UUID | None = None
     to_version_id: UUID
     from_version_no: int

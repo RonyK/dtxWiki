@@ -540,6 +540,12 @@ def publish_page_version(
             ),
             on_conflict=request_body.on_conflict,
             idempotency_key=request_body.idempotency_key,
+            # An explicit null is a claim too: the caller showed no review.
+            expected_review=(
+                (request_body.expected_review_item_id,)
+                if "expected_review_item_id" in request_body.model_fields_set
+                else None
+            ),
         )
     except PageServiceError as exc:
         return service_error_response(exc)
@@ -564,7 +570,7 @@ def diff_page_versions(
     to_version_id: UUID,
     actor: RestActorDep,
     from_version_id: UUID | None = None,
-    baseline: Literal["empty"] | None = None,
+    baseline: Literal["empty", "publish_result"] | None = None,
 ):
     try:
         actor, page_service = _workspace_page_service(

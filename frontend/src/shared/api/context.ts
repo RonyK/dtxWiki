@@ -1,7 +1,7 @@
 import { apiRequest } from "./client";
 import type { components } from "./types.gen";
 import type { ContextLinkTarget } from "../lib/contextLinks";
-import type { ContextHistoryStatus } from "../lib/contextHistory";
+import type { ContextClosedReason, ContextHistoryStatus } from "../lib/contextHistory";
 import type { ReferenceView } from "./references";
 
 export type VersionInfo = {
@@ -9,6 +9,8 @@ export type VersionInfo = {
   version_no: number;
   version_status: string;
   history_status: ContextHistoryStatus;
+  /** history_status "closed" only: why the draft ended. */
+  closed_reason?: ContextClosedReason | null;
   graph_status: string | null;
   is_visible_head: boolean;
   is_published_head: boolean;
@@ -51,6 +53,8 @@ export type ContextPageDetail = ContextPageSummary & {
   open_drafts?: OpenDrafts | null;
   /** Open drafts of this page that carry an open review request. */
   open_review_count: number;
+  /** Save counter of the displayed version; a merge preview of another revision is not what is shown. */
+  editing_revision?: number | null;
   body_markdown: string | null;
   references?: ReferenceView[];
   references_hash?: string;
@@ -204,6 +208,7 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
     draft: raw.draft ?? null,
     open_drafts: raw.open_drafts ?? null,
     open_review_count: raw.open_review_count ?? 0,
+    editing_revision: raw.editing_revision ?? null,
     body_markdown: raw.body_md,
     references: raw.references ?? [],
     references_hash: raw.references_hash,
@@ -214,6 +219,7 @@ function toContextPageDetail(raw: BackendContextPageDetail): ContextPageDetail {
       version_no: 0,
       version_status: raw.version_status ?? "",
       history_status: raw.history_status ?? "current_draft",
+      closed_reason: raw.closed_reason ?? null,
       graph_status: raw.graph_status ?? null,
       is_visible_head: raw.is_visible_head,
       is_published_head: raw.is_published_head,

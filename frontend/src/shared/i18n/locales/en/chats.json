@@ -72,7 +72,7 @@
     },
     "toolTitles": {
       "begin_context_edit": "Begin context edit",
-      "bring_in_context_version": "Bring in context version",
+      "bring_in_context_version": "Merge context version",
       "build_agent_input_bundle": "Build agent input bundle",
       "cite": "Register references",
       "create_context_page": "Create context page",

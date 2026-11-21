@@ -5,7 +5,7 @@
       "document": "문서",
       "chat": "대화",
       "ask": "질문 턴",
-      "review": "검토",
+      "review": "리뷰",
       "agent": "행위자 또는 에이전트",
       "event": "이벤트",
       "structural": "구조"
@@ -84,7 +84,7 @@
       "cited": "인용됨",
       "created": "생성됨",
       "edited": "편집됨",
-      "reviewed": "검토됨",
+      "reviewed": "리뷰됨",
       "approved": "승인됨",
       "rejected": "거절됨",
       "request_changes": "변경 요청됨",
@@ -105,8 +105,8 @@
       "mcp_chat_session": "MCP 채팅 세션",
       "ask_session": "질문 세션",
       "ask_turn": "질문 턴",
-      "review_item": "검토 항목",
-      "review_decision": "검토 결정",
+      "review_item": "리뷰 항목",
+      "review_decision": "리뷰 결정",
       "agent_page": "에이전트 문서",
       "actor": "행위자",
       "audit_event": "감사 이벤트",
@@ -339,7 +339,7 @@
     },
     "citationEvidence": {
       "title": "보존된 인용 근거",
-      "currentPublished": "출발 문서의 현재 발행본에 보존된 정확한 인용 근거입니다.",
+      "currentPublished": "출발 문서의 현재 게시본에 보존된 정확한 인용 근거입니다.",
       "sourceVersion": "출발 문서 버전",
       "loading": "인용 근거를 불러오는 중…",
       "failed": "인용 근거에 접근할 수 없거나 불러오지 못했습니다.",
@@ -601,7 +601,7 @@
       "review": {
         "pending": "리뷰 대기",
         "changes_requested": "변경 요청됨",
-        "rejected": "반려됨"
+        "rejected": "거절됨"
       }
     },
     "layoutPause": "레이아웃 일시 중지",

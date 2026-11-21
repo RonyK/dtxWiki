@@ -45,6 +45,18 @@ describe("Context history presentation", () => {
   it("keeps the authoritative English and Korean labels and descriptions in both readers", () => {
     const expectedEnglish = {
       closed: { label: "Closed", description: "This draft ended and is preserved as a commit." },
+      closed_discarded: {
+        label: "Discarded",
+        description: "A discarded draft. It stays in History, and you can start again from it.",
+      },
+      closed_merged: {
+        label: "Merged",
+        description: "A draft merged into another version, as when it was published by a merge. Its changes are in that version.",
+      },
+      closed_rejected: {
+        label: "Rejected",
+        description: "A draft whose review was rejected. You can start again from it.",
+      },
       state_inconsistent: {
         label: "State review required",
         description: "Operator repair is required",
@@ -77,6 +89,18 @@ describe("Context history presentation", () => {
     };
     const expectedKorean = {
       closed: { label: "끝남", description: "종료된 초안이며 커밋으로 보존됩니다." },
+      closed_discarded: {
+        label: "폐기됨",
+        description: "폐기한 초안입니다. 히스토리에 남아 있고 이 버전에서 다시 시작할 수 있습니다.",
+      },
+      closed_merged: {
+        label: "병합됨",
+        description: "다른 버전에 병합된 초안입니다. 게시할 때 병합된 경우처럼, 변경 내용은 그 버전에 들어 있습니다.",
+      },
+      closed_rejected: {
+        label: "거절됨",
+        description: "리뷰에서 거절된 초안입니다. 이 버전에서 다시 시작할 수 있습니다.",
+      },
       state_inconsistent: { label: "상태 확인 필요", description: "운영 점검 필요" },
       current_draft: {
         label: "현재 초안",

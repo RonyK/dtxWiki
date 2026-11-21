@@ -3599,3 +3599,101 @@ def test_percent_encoded_korean_slug_path_is_decoded_once(page_service):
     assert response.status_code == 200
     assert response.json()["data"]["id"] == created["id"]
     assert response.json()["data"]["slug"] == "한국어-페이지"
+
+
+def test_publish_binds_the_shown_review_and_diffs_the_publish_result(page_service):
+    """Two drafts from one published version: once one is published, the
+    other (an older version number) is compared against what publishing it
+    would publish -- the merge, not a revert of the newer published change --
+    its publish approves only the review the caller showed, and History says
+    it ended merged. One transport scenario; the other close reasons are unit
+    cases (test_context_closed_reasons)."""
+
+    client = make_client(page_service)
+    base = "# Steps\n\nalpha\n\nbeta\n"
+    page = create_published_page(client, page_service, title="Steps", body_md=base)
+    page_url = f"{pages_url(page_service)}/{page['id']}"
+    drafts = []
+    for key, body in (
+        ("a", base.replace("alpha", "alpha A")),
+        ("b", base.replace("beta", "beta B")),
+    ):
+        begun = client.post(
+            f"{page_url}/begin-edit", json={"idempotency_key": f"begin-{key}"}
+        ).json()["data"]
+        saved = _browser_save(client, page_url, begun, f"save-{key}", body)
+        assert saved.status_code == 200, saved.text
+        drafts.append(saved.json()["data"])
+    draft_a, draft_b = drafts
+
+    def publish(draft, **expected):
+        url = f"{page_url}/versions/{draft['version_id']}/publish"
+        return client.post(
+            url,
+            json={
+                **merge_preview_binding(client, url),
+                "idempotency_key": str(uuid4()),
+                "reason": "publish",
+                "expected_content_hash": draft["content_hash"],
+                "expected_references_hash": draft["references_hash"],
+                **expected,
+            },
+        )
+
+    published_b = publish(draft_b, expected_review_item_id=None)
+    assert published_b.status_code == 200, published_b.text
+
+    diff = client.get(
+        f"{page_url}/diff",
+        params={"to_version_id": draft_a["version_id"], "baseline": "publish_result"},
+    )
+    assert diff.status_code == 200, diff.text
+    shown = diff.json()["data"]
+    assert shown["merge_kind"] == "automatic_merge"
+    assert shown["from_version_id"] == draft_b["version_id"]
+    assert shown["published_version_id"] == draft_b["version_id"]
+    # The draft is older than the published version it is compared against.
+    assert shown["to_version_no"] < shown["from_version_no"]
+    changed = [
+        line
+        for line in shown["lines"]
+        if line[:1] in "+-" and line[:3] not in {"+++", "---"}
+    ]
+    assert changed == ["-alpha", "+alpha A"]
+
+    submitted = client.post(
+        f"{page_url}/submit-for-review",
+        json={
+            "idempotency_key": "submit-a",
+            "version_id": draft_a["version_id"],
+            "expected_editing_revision": draft_a["editing_revision"],
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    review_id = submitted.json()["data"]["review_item_id"]
+    # The screen showed no review (an explicit null), but one is open now.
+    refused = publish(draft_a, expected_review_item_id=None)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error_code"] == "context_review_changed"
+    approved = publish(draft_a, expected_review_item_id=review_id)
+    assert approved.status_code == 200, approved.text
+    with page_service.session_factory() as session:
+        assert session.get(ReviewItem, UUID(review_id)).status == "approved"
+        body = context_page_repo.get_page_by_id(session, UUID(page["id"]))
+        published = session.get(ContextPageVersion, body.current_published_version_id)
+    assert published.id not in {
+        UUID(draft_a["version_id"]),
+        UUID(draft_b["version_id"]),
+    }
+
+    history = client.get(
+        f"/api/v1/workspaces/{default_workspace_id(page_service)}/changesets",
+        params={"target_type": "context_page", "target_id": page["id"]},
+    ).json()["data"]["versions"]
+    reasons = {
+        entry["version_id"]: entry.get("closed_reason")
+        for entry in history
+        if entry["history_status"] == "closed"
+    }
+    # A was published by a merge: History says why it ended.
+    assert reasons == {draft_a["version_id"]: "merged"}
