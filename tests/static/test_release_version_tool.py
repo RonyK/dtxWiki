@@ -238,6 +238,47 @@ def test_version_sync_updates_consumers_without_rewriting_history_or_dependencie
     )
 
 
+def test_release_candidate_round_trip_uses_the_registry_version_spellings(
+    release_tree: Path,
+) -> None:
+    readme = release_tree / "README.md"
+    history = "\n## v1.2.2-rc.1\n\nInstall with `pipx install dtxwiki==1.2.2rc1`.\n"
+    original_readme = readme.read_text(encoding="utf-8") + history
+    readme.write_text(original_readme, encoding="utf-8")
+
+    release_version.synchronize(root=release_tree, version="1.2.4-rc.1")
+
+    assert release_version.source_version(release_tree) == "1.2.4-rc.1"
+    assert _json(release_tree, "npm/dtxwiki/package.json")["version"] == "1.2.4-rc.1"
+    assert (
+        _json(release_tree, "package-lock.json")["packages"]["desktop"]["version"]
+        == "1.2.4-rc.1"
+    )
+    assert _json(release_tree, OPENAPI)["info"]["version"] == "1.2.4-rc.1"
+    lock = tomllib.loads((release_tree / "uv.lock").read_text(encoding="utf-8"))
+    assert lock["package"][1]["version"] == "1.2.4rc1"
+    rendered = readme.read_text(encoding="utf-8")
+    assert 'pip install "dtxwiki==1.2.4rc1"' in rendered
+    assert "npx @dtxsuite/dtxwiki@1.2.4-rc.1" in rendered
+    assert "/download/v1.2.4-rc.1/dtxwiki-1.2.4rc1-py3-none-any.whl" in rendered
+    assert rendered.endswith(history)
+    assert release_version.check(root=release_tree) == []
+    assert release_version.synchronize(root=release_tree) == []
+
+    # Detect and repair a package spelling accidentally used in a Git tag.
+    readme.write_text(rendered.replace("v1.2.4-rc.1", "v1.2.4rc1", 1), encoding="utf-8")
+    assert any(
+        "expected release version 1.2.4-rc.1, found 1.2.4rc1" in problem
+        for problem in release_version.check(release_tree)
+    )
+    assert release_version.synchronize(root=release_tree) == ["README.md"]
+
+    release_version.synchronize(root=release_tree, version="1.2.3")
+
+    assert readme.read_text(encoding="utf-8") == original_readme
+    assert release_version.check(root=release_tree) == []
+
+
 @pytest.mark.counterexample("mixed README versions and invalid input cannot pass")
 def test_version_check_reports_drift_and_failed_preflight_keeps_every_file(
     release_tree: Path,

@@ -684,6 +684,17 @@ OpenAPI와 README의 현재 앱 버전 표기를 함께 갱신하고 editable �
 OpenAPI export는 설치된 패키지의 오래된 버전이나 `DTXWIKI_APP_VERSION` 대신 소스 버전을
 사용합니다. CLI와 실행 중인 서버는 계속 설치 metadata와 runtime 설정을 사용합니다.
 
+`make set-version VERSION=0.3.1-rc.1`로 사전 릴리스를 준비하고 `v0.3.1-rc.1` 태그로
+기존 release workflow를 실행합니다. `-alpha.N`, `-beta.N`, `-rc.N`을 사용할 수 있습니다.
+Git 태그와 npm에는 `0.3.1-rc.1`, PyPI 패키지와 `uv.lock`에는 `0.3.1rc1`을 사용합니다.
+사전 릴리스는 npm의 `next`와 GitHub의 prerelease로 게시됩니다. `npm`의 기본 설치는
+계속 `latest`를 사용합니다. 지정한 사전 릴리스는 다음과 같이 설치할 수 있습니다.
+
+```bash
+pipx install dtxwiki==0.3.1rc1
+npx @dtxsuite/dtxwiki@0.3.1-rc.1
+```
+
 `README.md`, `README.ko.md`, `npm/dtxwiki/README.md`는 직접 편집합니다. 템플릿은 없으며
 동기화 도구는 설치 명령·wheel 이름·릴리스 태그 링크·현재 버전 안내의 앱 버전 패턴만 제자리에서
 바꿉니다. 다른 본문과 과거 기록·앵커는 보존합니다. Docs의 지원 시리즈 경로는 앱 버전과 별도로
@@ -696,6 +707,44 @@ asset 파일 이름과 경로를 유지하세요.
 CHANGELOG의 과거 릴리스, 운영 증거, DB schema 경계와 백업의 당시 버전은 자동 치환하지
 않습니다. DB 변경은 아래의 `unreleased` 절차를 따릅니다. 이 명령은 Git 태그 생성, push,
 registry 게시를 수행하지 않습니다.
+
+### Changelog와 GitHub Release 본문
+
+릴리스 브랜치에서 이전 릴리스 태그 또는 커밋 이후의 변경을 간결한 PR 목록으로 생성합니다.
+첫 명령은 미리보기이며, `make changelog`는 `CHANGELOG.md`의 `Unreleased`만 교체합니다.
+과거 릴리스 항목은 보존합니다. 태그가 로컬에 없으면 이전 릴리스 커밋을 지정할 수 있습니다.
+
+```bash
+.venv/bin/python scripts/changelog.py generate --since v0.2.4
+make changelog SINCE=v0.2.4
+```
+
+생성기는 Conventional Commit의 종류별로 변경을 묶고, 제목의 `(#123)` 또는 `#123`을
+PR 링크로 변환합니다. 일반 PR merge는 본문의 제목과 merge의 PR 번호로 한 번만 기록합니다.
+Release 병합과 릴리스 준비 커밋은 생략하되, 병합 안의 실제 변경은 읽습니다.
+PR 번호가 없는 변경은 커밋 링크로 남깁니다. Git 이력만 읽으며 GitHub API는 필요하지 않습니다.
+Conventional Commit의 `!` 또는 본문의 `BREAKING CHANGE:`는 `Breaking` 표시로 보존합니다.
+
+PR 제목만으로 부족한 내용은 두 곳에 직접 적습니다. 릴리스 전체의 호환성·업그레이드 안내와
+MCP tool contract revision별 클라이언트 조치는 `### Important changes`에 적습니다.
+특정 PR의 보충 설명은 해당 항목 아래 두 칸 들여쓴 하위 목록으로 적습니다.
+재생성해도 `Important changes`와,
+같은 PR·커밋 링크가 다시 생성된 항목 아래의 들여쓴 줄은 유지합니다. 그 밖의 `Unreleased`
+수동 편집은 덮어쓰므로, 재생성은 버전 확정 전에 실행합니다.
+
+검토를 마치면 기존처럼 `## Unreleased`를 `## X.Y.Z — YYYY-MM-DD`로 바꿉니다.
+사전 릴리스용 항목은 `## 0.3.1-rc.1 — YYYY-MM-DD`처럼 태그의 버전을 사용합니다.
+GitHub Release 본문은 다음 명령으로 미리 볼 수 있습니다.
+
+```bash
+.venv/bin/python scripts/changelog.py notes --version X.Y.Z
+```
+
+Release workflow는 PyPI·npm 게시 전 build job에서 태그 버전과 일치하는 항목 하나를 찾아
+설치 안내, 태그 시점의 CHANGELOG 링크와 함께 GitHub Release 본문을 만들고 artifact로
+전달합니다. 항목이 없거나 비어 있거나 둘 이상이면
+경고를 남기고 설치 안내와 CHANGELOG 링크만으로 본문을 만들며, 릴리스는 중단하지 않습니다.
+게시 단계에서 파일을 수정하거나 PR 목록을 다시 생성하지 않습니다.
 
 ### MCP tool contract revision
 
@@ -722,6 +771,7 @@ digest를 `MCP_RELEASED_TOOL_CONTRACT_REVISION`과
    고칩니다. 배포된 revision과 helper는 보존하고, 두 `unreleased/` 디렉터리의 잔여 파일과
    빈 `__init__.py`도 제거합니다.
 3. DB 변경이 있으면 `release_manifest.json`에 해당 앱 버전과 최종 head를 기록합니다.
+   사전 릴리스는 해당 버전의 별도 경계가 없으면 대상 정식 릴리스의 경계를 사용합니다.
 4. 배포할 파일을 확정한 뒤 `frozen_revisions.json`의 고정 해시를 갱신합니다.
 5. `make build-wheel`로 새 산출물을 만들고 `make verify-release-artifacts`로 검증합니다.
 

@@ -229,6 +229,34 @@ def test_publish_job_only_consumes_the_verified_build_artifact():
         )
 
 
+def test_release_notes_follow_the_tag_into_the_github_release():
+    # The notes are written before publishing and read after it. A version not
+    # bound to the tag, or a renamed file or artifact on one side, would publish
+    # to PyPI and npm and then fail to create the GitHub Release.
+    workflow = _workflow()
+    steps = _build_steps()
+    commands = [
+        shlex.split(step["run"])
+        for step in steps
+        if "scripts/changelog.py notes" in step.get("run", "")
+    ]
+    assert len(commands) == 1
+    command = commands[0]
+    assert command[command.index("--version") + 1] == "${GITHUB_REF_NAME#v}"
+    notes = command[command.index(">") + 1]
+    artifact = next(
+        step["with"]["name"]
+        for step in steps
+        if step.get("with", {}).get("path") == notes
+    )
+    release = workflow["jobs"]["github-release"]["steps"]
+    downloaded = next(
+        step["with"] for step in release if step.get("with", {}).get("name") == artifact
+    )
+    notes_file = (Path(downloaded.get("path", ".")) / notes).as_posix()
+    assert any(f"--notes-file {notes_file}" in step.get("run", "") for step in release)
+
+
 def test_every_deselected_node_id_still_exists():
     """A stale ``--deselect`` is silently a no-op, so it must name a real test.
 

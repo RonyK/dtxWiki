@@ -381,7 +381,8 @@ def _check_release_schema(
     """Tie a tag to the metadata and schema boundary inside each artifact.
 
     A patch with no database changes inherits its nearest earlier boundary.
-    A future entry must not make an older package with a new migration pass.
+    A prerelease can also use its matching final release's prepared boundary.
+    An unrelated future entry cannot qualify an older package.
     This is an explicit publishing check: development artifacts may qualify
     their runtime before the owner chooses the next release version. Release
     artifacts must record the MCP tool contract they ship and contain no
@@ -498,10 +499,10 @@ def _check_release_identity(
                 failures.append(
                     "release metadata must identify Name: dtxwiki exactly once"
                 )
-            if metadata.get_all("Version") != [release_version]:
+            # The build backend normalizes the source's SemVer spelling.
+            if metadata.get_all("Version") != [str(expected)]:
                 failures.append(
-                    f"release metadata must identify Version: {release_version} "
-                    "exactly once"
+                    f"release metadata must identify Version: {expected} exactly once"
                 )
 
     if artifact.suffix != ".whl":
@@ -536,6 +537,9 @@ def _check_schema_boundary(
         entries = manifest["schema_releases"]
         if not isinstance(entries, dict) or not entries:
             raise ValueError("schema_releases must be a nonempty mapping")
+        target_release = None
+        if expected.pre is not None and str(expected) not in entries:
+            target_release = expected.base_version
         applicable: list[tuple[Version, str, str]] = []
         for release, entry in entries.items():
             boundary = Version(release)
@@ -562,7 +566,7 @@ def _check_schema_boundary(
                 != 1
             ):
                 raise ValueError(f"schema head {revision!r} is not in group {group}")
-            if boundary <= expected:
+            if boundary <= expected or release == target_release:
                 applicable.append((boundary, release, revision))
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [f"invalid release_manifest schema mapping: {error}"]

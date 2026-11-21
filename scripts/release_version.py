@@ -17,6 +17,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from packaging.version import Version
+
 ROOT = Path(__file__).resolve().parents[1]
 JSON_MANIFESTS = (
     "desktop/package.json",
@@ -34,28 +36,44 @@ _RELEASED_TOOL_CONTRACT_DIGEST = re.compile(
     r'^MCP_RELEASED_TOOL_CONTRACT_DIGEST = "[0-9a-f]*"$', re.M
 )
 README_PATHS = ("README.md", "README.ko.md", "npm/dtxwiki/README.md")
-_README_VERSION = r"(?P<version>[0-9]+\.[0-9]+\.[0-9]+)"
-_README_PATTERNS = tuple(
-    re.compile(pattern.replace("<VERSION>", _README_VERSION))
-    for pattern in (
-        r"(?<![\w-])dtxwiki==<VERSION>(?![\w.+-])",
-        r"@dtxsuite/dtxwiki@<VERSION>(?![\w.+-])",
-        r"https://github\.com/dtxSuite/dtxWiki/(?:blob|tree|releases/download)/v<VERSION>/",
-        r"https://raw\.githubusercontent\.com/dtxSuite/dtxWiki/v<VERSION>/",
-        r"(?<![\w-])dtxwiki-<VERSION>(?=-[^\s/\"'<>]*\.whl\b)",
-        r"git clone --branch v<VERSION>(?=\s+https://github\.com/dtxSuite/dtxWiki(?:\.git)?(?:\s|$))",
-        r"^This guide is for \*\*dtxWiki <VERSION> \(Beta\)",
-        r"^이 안내는 \*\*dtxWiki <VERSION> \(Beta\)",
-        r"Upgrading to <VERSION>(?=\]|\s*$)",
-        r"(?:\[|^## )<VERSION>(?:으)?로 업데이트하기",
-        r"^Install <VERSION> using your existing installation method",
-        r"^기존 설치 방식을 사용해 <VERSION>(?:을|를) 설치하되",
-        r"On the server, download the <VERSION> installer",
-        r"서버에서 <VERSION> 설치 프로그램과",
-        r"^Complete the <VERSION> README's audit",
-        r"^covers setup for <VERSION>\.",
-    )
+_VERSION_NUMBER = r"(?:0|[1-9][0-9]*)"
+_RELEASE_VERSION = re.compile(
+    rf"{_VERSION_NUMBER}\.{_VERSION_NUMBER}\.{_VERSION_NUMBER}"
+    rf"(?:-(?:alpha|beta|rc)\.{_VERSION_NUMBER})?"
 )
+_README_VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:-(?:alpha|beta|rc)\.|a|b|rc)[0-9]+)?"
+_PYTHON_README_PATTERNS = (
+    r"(?<![\w-])dtxwiki==<VERSION>(?![\w.+-])",
+    r"(?<![\w-])dtxwiki-<VERSION>(?=-[^\s/\"'<>]*\.whl\b)",
+)
+_RELEASE_README_PATTERNS = (
+    r"@dtxsuite/dtxwiki@<VERSION>(?![\w.+-])",
+    r"https://github\.com/dtxSuite/dtxWiki/(?:blob|tree|releases/download)/v<VERSION>/",
+    r"https://raw\.githubusercontent\.com/dtxSuite/dtxWiki/v<VERSION>/",
+    r"git clone --branch v<VERSION>(?=\s+https://github\.com/dtxSuite/dtxWiki(?:\.git)?(?:\s|$))",
+    r"^This guide is for \*\*dtxWiki <VERSION> \(Beta\)",
+    r"^이 안내는 \*\*dtxWiki <VERSION> \(Beta\)",
+    r"Upgrading to <VERSION>(?=\]|\s*$)",
+    r"(?:\[|^## )<VERSION>(?:으)?로 업데이트하기",
+    r"^Install <VERSION> using your existing installation method",
+    r"^기존 설치 방식을 사용해 <VERSION>(?:을|를) 설치하되",
+    r"On the server, download the <VERSION> installer",
+    r"서버에서 <VERSION> 설치 프로그램과",
+    r"^Complete the <VERSION> README's audit",
+    r"^covers setup for <VERSION>\.",
+)
+_README_PATTERNS = tuple(
+    (
+        re.compile(pattern.replace("<VERSION>", f"(?P<version>{_README_VERSION})")),
+        use_python_version,
+    )
+    for patterns, use_python_version in (
+        (_PYTHON_README_PATTERNS, True),
+        (_RELEASE_README_PATTERNS, False),
+    )
+    for pattern in patterns
+)
+_HISTORY_VERSION = re.compile(rf"v?{_README_VERSION}(?:\s|$)")
 _HISTORY_CONTEXT = re.compile(
     r"\b(?:history|historical|legacy|(?:previous|older) (?:versions?|releases?))\b"
     r"|과거|이전\s*(?:버전|릴리스)",
@@ -64,10 +82,11 @@ _HISTORY_CONTEXT = re.compile(
 
 
 def _validate_version(version: str) -> str:
-    if not isinstance(version, str) or not re.fullmatch(
-        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version
-    ):
-        raise ValueError("release version must be canonical MAJOR.MINOR.PATCH")
+    if not isinstance(version, str) or not _RELEASE_VERSION.fullmatch(version):
+        raise ValueError(
+            "release version must be MAJOR.MINOR.PATCH with an optional "
+            "-alpha.N, -beta.N, or -rc.N suffix"
+        )
     return version
 
 
@@ -130,7 +149,9 @@ def _uv_text(root: Path, version: str) -> str:
     raise ValueError("could not locate dtxwiki in uv.lock")
 
 
-def _readme_references(text: str) -> list[tuple[int, int, str]]:
+def _readme_references(
+    text: str, version: str, python_version: str
+) -> list[tuple[int, int, str, str]]:
     """Locate current app references without treating every number as a version.
 
     Explicit history sections and historical inline examples remain evidence.
@@ -155,24 +176,33 @@ def _readme_references(text: str) -> list[tuple[int, int, str]]:
                 history_depth = None
             if history_depth is None and (
                 _HISTORY_CONTEXT.search(heading[2])
-                or re.match(r"v?[0-9]+\.[0-9]+\.[0-9]+(?:\s|$)", heading[2])
+                or _HISTORY_VERSION.match(heading[2])
             ):
                 history_depth = depth
         if history_depth is None and not _HISTORY_CONTEXT.search(line):
-            for pattern in _README_PATTERNS:
+            for pattern, use_python_version in _README_PATTERNS:
+                expected = python_version if use_python_version else version
                 for match in pattern.finditer(line):
                     start, end = match.span("version")
-                    references[offset + start, offset + end] = match["version"]
+                    references[offset + start, offset + end] = (
+                        match["version"],
+                        expected,
+                    )
         offset += len(line)
-    return [(start, end, value) for (start, end), value in sorted(references.items())]
+    return [
+        (start, end, found, expected)
+        for (start, end), (found, expected) in sorted(references.items())
+    ]
 
 
-def _readme_outputs(root: Path, version: str) -> dict[str, str]:
+def _readme_outputs(root: Path, version: str, python_version: str) -> dict[str, str]:
     outputs = {}
     for path in README_PATHS:
         text = (root / path).read_text(encoding="utf-8")
-        for start, end, _ in reversed(_readme_references(text)):
-            text = text[:start] + version + text[end:]
+        for start, end, _, expected in reversed(
+            _readme_references(text, version, python_version)
+        ):
+            text = text[:start] + expected + text[end:]
         outputs[path] = text
     return outputs
 
@@ -231,6 +261,7 @@ def _released_tool_contract_text(root: Path, digest: str) -> str:
 def synchronize(root: Path = ROOT, version: str | None = None) -> list[str]:
     current = source_version(root)
     target = _validate_version(version) if version is not None else current
+    python_version = str(Version(target))
     # Prepare every output before writing anything: malformed input, missing
     # README files or a broken exporter must not leave a half-updated release.
     outputs = {"pyproject.toml": _project_text(root, target)}
@@ -248,8 +279,8 @@ def synchronize(root: Path = ROOT, version: str | None = None) -> list[str]:
     lock = _json(root, "package-lock.json")
     lock["packages"]["desktop"]["version"] = target
     outputs["package-lock.json"] = _dump(lock)
-    outputs["uv.lock"] = _uv_text(root, target)
-    outputs.update(_readme_outputs(root, target))
+    outputs["uv.lock"] = _uv_text(root, python_version)
+    outputs.update(_readme_outputs(root, target, python_version))
     # Export the real API, rather than only patching a possibly stale snapshot.
     # A set operation has not written the new source version yet, so bind its
     # identity to the validated target after exporting the unchanged API.
@@ -268,23 +299,26 @@ def synchronize(root: Path = ROOT, version: str | None = None) -> list[str]:
 
 def check(root: Path = ROOT) -> list[str]:
     version = source_version(root)
+    python_version = str(Version(version))
     problems = []
     for path in JSON_MANIFESTS:
         if _json(root, path).get("version") != version:
             problems.append(f"{path}: expected version {version}")
     if _json(root, "package-lock.json")["packages"]["desktop"]["version"] != version:
         problems.append(f"package-lock.json: expected desktop version {version}")
-    if _uv_package(root)["version"] != version:
-        problems.append(f"uv.lock: expected dtxwiki version {version}")
+    if _uv_package(root)["version"] != python_version:
+        problems.append(f"uv.lock: expected dtxwiki version {python_version}")
     if _json(root, OPENAPI)["info"]["version"] != version:
         problems.append(f"{OPENAPI}: expected info.version {version}")
     for path in README_PATHS:
         text = (root / path).read_text(encoding="utf-8")
-        for start, _, found in _readme_references(text):
-            if found != version:
+        for start, _, found, expected in _readme_references(
+            text, version, python_version
+        ):
+            if found != expected:
                 line = text.count("\n", 0, start) + 1
                 problems.append(
-                    f"{path}:{line}: expected release version {version}, found {found}"
+                    f"{path}:{line}: expected release version {expected}, found {found}"
                 )
     return problems
 

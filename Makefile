@@ -190,7 +190,11 @@ check-i18n:
 sync-csp:
 	$(VENV_PYTHON) -m backend.scripts.sync_csp_templates
 
-.PHONY: version set-version sync-version check-version verify-release-artifacts
+.PHONY: version set-version sync-version check-version verify-release-artifacts changelog
+changelog:
+	@test -n "$(SINCE)" || { echo 'Usage: make changelog SINCE=<previous-release-tag-or-commit>' >&2; exit 2; }
+	$(VENV_PYTHON) scripts/changelog.py generate --since "$(SINCE)" --write
+
 version:
 	@$(VENV_PYTHON) scripts/release_version.py show
 
