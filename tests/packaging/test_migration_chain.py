@@ -34,7 +34,8 @@ RELEASE_014_REVISION = "eb86fdacb1bb"
 RELEASE_021_REVISION = "5b7e5c149279"
 RELEASE_023_REVISION = "00ba02774c4a"
 RELEASE_031_REVISION = "c3d2e4f601ab"
-CURRENT_HEAD = "002398e0fcdc"
+RELEASE_032_REVISION = "002398e0fcdc"
+CURRENT_HEAD = RELEASE_032_REVISION
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -111,6 +112,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         RELEASE_021_REVISION: RELEASE_014_REVISION,
         RELEASE_023_REVISION: RELEASE_021_REVISION,
         RELEASE_031_REVISION: RELEASE_023_REVISION,
+        RELEASE_032_REVISION: RELEASE_031_REVISION,
     }
     assert {
         revision: graph[revision] for revision in expected_prefix
@@ -136,6 +138,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     assert manifest["schema_releases"]["0.2.1"]["head"] == RELEASE_021_REVISION
     assert manifest["schema_releases"]["0.2.3"]["head"] == RELEASE_023_REVISION
     assert manifest["schema_releases"]["0.3.1"]["head"] == RELEASE_031_REVISION
+    assert manifest["schema_releases"]["0.3.2"]["head"] == RELEASE_032_REVISION
     released_revisions: set[str] = set()
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]

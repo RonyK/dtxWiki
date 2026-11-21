@@ -28,10 +28,11 @@ _spec = importlib.util.spec_from_file_location(
 )
 _backend = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_backend)
-# The release cases qualify the shipped 0.3.1 tree, not dev work since then.
-RELEASE_HEAD = "c3d2e4f601ab"
-WHEEL_NAME = "dtxwiki-0.3.1-py3-none-any.whl"
-SDIST_NAME = "dtxwiki-0.3.1.tar.gz"
+RELEASE_VERSION = "0.3.2"
+RELEASE_HEAD = "002398e0fcdc"
+RELEASE_031_HEAD = "c3d2e4f601ab"
+WHEEL_NAME = f"dtxwiki-{RELEASE_VERSION}-py3-none-any.whl"
+SDIST_NAME = f"dtxwiki-{RELEASE_VERSION}.tar.gz"
 _verifier_module = _backend._verifier_module
 _write_wheel = _backend._write_wheel
 
@@ -118,7 +119,7 @@ def test_verifier_rejects_a_missing_2k_d3_worker(tmp_path, artifact_kind, damage
 
     dist = _dist_with_one_artifact_mutated(tmp_path, artifact_kind, damage_worker)
 
-    result = _run_verifier(dist, "--release-version", "0.3.1")
+    result = _run_verifier(dist, "--release-version", RELEASE_VERSION)
 
     assert result.returncode == 1, result.stdout + result.stderr
     artifact = WHEEL_NAME if artifact_kind == "wheel" else SDIST_NAME
@@ -142,7 +143,7 @@ def test_verifier_rejects_a_stale_2k_worker_instead_of_the_referenced_hash(
             tmp_path, artifact_kind, keep_only_stale_worker
         ),
         "--release-version",
-        "0.3.1",
+        RELEASE_VERSION,
     )
 
     assert result.returncode == 1, result.stdout + result.stderr
@@ -165,7 +166,7 @@ def test_verifier_rejects_a_worker_file_without_an_actual_bundle_reference(
     result = _run_verifier(
         _dist_with_one_artifact_mutated(tmp_path, artifact_kind, remove_reference),
         "--release-version",
-        "0.3.1",
+        RELEASE_VERSION,
     )
 
     assert result.returncode == 1, result.stdout + result.stderr
@@ -213,7 +214,7 @@ def _write_release_metadata(stage, artifact_kind, version):
 def _replace_schema_boundary(stage, replacement=None, **overrides):
     path = stage / "backend/migrations/release_manifest.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
-    entry = payload["schema_releases"].pop("0.3.1")
+    entry = payload["schema_releases"].pop(RELEASE_VERSION)
     if replacement is not None:
         payload["schema_releases"][replacement] = {**entry, **overrides}
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -223,7 +224,7 @@ def _drop_unreleased(stage):
     """Remove development revisions and helpers added after the release.
 
     Development keeps new revisions in unreleased until a release promotes
-    them, so a published 0.3.1 artifact contains none of them.
+    them, so a published artifact contains none of them.
     """
     for tree in ("versions", "revision_modules"):
         shutil.rmtree(
@@ -264,7 +265,7 @@ def _release_schema_stage(tmp_path, artifact_kind="wheel", version="0.3.1"):
     return stage, tmp_path / f"dtxwiki-{version}{suffix}"
 
 
-def _release_dist(tmp_path, version="0.3.1", *, mutate=None):
+def _release_dist(tmp_path, version=RELEASE_VERSION, *, mutate=None):
     dist = tmp_path / "release-dist"
     dist.mkdir()
     for artifact_kind in ("wheel", "sdist"):
@@ -285,8 +286,8 @@ def _release_dist(tmp_path, version="0.3.1", *, mutate=None):
 @pytest.mark.parametrize(
     "version,head",
     [
-        ("0.3.1", RELEASE_HEAD),
-        ("0.3.2", RELEASE_HEAD),
+        (RELEASE_VERSION, RELEASE_HEAD),
+        ("0.3.3", RELEASE_HEAD),
         ("0.1.2", "efcbcf724889"),
     ],
     ids=["explicit-boundary", "patch-inherits-boundary", "historical-patch"],
@@ -312,7 +313,9 @@ def test_prerelease_sdist_uses_the_target_release_schema_boundary(tmp_path):
     )
 
     assert (
-        _verifier_module()._check_release_schema(stage, artifact, RELEASE_HEAD, version)
+        _verifier_module()._check_release_schema(
+            stage, artifact, RELEASE_031_HEAD, version
+        )
         == []
     )
 
@@ -354,7 +357,7 @@ def test_release_schema_rejects_invalid_artifact_metadata(
         metadata.write_text(text, encoding="utf-8")
 
     failures = _verifier_module()._check_release_schema(
-        stage, artifact, RELEASE_HEAD, "0.3.1"
+        stage, artifact, RELEASE_031_HEAD, "0.3.1"
     )
 
     assert failures, damage
@@ -379,7 +382,7 @@ def test_release_schema_rejects_invalid_wheel_metadata_directories(tmp_path, dam
             shutil.copy(metadata, extra / "METADATA")
 
     failures = _verifier_module()._check_release_schema(
-        stage, artifact, RELEASE_HEAD, "0.3.1"
+        stage, artifact, RELEASE_031_HEAD, "0.3.1"
     )
 
     assert failures, damage
@@ -393,7 +396,7 @@ def test_release_schema_rejects_sdist_with_stale_rebuild_metadata(tmp_path):
     )
 
     failures = _verifier_module()._check_release_schema(
-        stage, artifact, RELEASE_HEAD, "0.3.1"
+        stage, artifact, RELEASE_031_HEAD, "0.3.1"
     )
 
     assert failures
@@ -412,7 +415,7 @@ def test_release_schema_rejects_a_filename_for_a_different_release(
     artifact = artifact.with_name(f"{distribution}-{version}{suffix}")
 
     failures = _verifier_module()._check_release_schema(
-        stage, artifact, RELEASE_HEAD, "0.3.1"
+        stage, artifact, RELEASE_031_HEAD, "0.3.1"
     )
 
     assert failures
@@ -454,7 +457,7 @@ def test_release_schema_rejects_invalid_boundaries(tmp_path, boundary, overrides
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     failures = _verifier_module()._check_release_schema(
-        stage, artifact, RELEASE_HEAD, "0.3.1"
+        stage, artifact, RELEASE_031_HEAD, "0.3.1"
     )
 
     assert any(
@@ -464,7 +467,7 @@ def test_release_schema_rejects_invalid_boundaries(tmp_path, boundary, overrides
 
 
 @pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
-@pytest.mark.parametrize("future_boundary", [None, "0.3.2"])
+@pytest.mark.parametrize("future_boundary", [None, "0.3.3"])
 def test_release_schema_does_not_launder_graph_under_an_older_release(
     tmp_path, artifact_kind, future_boundary
 ):
@@ -507,9 +510,9 @@ def test_release_cli_uses_the_extracted_mapping_not_the_checkout(tmp_path):
         [
             sys.executable,
             str(scripts / VERIFIER.name),
-            str(_release_dist(tmp_path, "0.3.2")),
+            str(_release_dist(tmp_path)),
             "--release-version",
-            "0.3.2",
+            RELEASE_VERSION,
         ],
         cwd=checkout,
         capture_output=True,
@@ -518,8 +521,8 @@ def test_release_cli_uses_the_extracted_mapping_not_the_checkout(tmp_path):
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "dtxwiki-0.3.2-py3-none-any.whl:" in result.stdout
-    assert "dtxwiki-0.3.2.tar.gz:" in result.stdout
+    assert f"{WHEEL_NAME}:" in result.stdout
+    assert f"{SDIST_NAME}:" in result.stdout
 
 
 def test_release_cli_rejects_current_graph_without_a_new_schema_boundary(tmp_path):
@@ -537,7 +540,7 @@ def test_release_cli_rejects_current_graph_without_a_new_schema_boundary(tmp_pat
 def test_release_cli_checks_metadata_in_both_uploaded_artifacts(
     tmp_path, artifact_kind
 ):
-    version = "0.3.1"
+    version = RELEASE_VERSION
     migration = Path("backend/migrations/versions/unreleased/0003_stray.py")
     helper = Path("backend/migrations/revision_modules/unreleased/new_schema.py")
     helper_init = helper.with_name("__init__.py")

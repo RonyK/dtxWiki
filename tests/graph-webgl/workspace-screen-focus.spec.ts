@@ -197,7 +197,10 @@ for (const mobile of [false, true]) {
       const restored = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
       expect(restored.positions).toEqual(beforeRemount.positions);
       expect(restored.pinned).toEqual(beforeRemount.pinned);
-      expect(restored.center).toEqual(beforeRemount.center);
+      // The remount sets the camera again from the persisted center, so the
+      // read-back center can differ from the original in its last double bits.
+      expect(restored.center).toHaveLength(2);
+      restored.center!.forEach((value, axis) => expect(value).toBeCloseTo(beforeRemount.center![axis], 6));
       expect(restored.zoom).toBe(beforeRemount.zoom);
       expect(restored.running).toBe(false);
       expect(restored.layoutRunning).toBe(false);
@@ -397,7 +400,7 @@ for (const mobile of [false, true]) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(`${origin}/?navigationFocus=1`);
     if (mobile) await page.getByRole("button", { name: "Open canvas fullscreen", exact: true }).click();
-    await expectSettledNativeScene(page);
+    await expectSettledNativeScene(page, { waitForD3Positions: true });
     await expect.poll(() => distanceFromUncoveredCenter(page, 1999)).toBeLessThan(6);
     const revealed = await page.evaluate(() => window.__workspaceScreenFocus.snapshot());
     const initialRequests = await page.evaluate(() => structuredClone(window.__workspaceScreenFocus.requests));

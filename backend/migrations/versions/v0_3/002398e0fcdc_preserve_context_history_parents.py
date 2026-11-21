@@ -8,7 +8,7 @@ Create Date: 2026-11-21 15:03:48.752581
 import sqlalchemy as sa
 from alembic import context, op
 
-from backend.migrations.revision_modules.unreleased._002398e0fcdc_capture import (
+from backend.migrations.revision_modules.v0_3._002398e0fcdc_capture import (
     capture,
 )
 

@@ -9,7 +9,7 @@ from alembic.runtime.migration import RevisionStep
 from alembic.util import CommandError
 from sqlalchemy import engine_from_config, event, pool
 
-from backend.migrations.revision_modules.unreleased._002398e0fcdc_capture import (
+from backend.migrations.revision_modules.v0_3._002398e0fcdc_capture import (
     capture as history_capture,
 )
 from backend.models import Base
