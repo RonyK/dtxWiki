@@ -117,7 +117,7 @@ describe("TreeRail", () => {
     await waitFor(() => expect(row).toHaveFocus());
   });
 
-  it("keeps arrow keys, folder toggles and dialog focus inside the tree that used them, and refocuses the full tree when the last favorite goes", async () => {
+  it("keeps arrow keys, folder toggles and dialog focus inside the tree that used them, keeps folds across a remount, and refocuses the full tree when the last favorite goes", async () => {
     clearTreeFavoriteCache();
     setTreeFavoriteActor("viewer-1");
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
@@ -144,9 +144,10 @@ describe("TreeRail", () => {
         </>
       );
     }
-    render(<Harness />);
-    const favorites = within(screen.getByRole("tree", { name: "Favorites" }));
-    const fullTreeDesign = within(screen.getByRole("tree", { name: "Context" })).getByRole("treeitem", { name: "Design" });
+    window.localStorage.clear();
+    const { unmount } = render(<Harness />);
+    let favorites = within(screen.getByRole("tree", { name: "Favorites" }));
+    let fullTreeDesign = within(screen.getByRole("tree", { name: "Context" })).getByRole("treeitem", { name: "Design" });
     // Design is in both trees; a dialog opened from the full tree returns there.
     act(() => fullTreeDesign.focus());
     await userEvent.keyboard("{Shift>}{F10}{/Shift}");
@@ -154,7 +155,7 @@ describe("TreeRail", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(fullTreeDesign).toHaveFocus());
-    const design = favorites.getByRole("treeitem", { name: "Design" });
+    let design = favorites.getByRole("treeitem", { name: "Design" });
     act(() => design.focus());
     fireEvent.keyDown(design, { key: "ArrowDown" });
     const rules = favorites.getByRole("treeitem", { name: "Rules" });
@@ -165,6 +166,14 @@ describe("TreeRail", () => {
     expect(design).toHaveFocus();
     fireEvent.keyDown(design, { key: "ArrowLeft" });
     expect(favorites.queryByRole("treeitem", { name: "Rules" })).not.toBeInTheDocument();
+    // Opening a page mounts the rail again; a folded favorites folder stays folded.
+    unmount();
+    render(<Harness />);
+    favorites = within(screen.getByRole("tree", { name: "Favorites" }));
+    fullTreeDesign = within(screen.getByRole("tree", { name: "Context" })).getByRole("treeitem", { name: "Design" });
+    expect(favorites.queryByRole("treeitem", { name: "Rules" })).not.toBeInTheDocument();
+    design = favorites.getByRole("treeitem", { name: "Design" });
+    act(() => design.focus());
     fireEvent.keyDown(design, { key: "ArrowRight" });
     fireEvent.keyDown(design, { key: "ArrowRight" });
     expect(favorites.getByRole("treeitem", { name: "Rules" })).toHaveFocus();

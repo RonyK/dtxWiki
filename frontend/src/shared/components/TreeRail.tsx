@@ -41,6 +41,7 @@ import { WorkspacePanelChrome } from "./WorkspacePanelChrome";
 import { useNowTick } from "./RelativeTime";
 import { contentChangedAt, TREE_RECENT_CHANGE_MS, treeNodeStatus, treeNodeStatusDescription } from "./treeNodeStatus";
 import { useTreeRowTooltip, type TreeRowTooltip } from "./useTreeRowTooltip";
+import { readFoldedFavoriteNodeIds, writeFoldedFavoriteNodeIds } from "./treeRouteState";
 import { readWorkspacePanelState, writeWorkspacePanelState } from "./useWorkspaceRailState";
 
 type TreeRowStyle = CSSProperties & {
@@ -85,28 +86,65 @@ function isFavoriteRowKey(rowKey: string) {
 // move the real node relative to siblings that tree does not show.
 function ignoreRowDrag() {}
 
-// The row a rail just opened a document from. Opening a page can replace the
-// screen while it loads, so the rail is mounted again and loses focus; the
-// rail's next reveal uses this once, to show the page in the tree and
-// placement it was opened from, and drops it whatever it reveals. Any other
-// way of reaching the page (search, links, another screen) finds nothing.
-let pendingOpenedFrom: { railKey: string; targetId: string; rowKey: string } | null = null;
+// The row a rail just opened a page or folder from. Opening one can replace
+// the screen while it loads, so the rail is mounted again and loses focus;
+// the rail's next reveal uses this once, to show the opened node in the tree
+// and placement it was opened from, and drops it whatever it reveals. It
+// also lapses at the user's next pointer or key input: a click that did not
+// navigate (a cancelled or no-op selection) must not steer a later reveal.
+// Any other way of reaching the node (search, links, another screen) finds
+// nothing.
+let pendingOpenedFrom: {
+  railKey: string;
+  nodeId: string;
+  targetId: string | null;
+  rowKey: string;
+} | null = null;
+let stopOpenedFromLapse: (() => void) | null = null;
 
-function rememberOpenedFrom(railKey: string, targetId: string, rowKey: string) {
-  pendingOpenedFrom = { railKey, targetId, rowKey };
+function clearOpenedFrom() {
+  pendingOpenedFrom = null;
+  stopOpenedFromLapse?.();
+  stopOpenedFromLapse = null;
 }
 
-function openedFromRowKey(railKey: string, targetId: string | null | undefined) {
-  return pendingOpenedFrom &&
-    pendingOpenedFrom.railKey === railKey &&
-    pendingOpenedFrom.targetId === targetId
-    ? pendingOpenedFrom.rowKey
-    : null;
+// A held key repeats the activating Enter; only a new press is new input.
+function lapseOpenedFrom(event: Event) {
+  if (event instanceof KeyboardEvent && event.repeat) {
+    return;
+  }
+  clearOpenedFrom();
+}
+
+function rememberOpenedFrom(railKey: string, node: TreeNodePayload, rowKey: string) {
+  clearOpenedFrom();
+  pendingOpenedFrom = { railKey, nodeId: node.id, targetId: node.target_id ?? null, rowKey };
+  // Armed after the activating event, so that input does not end it.
+  const timer = window.setTimeout(() => {
+    window.addEventListener("pointerdown", lapseOpenedFrom, true);
+    window.addEventListener("keydown", lapseOpenedFrom, true);
+    stopOpenedFromLapse = () => {
+      window.removeEventListener("pointerdown", lapseOpenedFrom, true);
+      window.removeEventListener("keydown", lapseOpenedFrom, true);
+    };
+  }, 0);
+  stopOpenedFromLapse = () => window.clearTimeout(timer);
+}
+
+// The opened placement, or another placement of the same document.
+function openedFromRowKey(railKey: string, activeNode: TreeNodePayload | undefined) {
+  if (!pendingOpenedFrom || !activeNode || pendingOpenedFrom.railKey !== railKey) {
+    return null;
+  }
+  const sameNode = pendingOpenedFrom.nodeId === activeNode.id;
+  const sameTarget =
+    pendingOpenedFrom.targetId !== null && pendingOpenedFrom.targetId === activeNode.target_id;
+  return sameNode || sameTarget ? pendingOpenedFrom.rowKey : null;
 }
 
 function forgetOpenedFrom(railKey: string) {
   if (pendingOpenedFrom?.railKey === railKey) {
-    pendingOpenedFrom = null;
+    clearOpenedFrom();
   }
 }
 
@@ -235,8 +273,18 @@ export function TreeRail({
   const [favoritesOpen, setFavoritesOpen] = useState(() =>
     readWorkspacePanelState(favoritesStateKey, true),
   );
-  const [collapsedFavoriteNodeIds, setCollapsedFavoriteNodeIds] = useState(
-    () => new Set<string>(),
+  // Folded favorites folders live in the workspace's tree store, so they
+  // survive the remount that opening a page causes. This session's own folds
+  // win while the rail is mounted, which also covers disabled storage.
+  const favoriteWorkspaceId = favoriteScope?.workspaceId ?? "";
+  const foldedFavoritesKey = `${railKey}|${favoriteWorkspaceId}`;
+  const [foldedFavorites, setFoldedFavorites] = useState<{ key: string; ids: Set<string> } | null>(null);
+  const collapsedFavoriteNodeIds = useMemo(
+    () =>
+      foldedFavorites?.key === foldedFavoritesKey
+        ? foldedFavorites.ids
+        : new Set(readFoldedFavoriteNodeIds(railKey, favoriteWorkspaceId)),
+    [favoriteWorkspaceId, foldedFavorites, foldedFavoritesKey, railKey],
   );
   const favoritesTreeId = useId();
   const favoritesLabelId = useId();
@@ -473,11 +521,11 @@ export function TreeRail({
       : undefined;
   const revealRowKeyRef = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
-    const activeTarget = activeVisibleNodeId
-      ? nodeById.get(activeVisibleNodeId)?.target_id
+    const activeNode = activeVisibleNodeId
+      ? nodeById.get(activeVisibleNodeId)
       : undefined;
     revealRowKeyRef.current =
-      openedFromRowKey(railKey, activeTarget) ??
+      openedFromRowKey(railKey, activeNode) ??
       (activeFavoriteNodeId ? favoriteRowKey(activeFavoriteNodeId) : activeVisibleNodeId);
   });
 
@@ -522,15 +570,14 @@ export function TreeRail({
   // favorites never rearranges the full tree.
   function toggleFavoriteFolder(nodeId: string) {
     tooltip.dismissForActivation();
-    setCollapsedFavoriteNodeIds((current) => {
-      const next = new Set(current);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
-      return next;
-    });
+    const next = new Set(collapsedFavoriteNodeIds);
+    if (next.has(nodeId)) {
+      next.delete(nodeId);
+    } else {
+      next.add(nodeId);
+    }
+    writeFoldedFavoriteNodeIds(railKey, Array.from(next), favoriteWorkspaceId);
+    setFoldedFavorites({ key: foldedFavoritesKey, ids: next });
   }
 
   function toggleFavoritesOpen() {
@@ -965,9 +1012,9 @@ export function TreeRail({
   }
 
   function selectTargetFrom(list: TreeRowList, node: TreeNodePayload) {
-    // Re-opening the open document starts no reveal to consume the record.
-    if (node.target_id && !rowIsActive(node)) {
-      rememberOpenedFrom(railKey, node.target_id, list.rowKey(node.id));
+    // Re-opening the open node starts no reveal to consume the record.
+    if (!rowIsActive(node)) {
+      rememberOpenedFrom(railKey, node, list.rowKey(node.id));
     }
     onSelectTarget?.(node);
   }

@@ -284,6 +284,20 @@ describe("TreeRail document status and personal favorites", () => {
     await waitFor(() => expect(scrolled.mock.contexts.at(-1)).toBe(
       within(favorites()).getByRole("treeitem", { name: "Backup" }),
     ));
+    // Folders opened from the full tree are revealed there too.
+    fireEvent.click(fullTree().getByRole("treeitem", { name: "Ops" }));
+    unmount();
+    ({ unmount } = render(<TreeRail {...props} activeNodeId="ops" />));
+    await waitFor(() => expect(scrolled.mock.contexts.at(-1)).toBe(fullTree().getByRole("treeitem", { name: "Ops" })));
+    // A click that did not navigate lapses at the next input.
+    fireEvent.click(fullTree().getByRole("treeitem", { name: "Backup" }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    fireEvent.pointerDown(document.body);
+    unmount();
+    ({ unmount } = render(<TreeRail {...props} activeTargetId="backup" />));
+    await waitFor(() => expect(scrolled.mock.contexts.at(-1)).toBe(
+      within(favorites()).getByRole("treeitem", { name: "Backup" }),
+    ));
     // Both placements share one favorite, so removing it empties the Design branch.
     fireEvent.click(within(favorites()).getAllByRole("button", { name: "Open actions for Rules" })[1]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove from my favorites" }));

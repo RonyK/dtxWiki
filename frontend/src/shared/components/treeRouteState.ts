@@ -198,6 +198,53 @@ function readExpandedNodeIdsFromStorage(
   }
 }
 
-function treeExpansionStorageKey(storageKey: TreeExpansionStorageKey, workspaceId: string) {
+function treeExpansionStorageKey(storageKey: string, workspaceId: string) {
   return `${TREE_EXPANSION_STORAGE_PREFIX}${workspaceId}:${storageKey}`;
+}
+
+// Folders folded in a rail's favorites tree, kept beside the full tree's
+// expansion in the same per-workspace store. The favorites tree opens every
+// branch by default, so it stores the folded ones: a new favorite shows its
+// path open. The in-memory copy keeps folds for the session when browser
+// storage is unavailable; storage keeps them across reloads.
+const foldedFavoritesInSession = new Map<string, string[]>();
+
+function foldedFavoritesStorageKey(railKey: string) {
+  return `${railKey}:favorites-folded`;
+}
+
+export function readFoldedFavoriteNodeIds(railKey: string, workspaceId: string): string[] {
+  if (typeof window === "undefined" || !workspaceId) {
+    return [];
+  }
+  const key = treeExpansionStorageKey(foldedFavoritesStorageKey(railKey), workspaceId);
+  const inSession = foldedFavoritesInSession.get(key);
+  if (inSession) {
+    return inSession;
+  }
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeFoldedFavoriteNodeIds(
+  railKey: string,
+  nodeIds: string[],
+  workspaceId: string,
+) {
+  if (typeof window === "undefined" || !workspaceId) {
+    return;
+  }
+  const key = treeExpansionStorageKey(foldedFavoritesStorageKey(railKey), workspaceId);
+  const ids = Array.from(new Set(nodeIds));
+  foldedFavoritesInSession.set(key, ids);
+  try {
+    window.localStorage.setItem(key, JSON.stringify(ids));
+  } catch {
+    // Browser storage can be disabled; the session copy above still holds.
+  }
 }
