@@ -1317,12 +1317,25 @@ describe("ContextScreen", () => {
       expect.objectContaining({ body: JSON.stringify({ is_favorite: true }) }),
     ]);
     // The reader menu and the rail share one favorite store.
-    expect(document.querySelectorAll(".tree-row-favorite")).toHaveLength(1);
+    expect(
+      screen.getByRole("tree", { name: "Context" }).querySelectorAll(".tree-row-favorite"),
+    ).toHaveLength(1);
+    expect(
+      within(screen.getByRole("tree", { name: "Favorites" })).getByRole("treeitem", { name: "Decision Log" }),
+    ).toBeInTheDocument();
     await userEvent.click(moreAction);
     expect(
       await screen.findByRole("menuitem", { name: "Remove from my favorites" }),
     ).toBeEnabled();
     await userEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
+    // The menu is a portal: closing it, or cancelling a dialog it opened,
+    // returns focus to the More button.
+    await waitFor(() => expect(moreAction).toHaveFocus());
+    await userEvent.click(moreAction);
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(moreAction).toHaveFocus());
     expect(writeText).toHaveBeenCalledWith(
       expect.stringMatching(
         new RegExp(`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}$`),

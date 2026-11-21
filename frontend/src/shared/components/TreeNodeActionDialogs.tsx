@@ -250,30 +250,50 @@ export function DeleteTreeNodeDialog({
 
 function useTreeDialogFocusFallback(nodeId: string) {
   // A tree action menu is removed in the same commit that mounts its dialog,
-  // so capture the owning rail during render while the focused menu item is
-  // still connected. Holding that exact rail element also fences restoration
-  // from a later route that happens to render a node with the same id.
-  const treeRailRef = useRef<HTMLElement | null>(
-    typeof document === "undefined"
-      ? null
-      : document.activeElement instanceof HTMLElement
-        ? document.activeElement.closest<HTMLElement>(".tree-rail")
-        : null,
+  // so capture the owning rail during render while focus is still on the row
+  // that opened the menu. Holding that exact rail element also fences
+  // restoration from a later route that happens to render a node with the
+  // same id. A rail can show a node in more than one tree (favorites above the
+  // full tree), so the opening tree is searched before the rest of the rail.
+  const scopeRef = useRef<{ rail: HTMLElement | null; tree: HTMLElement | null }>(
+    (() => {
+      const active =
+        typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      return {
+        rail: active?.closest<HTMLElement>(".tree-rail") ?? null,
+        tree: active?.closest<HTMLElement>('[role="tree"]') ?? null,
+      };
+    })(),
   );
 
   return useCallback(() => {
-    const treeRail = treeRailRef.current;
-    if (!treeRail?.isConnected) {
+    const { rail, tree } = scopeRef.current;
+    if (!rail?.isConnected) {
       return null;
     }
-    const matchingRow = Array.from(
-      treeRail.querySelectorAll<HTMLElement>('[role="treeitem"][data-node-id]'),
-    ).find((row) => row.dataset.nodeId === nodeId);
-    if (matchingRow) {
-      return matchingRow.querySelector<HTMLElement>(".tree-row-menu-button")
-        ?? matchingRow;
+    const scopes = [tree?.isConnected ? tree : null, rail].filter(
+      (scope): scope is HTMLElement => scope !== null,
+    );
+    for (const scope of scopes) {
+      const matchingRow = Array.from(
+        scope.querySelectorAll<HTMLElement>('[role="treeitem"][data-node-id]'),
+      ).find((row) => row.dataset.nodeId === nodeId);
+      if (matchingRow) {
+        return matchingRow.querySelector<HTMLElement>(".tree-row-menu-button")
+          ?? matchingRow;
+      }
     }
-    return treeRail.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]')
-      ?? treeRail.querySelector<HTMLElement>('[role="treeitem"]');
+    for (const scope of scopes) {
+      const tabStop = scope.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]');
+      if (tabStop) {
+        return tabStop;
+      }
+    }
+    // Deleting the only visible row leaves no tree rows; the rail's own
+    // controls (create, filter) are still there.
+    return rail.querySelector<HTMLElement>('[role="treeitem"]')
+      ?? rail.querySelector<HTMLElement>("button:not([disabled]), input:not([disabled])");
   }, [nodeId]);
 }

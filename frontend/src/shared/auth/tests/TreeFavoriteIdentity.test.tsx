@@ -74,6 +74,9 @@ function IdentityHarness() {
   </>;
 }
 
+// The favorites tree repeats favorite rows; these checks follow the full tree.
+const fullTreeRow = () => within(screen.getByRole("tree", { name: "Context" })).getByRole("treeitem");
+
 describe("TreeRail favorite identity boundaries", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -103,7 +106,7 @@ describe("TreeRail favorite identity boundaries", () => {
     });
     render(<MemoryRouter initialEntries={[`/workspaces/${workspaceId}/context`]}><AuthProvider skipInitialSessionCheck><IdentityHarness /></AuthProvider></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "Authenticate A" }));
-    const aRow = await screen.findByRole("treeitem", { name: page.title });
+    const aRow = within(await screen.findByRole("tree", { name: "Context" })).getByRole("treeitem", { name: page.title });
     expect(aRow.querySelector(".tree-row-favorite")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Route state" }), { target: { value: "A's local state" } });
     // A normal refresh of the same actor preserves the mounted route.
@@ -125,10 +128,10 @@ describe("TreeRail favorite identity boundaries", () => {
     expect(screen.getByRole("textbox", { name: "Route state" })).toHaveValue("");
     expect(getTreeFavoriteSnapshot().size).toBe(0);
     await act(async () => { bTree.resolve(json({ nodes: [{ ...page, is_favorite: false }], policies: {} })); });
-    expect(screen.getByRole("treeitem").querySelector(".tree-row-favorite")).not.toBeInTheDocument();
+    expect(fullTreeRow().querySelector(".tree-row-favorite")).not.toBeInTheDocument();
     serverActor = "A";
     fireEvent.click(screen.getByRole("button", { name: "Authenticate A" }));
-    await waitFor(() => expect(screen.getByRole("treeitem").querySelector(".tree-row-favorite")).toBeInTheDocument());
+    await waitFor(() => expect(fullTreeRow().querySelector(".tree-row-favorite")).toBeInTheDocument());
     // Even returning to the same actor cannot revive requests from its old
     // session generation. The old removal must not clear the new A favorite.
     await act(async () => {
@@ -137,7 +140,7 @@ describe("TreeRail favorite identity boundaries", () => {
       await staleRead;
     });
     expect(getTreeFavoriteSnapshot().size).toBe(0);
-    expect(screen.getByRole("treeitem").querySelector(".tree-row-favorite")).toBeInTheDocument();
+    expect(fullTreeRow().querySelector(".tree-row-favorite")).toBeInTheDocument();
     expect(treeRequests).toBe(4);
   });
 

@@ -1509,6 +1509,74 @@
   gap: 2px;
 }
 
+/* The favorites tree above the full tree. Both parts of the rail body get a
+   section title on a tinted band: it is a title, not a tree row, so it keeps
+   the control hit size (lower than a row) and puts the favorites chevron at
+   the far end, away from the folder chevrons' leading slot. */
+.tree-favorites {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+.tree-section-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: var(--tree-control-hit-size);
+  margin-bottom: 2px;
+  padding: 0 2px 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-active) 80%, transparent);
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+button.tree-section-header {
+  cursor: pointer;
+}
+
+button.tree-section-header:hover {
+  background: var(--surface-active);
+}
+
+/* Inset, so the rail's scroll edge never clips the ring. The rail-body prefix
+   outranks the global :is(...):focus-visible ring, which is (0,3,0). */
+.tree-rail-body button.tree-section-header:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Forced colors drop the band; a system-colour edge keeps the title a band. */
+@media (forced-colors: active) {
+  .tree-section-header {
+    border: 1px solid CanvasText;
+  }
+}
+
+.tree-section-icon {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+}
+
+.tree-section-chevron {
+  flex: 0 0 var(--tree-control-hit-size);
+  margin-left: auto;
+  color: var(--ink-faint);
+}
+
+.tree-favorites-star {
+  flex: 0 0 auto;
+  fill: var(--tree-favorite-fill);
+  stroke: var(--tree-favorite-edge);
+  stroke-width: 1.4;
+}
+
 .tree-row {
   /* Matches the rail's own background so the hover overlay below reads as part
      of the row rather than as a floating chip. Each row state that repaints the

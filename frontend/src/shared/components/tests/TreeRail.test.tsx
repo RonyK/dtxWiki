@@ -10,7 +10,9 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { clearTreeFavoriteCache, setTreeFavoriteActor } from "../../api/treeFavorites";
 import type { TreeNodePayload } from "../../api/workspace";
+import { RenameTreeNodeDialog } from "../TreeNodeActionDialogs";
 import { TreeRail } from "../TreeRail";
 
 describe("TreeRail", () => {
@@ -113,6 +115,75 @@ describe("TreeRail", () => {
 
     expect(onCopyNodeLink).toHaveBeenCalledWith(node);
     await waitFor(() => expect(row).toHaveFocus());
+  });
+
+  it("keeps arrow keys, folder toggles and dialog focus inside the tree that used them, keeps folds across a remount, and refocuses the full tree when the last favorite goes", async () => {
+    clearTreeFavoriteCache();
+    setTreeFavoriteActor("viewer-1");
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    const onExpandedNodeIdsChange = vi.fn();
+    function Harness() {
+      const [renaming, setRenaming] = useState<TreeNodePayload | null>(null);
+      return (
+        <>
+          <TreeRail
+            title="Context"
+            favoriteScope={{ actorId: "viewer-1", workspaceId: "workspace-1" }}
+            expandedNodeIds={[]}
+            onExpandedNodeIdsChange={onExpandedNodeIdsChange}
+            onRenameNode={setRenaming}
+            nodes={[
+              treeNode({ id: "design", title: "Design", node_kind: "folder", can_have_children: true, children_count: 1 }),
+              treeNode({ id: "rules", title: "Rules", parent_id: "design", target_kind: "context_page",
+                target_id: "rules", is_favorite: true }),
+            ]}
+          />
+          {renaming ? (
+            <RenameTreeNodeDialog node={renaming} onClose={() => setRenaming(null)} onSubmit={async () => setRenaming(null)} />
+          ) : null}
+        </>
+      );
+    }
+    window.localStorage.clear();
+    const { unmount } = render(<Harness />);
+    let favorites = within(screen.getByRole("tree", { name: "Favorites" }));
+    let fullTreeDesign = within(screen.getByRole("tree", { name: "Context" })).getByRole("treeitem", { name: "Design" });
+    // Design is in both trees; a dialog opened from the full tree returns there.
+    act(() => fullTreeDesign.focus());
+    await userEvent.keyboard("{Shift>}{F10}{/Shift}");
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(fullTreeDesign).toHaveFocus());
+    let design = favorites.getByRole("treeitem", { name: "Design" });
+    act(() => design.focus());
+    fireEvent.keyDown(design, { key: "ArrowDown" });
+    const rules = favorites.getByRole("treeitem", { name: "Rules" });
+    expect(rules).toHaveFocus();
+    fireEvent.keyDown(rules, { key: "ArrowDown" });
+    expect(rules).toHaveFocus();
+    fireEvent.keyDown(rules, { key: "ArrowLeft" });
+    expect(design).toHaveFocus();
+    fireEvent.keyDown(design, { key: "ArrowLeft" });
+    expect(favorites.queryByRole("treeitem", { name: "Rules" })).not.toBeInTheDocument();
+    // Opening a page mounts the rail again; a folded favorites folder stays folded.
+    unmount();
+    render(<Harness />);
+    favorites = within(screen.getByRole("tree", { name: "Favorites" }));
+    fullTreeDesign = within(screen.getByRole("tree", { name: "Context" })).getByRole("treeitem", { name: "Design" });
+    expect(favorites.queryByRole("treeitem", { name: "Rules" })).not.toBeInTheDocument();
+    design = favorites.getByRole("treeitem", { name: "Design" });
+    act(() => design.focus());
+    fireEvent.keyDown(design, { key: "ArrowRight" });
+    fireEvent.keyDown(design, { key: "ArrowRight" });
+    expect(favorites.getByRole("treeitem", { name: "Rules" })).toHaveFocus();
+    expect(onExpandedNodeIdsChange).not.toHaveBeenCalled();
+    // Rules is collapsed out of the full tree, so its own row cannot take focus back.
+    await userEvent.keyboard("{Shift>}{F10}{/Shift}");
+    await userEvent.click(screen.getByRole("menuitem", { name: "Remove from my favorites" }));
+    expect(screen.queryByRole("tree", { name: "Favorites" })).not.toBeInTheDocument();
+    await waitFor(() => expect(fullTreeDesign).toHaveFocus());
+    vi.unstubAllGlobals();
   });
 
   it("filters locally while preserving the active path", async () => {
