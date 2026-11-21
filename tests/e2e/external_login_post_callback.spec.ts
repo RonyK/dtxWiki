@@ -1,60 +1,97 @@
 import { expect, test, type Request } from "@playwright/test";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import https from "node:https";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+
+const loginTest = test.extend<{ httpsFixturePort: string }>({
+  httpsFixturePort: [
+    async ({}, use, testInfo) => {
+      const temporary = await mkdtemp(path.join(os.tmpdir(), "dtxwiki-samesite-"));
+      let server: ChildProcess | undefined;
+      let closed: Promise<void> | undefined;
+      let stdout = "";
+      let stderr = "";
+      try {
+        execFileSync("openssl", [
+          "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+          "-subj", "/CN=localhost",
+          "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
+          "-keyout", path.join(temporary, "key.pem"),
+          "-out", path.join(temporary, "certificate.pem"),
+        ], { stdio: "ignore" });
+        const fixture = spawn(path.join(process.cwd(), ".venv/bin/python"), [
+          "tests/e2e/external_login_browser_server.py",
+          "--database", path.join(temporary, "database.db"),
+          "--certificate", path.join(temporary, "certificate.pem"),
+          "--key", path.join(temporary, "key.pem"),
+        ], {
+          cwd: process.cwd(),
+          env: { ...process.env, PYTHONPATH: process.cwd() },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        server = fixture;
+        closed = new Promise((resolve) => fixture.once("close", () => resolve()));
+        let spawnError: Error | undefined;
+        fixture.once("error", (error) => { spawnError = error; });
+        fixture.stdout.on("data", (chunk) => { stdout += String(chunk); });
+        fixture.stderr.on("data", (chunk) => { stderr += String(chunk); });
+
+        let port = "";
+        await expect.poll(() => {
+          if (spawnError) throw spawnError;
+          if (fixture.exitCode !== null || fixture.signalCode !== null) {
+            throw new Error(`HTTPS fixture exited (${fixture.exitCode ?? fixture.signalCode})`);
+          }
+          port = /^HTTPS fixture port (\d+)$/m.exec(stdout)?.[1] ?? "";
+          if (!port) return 0;
+          return new Promise<number>((resolve) => {
+            const request = https.get(`https://127.0.0.1:${port}/fixture/done`, {
+              rejectUnauthorized: false,
+            }, (response) => { response.resume(); resolve(response.statusCode ?? 0); });
+            request.on("error", () => resolve(0));
+            request.setTimeout(2_000, () => { request.destroy(); resolve(0); });
+          });
+        }, { timeout: 45_000, message: "isolated HTTPS auth fixture starts" }).toBe(200);
+
+        await use(port);
+      } catch (error) {
+        await testInfo.attach("HTTPS auth fixture output", {
+          body: `stdout\n${stdout}\nstderr\n${stderr}`,
+          contentType: "text/plain",
+        });
+        throw error;
+      } finally {
+        try {
+          if (server?.pid !== undefined && server.exitCode === null && server.signalCode === null) {
+            const forceStop = setTimeout(() => server?.kill("SIGKILL"), 5_000);
+            try {
+              server.kill("SIGTERM");
+              await closed;
+            } finally {
+              clearTimeout(forceStop);
+            }
+          }
+        } finally {
+          await rm(temporary, { recursive: true, force: true });
+        }
+      }
+    },
+    // The app and its database start before the browser scenario's timeout.
+    { timeout: 60_000 },
+  ],
+});
 
 // One browser-only scenario: TestClient cannot implement SameSite policy.
 // HTTPS localhost and 127.0.0.1 are different sites, not just different ports.
 // Assertions are canned; the native cookies and production auth engine are real.
-test("cross-site POST restores Lax cookies before SSO reauthentication and linking", async ({
-  browser,
+loginTest("cross-site POST restores Lax cookies before SSO reauthentication and linking", async ({
+  browser, httpsFixturePort,
 }) => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), "dtxwiki-samesite-"));
-  const listener = net.createServer();
-  listener.listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  const address = listener.address() as net.AddressInfo;
-  await new Promise<void>((resolve) => listener.close(() => resolve()));
-  const wiki = `https://127.0.0.1:${address.port}`;
-  let server: ChildProcess | undefined;
-  let output = "";
+  const wiki = `https://127.0.0.1:${httpsFixturePort}`;
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   try {
-    execFileSync("openssl", [
-      "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-      "-subj", "/CN=localhost",
-      "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
-      "-keyout", path.join(temporary, "key.pem"),
-      "-out", path.join(temporary, "certificate.pem"),
-    ], { stdio: "ignore" });
-    server = spawn(path.join(process.cwd(), ".venv/bin/python"), [
-      "tests/e2e/external_login_browser_server.py",
-      "--port", String(address.port),
-      "--database", path.join(temporary, "database.db"),
-      "--certificate", path.join(temporary, "certificate.pem"),
-      "--key", path.join(temporary, "key.pem"),
-    ], {
-      cwd: process.cwd(),
-      env: { ...process.env, PYTHONPATH: process.cwd() },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    server.stdout?.on("data", (chunk) => { output += String(chunk); });
-    server.stderr?.on("data", (chunk) => { output += String(chunk); });
-    await expect.poll(async () => {
-      if (server?.exitCode !== null) throw new Error(output);
-      return await new Promise<number>((resolve) => {
-        const request = https.get(`${wiki}/fixture/done`, {
-          rejectUnauthorized: false,
-        }, (response) => { response.resume(); resolve(response.statusCode ?? 0); });
-        request.on("error", () => resolve(0));
-        request.setTimeout(500, () => { request.destroy(); resolve(0); });
-      });
-    }, { timeout: 15_000, message: "isolated HTTPS auth fixture starts" }).toBe(200);
-
     const page = await context.newPage();
     await page.goto(`${wiki}/api/v1/auth/sso/company/start?next=/fixture/done`);
     await expect(page).toHaveURL(`${wiki}/fixture/done`);
@@ -99,7 +136,7 @@ test("cross-site POST restores Lax cookies before SSO reauthentication and linki
       const sameSite = await continuation;
       const cookies = async (request: Request) => (await request.allHeaders()).cookie ?? "";
       expect(await cookies(crossSite)).not.toContain("dtxwiki_session=");
-      expect((await crossSite.allHeaders()).origin).toBe(`https://localhost:${address.port}`);
+      expect((await crossSite.allHeaders()).origin).toBe(`https://localhost:${httpsFixturePort}`);
       expect((await sameSite.allHeaders()).origin).toBe(wiki);
       await expect(page).toHaveURL(`${wiki}/fixture/done?flow=${purpose}`);
       // A redirect answers the continuation, so Playwright cannot report that
@@ -117,10 +154,5 @@ test("cross-site POST restores Lax cookies before SSO reauthentication and linki
       .toBe(true);
   } finally {
     await context.close();
-    if (server && server.exitCode === null) {
-      server.kill("SIGTERM");
-      await once(server, "exit");
-    }
-    await rm(temporary, { recursive: true, force: true });
   }
 });

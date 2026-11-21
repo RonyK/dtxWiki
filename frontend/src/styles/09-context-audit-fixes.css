@@ -426,10 +426,22 @@
 }
 
 @media (max-width: 640px) {
-  .context-activity-card.context-event-card { grid-template-columns: minmax(0, 1fr) minmax(0, 148px); column-gap: 8px; row-gap: 6px; padding: 11px 12px; }
+  .context-activity-card.context-event-card {
+    grid-template-columns: minmax(min-content, 1fr) minmax(0, 148px);
+    column-gap: 8px;
+    row-gap: 6px;
+    padding: 11px 12px;
+  }
   .context-event-main { display: contents; }
   .context-event-chip { grid-column: 1; grid-row: 1; justify-self: start; padding: 2px 7px; }
-  .context-event-actor { grid-column: 2; grid-row: 1; flex-direction: row; align-items: center; max-width: 148px; gap: 6px; }
+  .context-event-actor {
+    grid-column: 2;
+    grid-row: 1;
+    flex-direction: row;
+    align-items: center;
+    max-width: 100%;
+    gap: 6px;
+  }
   .context-event-author { max-width: 105px; min-height: 28px; }
   .context-event-change { grid-column: 1 / -1; grid-row: 2; font-size: 13px; }
   .context-event-support, .context-event-links { grid-column: 1 / -1; }

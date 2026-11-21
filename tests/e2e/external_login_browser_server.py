@@ -7,6 +7,7 @@ cookie and callback handling comes from the production application.
 import argparse
 import html
 import secrets
+import socket
 from dataclasses import replace
 
 import uvicorn
@@ -29,13 +30,19 @@ from backend.testing.fake_auth_method import FAKE_ISSUER, FakeAuthMethod
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", required=True, type=int)
     parser.add_argument("--database", required=True)
     parser.add_argument("--certificate", required=True)
     parser.add_argument("--key", required=True)
     arguments = parser.parse_args()
-    wiki_origin = f"https://127.0.0.1:{arguments.port}"
-    idp_origin = f"https://localhost:{arguments.port}"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        _serve_fixture(arguments, listener)
+
+
+def _serve_fixture(arguments: argparse.Namespace, listener: socket.socket) -> None:
+    port = listener.getsockname()[1]
+    wiki_origin = f"https://127.0.0.1:{port}"
+    idp_origin = f"https://localhost:{port}"
 
     class BrowserPostMethod(FakeAuthMethod):
         def begin(self, provider, request):
@@ -126,14 +133,16 @@ def main():
             )
         return await call_next(request)
 
-    uvicorn.run(
-        app,
-        host="127.0.0.1",
-        port=arguments.port,
-        ssl_certfile=arguments.certificate,
-        ssl_keyfile=arguments.key,
-        access_log=False,
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            ssl_certfile=arguments.certificate,
+            ssl_keyfile=arguments.key,
+            access_log=False,
+        )
     )
+    print(f"HTTPS fixture port {port}", flush=True)
+    server.run(sockets=[listener])
 
 
 if __name__ == "__main__":

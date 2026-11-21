@@ -41,6 +41,7 @@ pytestmark = [
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+_REQUEST_TIMEOUT = 2.0
 _COMPLETION_TIMEOUT = 30.0
 
 
@@ -113,7 +114,7 @@ def _running_cli(
         )
         with httpx.Client(
             base_url=f"http://127.0.0.1:{free_tcp_port}",
-            timeout=2.0,
+            timeout=_REQUEST_TIMEOUT,
             trust_env=False,
         ) as client:
             runtime = _Runtime(process, client, log_path)
@@ -219,9 +220,12 @@ def _upload_and_wait_for_conversion(
     assert workspace_id
     content = b"# Managed runtime\n\nThis exact document was converted by the worker.\n"
     collection_url = f"/api/v1/workspaces/{workspace_id}/library/items"
+    # The server acquires SQLite's writer lock and commits the upload before
+    # acknowledging it. Give this response the runtime completion budget.
     uploaded = runtime.client.post(
         collection_url,
         files={"file": ("managed-runtime.md", content, "text/markdown")},
+        timeout=httpx.Timeout(_REQUEST_TIMEOUT, read=_COMPLETION_TIMEOUT),
     )
     assert uploaded.status_code == 201, uploaded.text
     uploaded_data = uploaded.json()["data"]
