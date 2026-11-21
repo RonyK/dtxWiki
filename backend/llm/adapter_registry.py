@@ -229,7 +229,6 @@ class _Endpoint:
     def contains(self, other: _Endpoint) -> bool:
         return (
             other.origin == self.origin
-            and len(other.segments) > len(self.segments)
             and other.segments[: len(self.segments)] == self.segments
         )
 

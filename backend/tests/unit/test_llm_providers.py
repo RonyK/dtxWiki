@@ -286,13 +286,13 @@ def _anthropic_cases():
             expected=CanonicalTextResult(text="No", termination="refused"),
         ),
         WireCase(
-            "spend cap on 429 is not a rate limit",
+            "spend limit on 429 is not a rate limit",
             REQUEST,
             _reply(
                 {
                     "error": {
                         "type": "rate_limit_error",
-                        "details": {"error_code": "enforced_spend_limit_reached"},
+                        "details": {"error_code": "contract_spend_limit_reached"},
                     }
                 },
                 status=429,
@@ -819,6 +819,79 @@ def test_httpx_transport_reports_what_reached_the_provider():
     assert (response.status_code, response.headers["x-request-id"]) == (200, "r")
 
 
+def test_plugin_adapter_can_post_to_its_configured_endpoint():
+    endpoint = "https://api.example/generate"
+
+    class ExactEndpointAdapter:
+        def __init__(self, connection, transport):
+            self.connection = connection
+            self.transport = transport
+
+        async def generate(self, request, context):
+            await self.transport.post_json(
+                self.connection.base_url,
+                headers={},
+                payload={"prompt": request.messages[0].text},
+                timeout_seconds=context.timeout_seconds,
+            )
+            return CanonicalTextResult(text="answer", termination="completed")
+
+    descriptor = replace(
+        chat_completions.COMPATIBLE_FACTORY.descriptor,
+        adapter_id="vendor.generation",
+        default_base_url=endpoint,
+    )
+    factory = BuiltinAdapterFactory(descriptor, ExactEndpointAdapter)
+    transport = RecordingTransport(_reply({}))
+    port = LLMAdapterRegistry(plugins={"vendor": [factory]}).create(
+        descriptor.adapter_id,
+        base_url=None,
+        config={},
+        credential={},
+        model=REQUEST.model,
+        capabilities=LLMModelCapabilities(),
+        transport=transport,
+    )
+
+    assert asyncio.run(port.generate(REQUEST, ExecutionContext(5))).text == "answer"
+    assert [call["url"] for call in transport.calls] == [endpoint]
+
+
+def test_error_response_keeps_status_and_retry_metadata_on_decoding_failure():
+    def unavailable(_request):
+        return httpx.Response(
+            503,
+            headers={
+                "content-encoding": "gzip",
+                "retry-after": "4",
+                "x-request-id": "upstream-request",
+            },
+            stream=httpx.ByteStream(b"invalid gzip"),
+        )
+
+    port = _builtin_registry().create(
+        "builtin.openai.chat_completions",
+        base_url=None,
+        config={},
+        credential={"api_key": KEY},
+        model=REQUEST.model,
+        capabilities=LLMModelCapabilities(),
+        transport=HttpxLLMTransport(transport=httpx.MockTransport(unavailable)),
+    )
+
+    with pytest.raises(LLMAdapterError) as failure:
+        asyncio.run(port.generate(REQUEST, ExecutionContext(5)))
+
+    error = failure.value
+    assert (error.code, error.status_code, error.delivery) == (
+        "provider_unavailable",
+        503,
+        "sent",
+    )
+    assert error.retry_after_seconds == 4
+    assert error.provider_request_id == "upstream-request"
+
+
 def test_ask_service_composes_from_evidence_when_provider_is_set():
     result_id = uuid4()
     search_service = FakeSearchService(
@@ -882,7 +955,7 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
 @pytest.mark.parametrize(
     ("provider", "warning"),
     [
-        (lambda: ErrorProvider(503, "provider_unavailable"), "llm_composer_failed"),
+        (lambda: ErrorProvider(503, "provider_unavailable"), "llm_composer_retryable"),
         (
             lambda: ErrorProvider(401, "authentication_failed"),
             "llm_provider_unavailable",

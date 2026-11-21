@@ -55,9 +55,21 @@ class HttpxLLMTransport:
             follow_redirects=False,
         )
         try:
-            response = await client.post(url, headers=dict(headers), json=dict(payload))
+            request = client.build_request(
+                "POST", url, headers=dict(headers), json=dict(payload)
+            )
+            response = await client.send(request, stream=True)
+            try:
+                body = await response.aread()
+            except httpx.DecodingError:
+                # The status and headers still describe the reply when its
+                # body is unreadable.
+                body = b""
+            finally:
+                with contextlib.suppress(httpx.HTTPError):
+                    await response.aclose()
         except httpx.DecodingError:
-            # The provider answered; its body could not be decoded.
+            # An injected transport can fail before handing over a response.
             raise LLMAdapterError("invalid_response", delivery="sent") from None
         except httpx.RequestError as exc:
             raise LLMAdapterError(
@@ -74,5 +86,5 @@ class HttpxLLMTransport:
         return TransportResponse(
             status_code=response.status_code,
             headers=response.headers,
-            body=response.content,
+            body=body,
         )

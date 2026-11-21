@@ -121,13 +121,15 @@ def _usage(usage: Mapping[str, Any]) -> TokenUsage:
     )
 
 
+# The contract and usage-tier spend limits arrive as a 429 rate_limit_error;
+# waiting does not lift them.
+_SPEND_LIMIT_ERROR_CODES = frozenset(
+    {"contract_spend_limit_reached", "enforced_spend_limit_reached"}
+)
+
+
 def _refine_error(error: Mapping[str, Any]) -> LLMErrorCode | None:
-    # The tier spend cap arrives as a 429 rate_limit_error; waiting does not
-    # lift it.
-    if (
-        mapping(error.get("details")).get("error_code")
-        == "enforced_spend_limit_reached"
-    ):
+    if mapping(error.get("details")).get("error_code") in _SPEND_LIMIT_ERROR_CODES:
         return "quota_exhausted"
     return None
 

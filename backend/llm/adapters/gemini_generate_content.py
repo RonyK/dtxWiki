@@ -34,6 +34,13 @@ from backend.spi.llm import (
 # The model is a URL path segment; anything else could address another method.
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
+# Gemini also uses RESOURCE_EXHAUSTED for temporary limits. Monthly caps are
+# identified by the first sentence of the provider's error message.
+_MONTHLY_SPENDING_CAP_MESSAGES = (
+    "Your billing account has exceeded its monthly spending cap.",
+    "Your project has exceeded its monthly spending cap.",
+)
+
 _FINISH_TERMINATIONS: Mapping[str, Termination] = {
     "STOP": "completed",
     "MAX_TOKENS": "truncated",
@@ -163,6 +170,12 @@ def _refine_error(error: Mapping[str, Any]) -> LLMErrorCode | None:
         for detail in sequence(error.get("details"))
     ):
         return "authentication_failed"
+    if (
+        error.get("code") == 429
+        and error.get("status") == "RESOURCE_EXHAUSTED"
+        and text_of(error.get("message")).startswith(_MONTHLY_SPENDING_CAP_MESSAGES)
+    ):
+        return "quota_exhausted"
     return None
 
 

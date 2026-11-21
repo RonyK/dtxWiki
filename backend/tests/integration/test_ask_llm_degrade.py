@@ -23,7 +23,7 @@ from backend.llm.legacy import resolve_llm_provider
 from backend.llm.registry import resolve_embedding_provider, resolve_reranker
 from backend.models.workspace import Workspace
 from backend.services.ask_service import (
-    LLM_COMPOSER_FAILED_WARNING,
+    LLM_COMPOSER_RETRYABLE_WARNING,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
 )
 from backend.tests.conftest import (
@@ -236,7 +236,7 @@ def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
 def test_an_unexpected_composer_exception_does_not_promise_a_retry(
     session_factory, page_service
 ):
-    """`llm_composer_failed` tells the user to try again later.
+    """`llm_composer_retryable` tells the user to try again later.
 
     That fits an upstream timeout or overload and never a bug in our own
     composer, so the two arms must not emit the same code — otherwise the only
@@ -285,7 +285,7 @@ def test_an_unexpected_composer_exception_does_not_promise_a_retry(
         )
 
     assert LLM_PROVIDER_UNAVAILABLE_WARNING in warnings
-    assert LLM_COMPOSER_FAILED_WARNING not in warnings
+    assert LLM_COMPOSER_RETRYABLE_WARNING not in warnings
 
 
 def test_a_broken_embedding_config_disables_semantic_indexing_instead_of_the_job(

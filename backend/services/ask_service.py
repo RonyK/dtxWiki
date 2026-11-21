@@ -82,11 +82,10 @@ ASK_FORWARDABLE_WARNINGS = frozenset(
 )
 # Codes Ask raises about its OWN answer pipeline rather than about a search
 # lane. They travel back on the same list so they reach the turn unfiltered.
-# The answer-model codes say what the reader can do: ask an administrator
-# (provider unavailable), try again later (composer failed), or nothing, since
-# the model's own reply was unusable (incomplete) or declined (refused).
+# The answer-model warnings tell the reader when to contact an administrator,
+# when to try again, and when the model returned an unusable or declined reply.
 LLM_PROVIDER_UNAVAILABLE_WARNING = "llm_provider_unavailable"
-LLM_COMPOSER_FAILED_WARNING = "llm_composer_failed"
+LLM_COMPOSER_RETRYABLE_WARNING = "llm_composer_retryable"
 LLM_ANSWER_INCOMPLETE_WARNING = "llm_answer_incomplete"
 LLM_ANSWER_REFUSED_WARNING = "llm_answer_refused"
 # The workspace asked for a retrieval mode this deployment cannot serve. Already
@@ -95,7 +94,7 @@ UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING = "unsupported_retrieval_mode_fallba
 ASK_SELF_WARNINGS = frozenset(
     {
         LLM_PROVIDER_UNAVAILABLE_WARNING,
-        LLM_COMPOSER_FAILED_WARNING,
+        LLM_COMPOSER_RETRYABLE_WARNING,
         LLM_ANSWER_INCOMPLETE_WARNING,
         LLM_ANSWER_REFUSED_WARNING,
         UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING,
@@ -113,10 +112,10 @@ _TERMINATION_WARNINGS: Mapping[str, str] = MappingProxyType(
 # administrator (credentials, permissions, model, quota, request shape).
 _ERROR_WARNINGS: Mapping[str, str] = MappingProxyType(
     {
-        "rate_limited": LLM_COMPOSER_FAILED_WARNING,
-        "provider_unavailable": LLM_COMPOSER_FAILED_WARNING,
-        "timeout": LLM_COMPOSER_FAILED_WARNING,
-        "network_error": LLM_COMPOSER_FAILED_WARNING,
+        "rate_limited": LLM_COMPOSER_RETRYABLE_WARNING,
+        "provider_unavailable": LLM_COMPOSER_RETRYABLE_WARNING,
+        "timeout": LLM_COMPOSER_RETRYABLE_WARNING,
+        "network_error": LLM_COMPOSER_RETRYABLE_WARNING,
         "invalid_response": LLM_ANSWER_INCOMPLETE_WARNING,
     }
 )
@@ -694,10 +693,8 @@ class AskService:
                     _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING),
                 ]
             except Exception:
-                # Not LLM_COMPOSER_FAILED_WARNING: that one suggests trying
-                # again, which helps an upstream hiccup and never a bug in our
-                # own composer. An unexpected exception here is the server's
-                # problem, so say the thing that is actionable — ask an admin.
+                # Unexpected composer errors need an administrator to inspect
+                # the server log.
                 logger.warning(
                     "Ask composer failed unexpectedly; using deterministic pack",
                     exc_info=True,

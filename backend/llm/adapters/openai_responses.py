@@ -83,6 +83,12 @@ class OpenAIResponsesAdapter:
                 provider_request_id=reply.request_id,
             )
         items = [mapping(item) for item in sequence(body.get("output"))]
+        if any(not isinstance(item.get("type"), str) for item in items):
+            raise LLMAdapterError(
+                "invalid_response",
+                delivery="sent",
+                provider_request_id=reply.request_id,
+            )
         parts = [
             mapping(part)
             for item in items
