@@ -359,6 +359,7 @@
     "switch": "보는 버전 바꾸기",
     "draft": "초안",
     "published": "게시본",
+    "earlier": "지난 버전",
     "readersSee": "독자가 보는 버전",
     "reviewWaiting": "리뷰 대기",
     "reviewWaitingCount_one": "리뷰 대기 {{count}}",
@@ -453,6 +454,7 @@
     "regionChanged": "두 쪽이 같은 곳을 다르게 바꿨습니다",
     "lineCounts": "{{theirs}} {{theirsCount}}줄 / {{ours}} {{oursCount}}줄",
     "placeLine": "{{line}}번째 줄",
+    "placeFrontmatter": "문서 머리말",
     "cardLabel": "겹친 곳 {{number}} · {{place}}",
     "outcome": {
       "both": "양쪽 모두",
@@ -478,6 +480,7 @@
     "editLabel": "{{place}} 결과 편집",
     "editHint": "이 겹친 곳의 결과만 고칩니다 · Markdown",
     "editFieldHint": "이 겹친 곳의 결과만 고칩니다",
+    "frontmatterDelimiter": "머리말에는 구분선(--- 또는 ...)만 있는 줄을 넣을 수 없습니다.",
     "fold_one": "변경 없는 {{count}}줄 · 펼치기",
     "fold_other": "변경 없는 {{count}}줄 · 펼치기",
     "autoMerged": "자동 병합 · {{side}}의 변경",

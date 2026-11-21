@@ -35,9 +35,10 @@ import { PAGE_TYPE_OPTIONS } from "./pageFrontmatter";
 export type ContextMergeDialogKind = "publish" | "approve" | "bring_in" | "save";
 
 type Method = ContextMergeMethod | "custom";
-type RegionItem = Extract<ContextMergeItem, { kind: "region" }>;
+type BodyItem = Extract<ContextMergeItem, { part: "body" }>;
 type FieldItem = Extract<ContextMergeItem, { kind: "field" }>;
-type Editing = { key: string; value: string | null };
+/** `newline`: the result being edited ended its line, and the edit keeps that. */
+type Editing = { key: string; value: string | null; newline: boolean };
 
 /** Lines shown around a place or an automatic change when unchanged lines fold. */
 const CONTEXT_LINES = 2;
@@ -150,7 +151,9 @@ export function ContextMergeDialog({
   const placeOf = (item: ContextMergeItem) => (
     item.kind === "field"
       ? t(`merge.fields.${item.field}`)
-      : item.headings.slice(-2).join(" › ") || t("merge.placeLine", { line: item.startLine - frontmatterLines })
+      : item.part === "frontmatter"
+        ? t("merge.placeFrontmatter")
+        : item.headings.slice(-2).join(" › ") || t("merge.placeLine", { line: item.startLine - frontmatterLines })
   );
   const outcomeShort = (outcome: ContextMergeOutcome) => (
     outcome === "both" ? t("merge.outcome.both") : outcome === "edit" ? t("merge.outcome.edit") : sideShort(outcome)
@@ -178,15 +181,17 @@ export function ContextMergeDialog({
 
   function startEdit(item: ContextMergeItem) {
     setCurrentKey(item.key);
-    const value = item.kind === "region"
-      ? regionResult(preview, item, choiceOf(item), baseMethod).replace(/\n$/, "")
-      : fieldResult(preview, item.field, choiceOf(item), baseMethod);
-    setEditing({ key: item.key, value });
+    if (item.kind === "region") {
+      const current = regionResult(preview, item, choiceOf(item), baseMethod);
+      setEditing({ key: item.key, value: current.replace(/\n$/, ""), newline: current.endsWith("\n") });
+    } else {
+      setEditing({ key: item.key, value: fieldResult(preview, item.field, choiceOf(item), baseMethod), newline: false });
+    }
   }
 
   function finishEdit(item: ContextMergeItem) {
     if (!editing) return;
-    decide(item, { source: "edit", value: editing.value });
+    decide(item, { source: "edit", value: editing.value, newline: editing.newline });
     setEditing(null);
   }
 
@@ -255,7 +260,7 @@ export function ContextMergeDialog({
     methodName,
     onPick: (side: ContextMergeSideKey) => pick(item, side),
     onEdit: () => startEdit(item),
-    onEditChange: (value: string | null) => setEditing({ key: item.key, value }),
+    onEditChange: (value: string | null) => setEditing((current) => (current ? { ...current, value } : current)),
     onEditCancel: () => setEditing(null),
     onEditDone: () => finishEdit(item),
     onCompare: () => setCompareKey(item.key),
@@ -384,7 +389,8 @@ export function ContextMergeDialog({
         </div>
         <div className="context-merge-places">
           {items.length === 0 ? <p className="context-merge-hint">{t("merge.noPlaces")}</p> : null}
-          {items.filter((item): item is FieldItem => item.kind === "field").map((item) => <MergeCard key={item.key} {...cardProps(item)} />)}
+          {/* The frontmatter first, as the document has it: properties, then its other lines. */}
+          {items.filter((item) => item.kind === "field" || item.part === "frontmatter").map((item) => <MergeCard key={item.key} {...cardProps(item)} />)}
           {document.blocks.map((block) => (
             block.kind === "card"
               ? <MergeCard key={block.item.key} {...cardProps(block.item)} />
@@ -501,8 +507,8 @@ function MergeCard(props: MergeCardProps) {
   const { t } = useTranslation("context");
   const { item, number, place, current, choice, outcome, method, baseMethod, preview, editing, blocked, labels, shorts, metas, expanded = false } = props;
   const [stacked, setStacked] = useState(false);
-  const theirsText = item.kind === "region" ? item.conflict.theirs : "";
-  const oursText = item.kind === "region" ? item.conflict.ours : "";
+  const theirsText = item.kind === "region" ? item.theirs : "";
+  const oursText = item.kind === "region" ? item.ours : "";
   const lineCount = (text: string) => text.replace(/\n$/, "").split("\n").length;
   const large = item.kind === "region" && Math.max(lineCount(theirsText), lineCount(oursText)) > LARGE_REGION_LINES;
   const words = useMemo(() => (item.kind === "region" ? wordChanges(theirsText, oursText) : null), [item.kind, theirsText, oursText]);
@@ -603,6 +609,12 @@ function fieldValueOf(preview: ContextMergePreview, field: ContextMergeMetadataF
 function ResultPane(props: MergeCardProps & { hint: string | null; label: string; resultText: string | null }) {
   const { t } = useTranslation("context");
   const { item, editing, blocked, hint, label, resultText } = props;
+  // A delimiter line would end the front matter there and move the rest into the body.
+  const delimiterInFrontmatter = Boolean(
+    editing && item.kind === "region" && item.part === "frontmatter"
+      // Trimmed as the server trims it (Python's str.strip: Unicode spaces, NEL, separators).
+      && (editing.value ?? "").split("\n").some((line) => /^[\s\u0085\u001c-\u001f]*(---|\.\.\.)[\s\u0085\u001c-\u001f]*$/.test(line)),
+  );
   return (
     <div className="context-merge-result">
       <div className="context-merge-result-head">
@@ -614,7 +626,7 @@ function ResultPane(props: MergeCardProps & { hint: string | null; label: string
             <button className="icon-button text-button" onClick={props.onEditCancel} type="button">{t("merge.editCancel")}</button>
             <button
               className="icon-button primary"
-              disabled={item.kind === "field" && item.field === "title" && !editing.value?.trim()}
+              disabled={(item.kind === "field" && item.field === "title" && !editing.value?.trim()) || delimiterInFrontmatter}
               onClick={props.onEditDone}
               type="button"
             >
@@ -630,7 +642,9 @@ function ResultPane(props: MergeCardProps & { hint: string | null; label: string
       {editing ? (
         <>
           <ResultEditor {...props} editing={editing} />
-          <p className="context-merge-hint">{item.kind === "region" ? t("merge.editHint") : t("merge.editFieldHint")}</p>
+          {delimiterInFrontmatter
+            ? <p className="context-merge-hint is-error" role="alert">{t("merge.frontmatterDelimiter")}</p>
+            : <p className="context-merge-hint">{item.kind === "region" ? t("merge.editHint") : t("merge.editFieldHint")}</p>}
         </>
       ) : item.kind === "region" ? (
         <pre className="context-merge-result-text">{resultText || " "}</pre>
@@ -772,7 +786,7 @@ function FieldValue({ field, value, workspaceId }: { field: ContextMergeMetadata
 type DocumentLine = { line: number; text: string; added: boolean; removedBefore: number };
 type DocumentBlock =
   | { kind: "lines"; key: string; lines: DocumentLine[]; removedAtEnd: number; beforeCard: boolean; afterCard: boolean }
-  | { kind: "card"; item: RegionItem };
+  | { kind: "card"; item: BodyItem };
 
 /**
  * The body in order: unchanged and automatically merged lines between the
@@ -786,7 +800,7 @@ function buildDocument(preview: ContextMergePreview, items: ContextMergeItem[], 
   const all = text.split("\n");
   if (all[all.length - 1] === "") all.pop();
   const start = frontmatterExtent(text).lines;
-  const regions = items.filter((item): item is RegionItem => item.kind === "region").sort((left, right) => left.startLine - right.startLine);
+  const regions = items.filter((item): item is BodyItem => item.kind === "region" && item.part === "body").sort((left, right) => left.startLine - right.startLine);
   let changes: ReturnType<typeof lineChanges> = null;
   if (ours !== null) {
     const from = ours.split("\n");

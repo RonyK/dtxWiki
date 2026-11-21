@@ -359,6 +359,7 @@
     "switch": "Switch the version shown",
     "draft": "Draft",
     "published": "Published",
+    "earlier": "Earlier version",
     "readersSee": "What readers see",
     "reviewWaiting": "Waiting for review",
     "reviewWaitingCount_one": "{{count}} waiting for review",
@@ -453,6 +454,7 @@
     "regionChanged": "Both sides changed the same place differently",
     "lineCounts": "{{theirs}} {{theirsCount}} lines / {{ours}} {{oursCount}} lines",
     "placeLine": "Line {{line}}",
+    "placeFrontmatter": "Front matter",
     "cardLabel": "Overlapping place {{number}} · {{place}}",
     "outcome": {
       "both": "Both",
@@ -478,6 +480,7 @@
     "editLabel": "Edit the result of {{place}}",
     "editHint": "Changes only this place's result · Markdown",
     "editFieldHint": "Changes only this place's result",
+    "frontmatterDelimiter": "Front matter cannot contain a line that is only a delimiter (--- or ...).",
     "fold_one": "{{count}} unchanged line · Expand",
     "fold_other": "{{count}} unchanged lines · Expand",
     "autoMerged": "Merged automatically · {{side}}'s change",

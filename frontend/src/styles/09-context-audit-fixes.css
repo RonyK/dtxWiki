@@ -1092,6 +1092,10 @@
   overflow-wrap: anywhere;
 }
 
+.context-merge-hint.is-error {
+  color: var(--danger-strong);
+}
+
 .context-merge-switched {
   padding: 8px 12px;
   border: 1px solid #c4b5fd;
@@ -1855,6 +1859,10 @@ textarea.context-merge-editor {
 
 .context-version-switch-label .is-published {
   color: var(--ok-strong);
+}
+
+.context-version-switch-label .is-earlier {
+  color: var(--ink-muted);
 }
 
 .context-version-sub {

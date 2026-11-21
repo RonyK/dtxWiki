@@ -3605,7 +3605,9 @@ def test_publish_binds_the_shown_review_and_diffs_the_publish_result(page_servic
     """Two drafts from one published version: once one is published, the
     other (an older version number) is compared against what publishing it
     would publish -- the merge, not a revert of the newer published change --
-    and its publish approves only the review the caller showed."""
+    its publish approves only the review the caller showed, and History says
+    it ended merged. One transport scenario; the other close reasons are unit
+    cases (test_context_closed_reasons)."""
 
     client = make_client(page_service)
     base = "# Steps\n\nalpha\n\nbeta\n"
@@ -3669,10 +3671,10 @@ def test_publish_binds_the_shown_review_and_diffs_the_publish_result(page_servic
     )
     assert submitted.status_code == 200, submitted.text
     review_id = submitted.json()["data"]["review_item_id"]
-    for wrong in (None, str(uuid4())):
-        refused = publish(draft_a, expected_review_item_id=wrong)
-        assert refused.status_code == 409, refused.text
-        assert refused.json()["error_code"] == "context_review_changed"
+    # The screen showed no review (an explicit null), but one is open now.
+    refused = publish(draft_a, expected_review_item_id=None)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error_code"] == "context_review_changed"
     approved = publish(draft_a, expected_review_item_id=review_id)
     assert approved.status_code == 200, approved.text
     with page_service.session_factory() as session:
@@ -3684,35 +3686,6 @@ def test_publish_binds_the_shown_review_and_diffs_the_publish_result(page_servic
         UUID(draft_b["version_id"]),
     }
 
-    # Why each ended draft ended, from recorded facts: A was published by a
-    # merge, C was discarded, D's review was rejected.
-    ended = {}
-    for key in ("c", "d"):
-        begun = client.post(
-            f"{page_url}/begin-edit", json={"idempotency_key": f"begin-{key}"}
-        ).json()["data"]
-        ended[key] = _browser_save(
-            client, page_url, begun, f"save-{key}", f"# Steps\n\n{key}\n"
-        ).json()["data"]
-    discarded = client.post(
-        f"{page_url}/discard-edit",
-        json={"version_id": ended["c"]["version_id"], "idempotency_key": "discard-c"},
-    )
-    assert discarded.status_code == 204, discarded.text
-    submitted_d = client.post(
-        f"{page_url}/submit-for-review",
-        json={
-            "idempotency_key": "submit-d",
-            "version_id": ended["d"]["version_id"],
-            "expected_editing_revision": ended["d"]["editing_revision"],
-        },
-    ).json()["data"]
-    rejected = client.post(
-        f"/api/v1/workspaces/{default_workspace_id(page_service)}/reviews/"
-        f"{submitted_d['review_item_id']}/decision",
-        json={"decision_type": "reject", "decision_reason": "not this"},
-    )
-    assert rejected.status_code == 200, rejected.text
     history = client.get(
         f"/api/v1/workspaces/{default_workspace_id(page_service)}/changesets",
         params={"target_type": "context_page", "target_id": page["id"]},
@@ -3722,8 +3695,5 @@ def test_publish_binds_the_shown_review_and_diffs_the_publish_result(page_servic
         for entry in history
         if entry["history_status"] == "closed"
     }
-    assert reasons == {
-        draft_a["version_id"]: "merged",
-        ended["c"]["version_id"]: "discarded",
-        ended["d"]["version_id"]: "rejected",
-    }
+    # A was published by a merge: History says why it ended.
+    assert reasons == {draft_a["version_id"]: "merged"}

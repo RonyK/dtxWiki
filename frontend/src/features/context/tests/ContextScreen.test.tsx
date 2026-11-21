@@ -950,6 +950,43 @@ describe("ContextScreen", () => {
     expect(screen.getByText("Published body")).toBeInTheDocument();
   });
 
+  it("names an earlier or closed version as History does, not as the version readers see", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const pageUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
+    const base = (await (await originalFetch(pageUrl, undefined)).json()).data;
+    const writing = {
+      version_id: "writing-1", version_status: "draft", last_saved_at: "2026-05-11T01:00:00Z",
+      author: { actor_kind: "human", actor_id: "author-1", display_name: "Draft Author" },
+      is_editing: true, review: null, is_behind: false, is_mine: false, state: "writing",
+    };
+    const openDrafts = { total: 1, items: [writing], next_cursor: null };
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === `${new URL(pageUrl).pathname}/drafts`) return jsonResponse({ data: openDrafts });
+      if (url.pathname === new URL(pageUrl).pathname) {
+        // Another draft is open while a rejected draft is on screen.
+        return jsonResponse({ data: {
+          ...base, open_drafts: openDrafts, draft: null, version_id: "rejected-1", version_status: "closed",
+          history_status: "closed", closed_reason: "rejected", is_published_head: false, body_md: "Rejected body",
+        } });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?version=rejected-1`]}>
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Rejected body");
+    const switcher = screen.getByRole("button", { name: "Switch the version shown" });
+    expect(switcher).toHaveTextContent(/Rejected/);
+    expect(switcher).not.toHaveTextContent(/Published/);
+    await userEvent.click(switcher);
+    expect(await screen.findByRole("button", { name: /What readers see/ })).not.toHaveAttribute("aria-current");
+  });
+
   it("presents the reader-visible version as one described action with a decorative arrow", async () => {
     await renderDecisionLog();
     await userEvent.click(

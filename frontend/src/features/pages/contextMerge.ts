@@ -10,7 +10,6 @@ export type { ContextMergeCandidate, ContextMergePreview };
 export type ContextMergeChoice = ContextMergeChoiceValue;
 export type ContextMergeSide = components["schemas"]["ContextMergeSide"];
 export type ContextMergeMetadataField = "title" | "page_type" | "placement_parent_node_id";
-export type ContextMergeConflictRegion = ContextMergeCandidate["conflicts"][number];
 /** The draft (or the person's own save) is "ours"; what it merges with is "theirs". */
 export type ContextMergeSideKey = "ours" | "theirs";
 
@@ -50,7 +49,7 @@ export function frontmatterExtent(text: string): { lines: number; length: number
  * cards state. A virtual-base conflict can need a choice without a place of
  * its own, so a conflict is never zero places.
  */
-export function mergeOverlapCount(preview: Pick<ContextMergePreview, "keep_both" | "metadata_conflicts">): number {
+export function mergeOverlapCount(preview: Pick<ContextMergePreview, "keep_both" | "latest" | "metadata_conflicts">): number {
   return Math.max(1, mergeItems(preview).length);
 }
 
@@ -103,40 +102,182 @@ export function resolvedMergeResult(resolution: ContextMergeResolution) {
 }
 
 /**
+ * Frontmatter keys the server writes itself when it prepares a body
+ * (`upsert_page_frontmatter`, PAGE_METADATA_FIELDS): title and type are
+ * property items, tags and aliases merge as sets (`merge_metadata`), the slug
+ * is fixed. Every other frontmatter line (icon, anything else) is kept as
+ * written, so an overlap there is the person's to decide.
+ */
+const SERVER_FRONTMATTER_KEYS = new Set(["title", "slug", "type", "tags", "aliases"]);
+
+/** A frontmatter `key: value` line's key, as the server reads it (`_frontmatter_key_value`). */
+function frontmatterKey(line: string): string | null {
+  if (/^[ \t]/.test(line) || !line.includes(":")) return null;
+  const key = line.slice(0, line.indexOf(":")).trim();
+  return /^[A-Za-z0-9_-]+$/.test(key) && /[A-Za-z0-9]/.test(key) ? key : null;
+}
+
+/**
+ * Which frontmatter lines the server writes itself, by its own rule
+ * (`_managed_frontmatter_indexes`): a server key's line and the blank,
+ * indented or "- " lines continuing it. Always applied to a whole front
+ * matter: whether a line continues a server key depends on every line above.
+ */
+function serverLines(lines: string[]): boolean[] {
+  let block = false;
+  return lines.map((line) => {
+    const key = frontmatterKey(line);
+    if (key !== null) block = SERVER_FRONTMATTER_KEYS.has(key);
+    else if (!(block && (!line.trim() || /^[ \t]/.test(line) || line.trimStart().startsWith("- ")))) block = false;
+    return block;
+  });
+}
+
+/** The lines of a whole front matter the server keeps as written. */
+function keptLines(lines: string[]): string[] {
+  const owned = serverLines(lines);
+  return lines.filter((_, at) => !owned[at]);
+}
+
+type RegionPlace = {
+  key: string;
+  kind: "region";
+  /** Each side's text at this place. */
+  ours: string;
+  theirs: string;
+};
+
+/**
  * One place the person decides. Conflicted properties come first, as the
- * frontmatter does; then each overlapping region of the body in order. A
- * region inside the frontmatter is not a place of its own: its title and type
- * lines are the property items, and tags and aliases merge as sets on the
- * server (`merge_metadata`), so they never conflict.
+ * frontmatter does; then, when the sides differ in the frontmatter lines the
+ * server keeps as written, one "front matter" place for those lines; then
+ * each overlapping region of the body in order. A region that begins in the
+ * frontmatter and runs on into the body leaves its body part a place.
  */
 export type ContextMergeItem =
   | { key: string; kind: "field"; field: ContextMergeMetadataField }
-  | {
-    key: string;
-    kind: "region";
-    conflict: ContextMergeConflictRegion;
-    /** 1-based lines of the region in the keep-both text. */
+  | (RegionPlace & {
+    part: "frontmatter";
+    /** The kept lines of the keep-both front matter. */
+    both: string;
+  })
+  | (RegionPlace & {
+    part: "body";
+    /** String ranges of this place in the keep-both and latest texts. */
+    keepBoth: [number, number];
+    latest: [number, number] | null;
+    /** 1-based lines of the place in the keep-both text. */
     startLine: number;
     endLine: number;
-    /** The headings above the region, outermost first. */
+    /** The headings above the place, outermost first. */
     headings: string[];
-  };
+  });
 
-export function mergeItems(preview: Pick<ContextMergePreview, "keep_both" | "metadata_conflicts">): ContextMergeItem[] {
+export type ContextMergeRegionItem = Extract<ContextMergeItem, { kind: "region" }>;
+
+export function mergeItems(preview: Pick<ContextMergePreview, "keep_both" | "latest" | "metadata_conflicts">): ContextMergeItem[] {
   const items: ContextMergeItem[] = conflictedMetadataFields(preview).map((field) => ({ key: `field:${field}`, kind: "field", field }));
   const candidate = preview.keep_both;
   if (!candidate) return items;
   const text = mergeSourceText(candidate);
   const frontmatter = frontmatterExtent(text);
+  const latestText = preview.latest ? mergeSourceText(preview.latest) : null;
+  const latestFrontmatter = latestText === null ? 0 : frontmatterExtent(latestText).length;
   const lines = text.split("\n");
+  const body: ContextMergeItem[] = [];
+  // The frontmatter part of each region: its keep-both lines and each side's.
+  const heads: Array<{ span: [number, number]; ours: string[]; theirs: string[] }> = [];
   candidate.conflicts.forEach((conflict, index) => {
-    const start = codePointOffsetToIndex(text, conflict.keep_both_start);
-    if (start < frontmatter.length) return;
+    const begin = codePointOffsetToIndex(text, conflict.keep_both_start);
     const end = codePointOffsetToIndex(text, conflict.keep_both_end);
+    const inFrontmatter = begin < frontmatter.length;
+    // A region at the very top holds the opening delimiter of a side that has one.
+    const ours = splitSide(conflict.ours, inFrontmatter, begin === 0);
+    const theirs = splitSide(conflict.theirs, inFrontmatter, begin === 0);
+    if (inFrontmatter) {
+      const [first, last] = lineSpan(text, begin, Math.min(end, frontmatter.length));
+      // Lines between the delimiters, 0-based.
+      const span: [number, number] = [Math.max(first - 1, 1), Math.min(last - 1, frontmatter.lines - 2)];
+      if (span[0] <= span[1]) heads.push({ span, ours: ours.head, theirs: theirs.head });
+    }
+    if (end <= frontmatter.length) return;
+    const start = inFrontmatter ? frontmatter.length : begin;
+    let latest: [number, number] | null = null;
+    if (latestText !== null) {
+      const latestEnd = codePointOffsetToIndex(latestText, conflict.latest_end);
+      latest = [Math.min(latestEnd, Math.max(latestFrontmatter, codePointOffsetToIndex(latestText, conflict.latest_start))), latestEnd];
+    }
     const [startLine, endLine] = lineSpan(text, start, end);
-    items.push({ key: `region:${index}`, kind: "region", conflict, startLine, endLine, headings: headingsAbove(lines, frontmatter.lines, startLine) });
+    body.push({
+      key: `region:${index}`,
+      kind: "region",
+      part: "body",
+      ours: ours.body,
+      theirs: theirs.body,
+      keepBoth: [start, end],
+      latest,
+      startLine,
+      endLine,
+      headings: headingsAbove(lines, frontmatter.lines, startLine),
+    });
   });
-  return items;
+  if (heads.length > 0) {
+    // Each side's whole front matter (the shared lines plus its own at every
+    // region), classified as a whole by the server's rule: what one side
+    // renamed decides whose continuation lines follow it.
+    // Which region (if any) each keep-both line belongs to, found once.
+    const headAt = new Int32Array(Math.max(frontmatter.lines, 1)).fill(-1);
+    heads.forEach((entry, at) => {
+      for (let index = entry.span[0]; index <= entry.span[1]; index += 1) if (headAt[index] < 0) headAt[index] = at;
+    });
+    const sideFrontmatter = (side: ContextMergeSideKey) => {
+      const out: string[] = [];
+      for (let index = 1; index < frontmatter.lines - 1; index += 1) {
+        const head = headAt[index] < 0 ? null : heads[headAt[index]];
+        if (!head) out.push(lines[index]);
+        else if (index === head.span[0]) for (const line of head[side]) out.push(line);
+      }
+      return out;
+    };
+    const keptOurs = keptLines(sideFrontmatter("ours"));
+    const keptTheirs = keptLines(sideFrontmatter("theirs"));
+    if (keptOurs.join("\n") !== keptTheirs.join("\n")) {
+      items.push({
+        key: "frontmatter",
+        kind: "region",
+        part: "frontmatter",
+        ours: asLines(keptOurs),
+        theirs: asLines(keptTheirs),
+        both: asLines(keptLines(lines.slice(1, Math.max(frontmatter.lines - 1, 1)))),
+      });
+    }
+  }
+  return [...items, ...body];
+}
+
+function asLines(lines: string[]): string {
+  return lines.length > 0 ? `${lines.join("\n")}\n` : "";
+}
+
+/**
+ * A side's text at a region, split at the line closing the frontmatter. A
+ * region beginning in the body is all body. One beginning at the very top
+ * starts with the side's opening delimiter, when it has a frontmatter at all.
+ */
+function splitSide(text: string, inFrontmatter: boolean, fromTop: boolean): { head: string[]; body: string } {
+  if (!inFrontmatter) return { head: [], body: text };
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  let from = 0;
+  if (fromTop) {
+    // Front matter opens with a delimiter line; a lone "---" is a thematic break.
+    if (!text.startsWith("---\n")) return { head: [], body: text };
+    from = 1;
+  }
+  const close = lines.indexOf("---", from);
+  if (close < 0) return { head: lines.slice(from), body: "" };
+  const rest = text.split("\n").slice(close + 1).join("\n");
+  return { head: lines.slice(from, close), body: rest };
 }
 
 /** 1-based inclusive lines of [start, end); an end after a newline belongs to the line before it. */
@@ -177,7 +318,8 @@ export type ContextMergeItemChoice =
   | { source: "method" }
   | { source: ContextMergeSideKey }
   | { source: "both" }
-  | { source: "edit"; value: string | null };
+  /** `newline`: the result the edit started from ended its line; the edit keeps that. */
+  | { source: "edit"; value: string | null; newline?: boolean };
 
 /** What a place resolves to: one side, both (a body region only), or the person's text. */
 export type ContextMergeOutcome = ContextMergeSideKey | "both" | "edit";
@@ -197,30 +339,28 @@ export function itemOutcome(
   return preview.latest_side;
 }
 
-function sliceOf(candidate: ContextMergeCandidate | null | undefined, start: number, end: number): string {
-  if (!candidate) return "";
-  const text = mergeSourceText(candidate);
-  return text.slice(codePointOffsetToIndex(text, start), codePointOffsetToIndex(text, end));
-}
-
-/** The text a body region contributes to the result. */
+/** The text a region place contributes to the result. */
 export function regionResult(
   preview: ContextMergePreview,
-  item: Extract<ContextMergeItem, { kind: "region" }>,
+  item: ContextMergeRegionItem,
   choice: ContextMergeItemChoice,
   method: ContextMergeMethod,
 ): string {
-  const { conflict } = item;
-  const both = sliceOf(preview.keep_both, conflict.keep_both_start, conflict.keep_both_end);
   if (choice.source === "edit") {
+    // The editor showed the result without its last line ending; put back
+    // exactly that one, so an unchanged edit is the result it started from.
     const value = choice.value ?? "";
-    // The region owns its closing newline; an edit keeps the line structure.
-    return value && both.endsWith("\n") && !value.endsWith("\n") ? `${value}\n` : value;
+    return choice.newline ? `${value}\n` : value;
   }
-  if (choice.source === "ours") return conflict.ours;
-  if (choice.source === "theirs") return conflict.theirs;
-  if (choice.source === "both" || method === "keep_both") return both;
-  return sliceOf(preview.latest, conflict.latest_start, conflict.latest_end);
+  if (choice.source === "ours") return item.ours;
+  if (choice.source === "theirs") return item.theirs;
+  if (item.part === "frontmatter") {
+    return choice.source === "both" || method === "keep_both" ? item.both : item[preview.latest_side];
+  }
+  const keepBoth = preview.keep_both ? mergeSourceText(preview.keep_both) : "";
+  const both = keepBoth.slice(item.keepBoth[0], item.keepBoth[1]);
+  if (choice.source === "both" || method === "keep_both" || !preview.latest || !item.latest) return both;
+  return mergeSourceText(preview.latest).slice(item.latest[0], item.latest[1]);
 }
 
 /** The value a conflicted property takes in the result. */
@@ -252,18 +392,29 @@ export function customMergeResolution(
   const candidate = preview.keep_both;
   if (!candidate) return null;
   const choiceOf = (item: ContextMergeItem) => choices[item.key] ?? { source: "method" as const };
-  let body = mergeSourceText(candidate);
+  const text = mergeSourceText(candidate);
+  const frontmatter = frontmatterExtent(text);
+  let body = text;
   const regions = items
-    .filter((item): item is Extract<ContextMergeItem, { kind: "region" }> => item.kind === "region")
-    .map((item) => ({
-      start: codePointOffsetToIndex(body, item.conflict.keep_both_start),
-      end: codePointOffsetToIndex(body, item.conflict.keep_both_end),
-      text: regionResult(preview, item, choiceOf(item), method),
-    }))
+    .filter((item): item is Extract<ContextMergeRegionItem, { part: "body" }> => item.kind === "region" && item.part === "body")
+    .map((item) => ({ start: item.keepBoth[0], end: item.keepBoth[1], text: regionResult(preview, item, choiceOf(item), method) }))
     .sort((left, right) => right.start - left.start);
   for (const region of regions) body = body.slice(0, region.start) + region.text + body.slice(region.end);
   const prepared = frontmatterExtent(candidate.body_md);
   let head = candidate.body_md.slice(0, prepared.length);
+  const headPlace = items.find((item): item is Extract<ContextMergeRegionItem, { part: "frontmatter" }> => item.kind === "region" && item.part === "frontmatter");
+  if (head && headPlace) {
+    // The server's own lines as it prepared them, then the kept lines the
+    // place answered (a typed server key is the server's to write, so dropped).
+    const answer = regionResult(preview, headPlace, choiceOf(headPlace), method).replace(/\n$/, "");
+    const preparedLines = head.split("\n").slice(0, prepared.lines - 1);
+    const preparedOwned = serverLines(preparedLines);
+    const out = ["---"];
+    preparedLines.forEach((line, at) => { if (at > 0 && preparedOwned[at]) out.push(line); });
+    if (answer) for (const line of keptLines(answer.split("\n"))) out.push(line);
+    out.push("---", "");
+    head = out.join("\n");
+  }
   const edit: ContextMergeMetadataEdit = {};
   for (const item of items) {
     if (item.kind !== "field") continue;
@@ -275,7 +426,8 @@ export function customMergeResolution(
     else if (item.field === "page_type" && value) edit.page_type = value as ContextMergeMetadataEdit["page_type"];
     else if (item.field === "title" && value) edit.title = value;
   }
-  if (head) body = head + body.slice(frontmatterExtent(body).length);
+  // Body places were replaced after the frontmatter, so its extent is unchanged.
+  if (head) body = head + body.slice(frontmatter.length);
   return { choice: "keep_both", candidate, bodyMd: body, pageMetadata: Object.keys(edit).length > 0 ? edit : null };
 }
 

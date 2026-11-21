@@ -29,6 +29,7 @@ import { StatusPill } from "../../shared/components/StatusPill";
 import { TREE_VERSION_PARAM } from "../../shared/components/treeRouteState";
 import { useMediaQuery } from "../../shared/hooks/useMediaQuery";
 import { isAbortError } from "../../shared/lib/abortError";
+import { contextHistoryPresentation } from "../../shared/lib/contextHistory";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { readReviewDraft, reviewDraftKey, writeReviewDraft } from "../../shared/lib/reviewDraftStorage";
 import { contextEditHref, workspacePath } from "../../shared/lib/workspaceRoutes";
@@ -83,6 +84,11 @@ export function ContextVersionBar({
   const draftVersionId = draft ? detail.version_info?.version_id ?? null : null;
   const publishedId = detail.current_published_version_id;
   const publishedNo = detail.published_version_info?.version_no ?? null;
+  // A version on screen that is neither an open draft nor the published head
+  // (an earlier snapshot, a closed draft) is named as History names it, never
+  // as the version readers see.
+  const viewed = detail.version_info ?? null;
+  const earlier = !draft && viewed && viewed.version_id !== publishedId ? viewed : null;
   // The open review of the draft on screen (the server scopes both fields to
   // the displayed version). Publishing approves exactly this review.
   const openReview = (() => {
@@ -125,7 +131,9 @@ export function ContextVersionBar({
     setDraftsError(false);
     return () => { generationRef.current += 1; };
   }, [detail.open_drafts]);
-  const shownView = draft ? draftVersionId : PUBLISHED_VIEW;
+  // An earlier version is a view of its own: switching to the published
+  // version from it must still move focus once that version is on screen.
+  const shownView = draft ? draftVersionId : earlier ? earlier.version_id : PUBLISHED_VIEW;
   useEffect(() => {
     if (!focusSwitcherFor || focusSwitcherFor !== shownView || !triggerRef.current) return;
     focusSwitcherFor = null;
@@ -463,6 +471,16 @@ export function ContextVersionBar({
                   <span>· {author}</span>
                   {viewedIsMine ? <span className="context-version-mine">{t("drafts.mine")}</span> : null}
                 </>
+              ) : earlier ? (
+                <>
+                  <strong className="is-earlier">
+                    {earlier.history_status
+                      ? t(contextHistoryPresentation(earlier.history_status, earlier.closed_reason).labelKey)
+                      : t("versionBar.earlier")}
+                  </strong>
+                  {/* The detail does not carry this version's number; its time names it. */}
+                  {earlier.created_at ? <span className="context-version-sub">{formatVersionTimestamp(earlier.created_at)}</span> : null}
+                </>
               ) : (
                 <>
                   <strong className="is-published">{t("versionBar.published")}</strong>
@@ -476,7 +494,7 @@ export function ContextVersionBar({
             <div className="context-version-menu" id={menuId}>
               {publishedId ? (
                 <button
-                  aria-current={!draft ? "true" : undefined}
+                  aria-current={!draft && !earlier ? "true" : undefined}
                   className="context-version-item"
                   onClick={() => selectVersion(null)}
                   type="button"
