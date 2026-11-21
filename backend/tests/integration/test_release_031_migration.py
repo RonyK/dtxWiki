@@ -24,7 +24,7 @@ from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
 from backend.context_versions.application import ContextVersionWriter
 from backend.context_versions.domain import ContentPayload
-from backend.migrations.revision_modules.unreleased._002398e0fcdc_capture import (
+from backend.migrations.revision_modules.v0_3._002398e0fcdc_capture import (
     capture as history_capture,
 )
 from backend.models import (

@@ -746,6 +746,30 @@ Release workflow는 PyPI·npm 게시 전 build job에서 태그 버전과 일치
 경고를 남기고 설치 안내와 CHANGELOG 링크만으로 본문을 만들며, 릴리스는 중단하지 않습니다.
 게시 단계에서 파일을 수정하거나 PR 목록을 다시 생성하지 않습니다.
 
+#### Changelog 작성 규칙
+
+독자는 업그레이드하는 운영자와 REST·MCP 클라이언트입니다. 관찰할 수 있는 동작과 필요한
+조치만 적고, 구현 방식은 적지 않습니다.
+
+- PR에서 `Unreleased`를 고칠 때는 생성기와 같은 형식으로 적습니다. 해당 종류의
+  `### Features`·`### Fixes` 등에 `- **scope**: PR 제목 ([#N](https://github.com/dtxSuite/dtxWiki/pull/N))`
+  항목을 두고, 보충 설명은 그 아래 두 칸 들여쓴 하위 목록으로 적습니다. 링크 없는 목록이나
+  새 소제목은 재생성할 때 사라집니다.
+- `### Important changes`에는 릴리스 전체에 해당하는 안내만 적습니다.
+  - DB schema: 새 migration의 revision ID와 앞선 head를 적고, 없으면 직전 릴리스의
+    schema를 그대로 쓴다고 적습니다.
+  - 업그레이드 경로·되돌리기 제약·필요한 백업을 적습니다.
+  - MCP tool contract: 바뀐 revision 번호, 직전 배포본의 revision, 클라이언트가 할 일을
+    적습니다.
+- 한 사실은 한 곳에만 적습니다. 업그레이드 조치는 `Important changes`에, 기능 설명은
+  해당 PR 항목 아래에 둡니다. 같은 revision의 MCP 변경은 한 항목으로 합칩니다.
+- 화면과 같은 용어(병합, 리뷰, 거절, 변경 요청, 게시)를 씁니다. 코드 식별자, API 필드,
+  명령, revision ID는 백틱으로 감쌉니다.
+- 버전을 확정한 뒤 PR이 더 들어오거나 릴리스 브랜치를 rebase하면 해당 버전 항목 전체를
+  다시 검토합니다. 특히 schema·MCP revision·업그레이드 경로 서술이 새 변경과 맞는지,
+  README·DEPLOYMENT.md의 같은 서술과 맞는지 확인합니다.
+- 배포된 버전의 항목은 고치지 않습니다.
+
 ### MCP tool contract revision
 
 클라이언트가 관찰할 수 있는 MCP tool 계약이 바뀐 릴리스는 직전 배포본의
@@ -836,11 +860,12 @@ head가 하나여야 합니다. 기존 DB 업그레이드는 고정된 core revi
 `efcbcf724889`의 이력을 보존하고, 새 설치는 아래의 직접 초기화 경로를 사용합니다.
 패키지 검증기는 각 그래프와 고정 파일의 해시를 함께 확인합니다.
 
-새 DB의 `upgrade head`는 `initialization/versions/v0_3/c3d2e4f601ab_initial_schema.py`
-하나로 v0.3.1 schema를 직접 생성하고 `c3d2e4f601ab`를 기록합니다. SQLite·PostgreSQL의 기준 DDL은
-`initialization/schema/`에 고정되어 있으며, 과거 table rebuild·backfill이나 현재 ORM
-metadata를 실행하지 않습니다. 비어 있음이 증명된 DB에서만 이 경로를 선택합니다.
-후속 schema 변경은 현재 head 뒤에 추가해 이 초기화 경로에서도 이어서 적용합니다.
+새 DB의 `upgrade head`는 `initialization/versions/v0_3/c3d2e4f601ab_initial_schema.py`로
+v0.3.1 schema를 직접 생성한 뒤 후속 revision `002398e0fcdc`를 적용합니다.
+SQLite·PostgreSQL의 기준 DDL은 `initialization/schema/`에 고정되어 있습니다.
+비어 있음이 증명된 DB에서만 이 경로를 선택하며, 직접 초기화에서는 과거 table
+rebuild·backfill이나 현재 ORM metadata를 실행하지 않습니다. 후속 schema 변경은
+현재 head 뒤에 추가해 초기화 경로에서도 이어서 적용합니다.
 
 기존 DB의 upgrade graph는 배포된 릴리스 경계 하나로만 이어집니다.
 
@@ -848,7 +873,7 @@ metadata를 실행하지 않습니다. 비어 있음이 증명된 DB에서만 �
 bd62193d5cf6 (0.0.1) → efcbcf724889 (0.1.1·0.1.2) → 19db79d3e622 (0.1.3)
   → eb86fdacb1bb (0.1.4) → 5b7e5c149279 (0.2.1·0.2.2)
   → 00ba02774c4a (0.2.3·0.2.4)
-  → c3d2e4f601ab (0.3.1)
+  → c3d2e4f601ab (0.3.1) → 002398e0fcdc (0.3.2)
 ```
 
 `versions/v0_1/eb86fdacb1bb_release_0_1_4.py`는 v0.1.4 태그의 파일과 같습니다.

@@ -1,6 +1,6 @@
 {
-  "description": "Frozen migration implementations through 0.3.1 and the direct v0.3.1 initialization. Released upgrades follow the published schema boundaries. An empty database starts at the frozen 0.3.1 schema and applies any later revisions. Extend the chain for new database changes and preserve the frozen files.",
-  "released_in": "0.3.1",
+  "description": "Frozen migration implementations through 0.3.2 and the direct v0.3.1 initialization. Released upgrades follow the published schema boundaries. An empty database starts at the frozen 0.3.1 schema and applies any later revisions. Extend the chain for new database changes and preserve the frozen files.",
+  "released_in": "0.3.2",
   "schema_origins": [
     "0.0.1",
     "0.1.1",
@@ -8,7 +8,8 @@
     "0.1.4",
     "0.2.1",
     "0.2.3",
-    "0.3.1"
+    "0.3.1",
+    "0.3.2"
   ],
   "sha256": {
     "revision_modules/__init__.py": "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6",
@@ -45,6 +46,8 @@
     "initialization/versions/v0_3/c3d2e4f601ab_initial_schema.py": "37127151eb5feb82f8bf4b91d76208dee45e6260524b2b9bf29bb80a46d411d0",
     "versions/v0_1/eb86fdacb1bb_release_0_1_4.py": "a639a8ce3a5b8678503f3d0bf7b493e394308869cc3274c0084cb3dbaf2b8557",
     "revision_modules/v0_3/__init__.py": "222e69501eea4aa437e0bd13de09ed6d7af13c41cbcf058f7b666b0eff109ddf",
+    "revision_modules/v0_3/_002398e0fcdc_capture/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "revision_modules/v0_3/_002398e0fcdc_capture/capture.py": "022b315ff17920bdd4b1142089683e7ceb25551d05a82cddcc12d7d7b59cae10",
     "revision_modules/v0_3/_c3d2e4f601ab_release_0_3_1/__init__.py": "680012cb282a4f0c0e8475795e04f2e4111a4c8b608597a82f506baf46e372d9",
     "revision_modules/v0_3/_c3d2e4f601ab_release_0_3_1/active_block_maps.py": "0d22f950079562390653f53a2247d9e6bf7189a00146942056e5ae38f938ea79",
     "revision_modules/v0_3/_c3d2e4f601ab_release_0_3_1/context_content_to_git.py": "b62d940d764174cbb7f8de85688b7126b1b70bbe4023cf4075bca938e309f890",
@@ -52,6 +55,7 @@
     "revision_modules/v0_3/_c3d2e4f601ab_release_0_3_1/context_git_bodies.py": "464478ec006b14b1a8cde7be7a7353eeb0a2282d52df080db847af16db24a7e5",
     "revision_modules/v0_3/_c3d2e4f601ab_release_0_3_1/document_identity.py": "c361b115f31a5aa6a0f85662dec3f4aeaaeb2e742a90b277e0bb8dedb55bffa0",
     "revision_modules/v0_3/_c3d2e4f601ab_release_0_3_1/schema.py": "cf41b3830b698f6758d4e99132486fabff828f291135f143c0c555df86542920",
+    "versions/v0_3/002398e0fcdc_preserve_context_history_parents.py": "f440c21c8bae31cc1114cace1ba3b31d131bd609fd3bd1132f75d0cce19504ef",
     "versions/v0_3/c3d2e4f601ab_release_0_3_1.py": "4f03b2801f261714a1578999c99c1744f5f0201ac2a41983cf5a5f054803a931"
   }
 }

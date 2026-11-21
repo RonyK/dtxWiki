@@ -353,6 +353,7 @@ def _check_alembic_payload(root: Path) -> list[str]:
             "0.2.1": {"group": "v0_2", "head": "5b7e5c149279"},
             "0.2.3": {"group": "v0_2", "head": "00ba02774c4a"},
             "0.3.1": {"group": "v0_3", "head": "c3d2e4f601ab"},
+            "0.3.2": {"group": "v0_3", "head": "002398e0fcdc"},
         }
         aliases = {
             "0001_initial_release": "bd62193d5cf6",
