@@ -1,5 +1,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
+from packaging.version import Version
+
 from backend.app import version as app_version
 from backend.app.settings import Settings
 
@@ -21,12 +23,10 @@ def test_package_version_falls_back_to_source_version(monkeypatch):
 
 
 def test_source_version_reads_pyproject_version():
-    # No release version is spelled out here, so a version bump never has to
-    # edit this test. The installed distribution's metadata was built from the
-    # same pyproject.toml, so a source reader that fell back to
-    # UNKNOWN_SOURCE_VERSION, or read the wrong key, disagrees with it.
-    assert app_version.source_version() == version(app_version.PACKAGE_NAME)
-    assert app_version.source_version() != app_version.UNKNOWN_SOURCE_VERSION
+    # Installed metadata uses PEP 440 spelling for the pyproject.toml version.
+    source_version = app_version.source_version()
+    assert source_version != app_version.UNKNOWN_SOURCE_VERSION
+    assert Version(source_version) == Version(version(app_version.PACKAGE_NAME))
 
 
 def test_settings_default_app_version_uses_package_version(monkeypatch):

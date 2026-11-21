@@ -22,7 +22,7 @@ def test_changelog_keeps_written_notes_from_draft_to_release(
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
-    # One history traversal covers squash titles, an ordinary merge PR, and a
+    # One history traversal covers squash titles, ordinary merge PRs, and a
     # release integration. Separate repositories would repeat the same mechanism.
     def git(*args):
         return changelog.git(tmp_path, *args)
@@ -37,7 +37,7 @@ def test_changelog_keeps_written_notes_from_draft_to_release(
     baseline = commit("chore(release): prepare 1.0.0")
     commit("feat(graph)!: retain positions (#12)")
     git("checkout", "-b", "feature")
-    commit("fix: internal implementation")
+    commit("fix!: internal implementation")
     git("checkout", "dev")
     git(
         "merge",
@@ -45,6 +45,18 @@ def test_changelog_keeps_written_notes_from_draft_to_release(
         "feature",
         "-m",
         "Merge pull request #13 from example/feature\n\nfix(mcp): preserve retries",
+    )
+    git("checkout", "-b", "api")
+    commit(
+        "feat(api): remove the legacy endpoint\n\nBREAKING CHANGE: use the new endpoint"
+    )
+    git("checkout", "dev")
+    git(
+        "merge",
+        "--no-ff",
+        "api",
+        "-m",
+        "Merge pull request #15 from example/api\n\nUpdate the API",
     )
     commit("fix(migrations): restore upgrades- #14")
     git("checkout", "-b", "release/1.0.1")
@@ -56,10 +68,12 @@ def test_changelog_keeps_written_notes_from_draft_to_release(
     generated = changelog.generate(baseline, root=tmp_path)
     assert generated.startswith("## Unreleased\n\n### Features\n")
     assert "**Breaking:** **graph**: retain positions ([#12]" in generated
-    assert "**mcp**: preserve retries ([#13]" in generated
-    assert "**migrations**: restore upgrades ([#14]" in generated
+    assert "**Breaking:** **mcp**: preserve retries ([#13]" in generated
+    assert "**Breaking:** Update the API ([#15]" in generated
+    assert "- **migrations**: restore upgrades ([#14]" in generated
     assert f"/commit/{fallback}" in generated
     assert "internal implementation" not in generated
+    assert "remove the legacy endpoint" not in generated
     assert "Merge " not in generated
     assert "prepare 1.0.1" not in generated
 

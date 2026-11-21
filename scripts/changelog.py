@@ -21,6 +21,7 @@ GROUPS = {
     "docs": "Documentation",
 }
 CONVENTIONAL = re.compile(r"^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$")
+BREAKING_CHANGE = re.compile(r"^BREAKING[ -]CHANGE:", re.MULTILINE)
 PR_SUFFIX = re.compile(r"\s*(?:\(#(\d+)\)|-?\s+#(\d+))$")
 MERGE_PR = re.compile(r"^Merge pull request #(\d+) from ")
 ENTRY_LINK = re.compile(r"^- .*\]\((\S+)\)\)$")
@@ -35,6 +36,12 @@ def git(root: Path, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=root, check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+def _is_breaking(conventional: re.Match[str] | None, body: str) -> bool:
+    return conventional is not None and bool(
+        conventional[3] or BREAKING_CHANGE.search(body)
+    )
 
 
 def generate(since: str, until: str = "HEAD", root: Path = ROOT) -> str:
@@ -54,6 +61,11 @@ def generate(since: str, until: str = "HEAD", root: Path = ROOT) -> str:
         for record in records.split("\x1e")
         if record.strip()
     ]
+    breaking_commits = {
+        sha
+        for sha, _, subject, body in commits
+        if _is_breaking(CONVENTIONAL.match(subject), body)
+    }
     grouped: dict[str, list[str]] = defaultdict(list)
     covered: set[str] = set()
     seen_prs: set[str] = set()
@@ -61,6 +73,7 @@ def generate(since: str, until: str = "HEAD", root: Path = ROOT) -> str:
         if sha in covered or RELEASE.search(subject) or RELEASE.search(body):
             continue
         pr = None
+        branch_breaking = False
         if len(parents.split()) > 1:
             # A regular merge PR represents its branch once. Release merges are
             # skipped above, leaving their constituent changes available.
@@ -69,11 +82,11 @@ def generate(since: str, until: str = "HEAD", root: Path = ROOT) -> str:
                 continue
             pr = merge[1]
             parent_refs = parents.split()
-            covered.update(
-                git(
-                    root, "rev-list", *parent_refs[1:], f"^{parent_refs[0]}"
-                ).splitlines()
-            )
+            merged_commits = git(
+                root, "rev-list", *parent_refs[1:], f"^{parent_refs[0]}"
+            ).splitlines()
+            covered.update(merged_commits)
+            branch_breaking = not breaking_commits.isdisjoint(merged_commits)
             subject = next(
                 (line.strip() for line in body.splitlines() if line.strip()), subject
             )
@@ -88,12 +101,12 @@ def generate(since: str, until: str = "HEAD", root: Path = ROOT) -> str:
         conventional = CONVENTIONAL.match(subject)
         group = "Other changes"
         if conventional:
-            kind, scope, breaking, subject = conventional.groups()
+            kind, scope, _, subject = conventional.groups()
             group = GROUPS.get(kind, "Other changes")
             if scope:
                 subject = f"**{scope}**: {subject}"
-            if breaking or re.search(r"^BREAKING[ -]CHANGE:", body, re.MULTILINE):
-                subject = f"**Breaking:** {subject}"
+        if branch_breaking or _is_breaking(conventional, body):
+            subject = f"**Breaking:** {subject}"
         link = (
             f"[#{pr}](https://github.com/{REPOSITORY}/pull/{pr})"
             if pr
