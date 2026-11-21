@@ -24,6 +24,30 @@ function version(
   } as VersionEntry;
 }
 
+// Follow an edge that leaves its row outside the node's lane down to the dot
+// it enters; that version must be connected to the row it left.
+function departureLanding(
+  graph: HistoryGraph<unknown>,
+  index: number,
+  lane: number,
+) {
+  for (const row of graph.rows.slice(index + 1)) {
+    if (row.lane === lane) {
+      return row.segments.some((segment) => segment.kind === "in")
+        ? row
+        : undefined;
+    }
+    const through = row.segments.find(
+      (segment) => segment.kind === "through" && segment.lane === lane,
+    );
+    if (!through || through.kind !== "through") {
+      return undefined;
+    }
+    lane = through.to;
+  }
+  return undefined;
+}
+
 // The contract in historyGraph.ts, checked on the segments a row draws. A lane
 // table alone cannot tell the bug this guards against from the fix: in the
 // same-base fork both put v5 on lane 1 and v4 on lane 0, and only the routing
@@ -62,10 +86,21 @@ function contractViolations(
       }
       if (
         segment.kind === "out" &&
-        !segment.merge &&
-        segment.lane !== row.lane
+        segment.lane !== row.lane &&
+        !segment.unresolved
       ) {
-        problems.push(`I3 ${name}: its parent edge leaves outside its lane`);
+        // A merge departs below its merge node, or from a merge parent
+        // listed above its child; a parent edge departs only from above.
+        const landing = departureLanding(graph, index, segment.to);
+        const connected =
+          landing !== undefined &&
+          (segment.merge
+            ? (row.node.mergeParentIds ?? []).includes(landing.node.id) ||
+              (landing.node.mergeParentIds ?? []).includes(row.node.id)
+            : landing.parent?.id === row.node.id);
+        if (!connected) {
+          problems.push(`I3 ${name}: an edge leaves its lane for no connected version`);
+        }
       }
     }
     if (
@@ -137,7 +172,10 @@ const FIXTURES: {
     name: "fork merged back by a merge version",
     head: "v5",
     versions: [
-      version(5, 4, { parent_version_ids: ["v4", "v3"] }),
+      version(5, 4, {
+        parent_version_ids: ["v4", "v3"],
+        history_merge_parent_version_ids: ["v3"],
+      }),
       version(4, 2),
       version(3, 1),
       version(2, 1),
@@ -164,7 +202,11 @@ const FIXTURES: {
     name: "merge from a version whose parent is hidden",
     head: "v3",
     versions: [
-      version(3, null, { prior_relation: "hidden", parent_version_ids: ["v2"] }),
+      version(3, null, {
+        prior_relation: "hidden",
+        parent_version_ids: ["v2"],
+        history_merge_parent_version_ids: ["v2"],
+      }),
       version(2, 1),
       version(1, null),
     ],
@@ -222,6 +264,75 @@ describe("buildHistoryGraph", () => {
         );
       }
     }
+  });
+
+  it("connects a published version to its earlier draft in drafts-first order", () => {
+    const nodes = contextHistoryNodes([
+      version(2, 1, { version_status: "draft" }),
+      version(4, 1),
+      version(3, 2, {
+        parent_version_id: "v1",
+        parent_version_ids: ["v1"],
+      }),
+      version(1, null),
+    ]);
+    const options = { allowParentsAbove: true, headCandidateIds: ["v2"] };
+    const before = buildHistoryGraph(nodes.slice(0, 2), options);
+    const graph = buildHistoryGraph(nodes, { ...options, complete: true });
+    const [draft, other, child] = graph.rows;
+
+    expect(graph.rows.map((row) => row.node.id)).toEqual(["v2", "v4", "v3", "v1"]);
+    expect(contractViolations(before, ["v2"])).toEqual([]);
+    expect(contractViolations(graph, ["v2", "v1"])).toEqual([]);
+    expect([draft.lane, other.lane]).toEqual(before.rows.map((row) => row.lane));
+    expect(child.parent?.id).toBe("v2");
+    expect(child.relation).toBe("linear");
+    expect(child.segments).not.toContainEqual({ kind: "stub" });
+    expect(draft.segments).toContainEqual({
+      kind: "out",
+      lane: 3,
+      to: 3,
+      merge: false,
+      unresolved: false,
+    });
+    expect(other.segments).toContainEqual({
+      kind: "through",
+      lane: 3,
+      to: child.lane,
+      unresolved: false,
+    });
+    expect(child.segments).toContainEqual({ kind: "in", tintLane: 3 });
+
+    // A draft that brought in the newer v6 and was then published as the same
+    // version lists that merge parent above it.
+    const published = buildHistoryGraph(
+      contextHistoryNodes([
+        version(6, 1),
+        version(5, 1, { history_merge_parent_version_ids: ["v6"] }),
+        version(1, null),
+      ]),
+      { allowParentsAbove: true, headCandidateIds: ["v6"], complete: true },
+    );
+    expect(published.rows[0].segments).toContainEqual(
+      expect.objectContaining({ kind: "out", merge: true }),
+    );
+    expect(contractViolations(published, ["v6", "v1"])).toEqual([]);
+
+    // 250 commits whose parents are the 250 drafts listed above them. Their
+    // lineage ends at the drafts' root, so lane 0 is free below it (I4).
+    const drafts = Array.from({ length: 250 }, (_, i) =>
+      version(250 - i, 249 - i || null, { version_status: "draft" }),
+    );
+    const commits = Array.from({ length: 250 }, (_, i) => version(500 - i, 250 - i));
+    const long = buildHistoryGraph(contextHistoryNodes([...drafts, ...commits]), {
+      allowParentsAbove: true,
+      headCandidateIds: ["v250"],
+      complete: true,
+    });
+    expect(long.rows.slice(250).every((row) => row.parent !== null)).toBe(true);
+    expect(
+      contractViolations(long, []).filter((problem) => !problem.startsWith("I4")),
+    ).toEqual([]);
   });
 
   it("derives Agent and Library lineage the History tab draws", () => {

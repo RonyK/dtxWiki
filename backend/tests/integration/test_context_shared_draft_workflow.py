@@ -1,13 +1,15 @@
 """One publication traversal covers shared drafts, stale previews and Git ancestry."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
 
-from backend.models.context import ContextPageVersion
+from backend.models.context import ContextPageVersion, ContextVersionHistoryParent
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import Workspace
+from backend.policy.auth import ActorContext
+from backend.services.domain_read import DomainReadService
 from backend.services.page_service import PageConflictError
 from backend.services.read_errors import StaleBaseVersionError
 
@@ -184,12 +186,55 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
             **result,
         )
 
+    # As if the upgrade from v0.2 had saved another first parent for this
+    # draft: History keeps it and draws the brought-in commit beside it.
+    saved = UUID(str(combined.page.version_id))
+    with page_service.session_factory() as session:
+        draft = session.get(ContextPageVersion, UUID(str(behind.version_id)))
+        session.add(
+            ContextVersionHistoryParent(
+                workspace_id=workspace_id,
+                page_id=draft.page_id,
+                version_id=draft.id,
+                parent_version_id=saved,
+                converted_parent_version_id=draft.parent_version_id,
+            )
+        )
+        session.commit()
     with pytest.raises(StaleBaseVersionError):
         bring(behind, preview(behind)["result"]["result_hash"], result_body_md=edited)
     brought = bring(behind, seen["result"]["result_hash"], result_body_md=edited)
     assert "Kept while bringing in." in brought.body_md
     assert "Middle moved." in brought.body_md
     assert moved in brought.parent_version_ids
+    editor = ActorContext(
+        actor_kind="human",
+        actor_id=actor,
+        token_kind="session",
+        scopes=("read",),
+        workspace_id=workspace_id,
+        workspace_role="editor",
+        role="editor",
+    )
+    with page_service.session_factory() as session:
+        entry = next(
+            entry
+            for entry in DomainReadService()
+            .list_changes(
+                session,
+                workspace_id,
+                "context_page",
+                initial.id,
+                drafts_first=True,
+                actor=editor,
+            )
+            .versions
+            if str(entry.version_id) == str(brought.version_id)
+        )
+    assert (entry.prior_version_id, entry.history_merge_parent_version_ids) == (
+        saved,
+        [UUID(str(moved))],
+    )
 
     # Bringing in a commit the draft already contains is bound the same way:
     # the edited result is saved (the commit is not added twice) and a wrong
@@ -240,18 +285,6 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
 
     # REST History appends across the draft-to-commit boundary, even when a
     # draft's merged parent is a newer commit. The default keeps version order.
-    from backend.policy.auth import ActorContext
-    from backend.services.domain_read import DomainReadService
-
-    editor = ActorContext(
-        actor_kind="human",
-        actor_id=actor,
-        token_kind="session",
-        scopes=("read",),
-        workspace_id=workspace_id,
-        workspace_role="editor",
-        role="editor",
-    )
     with page_service.session_factory() as session:
         history = DomainReadService().list_changes
         options = {

@@ -5795,6 +5795,7 @@ describe("ContextScreen", () => {
             is_current_published: true,
             is_visible_head: true,
             parent_version_ids: ["version-2", "version-3"],
+            history_merge_parent_version_ids: ["version-3"],
           }),
           historyVersion("version-3", 3, "closed", "version-1"),
           historyVersion("version-2", 2, "superseded", "version-1"),
@@ -6717,6 +6718,7 @@ function historyVersion(
     is_latest_draft: boolean;
     is_visible_head: boolean;
     parent_version_ids: string[];
+    history_merge_parent_version_ids: string[];
   }> = {},
 ) {
   const historyStatus: ContextHistoryStatus =
@@ -6774,6 +6776,12 @@ function historyVersion(
     is_discarded: options.isDiscarded ?? false,
     reconciliation_available: options.reconciliationAvailable,
     ...(publication.parent_version_ids ? { parent_version_ids: publication.parent_version_ids } : {}),
+    ...(publication.history_merge_parent_version_ids
+      ? {
+          history_merge_parent_version_ids:
+            publication.history_merge_parent_version_ids,
+        }
+      : {}),
   };
 }
 

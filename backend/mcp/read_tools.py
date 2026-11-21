@@ -92,6 +92,7 @@ from backend.services.coverage_service import (
     record_coverage_rewrite_attempt,
     resolve_coverage_gap,
 )
+from backend.services.db_read_snapshot import acquire_consistent_read_snapshot
 from backend.services.grep_wiki import grep_wiki as grep_wiki_service
 from backend.services.index_refs import parse_index_ref
 from backend.services.maintenance_rounds import UNTRUSTED_CONTEXT_NOTICE
@@ -1696,6 +1697,8 @@ def list_changes(payload: dict, ctx: ToolCallContext) -> ListChangesOutput:
     try:
         request = ListChangesInput.model_validate(payload)
         with session_factory() as session:
+            # Page resolution reads first; the History snapshot starts before it.
+            acquire_consistent_read_snapshot(session)
             data = ctx.services.domain_read.list_changes(
                 session=session,
                 workspace_id=ctx.workspace_id,

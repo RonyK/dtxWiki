@@ -25282,6 +25282,14 @@
             ],
             "title": "Graph Status"
           },
+          "history_merge_parent_version_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "History Merge Parent Version Ids",
+            "type": "array"
+          },
           "history_status": {
             "anyOf": [
               {

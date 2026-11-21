@@ -89,6 +89,11 @@ _NON_EDGE_RELATION_SOURCES = {
     "context_version_parent.page_id->context_page_version.page_id",
     "context_version_parent.version_id->context_page_version.id",
     "context_page_version.merged_into_version_id->context_page_version.id",
+    # Original v0.2 links are shown only in Context History.
+    "context_version_history_parent.workspace_id->context_page_version.workspace_id",
+    "context_version_history_parent.page_id->context_page_version.page_id",
+    "context_version_history_parent.version_id->context_page_version.id",
+    "context_version_history_parent.parent_version_id->context_page_version.id",
     # Lifetime counters feed the registered co_access extractor, not new kinds.
     "co_access_pair.source_kind+source_id",
     "co_access_pair.target_kind+target_id",

@@ -203,6 +203,17 @@ def context_parent_projection(
     parent: ContextPageVersion | None,
     actor: ActorContext | None,
 ) -> tuple[str, UUID | None]:
+    return context_parent_id_projection(
+        version.page_id, version.parent_version_id, parent, actor
+    )
+
+
+def context_parent_id_projection(
+    page_id: UUID,
+    parent_id: UUID | None,
+    parent: ContextPageVersion | None,
+    actor: ActorContext | None,
+) -> tuple[str, UUID | None]:
     """Project a version's parent without leaking an unreadable version id.
 
     Every REST/MCP history and detail surface must use this choke point. A
@@ -210,9 +221,9 @@ def context_parent_projection(
     exposing that draft UUID to a Viewer is still metadata disclosure.
     """
 
-    if version.parent_version_id is None:
+    if parent_id is None:
         return "root", None
-    if parent is None or parent.page_id != version.page_id:
+    if parent is None or parent.page_id != page_id or parent.id != parent_id:
         return "missing", None
     if not context_version_is_visible(parent, actor):
         return "hidden", None

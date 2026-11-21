@@ -17,7 +17,9 @@
 //   I3 Late bend. A child->parent edge leaves in the CHILD's lane, stays in
 //      it, and changes lane only in the row directly above the parent. The
 //      one early bend is a merge edge's departure (`|\`) right below the
-//      merge node.
+//      merge node. If a list places a parent or merge parent above its
+//      child, that edge runs in a separate lane between the two nodes,
+//      bending at both ends.
 //   I4 Trunk. Lane 0 holds only the head lineage -- draft head, published
 //      head, then first parents -- taken from page-level ids, never "the
 //      first-born child".
@@ -131,6 +133,10 @@ export function buildHistoryGraph<T>(
     // False while older pages remain. A head that is not loaded may then
     // still be further down, so lane 0 stays reserved for it (I5).
     complete?: boolean;
+    // Context groups open drafts above commits, including draft parents of
+    // some historical commits, and publishes a draft as the same version
+    // after it brought in a newer commit.
+    allowParentsAbove?: boolean;
   } = {},
 ): HistoryGraph<T> {
   const indexById = new Map(nodes.map((node, index) => [node.id, index]));
@@ -143,11 +149,12 @@ export function buildHistoryGraph<T>(
       );
     }
   });
-  // A parent is drawable only when it is loaded BELOW its child; anything
-  // else would need an edge pointing up the newest-first list.
-  const drawableParentIndex = (index: number): number | undefined => {
+  const loadedParentIndex = (index: number): number | undefined => {
     const parentId = nodes[index].parentId;
-    const parentIndex = parentId ? indexById.get(parentId) : undefined;
+    return parentId ? indexById.get(parentId) : undefined;
+  };
+  const parentIndexBelow = (index: number): number | undefined => {
+    const parentIndex = loadedParentIndex(index);
     return parentIndex !== undefined && parentIndex > index
       ? parentIndex
       : undefined;
@@ -163,18 +170,21 @@ export function buildHistoryGraph<T>(
     .map((id) => indexById.get(id))
     .find((index) => index !== undefined);
   const trunk = new Set<number>();
+  // The walk only moves down the list, so its last row is the lowest.
+  let trunkEnd = -1;
   for (
     let cursor = trunkTipIndex;
     cursor !== undefined;
-    cursor = drawableParentIndex(cursor)
+    cursor = parentIndexBelow(cursor)
   ) {
     trunk.add(cursor);
+    trunkEnd = cursor;
   }
   // Lane 0 is kept free for the trunk wherever the trunk can still appear
   // below. With no head loaded yet, that is every loaded row.
   const reserveTrunkLaneThrough =
     trunk.size > 0
-      ? Math.max(...trunk)
+      ? trunkEnd
       : candidates.length > 0 && options.complete !== true
         ? Number.POSITIVE_INFINITY
         : -1;
@@ -196,13 +206,14 @@ export function buildHistoryGraph<T>(
   };
   nodes.forEach((node, index) => {
     topBoundary.push(active.slice());
+    // Collected in lane order, so the first is the leftmost.
     const arriving = active.flatMap((edge, lane) =>
       edge?.target === node.id ? [lane] : [],
     );
     let lane = trunk.has(index)
       ? 0
       : arriving.length > 0
-        ? Math.min(...arriving)
+        ? arriving[0]
         : firstFreeLane(index, -1);
     if (active[lane] && active[lane]?.target !== node.id) {
       lane = firstFreeLane(index, -1);
@@ -214,7 +225,7 @@ export function buildHistoryGraph<T>(
     const edges: Edge[] = [];
     if (node.parentId && node.parentRelation === "visible") {
       const parentLoaded = indexById.has(node.parentId);
-      if (!parentLoaded || drawableParentIndex(index) !== undefined) {
+      if (!parentLoaded || parentIndexBelow(index) !== undefined) {
         const edge: Edge = {
           target: parentLoaded ? node.parentId : null,
           lane,
@@ -280,7 +291,10 @@ export function buildHistoryGraph<T>(
       });
     });
 
-    const parentIndex = drawableParentIndex(index);
+    const loadedIndex = loadedParentIndex(index);
+    const parentIndex = options.allowParentsAbove && loadedIndex !== index
+      ? loadedIndex
+      : parentIndexBelow(index);
     const parent = parentIndex !== undefined ? nodes[parentIndex] : null;
     if (
       node.parentRelation === "hidden" ||
@@ -317,13 +331,68 @@ export function buildHistoryGraph<T>(
     };
   });
 
-  const usedLanes = rows.flatMap((row) => [
-    row.lane,
-    ...row.segments.flatMap((segment) =>
-      segment.kind === "through" || segment.kind === "out"
-        ? [segment.lane, segment.to]
-        : [],
+  // Each row's highest occupied lane. An edge added below reads one number
+  // per row it spans, and the lane count never spreads every segment's lane.
+  const rowMaxLane = rows.map((row) =>
+    row.segments.reduce(
+      (max, segment) =>
+        segment.kind === "through" || segment.kind === "out"
+          ? Math.max(max, segment.lane, segment.to)
+          : max,
+      row.lane,
     ),
-  ]);
-  return { rows, laneCount: Math.max(1, ...usedLanes.map((lane) => lane + 1)) };
+  );
+
+  // Draw these edges after assigning the ordinary lanes. A child loaded on
+  // a later page can add a connection to a row above without moving its dot
+  // or changing any existing edge's lane.
+  if (options.allowParentsAbove) {
+    const connectAbove = (index: number, parentIndex: number, merge: boolean) => {
+      const child = rows[index];
+      // A lane outside every path already occupying this span. A segment's
+      // destination counts, so the lane is also free at its next row.
+      let lane = child.lane + 1;
+      for (let rowIndex = parentIndex; rowIndex < index; rowIndex += 1) {
+        lane = Math.max(lane, rowMaxLane[rowIndex] + 1);
+      }
+      for (let rowIndex = parentIndex; rowIndex < index; rowIndex += 1) {
+        const segment = {
+          lane,
+          to: rowIndex === index - 1 ? child.lane : lane,
+          unresolved: false,
+        };
+        rows[rowIndex].segments.push(
+          rowIndex === parentIndex
+            ? { kind: "out", merge, ...segment }
+            : { kind: "through", ...segment },
+        );
+        rowMaxLane[rowIndex] = lane;
+      }
+      if (!child.segments.some((segment) => segment.kind === "in")) {
+        child.segments.push({ kind: "in", tintLane: lane });
+      }
+    };
+    rows.forEach((child, index) => {
+      const parentIndex = loadedParentIndex(index);
+      if (
+        child.node.parentRelation === "visible" &&
+        parentIndex !== undefined &&
+        parentIndex < index
+      ) {
+        connectAbove(index, parentIndex, false);
+      }
+      for (const mergeParentId of child.node.mergeParentIds ?? []) {
+        const mergeParentIndex = indexById.get(mergeParentId);
+        if (mergeParentIndex !== undefined && mergeParentIndex < index) {
+          connectAbove(index, mergeParentIndex, true);
+        }
+      }
+    });
+  }
+
+  let laneCount = 1;
+  for (const max of rowMaxLane) {
+    laneCount = Math.max(laneCount, max + 1);
+  }
+  return { rows, laneCount };
 }

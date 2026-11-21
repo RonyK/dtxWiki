@@ -1,8 +1,9 @@
-"""One populated 0.3.1 release upgrade per supported dialect.
+"""One populated 0.3.1 upgrade and History preservation pass per dialect.
 
 Data written at the 0.2.3/0.2.4 schema goes through the one-way release
 revision: Git snapshots, historical body release, MCP call lifecycle,
-document identities and shared drafts. Assertions describe the final state.
+document identities and shared drafts. The following revision preserves the
+original History edges captured during this same upgrade.
 """
 
 import json
@@ -23,6 +24,9 @@ from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.context_versions.adapters.git_libgit2 import GitSnapshotStore
 from backend.context_versions.application import ContextVersionWriter
 from backend.context_versions.domain import ContentPayload
+from backend.migrations.revision_modules.unreleased._002398e0fcdc_capture import (
+    capture as history_capture,
+)
 from backend.models import (
     ClientDelegatedTask,
     ContextPage,
@@ -32,15 +36,17 @@ from backend.models import (
     LintRun,
 )
 from backend.models.ask import AskSession, AskTurn
-from backend.models.context import ContextPageVersion
+from backend.models.context import ContextPageVersion, ContextVersionHistoryParent
 from backend.models.coverage import KnowledgeCoverageGap
 from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
 from backend.models.review import ReviewItem
 from backend.models.tree import WorkspaceTreeNode
 from backend.models.workspace import MCPClient
+from backend.policy.auth import ActorContext
 from backend.schemas.context_write import ReviewDecisionRequest
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.context_review_disposition import context_version_review_metadata
+from backend.services.domain_read import DomainReadService
 from backend.services.review_service import ReviewService
 from backend.tests.integration.test_context_review_publish import _seed_review
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
@@ -52,6 +58,8 @@ from backend.utils.content_hash import content_hash
 
 PARENT = "00ba02774c4a"
 REVISION = "c3d2e4f601ab"
+HISTORY_REVISION = "002398e0fcdc"
+HISTORY_TABLE = "context_version_history_parent"
 GIT_COLUMNS = {
     "commit_oid",
     "content_format",
@@ -127,15 +135,15 @@ def _seed_git_history(engine, workspace_id, key):
         # while Git migration connects historical snapshots before it.
         git.rows = [
             (git.current_id, git.page_id, 1, "published_snapshot", git.body, None),
+            (git.editing_id, git.page_id, 2, "draft", "private work", git.current_id),
             (
                 git.historical_id,
                 git.page_id,
-                2,
+                3,
                 "superseded_snapshot",
                 "earlier\r\n",
-                git.current_id,
+                git.editing_id,
             ),
-            (git.editing_id, git.page_id, 3, "draft", "private work", git.current_id),
             (git.other_id, git.other_page_id, 1, "published_snapshot", "other", None),
             (
                 git.other_history_id,
@@ -223,6 +231,172 @@ def _seed_git_history(engine, workspace_id, key):
         session.commit()
     git.before = _stored_versions(engine)
     return git
+
+
+def _seed_unpublished_history(engine, workspace_id, now, key):
+    page_id = uuid4()
+    version_ids = [uuid4() for _ in range(3)]
+    with engine.begin() as connection:
+        pages = ContextPage.__table__
+        connection.execute(
+            pages.insert().values(
+                id=page_id,
+                workspace_id=workspace_id,
+                slug="unpublished-history",
+                title="Unpublished history",
+                lifecycle_status="draft",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        versions = sa.Table(
+            "context_page_version", sa.MetaData(), autoload_with=connection
+        )
+        parent_id = None
+        for number, version_id in enumerate(version_ids, 1):
+            body = f"Draft {number}"
+            connection.execute(
+                versions.insert().values(
+                    id=key(version_id),
+                    workspace_id=key(workspace_id),
+                    page_id=key(page_id),
+                    version_no=number,
+                    parent_version_id=parent_id,
+                    version_status="draft",
+                    body_md=body,
+                    content_hash=content_hash(body),
+                    graph_status="linear",
+                    rendering_profile="gfm_mermaid",
+                    actor_type="human",
+                    created_by_actor_kind="human",
+                    created_by_actor_id="migration-user",
+                    created_at=now + timedelta(minutes=number - 1),
+                )
+            )
+            parent_id = key(version_id)
+        # A discarded branch from the first draft converts to a closed commit.
+        closed_id = uuid4()
+        connection.execute(
+            versions.insert().values(
+                id=key(closed_id),
+                workspace_id=key(workspace_id),
+                page_id=key(page_id),
+                version_no=4,
+                parent_version_id=key(version_ids[0]),
+                version_status="draft",
+                body_md="Discarded",
+                content_hash=content_hash("Discarded"),
+                graph_status="discarded",
+                rendering_profile="gfm_mermaid",
+                actor_type="human",
+                created_by_actor_kind="human",
+                created_by_actor_id="migration-user",
+                created_at=now + timedelta(minutes=3),
+            )
+        )
+        connection.execute(
+            pages.update()
+            .where(pages.c.id == page_id)
+            .values(
+                current_version_id=version_ids[-1],
+                latest_draft_version_id=version_ids[-1],
+            )
+        )
+    return page_id, version_ids, closed_id
+
+
+def _staging_tables(engine):
+    # The capture's staging table lives only until 002398e0fcdc consumes it.
+    return [
+        name
+        for name in sa.inspect(engine).get_table_names()
+        if name.startswith("_dtxwiki_history_parent_")
+    ]
+
+
+def _capture_marker(connection):
+    return connection.scalar(
+        sa.text("SELECT value FROM app_metadata WHERE key = :key"),
+        {"key": history_capture.MARKER_KEY},
+    )
+
+
+def _history(session, workspace_id, page_id, role):
+    result = DomainReadService().list_changes(
+        session,
+        workspace_id,
+        "context_page",
+        page_id,
+        drafts_first=True,
+        actor=ActorContext(
+            actor_kind="human",
+            actor_id=f"{role}-user",
+            token_kind="session",
+            scopes=("read", "audit-read"),
+            workspace_id=workspace_id,
+            workspace_role=role,
+            role=role,
+        ),
+    )
+    return {version.version_id: version for version in result.versions}
+
+
+def _draft_chain(session, workspace_id, unpublished):
+    page_id, versions, _closed = unpublished
+    drafts = _history(session, workspace_id, page_id, "editor")
+    return [
+        (drafts[version].prior_relation, drafts[version].prior_version_id)
+        for version in versions
+    ]
+
+
+def _assert_preserved_history(engine, workspace_id, git, unpublished):
+    page_id, (first, second, third), closed = unpublished
+    with Session(engine) as session:
+        # Only links the conversion replaced are stored, explicit roots included.
+        stored = dict(
+            session.execute(
+                sa.select(
+                    ContextVersionHistoryParent.version_id,
+                    ContextVersionHistoryParent.parent_version_id,
+                )
+            ).all()
+        )
+        assert stored[git.current_id] is None
+        assert stored[git.historical_id] == git.editing_id
+        assert stored[git.draft_id] == git.editing_id
+        assert stored[second] == first and stored[third] == second
+        assert stored[closed] == first
+        assert not {first, git.editing_id, git.discarded_id, git.branch_id} & set(
+            stored
+        )
+
+        assert _draft_chain(session, workspace_id, unpublished) == [
+            ("root", None),
+            ("visible", first),
+            ("visible", second),
+        ]
+        # The commit brought in between the two upgrade runs is drawn beside
+        # the saved parent; the conversion left the draft without one.
+        brought = _history(session, workspace_id, page_id, "editor")[third]
+        assert (
+            brought.parent_version_ids,
+            brought.history_merge_parent_version_ids,
+        ) == (
+            [closed],
+            [closed],
+        )
+        editor = _history(session, workspace_id, git.page_id, "editor")
+        assert editor[git.current_id].prior_relation == "root"
+        assert editor[git.current_id].parent_version_id == git.historical_id
+        assert editor[git.historical_id].prior_version_id == git.editing_id
+        # Viewers keep the published Git chain v0.3.1 showed them.
+        viewer = _history(session, workspace_id, git.page_id, "viewer")
+        assert (
+            viewer[git.current_id].prior_relation,
+            viewer[git.current_id].prior_version_id,
+        ) == ("visible", git.historical_id)
+        assert git.editing_id not in viewer
 
 
 def _assert_git_history(engine, root, tmp_path, workspace_id, git):
@@ -1138,10 +1312,11 @@ def test_release_031_upgrade_traversal(tmp_path, dialect):
         git = _seed_git_history(engine, workspace_id, key)
         call = _seed_mcp_call(engine, workspace_id)
         loc = _seed_locators(engine, dialect, workspace_id, key)
+        unpublished = _seed_unpublished_history(engine, workspace_id, now, key)
 
         # A missing repository root is refused before any DDL.
         with pytest.raises(RuntimeError, match="absolute.*Config.attributes"):
-            command.upgrade(config, REVISION)
+            command.upgrade(config, HISTORY_REVISION)
         assert not GIT_COLUMNS & _version_columns(engine).keys()
         # A stored hash that no longer matches its body is refused after the Git
         # snapshots are written. The failed upgrade keeps the parent schema and
@@ -1154,9 +1329,10 @@ def test_release_031_upgrade_traversal(tmp_path, dialect):
                 .values(content_hash=content_hash("stale"))
             )
         with pytest.raises(RuntimeError, match="verification failed"):
-            command.upgrade(config, REVISION)
+            command.upgrade(config, HISTORY_REVISION)
         engine.dispose()
         assert not GIT_COLUMNS & _version_columns(engine).keys()
+        assert not _staging_tables(engine)
         assert _stored_versions(engine)[git.historical_id]["body_md"] == "earlier\r\n"
         with engine.begin() as connection:
             assert (
@@ -1168,9 +1344,37 @@ def test_release_031_upgrade_traversal(tmp_path, dialect):
                 .where(versions.c.id == key(git.historical_id))
                 .values(content_hash=git.before[git.historical_id]["content_hash"])
             )
+        # Stopping at the frozen conversion keeps the capture for a later run.
         command.upgrade(config, REVISION)
         engine.dispose()
+        _page_id, (_first, _second, third), closed = unpublished
+        with engine.begin() as connection:
+            staged = _capture_marker(connection)
+            assert _staging_tables(engine) == [staged]
+            # The row exists and the conversion left it without a Git parent.
+            assert (
+                connection.execute(
+                    sa.text(
+                        f"SELECT converted_parent_version_id FROM {staged} "
+                        "WHERE version_id = :version"
+                    ),
+                    {"version": key(third)},
+                ).scalar_one()
+                is None
+            )
+            # A v0.3.1 server brings the closed commit into the open draft.
+            connection.execute(
+                versions.update()
+                .where(versions.c.id == key(third))
+                .values(parent_version_id=key(closed))
+            )
+        command.upgrade(config, HISTORY_REVISION)
+        engine.dispose()
+        assert not _staging_tables(engine)
+        with engine.connect() as connection:
+            assert _capture_marker(connection) is None
         _assert_git_history(engine, root, tmp_path, workspace_id, git)
+        _assert_preserved_history(engine, workspace_id, git, unpublished)
         _assert_mcp_call(engine, dialect, call)
         _assert_locators(engine, dialect, workspace_id, loc)
         table = sa.Table("context_page_version", sa.MetaData(), autoload_with=engine)
@@ -1365,6 +1569,12 @@ def test_release_031_upgrade_traversal(tmp_path, dialect):
             for item in sa.inspect(engine).get_indexes("context_page_version")
         }
         assert "context_version_parent" in sa.inspect(engine).get_table_names()
+        _assert_preserved_history(engine, workspace_id, git, unpublished)
+        # Downgrading drops the restored History links; v0.3.1 serves the
+        # Git ancestry the version rows keep.
+        command.downgrade(config, REVISION)
+        engine.dispose()
+        assert HISTORY_TABLE not in sa.inspect(engine).get_table_names()
         # This data conversion intentionally has no reverse writer. A refused
         # downgrade must leave the completed forward state unchanged.
         with pytest.raises(RuntimeError, match="pre-upgrade dtxWiki backup"):
@@ -1375,6 +1585,21 @@ def test_release_031_upgrade_traversal(tmp_path, dialect):
                 == REVISION
             )
             assert page_reviews(connection, "pending") == []
+        # A later upgrade has no source parents left to capture.
+        command.upgrade(config, HISTORY_REVISION)
+        engine.dispose()
+        with Session(engine) as session:
+            assert (
+                session.scalar(
+                    sa.select(sa.func.count()).select_from(ContextVersionHistoryParent)
+                )
+                == 0
+            )
+            assert _draft_chain(session, workspace_id, unpublished) == [
+                ("root", None),
+                ("root", None),
+                ("visible", closed),
+            ]
     finally:
         if dialect == "postgresql":
             drop_reflected_postgres_metadata(engine)

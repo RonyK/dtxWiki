@@ -3760,6 +3760,7 @@ export function ContextHistory({
           detail.visible_version_id,
         ],
         complete: historyComplete,
+        allowParentsAbove: true,
       }),
     [
       detail.current_published_version_id,

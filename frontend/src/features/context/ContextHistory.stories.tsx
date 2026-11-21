@@ -177,6 +177,7 @@ export const ForkAndMerge = {
             is_visible_head: true,
             is_current_published: true,
             parent_version_ids: ["version-4", "version-3"],
+            history_merge_parent_version_ids: ["version-3"],
           }),
           historyVersion("version-4", 4, "superseded_snapshot", {
             prior_version_id: "version-2",

@@ -139,8 +139,8 @@ export function priorRelationForVersion(entry: VersionEntry): PriorRelation {
 }
 
 // Context versions name their own parent, so lineage comes straight from the
-// API: prior_version_id (already projected to what this actor may see) and
-// the reconcile merge recorded on the merged branch.
+// API: prior_version_id and history_merge_parent_version_ids, both already
+// projected to what this actor may see.
 export function contextHistoryNodes(
   versions: VersionEntry[],
 ): HistoryGraphNode<VersionEntry>[] {
@@ -152,10 +152,7 @@ export function contextHistoryNodes(
     versionNo: entry.version_no,
     parentId: entry.prior_version_id ?? null,
     parentRelation: priorRelationForVersion(entry),
-    // Merged-in parents, whatever order the reader's filtered list has: every
-    // parent except the first one.
-    mergeParentIds: (entry.parent_version_ids ?? []).filter((id) =>
-      id !== entry.parent_version_id && id !== entry.prior_version_id),
+    mergeParentIds: entry.history_merge_parent_version_ids ?? [],
     pending: entry.version_status === "draft",
     branched:
       entry.graph_status === "branched" ||

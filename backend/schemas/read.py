@@ -511,14 +511,20 @@ class VersionEntry(BaseModel):
     actor_type: str
     actor_display_name: str | None = None
     created_at: datetime | None = None
+    # Context uses the current Git ancestry for publishing and merges.
     parent_version_id: UUID | None = None
     parent_version_ids: list[UUID] = Field(default_factory=list)
+    # History can retain the previous version recorded before Git conversion.
     prior_version_id: UUID | None = None
     prior_relation: Literal["root", "visible", "hidden", "missing"] = "root"
+    # The other parents History draws: the Git parents other than the
+    # previous version and, after an upgrade from v0.2, the first Git parent
+    # the conversion assigned.
+    history_merge_parent_version_ids: list[UUID] = Field(default_factory=list)
     # The reconcile merge edge (design doc section 7.1): set only on a
     # diverged branch that landed cleanly, naming the linear version its
     # conflicts were folded into. A history graph draws this as a SECOND
-    # incoming edge into that version, alongside its own parent_version_id --
+    # incoming edge into that version, alongside its own prior_version_id --
     # the git-merge shape, not a lone dangling branch line.
     merged_into_version_id: UUID | None = None
     actor_id: UUID | None = None
