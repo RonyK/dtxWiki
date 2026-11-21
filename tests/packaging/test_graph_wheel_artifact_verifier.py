@@ -301,6 +301,22 @@ def test_release_schema_accepts_the_artifacts_applicable_boundary(
     )
 
 
+def test_prerelease_sdist_uses_the_target_release_schema_boundary(tmp_path):
+    # Setuptools normalizes the sdist filename and PKG-INFO but preserves the
+    # source spelling in pyproject.toml for rebuilds.
+    stage, artifact = _release_schema_stage(tmp_path, "sdist", "0.3.1rc1")
+    version = "0.3.1-rc.1"
+    (stage / "pyproject.toml").write_text(
+        f'[project]\nname = "dtxwiki"\nversion = "{version}"\n',
+        encoding="utf-8",
+    )
+
+    assert (
+        _verifier_module()._check_release_schema(stage, artifact, RELEASE_HEAD, version)
+        == []
+    )
+
+
 @pytest.mark.counterexample(
     reason="artifact metadata must reject missing, ambiguous or wrong release identity"
 )

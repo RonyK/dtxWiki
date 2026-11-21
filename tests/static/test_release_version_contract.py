@@ -2,8 +2,8 @@
 
 The version lives in pyproject.toml. Everything else that ships it -- the
 desktop workspace, both lock files, the exported OpenAPI document, the two
-agent-plugin manifests and the npm launcher package -- must carry the same
-string. Nothing in this module
+agent-plugin manifests and the npm launcher package -- must carry that release
+identity. The uv lock uses the normalized Python spelling. Nothing in this module
 spells out what that string is, so a version bump never edits a test.
 
 release.yml is pinned on three points the artifact gate in
@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE = ROOT / ".github" / "workflows" / "release.yml"
@@ -72,8 +73,13 @@ def version_mismatches(root: Path = ROOT) -> dict[str, str]:
     """{site: version found there} for every site that disagrees with pyproject."""
 
     expected = project(root)["version"]
+    python_version = str(Version(expected))
     found = {site: read(root) for site, read in VERSION_SITES.items()}
-    return {site: value for site, value in found.items() if value != expected}
+    return {
+        site: value
+        for site, value in found.items()
+        if value != (python_version if site == "uv.lock (dtxwiki)" else expected)
+    }
 
 
 def toolchain_pin_problems(root: Path = ROOT) -> list[str]:
@@ -139,8 +145,7 @@ def github_release_problems(workflow: dict) -> list[str]:
         job_id
         for job_id, job in jobs.items()
         if any(
-            "gh release create" in step.get("run", "")
-            for step in job.get("steps", [])
+            "gh release create" in step.get("run", "") for step in job.get("steps", [])
         )
     ]
     if len(releasing) != 1:
@@ -278,8 +283,9 @@ requires_bash = pytest.mark.skipif(
 
 
 @requires_bash
-def test_release_gate_accepts_the_tag_of_the_package_version(tmp_path):
-    result = _run_gate(tmp_path, pyproject_version="7.8.9", tag="v7.8.9")
+@pytest.mark.parametrize("version", ["7.8.9", "7.8.9-rc.1"])
+def test_release_gate_accepts_the_tag_of_the_package_version(tmp_path, version):
+    result = _run_gate(tmp_path, pyproject_version=version, tag=f"v{version}")
 
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -341,7 +347,7 @@ def test_a_stale_version_site_is_reported(tmp_path):
     lock = tmp_path / "uv.lock"
     lock.write_text(
         lock.read_text(encoding="utf-8").replace(
-            f'name = "dtxwiki"\nversion = "{current}"',
+            f'name = "dtxwiki"\nversion = "{Version(current)}"',
             f'name = "dtxwiki"\nversion = "{stale}"',
         ),
         encoding="utf-8",

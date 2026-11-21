@@ -9,6 +9,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from packaging.version import Version
+
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "dtxSuite/dtxWiki"
 GROUPS = {
@@ -189,10 +191,11 @@ def version_section(text: str, version: str) -> str:
 
 
 def release_notes(version: str, section: str) -> str:
+    python_version = Version(version)
     notes = f"dtxWiki {version}\n\n" + (
-        f"Install from PyPI: `pipx install dtxwiki=={version}`. "
+        f"Install from PyPI: `pipx install dtxwiki=={python_version}`. "
         "The attached wheel and sdist are the files published to "
-        f"https://pypi.org/project/dtxwiki/{version}/.\n\n"
+        f"https://pypi.org/project/dtxwiki/{python_version}/.\n\n"
         f"The launcher `@dtxsuite/dtxwiki` {version} is on "
         f"https://www.npmjs.com/package/@dtxsuite/dtxwiki/v/{version}.\n\n"
         f"Full changelog: https://github.com/{REPOSITORY}/blob/v{version}/CHANGELOG.md\n"

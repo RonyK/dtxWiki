@@ -97,6 +97,9 @@ def test_changelog_keeps_written_notes_from_draft_to_release(
     )
     assert changelog.version_section(confirmed, "1.0.2") == ""
     assert "## Changelog" not in changelog.release_notes("1.0.2", "")
+    rc_notes = changelog.release_notes("1.0.1-rc.1", section)
+    assert "https://pypi.org/project/dtxwiki/1.0.1rc1/" in rc_notes
+    assert "https://www.npmjs.com/package/@dtxsuite/dtxwiki/v/1.0.1-rc.1" in rc_notes
 
     # Git's own reason reaches the caller when a revision cannot be read.
     monkeypatch.setattr(changelog, "ROOT", tmp_path)
