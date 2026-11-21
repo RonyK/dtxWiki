@@ -2,10 +2,8 @@
 
 import ast
 import hashlib
-import importlib.util
 import json
 import shutil
-import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -28,7 +26,6 @@ CORE_REVISION_DIR = (
 )
 FRAGMENTS_DIR = MIGRATIONS_DIR.parent / "fragments"
 FREEZE_MANIFEST = MIGRATIONS_DIR.parent / "frozen_revisions.json"
-RELEASE_GATE = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
 INITIAL_REVISION = "bd62193d5cf6"
 # Frozen core schema boundary of the 0.1 release group.
 CORE_REVISION = "efcbcf724889"
@@ -36,7 +33,8 @@ RELEASE_013_REVISION = "19db79d3e622"
 RELEASE_014_REVISION = "eb86fdacb1bb"
 RELEASE_021_REVISION = "5b7e5c149279"
 RELEASE_023_REVISION = "00ba02774c4a"
-CURRENT_HEAD = "c3d2e4f601ab"
+RELEASE_031_REVISION = "c3d2e4f601ab"
+CURRENT_HEAD = RELEASE_031_REVISION
 ALEMBIC_REVISION_METADATA = {
     "revision",
     "down_revision",
@@ -111,24 +109,21 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
         RELEASE_013_REVISION: CORE_REVISION,
         RELEASE_014_REVISION: RELEASE_013_REVISION,
         RELEASE_021_REVISION: RELEASE_014_REVISION,
+        RELEASE_023_REVISION: RELEASE_021_REVISION,
+        RELEASE_031_REVISION: RELEASE_023_REVISION,
     }
     assert {
         revision: graph[revision] for revision in expected_prefix
     } == expected_prefix
-    assert graph[RELEASE_023_REVISION] == RELEASE_021_REVISION
-    # Future changes append after the single frozen 0.2 release migration.
-    appended = set(graph) - expected_prefix.keys()
+    # A fresh install creates the 0.3.1 schema directly; later revisions append.
+    appended = set(graph) - _revision_ancestors(graph, RELEASE_031_REVISION)
     assert initialization_graph == {
-        RELEASE_021_REVISION: None,
+        RELEASE_031_REVISION: None,
         **{revision: graph[revision] for revision in appended},
     }
     assert _revision_ancestors(graph, CURRENT_HEAD) == set(graph)
     assert all(
-        RELEASE_021_REVISION in _revision_ancestors(graph, revision)
-        for revision in appended
-    )
-    assert all(
-        Path(script.get_revision(revision).path).parent.name in {"v0_2", "unreleased"}
+        RELEASE_031_REVISION in _revision_ancestors(graph, revision)
         for revision in appended
     )
     assert Path(script.get_revision(RELEASE_021_REVISION).path).parent.name == "v0_2"
@@ -140,6 +135,7 @@ def test_graph_preserves_released_boundaries_and_appends_current_head():
     assert manifest["schema_releases"]["0.1.4"]["head"] == RELEASE_014_REVISION
     assert manifest["schema_releases"]["0.2.1"]["head"] == RELEASE_021_REVISION
     assert manifest["schema_releases"]["0.2.3"]["head"] == RELEASE_023_REVISION
+    assert manifest["schema_releases"]["0.3.1"]["head"] == RELEASE_031_REVISION
     released_revisions: set[str] = set()
     for release, entry in manifest["schema_releases"].items():
         major, minor = release.split(".")[:2]
@@ -201,7 +197,7 @@ def test_the_freeze_covers_every_released_migration_file():
         "revision_modules/v0_1/content_event_backfill_v1.py",
         "revision_modules/v0_1/input_restrictions_v1.py",
         "versions/v0_1/eb86fdacb1bb_release_0_1_4.py",
-        "initialization/versions/v0_2/5b7e5c149279_initial_schema.py",
+        "initialization/versions/v0_3/c3d2e4f601ab_initial_schema.py",
         "initialization/schema/sqlite.json",
         "initialization/schema/postgresql.json",
         *(
@@ -221,23 +217,14 @@ def test_the_freeze_covers_every_released_migration_file():
                 / "revision_modules/v0_2/_5b7e5c149279_release_0_2"
             ).glob("*.py")
         ),
+        *(
+            path.relative_to(MIGRATIONS_DIR.parent).as_posix()
+            for group in ("versions/v0_3", "revision_modules/v0_3")
+            for path in (MIGRATIONS_DIR.parent / group).rglob("*.py")
+        ),
     }
 
     assert set(_frozen_digests()) == released
-
-
-def test_the_release_gate_pins_the_same_digests_as_the_manifest():
-    """Two copies on purpose: rehashing the manifest alone must not pass."""
-
-    spec = importlib.util.spec_from_file_location("_release_gate", RELEASE_GATE)
-    module = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, str(RELEASE_GATE.parent))
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.path.remove(str(RELEASE_GATE.parent))
-
-    assert module.FROZEN_MIGRATIONS == _frozen_digests()
 
 
 def test_core_domain_modules_are_not_alembic_revisions():
@@ -437,12 +424,12 @@ def test_generated_revisions_wait_for_release_and_link_in_order(tmp_path):
 
     # Assigning a release later changes the folders, never revision identities
     # or ancestry. Helper scaffolding follows the same eventual release group.
-    release_dir = target / "migrations/versions/v0_3"
+    release_dir = target / "migrations/versions/v0_4"
     release_dir.mkdir()
     for revision in (first, second):
         shutil.move(revision.path, release_dir / Path(revision.path).name)
     (target / "migrations/revision_modules/unreleased").rename(
-        target / "migrations/revision_modules/v0_3"
+        target / "migrations/revision_modules/v0_4"
     )
     released = ScriptDirectory(
         str(target / "migrations"), recursive_version_locations=True

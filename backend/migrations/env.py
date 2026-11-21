@@ -10,7 +10,7 @@ from sqlalchemy import engine_from_config, event, pool
 from backend.models import Base
 from backend.models.search_index import include_non_fts5_object
 from backend.services.ops.alembic_migration_graph import (
-    RELEASE_02_REVISION,
+    INITIALIZATION_REVISION,
     initialization_script_directory,
 )
 from backend.services.ops.db_revision_inventory import (
@@ -35,11 +35,11 @@ target_metadata = Base.metadata
 
 
 def _select_initialization_route(connection) -> None:
-    """Initialize a proven-empty database directly at the v0.2 release schema.
+    """Initialize a proven-empty database directly at the v0.3.1 release schema.
 
     Every existing database, every non-upgrade command, and every explicit
     historical or relative target uses the release graph unchanged. Only an
-    upgrade of an unversioned, empty database to v0.2 or later swaps in the
+    upgrade of an unversioned, empty database to v0.3.1 or later swaps in the
     complete baseline, which skips the historical DDL and backfills. Alembic's
     command callback shares this script object, so direct Alembic commands and
     application bootstrap select the same graph. Alembic still records the
@@ -57,7 +57,7 @@ def _select_initialization_route(connection) -> None:
         # resolves them against the release graph from base.
         return
     if not targets or not all(
-        RELEASE_02_REVISION
+        INITIALIZATION_REVISION
         in {
             entry.revision
             for entry in context.script.iterate_revisions(target.revision, "base")

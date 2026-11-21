@@ -1,11 +1,11 @@
 """The v0.2 release migration: two traversals per dialect, four collected cases.
 
-* Published 0.1.4 (eb86fdacb1bb) -> 0.2 -> 0.1.4 -> 0.2 on one populated
+* Published 0.1.4 (eb86fdacb1bb) -> 0.2 -> 0.1.4 -> head on one populated
   database: backfills, schema contracts, retained 0.1.4 login/deletion
   evidence, the parent stamp/schema guard, late-DDL rollback in both
   directions and the startup upgrade from 0.1.4. Those fault inputs and one
   locator duplicate write share the traversal; none adds a database scenario.
-* A fresh installation initialized directly at 0.2, then the same populated
+* A fresh installation initialized directly at 0.3.1, then the same populated
   database started from 0.1.2 and 0.1.3. The first traversal starts after the
   0.1.3 input constraints and publication-time backfill, and only this one
   compares the frozen initialization DDL with the real release upgrades.
@@ -13,8 +13,6 @@
 The first traversal also upgrades, downgrades and re-upgrades the consolidated
 0.2.3 revision once, checking the Labs policy's defaults, values and NULL
 constraint and both archived Inbox indexes without adding a collected case.
-Fresh startup applies that revision after the frozen release initializer;
-the frozen snapshots remain unchanged.
 
 Scalar validation matrices belong to existing policy tests rather than this
 release migration.
@@ -43,7 +41,10 @@ from backend.app.bootstrap import (
 )
 from backend.app.settings import Settings
 from backend.models import Base
-from backend.services.ops.alembic_migration_graph import initialization_script_directory
+from backend.services.ops.alembic_migration_graph import (
+    INITIALIZATION_REVISION,
+    initialization_script_directory,
+)
 from backend.services.ops.input_maintenance import audit_inputs
 from backend.tests.integration.test_release_schema_migration import (
     _assert_each_table_rebuilt_at_most_once,
@@ -60,7 +61,6 @@ from backend.utils.content_hash import content_hash
 PARENT = "eb86fdacb1bb"
 REVISION = "5b7e5c149279"
 RELEASE_023_REVISION = "00ba02774c4a"
-REVERSIBLE_CONTEXT_REVISION = "872d9c3e104b"
 
 
 def _migration_engine(tmp_path, dialect, filename):
@@ -276,11 +276,8 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
         _assert_release_upgrade(engine, release_data, now, first=True)
         _assert_labs_policy_upgrade(engine, config, workspace_id)
         _assert_archived_inbox_indexes(engine)
-        # Seed both historical locator projections at the last reversible
-        # schema. The shared-draft cutover is intentionally one-way; the release
-        # downgrade assertions below still execute their exact owning revisions.
-        command.upgrade(config, REVERSIBLE_CONTEXT_REVISION)
-        _assert_model_parity(engine)
+        # Seed both locator projections at the last reversible release schema
+        # to exercise the link-syntax downgrade in the revisions that own it.
         _seed_runtime_links(engine, release_data)
         command.downgrade(config, REVISION)
         assert "labs_policy" not in {
@@ -319,6 +316,7 @@ def test_release_02_upgrade_downgrade_reupgrade(tmp_path, dialect):
             assert all(count == 1 for count in counts.values()), counts
         assert _stamp(engine) == current_alembic_head()
         _assert_release_upgrade(engine, release_data, now, first=False)
+        _assert_model_parity(engine)
         _assert_labs_policy_upgrade(
             engine, config, workspace_id, upgrade=False, raw_default=True
         )
@@ -973,7 +971,7 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
     The 0.1.4 traversal starts after the 0.1.3 input constraints and
     publication-time backfill. Startup upgrades 0.1.2 and 0.1.3 directly
     through the published 0.1.4 boundary, without an intermediate install.
-    The same database is first initialized directly at 0.2 and its schema is
+    The same database is first initialized directly at 0.3.1 and its schema is
     compared with those populated upgrades, which catches snapshot drift and
     accidental replay of historical migrations without another matrix.
     """
@@ -1021,19 +1019,14 @@ def test_older_releases_upgrade_directly_at_startup(tmp_path, dialect):
         initialization = list(initialization_script_directory().walk_revisions())
         assert len(stamp_writes) == len(initialization)
         assert stamp_writes[0].lstrip().startswith("INSERT INTO alembic_version")
-        assert REVISION in stamp_writes[0]
+        assert INITIALIZATION_REVISION in stamp_writes[0]
         assert all(
             statement.lstrip().startswith("UPDATE alembic_version")
             for statement in stamp_writes[1:]
         )
         assert current_alembic_head() in stamp_writes[-1]
-        # Only appended Git/body and shared-draft schema changes rebuild
-        # tables; historical release migrations are still skipped on install.
-        assert _batch_rebuild_counts(statements) == (
-            {"context_page_version": 2, "content_chunk": 1}
-            if dialect == "sqlite"
-            else {}
-        )
+        # The snapshot creates final tables; no release migration rebuilds one.
+        assert _batch_rebuild_counts(statements) == {}
         initialized_schema = _schema_snapshot(engine)
         _reset_database(engine)
 

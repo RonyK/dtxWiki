@@ -135,6 +135,13 @@ def release_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "Historical example: `dtxwiki==0.1.3`.\n"
         )
         _write(tmp_path, output, text)
+    _write(
+        tmp_path,
+        "backend/schemas/common.py",
+        "MCP_RELEASED_TOOL_CONTRACT_REVISION = 7\n"
+        'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "70000000000a"\n'
+        "MCP_TOOL_CONTRACT_REVISION = 8\n",
+    )
     _write(tmp_path, "CHANGELOG.md", "## 0.1.4\n\nReleased before 1.2.3.\n")
     _write(
         tmp_path,
@@ -143,6 +150,9 @@ def release_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.setattr(
         release_version, "export_openapi", lambda root: _json(root, OPENAPI)
+    )
+    monkeypatch.setattr(
+        release_version, "tool_contract_digest", lambda root: "80000000000b"
     )
     return tmp_path
 
@@ -196,11 +206,36 @@ def test_version_sync_updates_consumers_without_rewriting_history_or_dependencie
     assert (release_tree / "CHANGELOG.md").read_bytes() == before["CHANGELOG.md"]
     manifest = "backend/migrations/release_manifest.json"
     assert (release_tree / manifest).read_bytes() == before[manifest]
+    contract = release_tree / "backend/schemas/common.py"
+    # The upversion releases the revision accumulated since the last release.
+    assert contract.read_text() == (
+        "MCP_RELEASED_TOOL_CONTRACT_REVISION = 8\n"
+        'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "80000000000b"\n'
+        "MCP_TOOL_CONTRACT_REVISION = 8\n"
+    )
     assert release_version.check(root=release_tree) == []
 
+    # A later contract change stays unreleased: regenerating the same version
+    # must not record it, or the next release would need a second revision.
+    contract.write_text(
+        "MCP_RELEASED_TOOL_CONTRACT_REVISION = 8\n"
+        'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "80000000000b"\n'
+        "MCP_TOOL_CONTRACT_REVISION = 9\n"
+    )
     after = _snapshot(release_tree)
     assert release_version.synchronize(root=release_tree) == []
     assert _snapshot(release_tree) == after
+
+    # A release branch whose shipped revision 8 changes before the tag records
+    # 9 by setting the same version again, without a dummy version bump.
+    assert release_version.synchronize(root=release_tree, version="2.4.6") == [
+        "backend/schemas/common.py"
+    ]
+    assert contract.read_text() == (
+        "MCP_RELEASED_TOOL_CONTRACT_REVISION = 9\n"
+        'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "80000000000b"\n'
+        "MCP_TOOL_CONTRACT_REVISION = 9\n"
+    )
 
 
 @pytest.mark.counterexample("mixed README versions and invalid input cannot pass")

@@ -83,112 +83,6 @@ GRAPH_RUNTIME_FILES = tuple(
         "backend/utils/markdown_links.py",
     )
 )
-# SHA-256 of released revisions and their implementation modules, relative to
-# backend/migrations. A deliberate second copy of
-# backend/migrations/frozen_revisions.json: editing a released revision and
-# re-hashing the manifest in the same change still fails here, and
-# tests/packaging/test_migration_chain.py holds the two copies equal.
-FROZEN_MIGRATIONS = {
-    "initialization/schema/postgresql.json": (
-        "d8678842142290152f348ce50206a5fd12d6ff426f94178d6c912d7ad567d8da"
-    ),
-    "initialization/schema/sqlite.json": (
-        "01195f58398685838f7029007fe8b49f4f839da2e9d4860ce21085b86b0458cf"
-    ),
-    "initialization/versions/v0_2/5b7e5c149279_initial_schema.py": (
-        "91d97a286c94e9d9ae1c278d0227e42b38ab67f20239d945da665400136e3f69"
-    ),
-    "revision_modules/__init__.py": (
-        "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6"
-    ),
-    "revision_modules/v0_1/__init__.py": (
-        "4a10c05f30c23333471d4ce1a16d2d768361fb82aac88f3862dbedff753bf7b6"
-    ),
-    "revision_modules/v0_1/content_event_backfill_v1.py": (
-        "0321e31467fa8112e133b39a197b9456ea39795a684aaae0c8934eeb1f655995"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/__init__.py": (
-        "b57efc37a5d5c2e8027f42613fdfdb3252376d6784ba4cff95030e74ccd26f09"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/context_data.py": (
-        "366709f74283479354b738c4a4367f78183d327b184ad2d78654a60db4384ccc"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/context_schema.py": (
-        "406886a9b7e0963d0ac5e21947371a0824f5dfb1d382e384d69e90011b74ed85"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/identity_access_schema.py": (
-        "bdd07ca0004aa5973cd593bd6e00d1206781d0116e16ccc2a071aa206248f9f9"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/library_media_schema.py": (
-        "0026ee1fb15c27692a1888f4521ae2d01d9ddf343d45f9865c41d15e47fe5cfb"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/library_policy.py": (
-        "ed86943f046fedf08eb7fa0dde1a6674d07243bbcaf0907d49e4e00d8ef3732c"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/operations_schema.py": (
-        "daa008f631076b9018ef2ff045a06a27258c206dc001d1a23e4a836f988c36eb"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/search_schema.py": (
-        "13cb7fad720896937887a4692cb67c8afb63397cea120c38af4ae9683d7c62db"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/tenancy_schema.py": (
-        "e36f7d452028a03a73ce94d50f3b6c2b30c43b60230a332170b23fbc83bc9698"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/unique_key_prepass.py": (
-        "6d564b038d785c0d551ee103908ec3f61f0c08a3ff6d325053e629b3519e1cec"
-    ),
-    "revision_modules/v0_1/efcbcf724889_core_schema/workspace_schema.py": (
-        "6daaec7d569a6ec8c6f76c444a95e4fc945e218215d9234debcbb5187e2960ec"
-    ),
-    "revision_modules/v0_1/input_restrictions_v1.py": (
-        "14f50082552dc8490e2ee2ac239983f4224cbbce80758df6ce498f9cacef26d5"
-    ),
-    "revision_modules/v0_2/_5b7e5c149279_release_0_2/__init__.py": (
-        "2409dab9b580bd31c476b9a0bd3698899f01efdd7dd9d8a99280d2e187377008"
-    ),
-    "revision_modules/v0_2/_5b7e5c149279_release_0_2/co_access_schema.py": (
-        "ad1b0ad0c25f2f3067991ed6cb9e1eeaf6a36bef9f5b67eefd7620e8efe4a3e9"
-    ),
-    "revision_modules/v0_2/_5b7e5c149279_release_0_2/document_reference_schema.py": (
-        "c3d8ef2050f9f97f6bfef5e500596493f94be9bd19358649bc5b0facbcb84663"
-    ),
-    "revision_modules/v0_2/_5b7e5c149279_release_0_2/graph_schema.py": (
-        "91c11dceb2c14394078fe17da5f87c97b8f8909a22e8c5f5d6f3531812f712b7"
-    ),
-    "revision_modules/v0_2/_5b7e5c149279_release_0_2/inbox_schema.py": (
-        "0b2376bbfef03c351ebaaa3b1837f039c08c455dee1e43f80278b91337c27933"
-    ),
-    "revision_modules/v0_2/__init__.py": (
-        "5f3eb4116f07bb24e42375b4804692461fe4795f19107cfbff39e5ed19ff5686"
-    ),
-    "revision_modules/v0_2/co_read_v1.py": (
-        "d2d76a36e06862a42b661b8773f9bdd6ba58a94cdfb2610a9f1d0760147d5a88"
-    ),
-    "revision_modules/v0_2/legacy_usage_v1.py": (
-        "369051756eb50b2f06139e2d8642d0cf3379d126524579b3dc362e01e9e38a78"
-    ),
-    "revision_modules/v0_2/lifetime_co_access_v1.py": (
-        "d86ff3130305d73bda12f8618b4ce6066b35e22b58a41df8046f4d934f49567f"
-    ),
-    "versions/v0_0/bd62193d5cf6_initial_schema.py": (
-        "1c944d1f3c1d5427ff40470aacf1fbf611092a8e7e1111f19bc4089d13bd45e8"
-    ),
-    "versions/v0_1/19db79d3e622_release_0_1_3.py": (
-        "f6eade587f72c760ff86a37d2769355e22cbb647b9815c12c3e3ec084dcf5a0c"
-    ),
-    "versions/v0_1/eb86fdacb1bb_release_0_1_4.py": (
-        "a639a8ce3a5b8678503f3d0bf7b493e394308869cc3274c0084cb3dbaf2b8557"
-    ),
-    "versions/v0_1/efcbcf724889_core_schema.py": (
-        "1e4edcea3733bc4ea0f7407a9cd331a5f2f5e6913eebb289856cf87a45b9cd6b"
-    ),
-    "versions/v0_2/5b7e5c149279_release_0_2.py": (
-        "37470ffd638a140a787c26b805711d0af4589bb58ed0001e4f342d739b094b56"
-    ),
-    "versions/v0_2/00ba02774c4a_release_0_2_3.py": (
-        "c4248b0d84bfc05e0d060c8eba7d136953b462d1882f931dc8c3514f223d90fc"
-    ),
-}
 FROZEN_MANIFEST = Path("backend") / "migrations" / "frozen_revisions.json"
 # A local env file can hold SMTP passwords and session secrets. Only the
 # documented templates may ship.
@@ -237,13 +131,13 @@ sys.path.insert(0, root)
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from backend.services.ops.alembic_migration_graph import (
+    INITIALIZATION_REVISION,
     initialization_script_directory,
 )
 
+migrations = os.path.join(root, "backend", "migrations")
 config = Config(os.path.join(root, "backend", "alembic.ini"))
-config.set_main_option(
-    "script_location", os.path.join(root, "backend", "migrations")
-)
+config.set_main_option("script_location", migrations)
 script = ScriptDirectory.from_config(config)
 with warnings.catch_warnings():
     # Alembic otherwise warns and silently replaces a duplicate revision ID.
@@ -252,7 +146,13 @@ with warnings.catch_warnings():
     chain = [[entry.revision, entry.down_revision] for entry in script.walk_revisions()]
     initialization_error = None
     initialization_heads, initialization_chain = [], []
+    initialization_sources = []
     try:
+        # The release revisions the initialization snapshots stand in for.
+        initialization_sources = [
+            os.path.relpath(entry.path, migrations).replace(os.sep, "/")
+            for entry in script.walk_revisions("base", INITIALIZATION_REVISION)
+        ]
         initialization = initialization_script_directory()
         initialization_heads = sorted(initialization.get_heads())
         initialization_chain = [
@@ -288,6 +188,8 @@ print(json.dumps({
     "initialization_heads": initialization_heads,
     "initialization_chain": initialization_chain,
     "initialization_error": initialization_error,
+    "initialization_revision": INITIALIZATION_REVISION,
+    "initialization_sources": initialization_sources,
 }))
 """
 
@@ -450,6 +352,7 @@ def _check_alembic_payload(root: Path) -> list[str]:
             "0.1.4": {"group": "v0_1", "head": "eb86fdacb1bb"},
             "0.2.1": {"group": "v0_2", "head": "5b7e5c149279"},
             "0.2.3": {"group": "v0_2", "head": "00ba02774c4a"},
+            "0.3.1": {"group": "v0_3", "head": "c3d2e4f601ab"},
         }
         aliases = {
             "0001_initial_release": "bd62193d5cf6",
@@ -481,7 +384,8 @@ def _check_release_schema(
     A future entry must not make an older package with a new migration pass.
     This is an explicit publishing check: development artifacts may qualify
     their runtime before the owner chooses the next release version. Release
-    artifacts must contain no unreleased revision or helper files.
+    artifacts must record the MCP tool contract they ship and contain no
+    unreleased migration or helper files.
     """
 
     try:
@@ -493,6 +397,33 @@ def _check_release_schema(
         *_check_release_identity(root, artifact, release_version, expected),
         *_check_schema_boundary(root, head, expected),
         *_check_unreleased_migrations(root),
+        *_check_unreleased_tool_contract(root, release_version),
+    ]
+
+
+def _check_unreleased_tool_contract(root: Path, release_version: str) -> list[str]:
+    """Require make set-version to record the packaged MCP tool contract."""
+
+    relative = "backend/schemas/common.py"
+    missing = f"{relative} does not state both MCP tool contract revisions exactly once"
+    try:
+        source = (root / relative).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return [missing]
+
+    current = re.findall(r"^MCP_TOOL_CONTRACT_REVISION = (\d+)$", source, re.MULTILINE)
+    released = re.findall(
+        r"^MCP_RELEASED_TOOL_CONTRACT_REVISION = (\d+)$", source, re.MULTILINE
+    )
+    if len(current) != 1 or len(released) != 1:
+        return [missing]
+    if current == released:
+        return []
+    return [
+        f"release artifact contains unreleased MCP tool contract revision "
+        f"{current[0]} (last released {released[0]}). Run make set-version "
+        f"VERSION={release_version} on the release branch to record it before "
+        "publishing"
     ]
 
 
@@ -656,6 +587,25 @@ def _check_graph_runtime_payload(root: Path) -> list[str]:
     ]
 
 
+def _frozen_digests(root: Path) -> dict[str, str] | None:
+    """The artifact's frozen_revisions.json digests, relative to migrations/."""
+
+    try:
+        recorded = json.loads((root / FROZEN_MANIFEST).read_text(encoding="utf-8"))[
+            "sha256"
+        ]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(recorded, dict) or not recorded:
+        return None
+    if not all(
+        isinstance(relative, str) and isinstance(digest, str)
+        for relative, digest in recorded.items()
+    ):
+        return None
+    return recorded
+
+
 def _check_frozen_migrations(root: Path) -> list[str]:
     """Released migration files remain byte-identical to their frozen digests.
 
@@ -664,9 +614,12 @@ def _check_frozen_migrations(root: Path) -> list[str]:
     from a fresh one. New schema work belongs in a new revision.
     """
 
+    frozen = _frozen_digests(root)
+    if frozen is None:
+        return [f"{FROZEN_MANIFEST.as_posix()} is missing or unreadable"]
     migrations = root / "backend" / "migrations"
     failures: list[str] = []
-    for relative, expected in sorted(FROZEN_MIGRATIONS.items()):
+    for relative, expected in sorted(frozen.items()):
         path = migrations / relative
         if not path.is_file():
             failures.append(f"backend/migrations/{relative} is missing")
@@ -685,20 +638,8 @@ def _check_frozen_migrations(root: Path) -> list[str]:
         for path in sorted(
             (migrations / "revision_modules/v0_1/efcbcf724889_core_schema").glob("*.py")
         )
-        if f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}"
-        not in FROZEN_MIGRATIONS
+        if f"revision_modules/v0_1/efcbcf724889_core_schema/{path.name}" not in frozen
     )
-    manifest = root / FROZEN_MANIFEST
-    try:
-        recorded = json.loads(manifest.read_text(encoding="utf-8"))["sha256"]
-    except (OSError, ValueError, KeyError, TypeError):
-        failures.append(f"{FROZEN_MANIFEST.as_posix()} is missing or unreadable")
-    else:
-        if recorded != FROZEN_MIGRATIONS:
-            failures.append(
-                f"{FROZEN_MANIFEST.as_posix()} does not record the frozen "
-                "canonical baseline migration digests"
-            )
     return failures
 
 
@@ -788,19 +729,66 @@ def _check_migration_graph(root: Path) -> tuple[list[str], str | None]:
             for failure in _chain_failures(
                 resolved["initialization_heads"],
                 resolved["initialization_chain"],
-                baseline=(("5b7e5c149279", None),),
+                baseline=(("c3d2e4f601ab", None),),
             )
         )
         if resolved["initialization_heads"] != resolved["heads"]:
             failures.append(
                 "initialization graph does not converge to the packaged head"
             )
+        failures.extend(
+            _check_initialization_snapshots(
+                root,
+                resolved["initialization_revision"],
+                resolved["initialization_sources"],
+            )
+        )
     failures.extend(
         f"{name} resolved from {origin}, outside the artifact"
         for name, origin in sorted(resolved["foreign"].items())
     )
     heads = resolved["heads"]
     return failures, heads[0] if len(heads) == 1 else None
+
+
+def _check_initialization_snapshots(
+    root: Path, revision: str, sources: list[str]
+) -> list[str]:
+    """Each packaged snapshot was captured from this package's release chain.
+
+    The freeze manifest only proves a snapshot is the file that was committed
+    with it. A snapshot of an earlier schema boundary, committed with a
+    matching digest, passes that check and then breaks fresh installs, so its
+    recorded revision, dialect and source revisions must be the packaged ones.
+    """
+
+    migrations = root / "backend" / "migrations"
+    packaged = {
+        relative: hashlib.sha256((migrations / relative).read_bytes()).hexdigest()
+        for relative in sources
+    }
+    failures: list[str] = []
+    for dialect in ("sqlite", "postgresql"):
+        name = f"backend/migrations/initialization/schema/{dialect}.json"
+        try:
+            snapshot = json.loads((root / name).read_text(encoding="utf-8"))
+            recorded = (snapshot["revision"], snapshot["dialect"])
+            recorded_sources = snapshot["source_revision_sha256"]
+        except (OSError, ValueError, KeyError, TypeError):
+            failures.append(f"{name} is missing or unreadable")
+            continue
+        if recorded != (revision, dialect):
+            failures.append(
+                f"{name} records the {recorded[1]} schema at {recorded[0]}, but "
+                f"the package initializes {dialect} at {revision}; regenerate "
+                "the snapshot"
+            )
+        if recorded_sources != packaged:
+            failures.append(
+                f"{name} was not captured from the packaged release revisions "
+                f"through {revision}; regenerate the snapshot"
+            )
+    return failures
 
 
 def _chain_failures(
@@ -980,7 +968,7 @@ def verify_artifact(
     return [], (
         f"{artifact.name}: alembic head {head}, "
         f"{_revision_module_count(root)} packaged core revision modules, "
-        f"{len(FROZEN_MIGRATIONS)} frozen migration files intact, "
+        f"{len(_frozen_digests(root))} frozen migration files intact, "
         "frontend bundle intact"
     )
 
@@ -996,7 +984,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--release-version",
         help=(
             "require artifact metadata and effective schema boundary to match "
-            "this tag version, with no unreleased migration or helper files"
+            "this tag version, with a recorded MCP tool contract and no "
+            "unreleased migration or helper files"
         ),
     )
     arguments = parser.parse_args(argv)

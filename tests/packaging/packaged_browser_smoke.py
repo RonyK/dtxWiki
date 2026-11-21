@@ -260,9 +260,9 @@ for (const { name, group } of [
   { name: /^Agent$/, group: 'labs' },
   { name: /^(Workspace Knowledge Map|워크스페이스 지식 지도)$/, group: 'graph' },
 ]) {
-  const checkbox = page.getByRole('checkbox', { name });
-  await checkbox.check();
-  const card = page.locator('.policy-card').filter({ has: checkbox });
+  const toggle = page.getByRole('switch', { name });
+  await toggle.check();
+  const card = page.locator('.policy-card').filter({ has: toggle });
   const save = card.getByRole('button', { name: /^(Save|저장)$/ });
   await expect(save).toBeEnabled();
   const [saved] = await Promise.all([

@@ -13,24 +13,25 @@ from backend.services.ops.db_revision_inventory import is_revision_id
 # backend/services/ops/ -> backend/migrations; resolved here rather than through
 # backend.app.bootstrap, which imports the migration preflight that uses this.
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
-RELEASE_02_REVISION = "5b7e5c149279"
+# The release revision whose complete schema initialization/ creates directly.
+INITIALIZATION_REVISION = "c3d2e4f601ab"
 
 
 def initialization_script_directory(
     migrations_dir: str | Path | None = None,
 ) -> ScriptDirectory:
-    """Create an empty DB at the frozen 0.2 schema in one revision.
+    """Create an empty DB at the frozen 0.3.1 schema in one revision.
 
     Historical upgrades retain their original operations. Fresh installations
     use an independent baseline with the same terminal schema and revision;
-    subsequent releases append the same operations after that boundary.
+    later revisions append the same operations after that boundary.
     """
     root = Path(migrations_dir) if migrations_dir is not None else _MIGRATIONS_DIR
     script = ScriptDirectory(str(root), recursive_version_locations=True)
     canonical_map = script.revision_map
     replaced = {
         revision.revision
-        for revision in canonical_map.iterate_revisions(RELEASE_02_REVISION, "base")
+        for revision in canonical_map.iterate_revisions(INITIALIZATION_REVISION, "base")
     }
     initializer = ScriptDirectory(
         str(root / "initialization"), recursive_version_locations=True

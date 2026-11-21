@@ -27,10 +27,7 @@ from backend.scripts.seed_dev import seed_default_workspace
 from backend.services.ops.alembic_migration_graph import schema_release_head
 from backend.services.workspace_purge import purge_workspace_data
 from backend.services.workspace_write import WorkspaceWriteService
-from backend.tests.utils.context_git import (
-    configure_test_context_storage,
-    seed_published_snapshot,
-)
+from backend.tests.utils.context_git import historical_context_version_model
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.utils.content_hash import content_hash
@@ -787,15 +784,10 @@ def test_page_link_syntax_downgrade_preserves_wikilink_projection(
         sqlite_templates,
         tmp_path,
         "page-link-syntax-downgrade.db",
-        template="rev_872d9c3e104b",
+        template="rev_00ba02774c4a",
     )
-    from backend.tests.utils.context_git import historical_context_version_model
-
     ContextPageVersion = historical_context_version_model(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-    configure_test_context_storage(
-        session_factory, config.attributes["context_repositories_root"]
-    )
     try:
         with session_factory.begin() as session:
             workspace = seed_default_workspace(session)
@@ -847,8 +839,6 @@ def test_page_link_syntax_downgrade_preserves_wikilink_projection(
             source.current_published_version_id = source_version.id
             target.current_version_id = target_version.id
             target.current_published_version_id = target_version.id
-            seed_published_snapshot(session, source_version)
-            seed_published_snapshot(session, target_version)
             wikilink_created_at = datetime(2026, 9, 20, 1, tzinfo=UTC)
             context_url_created_at = datetime(2026, 9, 20, 2, tzinfo=UTC)
             session.add_all(
@@ -1070,7 +1060,7 @@ def test_first_install_rolls_back_complete_schema_on_late_failure(tmp_path):
         resolve_migrations_dir(), scripts, ignore=shutil.ignore_patterns("__pycache__")
     )
     initializer = (
-        scripts / "initialization/versions/v0_2/5b7e5c149279_initial_schema.py"
+        scripts / "initialization/versions/v0_3/c3d2e4f601ab_initial_schema.py"
     )
     initializer.write_text(
         initializer.read_text()

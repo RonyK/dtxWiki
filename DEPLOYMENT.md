@@ -792,7 +792,11 @@ docker compose up -d app worker
 이미 이 head인 DB에도 v0.2.3의 단일 후속 migration을 적용합니다. v0.2.3 준비 중의
 `fec23ff328e6` DB는 원래 checkout으로 `00ba02774c4a`까지 올리고 백업·검증한 뒤
 전환해야 합니다. 제거된 revision을 `alembic stamp`로 우회하지 마세요. 배포된
-0.1.4 이하 DB는 v0.2 chain으로 직접 업그레이드합니다.
+0.1.2 이상 DB는 중간 앱 버전을 설치하지 않고 0.3.1로 직접 업그레이드합니다.
+
+0.3.1의 공유 Context 초안 변환은 역변환을 지원하지 않습니다. 업그레이드 전에 DB,
+Library 파일, Context `repositories/`, 환경 설정과 키의 백업을 함께 확보하세요.
+롤백하려면 해당 백업 세트와 이전 버전을 함께 복원합니다.
 
 ### 관리자 화면에서 버전 확인
 
@@ -816,7 +820,7 @@ npx는 같은 npm 대상 버전을 지정하여 릴리스에서 요구하는 사
 사용하고 필요한 복구·migration은 상세 문서의 순서를 따르세요.
 
 화면의 안내는 설치·마이그레이션·복구 전체 절차를 대신하지 않습니다.
-[상세 유지보수 문서](https://docs.dtxwiki.com/docs/0.2/administration/backup-upgrades/)와
+[상세 유지보수 문서](https://docs.dtxwiki.com/docs/0.3/administration/backup-upgrades/)와
 [릴리스 변경 내역](https://github.com/dtxSuite/dtxWiki/releases)을 확인하고,
 실행 중인 서버와 별도로 관리하는 worker를 모두 중지한 뒤 DB·파일·설정을 백업하세요.
 
@@ -845,7 +849,7 @@ readiness를 수행하며, 실패 시 자동 rollback하지 않고 복구 명령
 ```bash
 # systemd + private wheel index
 sudo dtxwiki update --check               # 새 버전 유무만 (가능하면 exit 10)
-sudo dtxwiki update --version 0.2.4       # 특정 버전 핀
+sudo dtxwiki update --version 0.3.1       # 특정 버전 핀
 sudo dtxwiki update --index-url https://pypi.internal/simple   # 사설 wheel index
 ```
 
@@ -1331,10 +1335,9 @@ endpoint를 사용한다.
 
 0.1.2부터 DB migration은 **릴리스 그룹**, **revision ID**, **변경 내용 이름**을 구분해
 관리합니다. 당시 ID·파일 배치 정리는 schema·데이터 작업을 바꾸지 않았습니다.
-새 설치와 기존 배포본 업그레이드는 v0.2.3 head `00ba02774c4a`에 도달합니다.
-v0.2.1·v0.2.2의 head `5b7e5c149279` 뒤에 단일 릴리스 migration
-`00ba02774c4a`가 연결되어 workspace Labs 정책 컬럼과 보관된 Inbox 목록의 부분
-인덱스를 추가합니다. 이미 배포된 `5b7e5c149279`와 그 이전 구현은 유지합니다.
+새 설치와 기존 배포본 업그레이드는 v0.3.1 head `c3d2e4f601ab`에 도달합니다.
+v0.2.3·v0.2.4의 head `00ba02774c4a`에서 이 단일 migration을 적용해 Context 이력
+본문의 Git 저장, MCP 호출 수명 주기, 문서 URL, 공유 초안 관련 변경을 반영합니다.
 
 v0.1.2부터의 배포본은 중간 버전을 따로 설치하지 않고 현재 버전으로 직접
 업그레이드할 수 있습니다. 각 버전의 migration 구현과 연결은 이후 통합 시에도
@@ -1342,24 +1345,23 @@ v0.1.2부터의 배포본은 중간 버전을 따로 설치하지 않고 현재 
 
 | 기존 배포 버전 | 기존 DB revision | 현재 버전으로의 경로 |
 | --- | --- | --- |
-| 새 설치 | 없음, DB가 비어 있음 | v0.2.1 schema를 직접 초기화한 뒤 v0.2.3의 단일 후속 migration 적용 |
-| v0.1.2 | `efcbcf724889` | 정식 0.1.3 → 0.1.4 → v0.2 경로 적용 |
-| v0.1.3 | `19db79d3e622` | 정식 0.1.4 → v0.2 경로 적용 |
-| v0.1.4 | `eb86fdacb1bb` | 남은 v0.2 변경과 v0.2.3 후속 migration 적용, 0.1.4 로그인·계정 보존 데이터 유지 |
-| v0.2.1·v0.2.2 | `5b7e5c149279` | v0.2.3의 Labs 정책·Inbox 인덱스 migration 적용 |
-| v0.2.3 | `00ba02774c4a` | 이미 최신 schema이면 migration 생략 |
+| 새 설치 | 없음, DB가 비어 있음 | v0.3.1 schema를 직접 초기화 |
+| v0.1.2 | `efcbcf724889` | 0.1.3 → 0.1.4 → v0.2 → v0.3.1 경로 적용 |
+| v0.1.3 | `19db79d3e622` | 0.1.4 → v0.2 → v0.3.1 경로 적용 |
+| v0.1.4 | `eb86fdacb1bb` | v0.2와 v0.3.1 migration 적용, 0.1.4 로그인·계정 보존 데이터 유지 |
+| v0.2.1·v0.2.2 | `5b7e5c149279` | v0.2.3의 Labs 정책·Inbox 인덱스와 v0.3.1 migration 적용 |
+| v0.2.3·v0.2.4 | `00ba02774c4a` | v0.3.1의 단일 migration 적용 |
 
 ```text
 기존 배포본: efcbcf724889 (0.1.2) → 19db79d3e622 (0.1.3)
            → eb86fdacb1bb (0.1.4) → 5b7e5c149279 (0.2.1)
-           → 00ba02774c4a (Labs 정책·Inbox 인덱스, 0.2.3 head)
+           → 00ba02774c4a (0.2.3·0.2.4)
+           → c3d2e4f601ab (0.3.1)
 
-새 설치: base → 5b7e5c149279 (v0.2.1 schema 직접 생성)
-        → 00ba02774c4a
+새 설치: base → c3d2e4f601ab (v0.3.1 schema 직접 생성)
 ```
 
-새 DB는 과거 migration을 재실행하지 않고 고정된 v0.2.1 schema를 직접 생성한 뒤
-v0.2.3의 단일 후속 migration을 적용합니다.
+새 DB는 과거 migration을 재실행하지 않고 고정된 v0.3.1 schema를 직접 생성합니다.
 0.1.2·0.1.3 DB는 배포된 0.1.4 migration을 거쳐 업그레이드합니다.
 0.1.4 DB는 이미 적용된 SSO·계정 보존·Review 변경은 재실행하지 않고 Inbox·링크
 locator·Graph·문서 참고문헌·Chats 변경을 적용합니다. 시작 시 bootstrap과 직접
@@ -1458,13 +1460,16 @@ backend/migrations/
 │   ├── v0_2/
 │   │   ├── 5b7e5c149279_release_0_2.py
 │   │   └── 00ba02774c4a_release_0_2_3.py
+│   ├── v0_3/
+│   │   └── c3d2e4f601ab_release_0_3_1.py
 │   └── unreleased/                        # 개발 중인 revision, 배포 전 이동·통합
-├── initialization/                        # 새 설치용 v0.2.1 초기화
-│   ├── versions/v0_2/5b7e5c149279_initial_schema.py
-│   └── schema/                            # SQLite·PostgreSQL의 고정된 v0.2.1 DDL
+├── initialization/                        # 새 설치용 v0.3.1 초기화
+│   ├── versions/v0_3/c3d2e4f601ab_initial_schema.py
+│   └── schema/                            # SQLite·PostgreSQL의 고정된 v0.3.1 DDL
 ├── revision_modules/                      # 릴리스 그룹별 고정 helper 구현
 │   ├── v0_1/
 │   ├── v0_2/
+│   ├── v0_3/
 │   └── unreleased/                        # 개발 중인 helper, 배포 전 import 경로 변경
 ├── release_manifest.json                  # 스키마 릴리스별 그룹과 head 매핑
 └── frozen_revisions.json                  # 배포된 migration 구현의 해시
@@ -1479,7 +1484,8 @@ backend/migrations/
 
 `release_manifest.json`은 DB 변경이 포함된 스키마 릴리스와 head를 연결합니다. DB 변경이
 없는 Patch 배포마다 새 항목을 만들 필요는 없습니다. 배포한 실행 파일과 보조 코드의
-해시는 `frozen_revisions.json`과 패키지 검증기에 고정합니다. 배포된 migration은 수정하거나
+해시는 `frozen_revisions.json`에 고정하고, 패키지 검증기가 산출물의 파일을 이 해시와
+대조합니다. 배포된 migration은 수정하거나
 다시 합치지 않고, 변경이 필요할 때 후속 revision을 추가합니다.
 
 ### 새 DB 변경 추가
@@ -1498,8 +1504,8 @@ freeze하지 않고 개발 중 수정·통합할 수 있습니다. helper는 파
 별도로 수행합니다. Alembic은 하위 디렉터리를 재귀 탐색하므로 추가 설정 없이 읽습니다.
 
 릴리스 브랜치에서 앱 버전을 정한 뒤 revision과 helper를 릴리스 그룹으로 이동·통합하고,
-import 경로를 바꿉니다. 이어서 `release_manifest.json`의 head와 `frozen_revisions.json` 및
-검증기의 고정 해시를 확정하고, 새 wheel·sdist를 `make verify-release-artifacts`로 확인합니다.
+import 경로를 바꿉니다. 이어서 `release_manifest.json`의 head와 `frozen_revisions.json`의
+고정 해시를 확정하고, 새 wheel·sdist를 `make verify-release-artifacts`로 확인합니다.
 배포 산출물의 두 `unreleased/` 경로는 비어 있어야 하며 helper의 `__init__.py`도 남기지 않습니다.
 이전에 미배포 revision을 적용한 dev DB는 위의 "미배포 중간 revision" 절차로 전환합니다.
 
@@ -1523,8 +1529,8 @@ sudo dtxwiki db revision-inventory --configured prod
 
 ```text
 Database revision inventory (evidence only; not migration approval)
-code heads: 00ba02774c4a
-prod: status=ok revisions=00ba02774c4a consistency=consistent
+code heads: c3d2e4f601ab
+prod: status=ok revisions=c3d2e4f601ab consistency=consistent
 ```
 
 `revisions`는 DB에 기록된 revision이고, `code heads`는 설치된 코드의 최신 revision입니다.

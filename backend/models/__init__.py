@@ -123,7 +123,6 @@ from backend.models.media import (
     WorkspaceMediaQuotaUsage,
     WorkspaceMediaWriteIntent,
 )
-from backend.models.migration import DocumentLocatorRollback
 from backend.models.oauth import (
     OAuthClient,
     OAuthCode,
@@ -176,7 +175,6 @@ __all__ = [
     "AgentPage",
     "AgentPageVersion",
     "AppMetadata",
-    "DocumentLocatorRollback",
     "AgentInputBundle",
     "AgentInputBundleItem",
     "Base",

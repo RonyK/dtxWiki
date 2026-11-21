@@ -16,7 +16,7 @@ import {
 import { StatusPill } from "../../shared/components/StatusPill";
 
 const UPGRADE_DOCS =
-  "https://docs.dtxwiki.com/docs/0.1/administration/backup-upgrades/";
+  "https://docs.dtxwiki.com/docs/0.3/administration/backup-upgrades/";
 const METHODS = ["uv", "pipx", "pip", "npx", "npm", "docker", "service"] as const;
 type InstallMethod = (typeof METHODS)[number];
 

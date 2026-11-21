@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page, type Request, type Response, type TestInfo } from "@playwright/test";
+import { expect as playwrightExpect, test, type Locator, type Page, type Request, type Response, type TestInfo } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 
@@ -8,8 +8,11 @@ import type { components } from "../../frontend/src/shared/api/types.gen";
 import type { WorkspaceGraphDocumentNode, WorkspaceGraphOverviewRequest, WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { backendBaseUrl, configureWorkspaceLabs, currentWorkspace, e2ePassword, login, enableKnowledgeMapLab } from "./auth";
 import { createOverviewResponseReader } from "./workspace_graph_response_reader";
-import { expectNativeCounts, installNativeDrawMeter, readNativeDraw } from "./workspace_graph_native_draw";
+import { expectNativeCounts, installNativeDrawMeter, PC10K_LOADING_TIMEOUT_MS, readNativeDraw } from "./workspace_graph_native_draw";
 import { admittedNodes, expectCurrentContainment, exportedNodeShape, listedEdgeCount, listedNodeIds, nativeDrawCounts, sceneRelations } from "./workspace_graph_scene";
+
+// Software GL draws these scenes; every assertion gets the lane's loading allowance.
+const expect = playwrightExpect.configure({ timeout: PC10K_LOADING_TIMEOUT_MS });
 
 const OWNER_EMAIL = "e2e-graph-10k-owner@example.com";
 const DOCUMENT_COUNT = 10_000;
@@ -353,7 +356,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
 
   test("actual same-actor workspace switching isolates 10K and retains only returned 2K-visible state before explicit PC choice", async ({ page, browserName }, testInfo) => {
     test.skip(browserName !== "chromium", "This real workspace transition targets Chromium native WebGL");
-    test.setTimeout(240_000);
+    test.setTimeout(420_000);
     // Only the standard wrapper owns this disposable database. No operator
     // workspace or pre-existing database is mutated by secondary setup.
     expect(process.env.DTXWIKI_E2E_DATABASE_PATH).toBeTruthy();
@@ -519,7 +522,7 @@ test.describe("Workspace Knowledge Map real-API PC10K (opt-in)", () => {
   test.describe("actual account transitions without credential trace retention", () => {
     accountTransitionTest("actual same-browser owner-viewer-owner sign-ins deny viewer Map access, purge 10K state and return to fresh 2K", async ({ page, request, browserName, trace }, testInfo) => {
       test.skip(browserName !== "chromium", "This actual account transition acceptance targets Chromium native WebGL");
-      test.setTimeout(240_000);
+      test.setTimeout(420_000);
       expect(trace, "This credential-flow case must never retain a trace").toBe("off");
       await page.emulateMedia({ reducedMotion: "reduce" });
       const ownerLogin = await login(page.request, OWNER_EMAIL);

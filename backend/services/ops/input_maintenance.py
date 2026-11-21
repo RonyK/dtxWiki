@@ -43,11 +43,6 @@ CONSTRAINED_REVISIONS = frozenset(
         "5b7e5c149279",
         # v0.2.3 adds Labs policy and Inbox indexes; input CHECKs are unchanged.
         "00ba02774c4a",
-        "74e5d4f912a6",
-        "9d8695419436",
-        # MCP call lifecycle columns; input CHECKs are unchanged.
-        "872d9c3e104b",
-        "e4f7a2c901bd",
         "c3d2e4f601ab",
     }
 )
@@ -62,10 +57,6 @@ _OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset(
         "eb86fdacb1bb",
         "5b7e5c149279",
         "00ba02774c4a",
-        "74e5d4f912a6",
-        "9d8695419436",
-        "872d9c3e104b",
-        "e4f7a2c901bd",
         "c3d2e4f601ab",
     }
 )

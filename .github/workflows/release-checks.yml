@@ -179,7 +179,9 @@ jobs:
     # Playwright 1.59 cannot install browser dependencies on ubuntu-26.04,
     # which ubuntu-latest became in November 2026.
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # Software GL makes this job's duration follow runner speed. The serial
+    # 10K e2e cases alone may use about 40 minutes within their own limits.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7

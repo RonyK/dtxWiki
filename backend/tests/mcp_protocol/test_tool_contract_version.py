@@ -50,15 +50,23 @@ from backend.mcp.protocol.tool_descriptors import (
 )
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
-from backend.schemas.common import MCP_SCHEMA_VERSION, MCP_TOOL_CONTRACT_REVISION
+from backend.schemas.common import (
+    MCP_RELEASED_TOOL_CONTRACT_DIGEST,
+    MCP_RELEASED_TOOL_CONTRACT_REVISION,
+    MCP_SCHEMA_VERSION,
+    MCP_TOOL_CONTRACT_REVISION,
+)
 
-# The digest of the tool contract as each revision shipped it. A change to the
-# catalog, to any tool's input schema, to any tool's output schema, or to the
-# model-facing envelope allowlist will fail the pin below; the fix is NOT to
-# edit the existing entry but to add the next one, bump
-# ``MCP_TOOL_CONTRACT_REVISION`` in backend/schemas/common.py (with a line in
-# its revision history), and add a CHANGELOG entry saying what a client that
-# does not know the new revision should do.
+# The digest of the tool contract as each revision shipped it, plus the one
+# unreleased revision. A change to the catalog, to any tool's input schema, to
+# any tool's output schema, or to the model-facing envelope allowlist will fail
+# the pin below. Released entries never change; `make set-version` records the
+# released entry's digest. The first change after a
+# release adds MCP_RELEASED_TOOL_CONTRACT_REVISION + 1 here and in
+# backend/schemas/common.py (with a line in its revision history); later changes
+# before the next release amend that entry and its history line. Either way,
+# say in CHANGELOG's Important changes what a client that does not know the new
+# revision should do.
 TOOL_CONTRACT_DIGESTS = {
     1: "7cc83a9d3e5f",
     2: "82a008f8ef4b",
@@ -90,13 +98,7 @@ TOOL_CONTRACT_DIGESTS = {
     27: "9d725068d7ba",
     28: "fa9da086e872",
     29: "bf0185b2915d",
-    30: "6ec173af647d",
-    31: "dc3eb47bd2cf",
-    32: "b15e8689f102",
-    33: "dcad41707cb7",
-    34: "f78b174cb2de",
-    35: "9319fab6e980",
-    36: "7f825bd114a8",
+    30: "7f825bd114a8",
 }
 
 
@@ -137,18 +139,44 @@ def _default_workspace_id(page_service):
 
 
 def test_the_published_digest_is_pinned_to_the_live_catalog():
+    unreleased = MCP_RELEASED_TOOL_CONTRACT_REVISION + 1
     assert MCP_TOOL_CONTRACT_REVISION == max(TOOL_CONTRACT_DIGESTS), (
         "MCP_TOOL_CONTRACT_REVISION was bumped without recording the new "
         "revision's digest in TOOL_CONTRACT_DIGESTS (or vice versa)."
+    )
+    assert MCP_TOOL_CONTRACT_REVISION in {
+        MCP_RELEASED_TOOL_CONTRACT_REVISION,
+        unreleased,
+    }, (
+        "A release advances the MCP tool contract by one revision: changes since "
+        f"released revision {MCP_RELEASED_TOOL_CONTRACT_REVISION} share revision "
+        f"{unreleased}. Amend its digest, revision-history line and CHANGELOG "
+        "text instead of adding another revision."
+    )
+    assert (
+        TOOL_CONTRACT_DIGESTS[MCP_RELEASED_TOOL_CONTRACT_REVISION]
+        == MCP_RELEASED_TOOL_CONTRACT_DIGEST
+    ), (
+        f"Revision {MCP_RELEASED_TOOL_CONTRACT_REVISION} was recorded with digest "
+        f"{MCP_RELEASED_TOOL_CONTRACT_DIGEST}; restore that entry and record "
+        f"contract changes as revision {unreleased}. Before the tag of the release "
+        "that first recorded it, amend the entry and rerun make set-version "
+        "VERSION=X.Y.Z instead."
     )
     pinned = TOOL_CONTRACT_DIGESTS[MCP_TOOL_CONTRACT_REVISION]
     assert tool_contract_digest() == pinned, (
         "The MCP tool contract changed: a tool was added/removed/renamed, an "
         "input or output schema moved, or the model-facing envelope allowlist "
-        "widened. Bump MCP_TOOL_CONTRACT_REVISION in backend/schemas/common.py "
-        "and add its revision-history line, add the new digest as the next "
-        "entry in TOOL_CONTRACT_DIGESTS here, and add a CHANGELOG entry "
-        "telling clients what changed."
+        "widened. If MCP_TOOL_CONTRACT_REVISION in backend/schemas/common.py "
+        f"is the released {MCP_RELEASED_TOOL_CONTRACT_REVISION}, set it to "
+        f"{unreleased} with a revision-history line and add the digest as entry "
+        f"{unreleased} here; if it is already {unreleased}, update that entry "
+        "and its history line. On a release branch after make set-version, "
+        "compare with the previous release tag: if it already shipped "
+        f"{MCP_RELEASED_TOOL_CONTRACT_REVISION}, add {unreleased} and rerun "
+        "make set-version VERSION=X.Y.Z; otherwise update entry "
+        f"{MCP_RELEASED_TOOL_CONTRACT_REVISION}. Tell clients what changed in "
+        "CHANGELOG's Important changes."
     )
 
 

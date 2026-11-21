@@ -459,8 +459,8 @@ Cursor 이전 시각의 지연 열람이나 미처리 backlog는 요청 안에�
 
 현재 schema head는 release manifest에서 읽습니다. 이미 배포된 revision은 수정하지
 않습니다. 여러 브랜치의 후속 migration은 merge revision으로 연결하고 schema·model
-일치를 검사합니다. 0.2.1·0.2.3의 미배포 migration 통합과 개발 DB 전환은 아래 릴리스
-migration 안내를 따릅니다.
+일치를 검사합니다. 0.2.1·0.2.3·0.3.1의 미배포 migration 통합과 0.2.1·0.2.3의 개발 DB
+전환은 아래 릴리스 migration 안내를 따릅니다.
 
 ## 설치 방식별 업데이트 방법
 
@@ -697,6 +697,23 @@ CHANGELOG의 과거 릴리스, 운영 증거, DB schema 경계와 백업의 당�
 않습니다. DB 변경은 아래의 `unreleased` 절차를 따릅니다. 이 명령은 Git 태그 생성, push,
 registry 게시를 수행하지 않습니다.
 
+### MCP tool contract revision
+
+클라이언트가 관찰할 수 있는 MCP tool 계약이 바뀐 릴리스는 직전 배포본의
+`MCP_TOOL_CONTRACT_REVISION`에서 1을 올립니다. 계약이 그대로면 번호를 유지합니다.
+다음 릴리스까지의 변경은 같은 revision의 이력, digest, CHANGELOG 안내에 합칩니다.
+이미 배포된 revision과 digest는 보존합니다.
+
+`make set-version`은 같은 앱 버전으로 다시 실행해도 현재 revision과 tool 계약
+digest를 `MCP_RELEASED_TOOL_CONTRACT_REVISION`과
+`MCP_RELEASED_TOOL_CONTRACT_DIGEST`에 기록합니다. `make sync-version`은 생성물을
+갱신할 때 사용합니다. 태그 전에 계약을 더 바꿨다면 직전 배포본과 비교합니다.
+기록된 revision을 직전 배포본이 이미 사용했다면 1을 올립니다. 이번 릴리스에서 처음
+기록한 번호라면 해당 revision의 이력과 digest를 갱신합니다. 그 뒤
+`make set-version`을 다시 실행합니다.
+
+### 릴리스 migration 확정
+
 릴리스 브랜치에서는 다음 순서로 배포할 migration을 확정합니다.
 
 1. `make set-version VERSION=X.Y.Z`로 배포할 앱 버전을 정합니다.
@@ -705,7 +722,7 @@ registry 게시를 수행하지 않습니다.
    고칩니다. 배포된 revision과 helper는 보존하고, 두 `unreleased/` 디렉터리의 잔여 파일과
    빈 `__init__.py`도 제거합니다.
 3. DB 변경이 있으면 `release_manifest.json`에 해당 앱 버전과 최종 head를 기록합니다.
-4. 배포할 파일을 확정한 뒤 `frozen_revisions.json`과 패키지 검증기의 고정 해시를 갱신합니다.
+4. 배포할 파일을 확정한 뒤 `frozen_revisions.json`의 고정 해시를 갱신합니다.
 5. `make build-wheel`로 새 산출물을 만들고 `make verify-release-artifacts`로 검증합니다.
 
 DB 변경이 없는 patch에는 새 schema 경계가 필요하지 않습니다. 릴리스 검증기는 wheel과
@@ -769,8 +786,8 @@ head가 하나여야 합니다. 기존 DB 업그레이드는 고정된 core revi
 `efcbcf724889`의 이력을 보존하고, 새 설치는 아래의 직접 초기화 경로를 사용합니다.
 패키지 검증기는 각 그래프와 고정 파일의 해시를 함께 확인합니다.
 
-새 DB의 `upgrade head`는 `initialization/versions/v0_2/5b7e5c149279_initial_schema.py`
-하나로 v0.2.1 기준 schema를 생성한 뒤 후속 migration을 적용해 현재 head에 도달합니다. SQLite·PostgreSQL의 기준 DDL은
+새 DB의 `upgrade head`는 `initialization/versions/v0_3/c3d2e4f601ab_initial_schema.py`
+하나로 v0.3.1 schema를 직접 생성하고 `c3d2e4f601ab`를 기록합니다. SQLite·PostgreSQL의 기준 DDL은
 `initialization/schema/`에 고정되어 있으며, 과거 table rebuild·backfill이나 현재 ORM
 metadata를 실행하지 않습니다. 비어 있음이 증명된 DB에서만 이 경로를 선택합니다.
 후속 schema 변경은 현재 head 뒤에 추가해 이 초기화 경로에서도 이어서 적용합니다.
@@ -780,7 +797,8 @@ metadata를 실행하지 않습니다. 비어 있음이 증명된 DB에서만 �
 ```text
 bd62193d5cf6 (0.0.1) → efcbcf724889 (0.1.1·0.1.2) → 19db79d3e622 (0.1.3)
   → eb86fdacb1bb (0.1.4) → 5b7e5c149279 (0.2.1·0.2.2)
-  → 00ba02774c4a (0.2.3)
+  → 00ba02774c4a (0.2.3·0.2.4)
+  → c3d2e4f601ab (0.3.1)
 ```
 
 `versions/v0_1/eb86fdacb1bb_release_0_1_4.py`는 v0.1.4 태그의 파일과 같습니다.
@@ -807,6 +825,11 @@ migration만 적용합니다. 배포된 0.2.2 경계와 그 이전 고정 파일
 제거된 미배포·개발 revision의 DB는 원래 checkout으로 먼저 최종 head에 도달하고,
 백업과 schema 검증을 마친 뒤 전환합니다. 임의로 stamp를 바꾸지 않습니다.
 
+0.3.1은 미배포 변경을 `v0_3/c3d2e4f601ab_release_0_3_1.py` 하나로 통합합니다.
+0.2.3·0.2.4 DB는 `00ba02774c4a`에서 직접 이 revision을 적용합니다.
+공유 초안 변환 후 롤백은 업그레이드 전 백업을 복원합니다. 새 설치용 초기화는
+v0.2.1 기준 snapshot을 삭제하고 v0.3.1 schema snapshot으로 교체했습니다.
+
 지원되는 업그레이드 시작점은 최소 v0.1.2부터 유지합니다. v0.1.2의
 `efcbcf724889`, v0.1.3의 `19db79d3e622`, v0.1.4의 `eb86fdacb1bb`에서 현재 head로
 직접 업그레이드할 수 있어야 합니다. 현재 head까지 연결된다는 검사에 더해,
@@ -814,9 +837,11 @@ migration만 적용합니다. 배포된 0.2.2 경계와 그 이전 고정 파일
 
 초기 schema snapshot의 재현은 `scripts/generate_initial_schema.py`를 사용합니다.
 SQLite·PostgreSQL의 별도 빈 테스트 DB를 대상으로 `--database-url-env`와 `--output`을
-지정합니다. 이 도구는 배포된 release chain으로 reference DB를 만든 뒤 최종 DDL을
-추출합니다. 이미 배포한 snapshot과 해시를 재생성해 덮어쓰지 않고, schema가 달라지면
-후속 revision을 추가합니다.
+지정합니다. 이 도구는 `INITIALIZATION_REVISION`까지 release chain을 실제로 실행해
+reference DB를 만든 뒤 최종 DDL을 추출합니다. 각 단계 뒤에 대상 DB의 stamp를
+확인하며, migration이 그 DB에 적용되지 않았으면 파일을 쓰지 않고 실패합니다.
+연결마다 새 DB가 되는 SQLite `:memory:`가 이 경우입니다. snapshot을 바꾸면
+초기화 revision과 `frozen_revisions.json`의 해시를 함께 갱신합니다.
 
 ### Migration 테스트 수 제한
 

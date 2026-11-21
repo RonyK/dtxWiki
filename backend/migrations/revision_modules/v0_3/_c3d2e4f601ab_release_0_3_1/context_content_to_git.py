@@ -275,14 +275,3 @@ def convert(connection: Connection, repositories_root: Path) -> None:
             raise RuntimeError(
                 "Context Git migration published head verification failed"
             )
-
-
-def require_database_bodies(connection: Connection) -> None:
-    _pages, versions = _tables(connection)
-    missing = connection.scalar(
-        sa.select(sa.func.count())
-        .select_from(versions)
-        .where(versions.c.body_md.is_(None))
-    )
-    if missing:
-        raise RuntimeError("Context Git downgrade refused: restore all DB bodies first")

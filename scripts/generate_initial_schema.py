@@ -10,24 +10,82 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import AddConstraint, CreateTable
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
+from backend.services.ops.alembic_migration_graph import (
+    INITIALIZATION_REVISION as RELEASE_REVISION,
+)
 
-RELEASE_REVISION = "5b7e5c149279"
 RELEASE_014_REVISION = "eb86fdacb1bb"
 FTS_NAMES = ("search_doc_fts", "page_name_trgm")
+_TABLE_CONSTRAINT = re.compile(
+    r"(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY)\b", re.IGNORECASE
+)
 
 
 def _fts_shadow(name: str) -> bool:
     return any(name.startswith(f"{prefix}_") for prefix in FTS_NAMES)
+
+
+def _top_level_clauses(body: str) -> list[str]:
+    """Split a CREATE TABLE body at the commas between its clauses."""
+    clauses, start, depth, closing_quote = [], 0, 0, ""
+    for index, character in enumerate(body):
+        if closing_quote:
+            if character == closing_quote:
+                closing_quote = ""
+        elif character in "'\"`":
+            closing_quote = character
+        elif character == "[":
+            closing_quote = "]"
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif character == "," and depth == 0:
+            clauses.append(body[start:index])
+            start = index + 1
+    clauses.append(body[start:])
+    return clauses
+
+
+def _order_table_constraints(statement: str) -> str:
+    """Give a CREATE TABLE's table constraints one order; columns stay put.
+
+    SQLite keeps the text a migration emitted, and Alembic's batch rebuild
+    copies a table's constraints out of an unordered set, so two runs of the
+    same migrations store them in different orders. That order means nothing
+    to SQLite, but it changed the snapshot's bytes on every regeneration. The
+    primary key stays first, where migrations emit it; the rest sort by text.
+    """
+    opening, closing = statement.index("("), statement.rindex(")")
+    clauses = _top_level_clauses(statement[opening + 1 : closing])
+    slots = [
+        index
+        for index, clause in enumerate(clauses)
+        if _TABLE_CONSTRAINT.match(clause.strip())
+    ]
+    ordered = sorted(
+        (clauses[index].strip() for index in slots),
+        key=lambda text: (not text.upper().startswith("PRIMARY"), text),
+    )
+    for index, text in zip(slots, ordered, strict=True):
+        # Each position keeps its own surrounding whitespace.
+        clause = clauses[index]
+        lead = clause[: len(clause) - len(clause.lstrip())]
+        clauses[index] = lead + text + clause[len(clause.rstrip()) :]
+    return statement[: opening + 1] + ",".join(clauses) + statement[closing:]
 
 
 def sqlite_ddl(connection: sa.Connection) -> list[str]:
@@ -38,7 +96,11 @@ def sqlite_ddl(connection: sa.Connection) -> list[str]:
         "ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 "
         "WHEN 'view' THEN 2 ELSE 3 END, name"
     )
-    return [sql for _kind, name, sql in rows if not _fts_shadow(name)]
+    return [
+        _order_table_constraints(sql) if sql.startswith("CREATE TABLE") else sql
+        for _kind, name, sql in rows
+        if not _fts_shadow(name)
+    ]
 
 
 def postgresql_ddl(connection: sa.Connection, table_names: list[str]) -> list[str]:
@@ -117,6 +179,26 @@ def postgresql_ddl(connection: sa.Connection, table_names: list[str]) -> list[st
     return statements
 
 
+def _require_stamp(engine: sa.Engine, expected: str) -> None:
+    """Fail unless this process's own connection sees the migrated database.
+
+    env.py opens its own connections from the URL. Where each connection is a
+    separate database (SQLite ``:memory:``), the migrations run elsewhere: the
+    second upgrade finds an empty database and replays the existing snapshot
+    through the fresh-install route, while this engine still reads nothing.
+    Checking the stamp after each stage refuses both.
+    """
+    with engine.connect() as connection:
+        stamp = MigrationContext.configure(connection).get_current_heads()
+    if stamp != (expected,):
+        raise ValueError(
+            f"expected the database at {expected} after the upgrade, found "
+            f"{', '.join(stamp) or 'no stamp'}; the migrations must run on the "
+            "database this URL reopens (SQLite :memory: is a new database per "
+            "connection)"
+        )
+
+
 def generate(database_url: str, destination: Path) -> None:
     engine = sa.create_engine(database_url)
     try:
@@ -134,14 +216,24 @@ def generate(database_url: str, destination: Path) -> None:
         config.set_main_option("sqlalchemy.url", database_url)
         # The explicit published 0.1.4 target bypasses the fresh-only route, so
         # the reference schema is the result of the real release migrations.
-        command.upgrade(config, RELEASE_014_REVISION)
-        command.upgrade(config, RELEASE_REVISION)
+        # The Context Git conversion requires a repository root even though an
+        # empty database has no page to write there.
+        with TemporaryDirectory(prefix="dtxwiki-initial-schema-") as repositories:
+            config.attributes["context_repositories_root"] = Path(repositories)
+            command.upgrade(config, RELEASE_014_REVISION)
+            _require_stamp(engine, RELEASE_014_REVISION)
+            command.upgrade(config, RELEASE_REVISION)
+            _require_stamp(engine, RELEASE_REVISION)
+            if any(Path(repositories).iterdir()):
+                raise ValueError("empty migration unexpectedly wrote repositories")
         with engine.connect() as connection:
             tables = sorted(
                 name
                 for name in sa.inspect(connection).get_table_names()
                 if name != "alembic_version" and not _fts_shadow(name)
             )
+            if not tables:
+                raise ValueError("the migrated database has no tables")
             for name in tables:
                 table = sa.table(name)
                 if connection.scalar(sa.select(sa.func.count()).select_from(table)):

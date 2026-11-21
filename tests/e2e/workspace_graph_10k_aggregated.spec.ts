@@ -1,10 +1,13 @@
-import { expect, test as base, type Page, type Response } from "@playwright/test";
+import { expect as playwrightExpect, test as base, type Page, type Response } from "@playwright/test";
 
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { currentWorkspace, login, enableKnowledgeMapLab } from "./auth";
-import { expectNativeCounts, installNativeDrawMeter } from "./workspace_graph_native_draw";
+import { expectNativeCounts, installNativeDrawMeter, PC10K_LOADING_TIMEOUT_MS } from "./workspace_graph_native_draw";
 import { createOverviewResponseReader } from "./workspace_graph_response_reader";
 import { admittedNodes, expectCurrentContainment, nativeDrawCounts, sceneRelations } from "./workspace_graph_scene";
+
+// Software GL draws these scenes; every assertion gets the lane's loading allowance.
+const expect = playwrightExpect.configure({ timeout: PC10K_LOADING_TIMEOUT_MS });
 
 const DOCUMENTS = 12_000;
 const PC_BUDGET = { documents: 10_000, relations: 100_000 };

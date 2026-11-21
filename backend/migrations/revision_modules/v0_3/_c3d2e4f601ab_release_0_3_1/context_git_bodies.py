@@ -189,15 +189,13 @@ def _read(root: Path, row) -> tuple[str, list[dict] | None]:
         ) from exc
 
 
-def verify(
-    connection: Connection, root: Path, *, require_database_bodies: bool
-) -> None:
+def verify(connection: Connection, root: Path) -> None:
     """Finish the complete read-only validation pass before any DDL or removal."""
     pages, versions = _tables(connection)
     for row in connection.execute(
         sa.select(versions).execution_options(yield_per=100)
     ).mappings():
-        if require_database_bodies and row["body_md"] is None:
+        if row["body_md"] is None:
             raise RuntimeError(
                 "Context Git body migration requires every original SQL body"
             )
@@ -262,24 +260,6 @@ def release_historical_bodies(connection: Connection, root: Path) -> None:
             # Reflected JSON does not preserve none_as_null=True from the
             # runtime model; bind an explicit SQL NULL rather than JSON null.
             changes["block_map"] = sa.null()
-        connection.execute(
-            versions.update().where(versions.c.id == row["id"]).values(**changes)
-        )
-
-
-def restore_database_bodies(connection: Connection, root: Path) -> None:
-    """Second pass after verify: restore bytes without retaining a full corpus."""
-    _pages, versions = _tables(connection)
-    missing = (
-        sa.select(versions)
-        .where(versions.c.body_md.is_(None))
-        .execution_options(yield_per=100)
-    )
-    for row in connection.execute(missing).mappings():
-        body, archived_map = _read(root, row)
-        changes = {"body_md": body}
-        if archived_map is not None:
-            changes["block_map"] = archived_map
         connection.execute(
             versions.update().where(versions.c.id == row["id"]).values(**changes)
         )

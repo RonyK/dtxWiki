@@ -324,7 +324,7 @@ def convert_command_receipts(connection):
             )
 
 
-def enqueue_reindex(connection, *, generation=None):
+def enqueue_reindex(connection):
     """Use the existing embed worker to refresh each changed document."""
     metadata = sa.MetaData()
     jobs = sa.Table("job", metadata, autoload_with=connection)
@@ -340,8 +340,7 @@ def enqueue_reindex(connection, *, generation=None):
         table = sa.Table(table_name, metadata, autoload_with=connection)
         for row in connection.execute(sa.select(table.c.id, table.c.workspace_id)):
             identity = str(_id(row.id))
-            prefix = f"locator-index:{generation}:" if generation else "locator-index:"
-            job_key = f"{prefix}{kind}:{identity}"
+            job_key = f"locator-index:{kind}:{identity}"
             exists = connection.scalar(
                 sa.select(jobs.c.id)
                 .where(

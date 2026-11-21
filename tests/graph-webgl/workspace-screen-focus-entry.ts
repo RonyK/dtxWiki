@@ -40,6 +40,8 @@ declare global {
       pointScreen(index: number): number[];
       observeNativePointer(): void;
       nativePointer(): { index: number | null; answers: number };
+      /** The scalar fields of snapshot() without its synchronous GPU reads. */
+      nativeState(): { zoom: number | null; geometryUploads: number; pinned: number[] };
       simulationLifecycle(): NativeGraphObservation[];
       snapshot(): {
         points: number[] | null;
@@ -387,6 +389,11 @@ window.__workspaceScreenFocus = {
     });
   },
   nativePointer: () => ({ index: hoveredIndex, answers: graph ? pointPickAnswers.get(graph) ?? 0 : 0 }),
+  nativeState: () => ({
+    zoom: graph?.getZoomLevel() ?? null,
+    geometryUploads,
+    pinned: graph ? [...(pinsByGraph.get(graph) ?? [])] : [],
+  }),
   simulationLifecycle: () => graphObservations.map((observation) => ({ ...observation })),
   snapshot: () => {
     const canvas = document.querySelector<HTMLCanvasElement>(".graph-canvas canvas");

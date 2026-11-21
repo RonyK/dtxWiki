@@ -1,10 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect as playwrightExpect, test, type Page } from "@playwright/test";
 
 import type { WorkspaceGraphScene } from "../../frontend/src/shared/api/workspaceGraph";
 import { currentWorkspace, login, enableKnowledgeMapLab } from "./auth";
 import { createOverviewResponseReader, type OverviewResponseReader } from "./workspace_graph_response_reader";
 import { movedPointCount, readWorkspacePointFrameOnPage, visibleOrdinaryTitleCountOnPage } from "./workspace_graph_point_frame";
-import { captureNativeLongCalls, expectNativeCounts, installNativeDrawMeter, readNativeDraw, readNativeDrawDiagnostics } from "./workspace_graph_native_draw";
+import { captureNativeLongCalls, expectNativeCounts, installNativeDrawMeter, PC10K_LOADING_TIMEOUT_MS, readNativeDraw,
+  readNativeDrawDiagnostics } from "./workspace_graph_native_draw";
 import { sameWorkspaceRemountCamera } from "./workspace_graph_camera";
 import { admittedNodes, nativeDrawCounts, sceneRelations } from "./workspace_graph_scene";
 import { createDenseCpuProfile } from "./workspace_graph_cpu_profile";
@@ -18,9 +19,10 @@ const cpuProfiles = new WeakMap<Page, ReturnType<typeof createDenseCpuProfile>>(
 
 // Hosted CI renders these exact 10K scenes through software GL, where toolbar
 // clicks on a live scene have reached the suite's default action timeout.
-// Every action in this lane gets an explicit loading allowance instead; the
-// lane makes no interaction latency claim.
+// Every action and assertion in this lane gets an explicit loading allowance
+// instead; the lane makes no interaction latency claim.
 test.use({ viewport: { width: 1440, height: 900 }, trace: "off", actionTimeout: 60_000 });
+const expect = playwrightExpect.configure({ timeout: PC10K_LOADING_TIMEOUT_MS });
 test.afterEach(async ({ page }, info) => {
   const collector = nativeCostCollectors.get(page);
   try {
@@ -63,7 +65,7 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
   test("native 10K motion pauses and resumes without reclaiming the user's camera", async ({ page, browserName }, info) => {
     test.skip(process.env.DTXWIKI_E2E_GRAPH_10K !== "1" || browserName !== "chromium",
       "The isolated wrapper enables the PC10K corpus for Chromium");
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const errors = watchErrors(page);
     await installNativeDrawMeter(page);
@@ -171,7 +173,7 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
   test("exact 10K/100K remains selectable, exportable and returns to bounded 2K", async ({ page, browserName }, info) => {
     test.skip(process.env.DTXWIKI_E2E_GRAPH_10K_DENSE !== "1" || browserName !== "chromium",
       "The isolated wrapper enables the exact dense PC fixture for Chromium");
-    test.setTimeout(240_000);
+    test.setTimeout(300_000);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const errors = watchErrors(page);
     const nativeCost = process.env.DTXWIKI_E2E_GRAPH_NATIVE_COST === "1";
@@ -213,7 +215,8 @@ test.describe("PC10K normal-motion and dense real-API stability", () => {
           observation.error = String(error);
           throw error;
         }
-      }).toBeGreaterThanOrEqual(3);
+        // The recorded evidence scope names this unchanged 5 s bound.
+      }, { timeout: 5_000 }).toBeGreaterThanOrEqual(3);
       publicationPassed = true;
     } catch (error) {
       publicationError = String(error);
@@ -345,7 +348,10 @@ async function openPc10k(page: Page, email: string, relations: number, before10k
   // unlinked nodes are still hidden until the toggle below.
   await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations));
   await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied", { timeout: 90_000 });
-  await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible();
+  // Ready follows the applied layout by at least two native frames, which take
+  // seconds each for the 100K scene in software GL.
+  const ready = page.locator('.graph-canvas-frame[data-renderer-status="ready"]');
+  await expect(ready).toBeVisible({ timeout: 90_000 });
   await expect(view).toHaveAttribute("open", "");
   await view.locator("summary").click();
   const unlinked = page.getByRole("button", { name: /^Unlinked \d+$/ });
@@ -353,7 +359,7 @@ async function openPc10k(page: Page, email: string, relations: number, before10k
   await expect(canvas).toHaveAttribute("data-map-node-count", "10000");
   await expect(canvas).toHaveAttribute("data-map-edge-count", String(relations));
   await expect(canvas).toHaveAttribute("data-map-community-layout-status", "applied", { timeout: 90_000 });
-  await expect(page.locator('.graph-canvas-frame[data-renderer-status="ready"]')).toBeVisible();
+  await expect(ready).toBeVisible({ timeout: 90_000 });
   return scene;
 }
 

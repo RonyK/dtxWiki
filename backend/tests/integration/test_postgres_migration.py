@@ -99,7 +99,7 @@ def test_postgres_alembic_upgrade_reversible_boundary_and_downgrade_base():
 
         repair_input(database_url, "user", user_id, "display_name", "Ａlice Smith")
         repair_input(database_url, "workspace", workspace_id, "title", "Ｔeam Straße")
-        command.upgrade(config, "872d9c3e104b")
+        command.upgrade(config, "00ba02774c4a")
         inspector = inspect(engine)
         assert {
             "users",
@@ -330,7 +330,7 @@ def test_downgrade_refuses_when_oauth_sessions_exist():
                     created_at=now,
                 )
             )
-        command.upgrade(config, "872d9c3e104b")
+        command.upgrade(config, "00ba02774c4a")
 
         with pytest.raises(RuntimeError, match="oauth_refresh_tokens still holds"):
             command.downgrade(config, "bd62193d5cf6")

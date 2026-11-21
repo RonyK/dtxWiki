@@ -2,291 +2,130 @@
 
 ## Unreleased
 
-### Combining Context changes in the browser
+## 0.3.1 — 2026-11-20
 
-- When changes overlap, the browser offers two choices -- "Keep both changes"
-  or "Prefer the latest change" -- and shows the whole result, which can be
-  edited before it is saved. The same dialog serves publishing, approving a
-  review, bringing the published version into a draft, and two people saving
-  one draft. A clean merge publishes without asking.
-- Drafts show their actions in the draft banner: edit, bring in the published
-  version, compare with it, and withdraw. Finished versions in History offer
-  "Start from this version"; History draws merged parents and shows open
-  drafts dashed at the top. `/p/<page_id>`, an MCP-only shortcut, explains the
-  `/p/<workspace_id>/<page_id>` form instead of a not-found page.
-- The reconciliation workbench, alternative-draft discard and review-queue
-  bulk discard are removed; their REST routes were already gone.
-- REST: `merge-preview` returns a typed `ContextMergePreviewData` with
-  `target_version_id` and both sides' saver, save time and metadata. A browser
-  autosave that conflicts returns `merge_preview`, `server_editing_revision`
-  and `server_snapshot` with its 409. `bring-in` accepts `result_hash`,
-  `result_body_md` and `result_page_metadata` pinned to the named commit, and
-  page detail reports `open_review_count`. The MCP contract is unchanged.
+### Important changes
 
-### Agent review switch
+- Upgrades are supported directly from 0.1.2 onward. Stop the server and
+  workers and back up the database, Library files, Context `repositories/`,
+  and configuration together before running `dtxwiki bootstrap`.
+- The upgrade moves historical Context bodies into workspace Git repositories,
+  updates stored document locators, and converts old drafts to shared drafts
+  in migration `c3d2e4f601ab`. To roll back after that conversion, restore the
+  pre-upgrade backup with the previous dtxWiki version.
+- New installations create the 0.3.1 schema directly at `c3d2e4f601ab`
+  instead of initializing the 0.2.1 schema and applying later migrations.
+- Context drafts are shared and readable by workspace Editors and Owners.
+  Viewers and public visitors continue to read published content.
+- Page bodies no longer resolve `/context/<name>.md` or `/pages/<slug>` links.
+  They stay in the body as unavailable links with unresolved-link findings and
+  no longer count as backlinks or graph relations. Short `/p/<page_id>` links
+  expand to `/p/<workspace_id>/<page_id>` on save.
+- MCP tool contract revision 30 follows revision 29 of 0.2.4. Refresh cached
+  `tools/list` results and result schemas before updating clients.
+  - `submit_revision_for_review`, `retry_only`, the partial-read `target`,
+    `concept_path`, `/context/<name>.md` page inputs, and the Context update
+    fields `base_version_id` and `base_content_hash` are removed.
+  - Address Context drafts by `version_id` and editing revision. Include the
+    required `idempotency_key` with Context page, edit, merge and citation
+    writes and with `write_agent_page_draft`. Recover a lost write result with
+    `get_operation_status` and the original key.
+  - Address documents by kind and UUID or by their returned `stable_url`, and
+    link them with the returned `link_markdown`. Search results carry
+    `version_status` and `draft`. Pass a hit's `version_id` to
+    `read_context_outline` or `read_structure_map` to read the exact version
+    that matched.
+  - Partial reads take a top-level `page_id` and an optional `version_id`.
+    Uploads and Context updates take `version_id`, and updates place a page
+    with `placement_parent_node_id`. Context write results return `page_id`,
+    and structure maps return `content_hash`.
+  - Context reads label unpublished bodies with `draft` and list open drafts in
+    `open_drafts`; cursor continuations omit it. Page through a page's open
+    drafts with the read-only `list_context_drafts` tool.
+  - `read_concept` takes a Context page UUID or `/p/` URL, an exact Context or
+    Library `get_index` ref, or a canonical Library item URL in place of
+    `/library/<id>.md`. A Context path returns `validation_failed`, and
+    `redirected`, `ambiguous` and `candidates` are no longer returned.
+  - OKF bundle keys, index links and `dtxwiki:file` separators use canonical
+    Context and Library URLs.
+  - Save the whole body when `begin_context_edit` reports `block_map_stale`.
+    Use `actor_context.my_writes_wait_for_human_review` in place of
+    `actor_context.my_writes_stage_as_drafts`.
 
-- With "Review what agents write" turned off, an agent's write follows exactly
-  the rule a person's does: the risk threshold and page-type rules no longer
-  send it to review, and its `submit_context_edit_for_review` (MCP, or REST
-  with a token) publishes it unless the body fails the format floor or
-  conflicts with the published version. A person's review request still waits
-  for a reviewer.
-- On/off policy options in Settings are switches.
+### Features
 
-### MCP Context merge tools
+- **context**: unify merge conflict resolution in the editor ([#142](https://github.com/dtxSuite/dtxWiki/pull/142))
+  - Edit the full merge result before saving. The same dialog handles
+    publishing, review approval, bringing in changes, and overlapping
+    browser saves.
+- **mcp**: expose Context merge workflows ([#140](https://github.com/dtxSuite/dtxWiki/pull/140))
+  - Preview, bring in, and publish shared Context versions with
+    `preview_context_merge`, `bring_in_context_version`, and
+    `publish_context_edit`. Preview accepts `commit_version_id` for bring-in.
+  - Context tools enforce workspace boundaries and report merge conflicts
+    and required human approval with typed errors.
+  - With agent review disabled, agent submissions follow the same publication
+    rules as a person's writes. Format requirements and merge conflicts still
+    apply. Chats shows the diff for the version returned by the write.
+- **context**: show attachment usage history and batch usage reads ([#141](https://github.com/dtxSuite/dtxWiki/pull/141))
+  - See whether attachments are used by an active version or retained in history.
+- **settings**: refine MCP credential management ([#139](https://github.com/dtxSuite/dtxWiki/pull/139))
+  - See available key prefixes and an OAuth connection's status and next expiry.
+- **search**: return matching context versions ([#135](https://github.com/dtxSuite/dtxWiki/pull/135))
+  - Ask uses published Context for every role and filters out matching drafts
+    before applying retrieval limits.
+- **context**: add context merge reconciliation ([#129](https://github.com/dtxSuite/dtxWiki/pull/129))
+- **context**: share drafts and prefer published reads ([#128](https://github.com/dtxSuite/dtxWiki/pull/128))
+- **graph**: migrate context graphs to shared cosmos rendering ([#127](https://github.com/dtxSuite/dtxWiki/pull/127))
+- **graph**: show individual context timeline records ([#126](https://github.com/dtxSuite/dtxWiki/pull/126))
+- **context**: add child index preview ([#125](https://github.com/dtxSuite/dtxWiki/pull/125))
+- **context**: add Git snapshots and MCP operation recovery ([#119](https://github.com/dtxSuite/dtxWiki/pull/119))
+- **graph**: share D3 worker and replace 2K FA2 physics ([#112](https://github.com/dtxSuite/dtxWiki/pull/112))
+- **inbox**: paginate inbox items and refine filters ([#113](https://github.com/dtxSuite/dtxWiki/pull/113))
+- **context**: store version snapshots in Git ([#108](https://github.com/dtxSuite/dtxWiki/pull/108))
 
-- Add `preview_context_merge`, `bring_in_context_version`, and
-  `publish_context_edit` for shared Context drafts. A preview's `result` is what
-  publication publishes for the same conflict choice and edits; publication
-  checks the preview's revision, published version and result hash, and the
-  workspace review policy decides it. With `commit_version_id` (MCP and REST
-  `merge-preview`), a preview shows what bringing in that commit would save.
-  Bringing in a commit the draft already contains saves nothing.
-- An MCP call that names a Context page of another workspace is refused at the
-  MCP edge, as REST already does; `patch_context_edit` checks the workspace
-  too. A publication receipt offers the chat's cumulative diff in Chats, and
-  Chats takes the version a call produced from its receipt, so an
-  auto-published submission diffs the merge commit it returned.
-- Register `context_merge_conflict` and `human_approval_required`. An AI
-  approval refusal now reports `human_approval_required` on every surface, and
-  a merge target outside the page's history reports `not_found`.
-- Every Context command shares one failure mapping, and result bodies follow
-  the same input checks as other bodies. The guide no longer reports
-  `actor_context.my_writes_stage_as_drafts`; use
-  `my_writes_wait_for_human_review`.
-- MCP contract revision 36 adds these three tools and typed merge-preview
-  results. Refresh cached tool catalogs and result schemas before using them.
+### Fixes
 
-### Versioned Context search
+- **editor**: anchor the more menu to the action toolbar ([#143](https://github.com/dtxSuite/dtxWiki/pull/143))
+- **mcp**: improve oauth client compatibility ([#137](https://github.com/dtxSuite/dtxWiki/pull/137))
+  - A client that registers no scope, or an empty one, may request every
+    offered scope. Consent, the allowed workspaces and the account's workspace
+    role still decide what it can do.
+  - Loopback redirect registrations may omit the port, and an unauthenticated
+    `HEAD /mcp` returns the same 401 challenge as other `/mcp` requests.
+- **graph**: improve local graph list readability ([#124](https://github.com/dtxSuite/dtxWiki/pull/124))
+- **graph**: clarify edge rendering and legend cues ([#122](https://github.com/dtxSuite/dtxWiki/pull/122))
+- **migrations**: restore released upgrades and direct initialization ([#118](https://github.com/dtxSuite/dtxWiki/pull/118))
+- **context**: keep web links current after publish ([#115](https://github.com/dtxSuite/dtxWiki/pull/115))
+- **context-version**: store context versions in Git ([#114](https://github.com/dtxSuite/dtxWiki/pull/114))
 
-- Keep matching published and shared draft versions as separate search results,
-  grouped by page and ordered by published, review-requested draft, then other
-  drafts. Keyword, semantic and hybrid retrieval deduplicate each version.
-- Show each result's publication state and open the exact matching version.
-  Ask uses only published Context evidence for every role, including editors;
-  matching drafts are excluded from answer grounding.
-- MCP contract revision 35 adds enumerated `version_status` and typed `draft`
-  search fields, shared with Context reads.
-  Refresh cached tool catalogs and result schemas, and use `version_id` to read
-  the matching version.
-- REST and retriever/SPI results carry the same optional version-state fields.
-- Apply Ask's published Context eligibility before retrieval candidate limits,
-  so draft-only matches cannot crowd out published evidence for editors.
-- Evaluate document rankings from a single retrieval per query, removing
-  duplicate versions and claims before the document budget is applied.
+### Performance
 
-### Shared Context drafts
+- **context**: reuse markdown analysis during reads ([#123](https://github.com/dtxSuite/dtxWiki/pull/123))
+- **context**: lazy-load inspector sections ([#117](https://github.com/dtxSuite/dtxWiki/pull/117))
 
-- Save shared drafts in place using their version ID and editing revision.
-  Browser saves can merge a supplied baseline; stale MCP saves return a conflict.
-- Bind publication and review approval to a merge preview. Confirm automatic
-  merge results in the editor before publication, and retain closed drafts as
-  Git commits with their commit parents and version-owned metadata.
-- Collect all open drafts for indexing. Existing draft-pointer and reconciliation
-  columns remain for the later cleanup.
-- MCP contract revision 34 adapts existing editing tools, removes
-  `submit_revision_for_review` and the retired `current_editing` history
-  status. Refresh cached tool catalogs and schemas.
-- Upgrade the draft schema after the document-identity migration. This data
-  conversion cannot be downgraded; recovery uses the pre-upgrade backup.
-- Opening the editor on a published version no longer creates a draft; the
-  first save starts one. Page updates through REST finish every writer the
-  same way: published, or held in a review when the policy wants a person.
-- Automatic review approval waits from a draft's last save and approves only
-  the merge result it evaluated; publishing keeps the tree placement unless
-  the published result moves the page.
-- Private drafts are gone: every draft is shared. Draft activity shows to
-  every member who can see the page, discarded drafts follow the same
-  draft-read rule as any draft, and an uploaded attachment is visible to
-  everyone who can see its draft whether or not it is in the body yet.
-  Account deletion keeps the account's drafts and shows its author name on
-  what it wrote instead of "Human editor".
+### Refactoring
 
-### Context body links
+- **graph**: separate map state and persistence ([#138](https://github.com/dtxSuite/dtxWiki/pull/138))
+- **graph**: analyze timeline history in one forward replay ([#136](https://github.com/dtxSuite/dtxWiki/pull/136))
+- **context**: switch to shared mutable drafts ([#134](https://github.com/dtxSuite/dtxWiki/pull/134))
+- **context**: normalize body links and retire legacy paths ([#133](https://github.com/dtxSuite/dtxWiki/pull/133))
+- **context**: use document ids and canonical urls ([#132](https://github.com/dtxSuite/dtxWiki/pull/132))
+- **graph**: share media query and renderer types ([#131](https://github.com/dtxSuite/dtxWiki/pull/131))
+- **graph**: remove deprecated APIs ([#130](https://github.com/dtxSuite/dtxWiki/pull/130))
+- **graph**: extract shared cosmos rendering core ([#121](https://github.com/dtxSuite/dtxWiki/pull/121))
+- **graph**: simplify scenes and align graph rendering ([#120](https://github.com/dtxSuite/dtxWiki/pull/120))
 
-- Expand short `/p/<page_id>` Markdown destinations to workspace-qualified
-  `/p/<workspace_id>/<page_id>` URLs on save, including fragments, even when
-  optional lint fixes are disabled. Expansion uses the source workspace and
-  does not require the target to exist.
-- Stop interpreting `/context/<name>.md` and `/pages/<slug>` as document links.
-  Unsupported app destinations remain in the body, appear unavailable and
-  produce unresolved-link findings without blocking saves. Previously stored
-  legacy links no longer contribute to backlinks or current graph relations.
-- Apply the same link classification to Markdown rendering and editor paste.
-- Keep registered workspace navigation links, including workspace discovery and
-  Knowledge Map, available under the existing route access checks. Context read
-  and edit routes also accept a trailing slash while retaining view state and
-  fragments. Preserve link/image structure and character-reference semantics
-  during normalization.
-- Preserve the existing session-relative `/context` landing link and keep
-  generated link labels literal under the page renderer's math and GFM rules.
-- Match registered Context permalinks and workspace routes with the same
-  browser case and trailing-slash rules, retaining query and fragment state.
+### Other changes
 
-### Document identifiers and URLs
-
-- Identify documents by kind and ID and use `stable_url` and `link_markdown`
-  across REST, MCP, search, graph and Ask results. Remove `concept_path` and
-  use canonical Library URLs in place of `/library/<id>.md` lookup inputs.
-- OKF bundle keys, index links and `dtxwiki:file` separators now use canonical
-  Context and Library URLs. Import bundles using these same URLs.
-- Convert stored maintenance findings and response locators and refresh search
-  index headers without changing Context draft states or publication behavior.
-- MCP contract revision 33 changes document locators. Refresh cached
-  `tools/list` results and schemas before using the updated inputs and results.
-
-### Context Graph timeline
-
-- Show only the days that have records. Every record gets its own column
-  under its day, in time order across both lanes, so playback steps through a
-  day one record at a time; nearby records are no longer merged into a count.
-- Draw each day as its own band in each lane, and fill the bands purple from
-  the first record up to the playhead.
-- Label every day with its date, adding the year when it changes. When the
-  days do not fit, the timeline scrolls sideways and keeps the current day in
-  view.
-
-### Context Graph rendering
-
-- Render Context graphs with the shared Cosmos renderer and compute their
-  layouts in the D3 Worker used by the default Knowledge Map. Preserve live
-  coordinates, pins and the camera as timeline nodes enter and leave.
-- Use the Knowledge Map's WebGL2 support check for Context graphs and keep
-  the relationship list and static view available when rendering is unavailable.
-- Resume a paused Context graph layout when the reader seeks, steps or plays
-  the timeline.
-- Select a graph node on click without moving it or waking the layout; a
-  drag starts once the pointer moves.
-- Keep neighbouring nodes moving while a node is dragged, on every graph
-  (the 2K Knowledge Map now follows the Context graph and the 10K map).
-- Keep the 2K Knowledge Map's layout, pins and camera when the same view
-  gains or loses documents, for example when showing orphans.
-- Frame a Context graph to fit after a filter, query or history-view change,
-  and when locating a node from far zoomed out, zoom back in to a readable
-  level, as the Knowledge Map does.
-
-### Context draft visibility and reading
-
-- Make saved Context editing rows and their media readable by workspace Editors
-  and Owners, including edits opened through MCP. These rows were previously
-  visible only to their author. Editing, submitting and discarding another
-  author's editing session remain restricted; Viewers and public visitors keep
-  reading published content.
-- Open Context pages on their published version by default. Show the number of
-  open drafts, their authors, review states and last saved times, with paginated
-  browsing and explicit version selection. A never-published page shows its
-  most recently saved draft, including its review outcome when no draft is open.
-- Keep the last saved time tied to authored saves. Reviews, reindexing and
-  storage maintenance no longer move drafts ahead of newer saved content.
-- Preserve archived version and review-evidence reads while omitting their
-  open-draft discovery list. Keep discovery metadata out of write responses.
-- Label unpublished bodies in the browser and MCP results. Add `open_drafts`,
-  `draft` metadata and the read-only `list_context_drafts` tool in MCP contract
-  revision 32. Clients must refresh cached `tools/list` results and schemas;
-  agents following the latest decisions should inspect relevant open drafts
-  and identify their contents as awaiting approval.
-- Partial-read cursor continuations omit `open_drafts`; use
-  `list_context_drafts` to refresh that list. A readable page without a resumable
-  editing version shows an editing-unavailable message with a link to the page.
-- Remove the deprecated `/context/<name>.md` Context path as an MCP page input.
-  `read_concept`, `read_context_outline` and `read_structure_map` now take the
-  same page locators as other tools: a page UUID, `/p/<workspace_id>/<page_id>`
-  or `/p/<page_id>`, and `read_concept` also takes `get_index` refs and
-  `/library/<id>.md`. A Context path returns `validation_failed`;
-  `read_concept` no longer returns `redirected`, `ambiguous` or `candidates`.
-- Restore stays available on the published version when a newer draft holds
-  the edit head. Activity shows Editors the MCP reads of shared editing
-  versions, while Viewers still do not see them.
-
-### Graph legends
-
-- Lay out the Context Graph and Knowledge Map legends with one rule: visible
-  group titles, two columns inside each group, and groups side by side while
-  they fit. The Knowledge Map legend is titled "Legend" like the Context
-  Graph's and uses the same group titles.
-- Name each line style without the relationship-name notes under it, and call
-  the containment line "Contains".
-
-### Context editor on phones and tablets
-
-- Give the body the screen: on widths up to 1024px, short screens and touch
-  tablets up to 1366px, the app bar and sidebar hide while editing, and one top
-  row replaces the stacked header. The explorer (or overflow) and view tabs sit
-  on the left; the status message, Publish, Request review and Close on the
-  right. A mouse-driven desktop from 1025px keeps the existing layout.
-- Dock the formatting toolbar under the body and size the editor from the
-  visual viewport, so the toolbar stays directly above the on-screen keyboard.
-- Move less frequent page actions into an overflow that opens as a bottom sheet
-  on phones and a menu on wider screens. When the top row runs out of room the
-  status message shrinks to its icon first, then Request review moves into the
-  overflow. Focus mode is not offered on these screens.
-
-### Context version storage
-
-- Read past published Context bodies from workspace Git repositories while
-  keeping the current approved body and work in progress in the database.
-  Verify exact Git bytes before removing the previous head's database copy;
-  new snapshots preserve block identities in `metadata.json` beside the body,
-  and approval undo restores both from the same commit.
-- Remove historical database bodies in a verified migration. Preserve database
-  maps for legacy content-only snapshots; release a map only after verifying its
-  exact Git copy. Back up DB, Library and Git
-  together: losing `repositories/` loses the historical bodies.
-- Normalize block maps during upgrade for the current published version and
-  approvable drafts in its live linear chain. Preserve matching block IDs and
-  leave historical snapshots and reconciliation manifests unchanged.
-- Warn when a restored version has a missing or stale block map. An explicit
-  whole-body Save rebuilds the map even when the text is unchanged, keeping
-  matching IDs. Approval undo also exposes this warning on the restored page.
-- Add the optional `block_map_stale` result field in tool contract revision 30.
-  MCP clients should refresh `tools/list` and save the whole body when this
-  advisory is true; existing clients can ignore the additive field.
-- Add `dtxwiki backup` to create the existing verified SQLite checkpoint without
-  upgrading. Pause only running managed services and restore those services
-  after releasing the runtime lock, including on backup failure.
-- Show the backup path, creation time, version change and loss of writes since
-  the checkpoint before rollback, including `--dry-run` and `--yes`.
-
-### MCP editing contract
-
-- Advance the tool contract to revision 31; refresh cached `tools/list` results.
-  Preserve the `block_map_stale` advisory introduced in revision 30.
-- Recover lost write responses with `get_operation_status` using only the original
-  idempotency key. Record arrival and completion in the existing MCP call log,
-  retaining each retry's history; recover successful results from atomic write
-  receipts and preserve the conversation when retrying a first write.
-- Remove `retry_only` from MCP while preserving REST lookup-only retries.
-  Require retry keys for Context creation, review revisions and Agent draft writes.
-- Use top-level `page_id` and optional `version_id` for partial reads; remove
-  `target`. Context write results return `page_id`; structure maps return
-  `content_hash`. Uploads take `version_id`, and Context updates require it and use
-  `placement_parent_node_id` without `base_version_id`/`base_content_hash`.
-- Preserve staged metadata across updates and synchronize frontmatter through
-  one metadata resolver. Distinguish missing edits, revision conflicts and
-  content hash mismatches; trust successful receipts without a confirmation read.
-
-### MCP OAuth client compatibility
-
-- Accept the client metadata documents and dynamic registrations that hosted
-  and desktop MCP clients publish. Register the supported part of each list:
-  unknown grant and response types and redirect URIs on schemes dtxWiki does
-  not redirect to are ignored instead of failing the client.
-- Let a client metadata document that offers `none` among several token
-  endpoint authentication methods register as a public client.
-- Allow port-less loopback redirect registrations; a request may use any port.
-- A client that registers no scope, or an empty one, may request every
-  offered scope. A client that registers fewer scopes can request additional
-  supported scopes through fresh user consent. Existing tokens and refresh
-  tokens keep their original scopes. Consent, the allowed workspaces and the
-  account's workspace role still decide what it can do; an authorization
-  request without a scope stays read-only.
-- Validate supplied scope values before applying registration defaults, so
-  malformed or oversized blank values cannot become all-scope registrations.
-- The `/mcp` 401 challenge names `/.well-known/oauth-protected-resource/mcp`
-  and the offered scopes, and an unauthenticated `HEAD /mcp` returns the same
-  challenge. The root metadata URL keeps working.
-- Authorization server metadata advertises RFC 9207 issuer responses and
-  lists the registration endpoint only while dynamic registration is enabled.
+- Refactor context version Git integration ([#111](https://github.com/dtxSuite/dtxWiki/pull/111))
+  - Adds `dtxwiki backup`, which creates the verified SQLite checkpoint
+    without upgrading.
+  - A rollback that dtxWiki performs shows the backup path, its creation time
+    and the version change, and warns that writes since the backup will be
+    lost, including with `--dry-run` and `--yes`.
+- Improve context edit page header ([#109](https://github.com/dtxSuite/dtxWiki/pull/109))
+- Refactor workspace graph physics integration ([#110](https://github.com/dtxSuite/dtxWiki/pull/110))
 
 ## 0.2.4 — 2026-11-11
 
@@ -338,6 +177,13 @@ target 0.2.4.
   project toolchain.
 - Match the installed-wheel browser smoke check to the current Settings save
   button so it can enable workspace experiments before checking the graph.
+
+### Database upgrade
+
+- No database schema changes. Retain the 0.2.3 schema head `00ba02774c4a` and
+  all published migration implementations. Existing 0.2.3 databases need no
+  additional migration; older supported releases follow the existing upgrade
+  path.
 
 ## 0.2.3 — 2026-11-07
 

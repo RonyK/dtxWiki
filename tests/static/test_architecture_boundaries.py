@@ -180,12 +180,12 @@ CONTEXT_COMPOSITION_ROOT = "backend/app/context_version_storage.py"
 CONTEXT_NATIVE_GIT_IMPORTERS = frozenset(
     {
         "backend/migrations/env.py",
-        "backend/migrations/revision_modules/unreleased/"
-        "_74e5d4f912a6_context_git/context_content_to_git.py",
-        "backend/migrations/revision_modules/unreleased/"
-        "_9d8695419436_bodies/context_git_bodies.py",
-        "backend/migrations/revision_modules/unreleased/"
-        "_c3d2e4f601ab_drafts/conversion.py",
+        "backend/migrations/revision_modules/v0_3/"
+        "_c3d2e4f601ab_release_0_3_1/context_content_to_git.py",
+        "backend/migrations/revision_modules/v0_3/"
+        "_c3d2e4f601ab_release_0_3_1/context_git_bodies.py",
+        "backend/migrations/revision_modules/v0_3/"
+        "_c3d2e4f601ab_release_0_3_1/context_drafts.py",
     }
 )
 

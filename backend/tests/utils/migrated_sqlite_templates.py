@@ -20,7 +20,7 @@ Names:
 
 * ``base_0001``: ``bd62193d5cf6``.
 * ``rev_efcbcf724889``: pinned to ``efcbcf724889``. It does not follow ``head``.
-* ``rev_872d9c3e104b``: the last reversible Context schema.
+* ``rev_00ba02774c4a``: the last reversible release schema.
 * ``head``: whatever ``alembic upgrade head`` produces.
 * ``boundary_pre_tenancy``: ``base_0001`` plus ``_upgrade_base_schema`` and the
   workspace, identity, context, library media, library policy and context-data
@@ -89,8 +89,8 @@ def _build_rev_efcbcf724889(database_url: str) -> None:
     command.upgrade(_config(database_url), "efcbcf724889")
 
 
-def _build_rev_872d9c3e104b(database_url: str) -> None:
-    command.upgrade(_config(database_url), "872d9c3e104b")
+def _build_rev_00ba02774c4a(database_url: str) -> None:
+    command.upgrade(_config(database_url), "00ba02774c4a")
 
 
 def _build_head(database_url: str) -> None:
@@ -118,7 +118,7 @@ def _build_boundary_pre_tenancy(database_url: str) -> None:
 _BUILDERS: dict[str, Callable[[str], None]] = {
     "base_0001": _build_base_0001,
     "rev_efcbcf724889": _build_rev_efcbcf724889,
-    "rev_872d9c3e104b": _build_rev_872d9c3e104b,
+    "rev_00ba02774c4a": _build_rev_00ba02774c4a,
     "head": _build_head,
     "boundary_pre_tenancy": _build_boundary_pre_tenancy,
     "boundary_workspace_member": _build_boundary_workspace_member,

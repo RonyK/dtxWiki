@@ -24,13 +24,18 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 # (`llmwiki.mcp.v1.tools.<N>`) so the two read as one lineage rather than as
 # rival version numbers.
 #
-# Bump this whenever the tool contract changes in a way a client can observe:
-# a tool added/removed/renamed, an input schema changed, a result projection
-# changed (including a field that only ever appears inside `envelope.meta`),
-# or the model-facing envelope allowlist widened. The digest half of the
-# published version (see backend/mcp/protocol/tool_descriptors.py) is derived
-# from the live catalog and moves on its own, so forgetting to bump this
-# degrades the marker's readability, not its truthfulness.
+# A release advances this by exactly one when its tool contract changes in a
+# way a client can observe: a tool added/removed/renamed, an input schema
+# changed, a result projection changed (including a field that only ever
+# appears inside `envelope.meta`), or the model-facing envelope allowlist
+# widened. A release without such a change keeps the revision. Changes between
+# two releases share that one revision, like migrations under `unreleased/`:
+# the first sets it to MCP_RELEASED_TOOL_CONTRACT_REVISION + 1, and later ones
+# amend its history entry, digest pin and CHANGELOG text instead of adding
+# another. The digest half of the published version (see
+# backend/mcp/protocol/tool_descriptors.py) is derived from the live catalog
+# and moves on its own, so forgetting to advance this degrades the marker's
+# readability, not its truthfulness.
 #
 # Revision history:
 #   1 -- Epic-1 wire contract: outputSchema off `tools/list`, three legacy
@@ -230,33 +235,36 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #  29 -- cite registers explicit document references on the caller's editing
 #        version (draft-write, CAS and idempotency). Reads/fetch expose separate
 #        references. The former claim-based candidate input is rejected.
-#  30 -- begin_context_edit adds block_map_stale for missing or stale editing
-#        metadata; a whole-body save rebuilds it. Refresh cached tool catalogs
-#        and result schemas.
-#  31 -- Unified Context locators, write identities and metadata resolution;
-#        key-only operation status replaces retry_only. Refresh cached tools.
-#  32 -- Published-first Context reads, shared editing visibility, draft facts
-#        and paginated list_context_drafts; existing version modes remain.
-#        Context page inputs drop the deprecated /context/<name>.md path:
-#        read_concept and partial reads take UUID or /p/ links (read_concept
-#        also get_index refs and /library/<id>.md); read_concept no longer
-#        returns redirected/ambiguous status or candidates.
-#  33 -- Document locators use kind/UUID and canonical URLs throughout reads,
-#        search, neighbors, OKF and maintenance; Library read input accepts
-#        its canonical URL. Refresh cached tool catalogs and result schemas.
-#  34 -- Context tools address shared mutable drafts by version_id and revision.
-#        Exact-version reads replace private-edit selectors; review requests
-#        stay editable. Retire submit_revision_for_review and the legacy
-#        diverged-branch warning. Refresh cached tool catalogs and schemas.
-#  35 -- Search retains matching Context versions with enumerated version_status
-#        and ContextDraftInfo facts, grouped published-first. Refresh schemas; pass
-#        version_id to read the exact hit. Drafts remain non-citable.
-#  36 -- Preview, bring-in and publish shared Context drafts through MCP.
-#        A preview's result is what publication publishes (or, with
-#        commit_version_id, what bring-in saves); publication binds its
-#        revision, head (omitted when none) and result hash. Registers
-#        context_merge_conflict and human_approval_required. Refresh cached tools.
-MCP_TOOL_CONTRACT_REVISION = 36
+#  30 -- Changes after 0.2.4. Context tools address shared mutable drafts by
+#        version_id and editing revision; exact-version reads replace
+#        private-edit selectors and review requests stay editable. Retire
+#        submit_revision_for_review and the legacy diverged-branch warning.
+#        Published-first Context reads add shared editing visibility, draft
+#        facts and paginated list_context_drafts; existing version modes
+#        remain. Unified Context locators, write identities and metadata
+#        resolution; key-only get_operation_status replaces retry_only.
+#        Document locators use kind/UUID and canonical URLs throughout reads,
+#        search, neighbors, OKF and maintenance; Library read input accepts its
+#        canonical URL. Context page inputs drop the deprecated
+#        /context/<name>.md path: read_concept and partial reads take UUID or
+#        /p/ links (read_concept also get_index refs and /library/<id>.md);
+#        read_concept no longer returns redirected/ambiguous status or
+#        candidates. begin_context_edit adds block_map_stale for missing or
+#        stale editing metadata; a whole-body save rebuilds it. Search retains
+#        matching Context versions with enumerated version_status and
+#        ContextDraftInfo facts, grouped published-first; pass version_id to
+#        read the exact hit. Drafts remain non-citable. Add preview, bring-in
+#        and publish tools for shared drafts. Publishing binds the preview's
+#        revision, published head and result hash; commit_version_id enables
+#        bring-in previews. Register context_merge_conflict and
+#        human_approval_required. Refresh cached tool catalogs and schemas.
+# The revision the latest release shipped and its tool contract digest.
+# `make set-version` records the current revision and live digest here; release
+# verification rejects an artifact whose MCP_TOOL_CONTRACT_REVISION is not
+# recorded.
+MCP_RELEASED_TOOL_CONTRACT_REVISION = 30
+MCP_RELEASED_TOOL_CONTRACT_DIGEST = "7f825bd114a8"
+MCP_TOOL_CONTRACT_REVISION = 30
 # Marks a field whose null means "unknown" on the MCP wire. Fields at their
 # declared default are left off the wire (backend/mcp/protocol/wire_defaults.py);
 # a field carrying this marker is always sent, so an absent value can never be

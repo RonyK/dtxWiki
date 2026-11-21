@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { test } from "./fixtures";
 import { writeFile } from "node:fs/promises";
 import { createServer, type ViteDevServer } from "vite";
@@ -22,11 +22,26 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await server?.close(); });
 
+async function fitStoppedPointerScene(page: Page): Promise<void> {
+  // Community metadata can be applied before the D3 worker supplies any
+  // positions. Let the first position frame land before pausing layout.
+  await page.waitForFunction(() => Number(document.getElementById("stage")?.dataset.mapLayoutTicks) > 0);
+  await page.evaluate(async () => {
+    const fixture = window.__workspaceMapInteraction!;
+    fixture.stop();
+    // Fit schedules a D3 transition even with zero duration. Project the
+    // pointer target only once the native camera has reached that transform.
+    await fixture.fitAndWait();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+}
+
 // Native capacity uses the maximum edge budget; the real-API motion case owns 30,895 edges.
 test("native PC 10K preserves 100000 relations, real movement and finite camera ownership @pc10k", async ({ page }, testInfo) => {
   // Sixteen natural GPU frames draw 100K relations on headless software WebGL.
-  // This checks counted GPU work and camera lifecycle, not a device speed SLA.
-  test.setTimeout(90_000);
+  // This checks counted GPU work and camera lifecycle, not a device speed SLA;
+  // hosted runners have taken 57-72 s, so the limit leaves twice that.
+  test.setTimeout(150_000);
   const relations = 100_000;
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -250,12 +265,7 @@ test("native 2k Cosmos pointer drag saves its canonical position through Resume,
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
   await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied");
   expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("d3-worker");
-  await page.evaluate(async () => {
-    const fixture = window.__workspaceMapInteraction!;
-    fixture.stop();
-    fixture.fit();
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  });
+  await fitStoppedPointerScene(page);
   const before = await page.evaluate(() => window.__workspaceMapInteraction!.snapshot());
   const target = await page.evaluate(() => window.__workspaceMapInteraction!.dragTarget());
   expect(before.positions).toHaveLength(4000);
@@ -359,12 +369,7 @@ test("native 2k hover shows a chip without changing labels, emphasis or geometry
   expect(await page.evaluate(() => window.__workspaceMapSmoke?.status)).toBe("ready");
   await page.waitForFunction(() => document.getElementById("stage")?.dataset.mapCommunityLayoutStatus === "applied");
   expect(await page.locator("#stage").getAttribute("data-map-physics")).toBe("d3-worker");
-  await page.evaluate(async () => {
-    const fixture = window.__workspaceMapInteraction!;
-    fixture.stop();
-    fixture.fit();
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  });
+  await fitStoppedPointerScene(page);
   const labels = page.locator("[data-workspace-map-labels] span");
   const candidateIds = () => labels.evaluateAll((elements) => elements
     .map((element) => (element as HTMLElement).dataset.nodeId ?? "").filter(Boolean));

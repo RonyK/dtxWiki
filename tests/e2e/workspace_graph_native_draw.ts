@@ -2,6 +2,14 @@ import { expect, type ConsoleMessage, type Page } from "@playwright/test";
 
 export const NATIVE_LONG_CALL_PREFIX = "__DTX_PC10K_NATIVE_COST__";
 
+/**
+ * Hosted CI draws the 10K lane's scenes with software GL, where one native
+ * frame takes seconds and runner speed varies about twofold. Waits for a
+ * renderer or a native frame get this loading allowance; the lane makes no
+ * latency claim.
+ */
+export const PC10K_LOADING_TIMEOUT_MS = 90_000;
+
 /** Numeric metadata only; no pixel values, URLs, source identities or credentials. */
 export interface NativeLongCallRecord {
   operation: number; // 1 readPixels, 2 drawArrays, 3 instanced draw, 4 long task, 5 getParameter, 6 clientWaitSync, 7 getBufferSubData, 8 flush
@@ -211,6 +219,6 @@ export function readNativeDraw(page: Page) {
 }
 
 export async function expectNativeCounts(page: Page, points: number, links: number) {
-  await expect.poll(() => readNativeDraw(page), { message: "Native GL must draw the admitted original 10K scene" })
-    .toEqual({ points, links, currentCanvas: true });
+  await expect.poll(() => readNativeDraw(page), { message: "Native GL must draw the admitted original 10K scene",
+    timeout: PC10K_LOADING_TIMEOUT_MS }).toEqual({ points, links, currentCanvas: true });
 }

@@ -70,9 +70,12 @@ jobs:
       # build of artifacts nobody publishes. The step above already verified
       # the real dist/ this job produced, which is the stronger check.
       # release-checks.yml runs the full packaging suite before this build.
+      # The MCP tool contract pin also runs here: the tagged catalog must match
+      # its recorded revision and the digest make set-version recorded.
       - name: Run packaging and static contract tests
         run: >-
           .venv/bin/python -m pytest tests/packaging tests/static -q
+          backend/tests/mcp_protocol/test_tool_contract_version.py::test_the_published_digest_is_pinned_to_the_live_catalog
           --deselect tests/packaging/test_distribution_includes_infra_prod.py::test_wheel_and_sdist_include_operator_artifacts
       # Tags can bypass PR/main CI. A valid wheel inventory alone cannot prove
       # that its graph adapter, module Worker and Blob Worker run under CSP.

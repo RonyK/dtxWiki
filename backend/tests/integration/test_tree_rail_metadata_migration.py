@@ -17,16 +17,13 @@ from backend.models.audit import AuditEvent
 from backend.models.context import ContextPage
 from backend.scripts.seed_dev import seed_default_workspace
 from backend.tests.integration.test_release_schema_migration import _config
-from backend.tests.utils.context_git import (
-    configure_test_context_storage,
-    historical_context_version_model,
-    seed_published_snapshot,
-)
+from backend.tests.utils.context_git import historical_context_version_model
 from backend.tests.utils.migrated_sqlite_templates import shared_templates
 from backend.utils.content_hash import content_hash
 
 FIRST_EVENT = datetime(2026, 1, 3, 4, tzinfo=UTC)
 SECOND_EVENT = FIRST_EVENT + timedelta(days=12)
+REVERSIBLE_RELEASE = "00ba02774c4a"
 
 
 def test_upgrade_from_previous_head_backfills_only_proven_content_events(
@@ -42,14 +39,13 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
     # are independent rows read by the same backfill, so one upgrade checks
     # all of them together with the bounded, indexed history reads.
     database = tmp_path / "tree-metadata.sqlite"
-    url = shared_templates(tmp_path_factory).clone("rev_872d9c3e104b", database)
+    url = shared_templates(tmp_path_factory).clone(
+        f"rev_{REVERSIBLE_RELEASE}", database
+    )
     engine = create_engine(url)
     config = _config(url)
     ContextPageVersion = historical_context_version_model(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-    configure_test_context_storage(
-        session_factory, config.attributes["context_repositories_root"]
-    )
     ids = {}
     private_version_ids = []
     with session_factory.begin() as session:
@@ -149,8 +145,6 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
             private_version_ids.append(private.id.hex)
             if kind == "context_page":
                 page.current_version_id = page.current_published_version_id = latest.id
-                seed_published_snapshot(session, old)
-                seed_published_snapshot(session, latest, parents=[old.commit_oid])
                 previous_key, action = (
                     "previous_published_version_id",
                     "context_page.draft.publish",
@@ -277,7 +271,7 @@ def test_upgrade_from_previous_head_backfills_only_proven_content_events(
         private_id not in str(version_read_parameters)
         for private_id in private_version_ids
     ), version_read_parameters
-    command.upgrade(config, "872d9c3e104b")
+    command.upgrade(config, REVERSIBLE_RELEASE)
     engine = create_engine(url)
     try:
         with Session(engine) as session:

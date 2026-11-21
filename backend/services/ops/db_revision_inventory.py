@@ -16,7 +16,7 @@ _REVISION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 RELEASED_BASE_REVISION = "bd62193d5cf6"
 RELEASED_EPIC1_REVISION = "efcbcf724889"
 #: Superseded identifiers. Historical IDs need an operator-led conversion;
-#: unpublished 0.2 steps must reach the terminal head with their old checkout.
+#: unpublished steps must reach the terminal head with their old checkout.
 #: The classifier never accepts these, and new revisions may not reuse them.
 RETIRED_REVISION_IDS = frozenset(
     {
@@ -59,6 +59,11 @@ RETIRED_REVISION_IDS = frozenset(
         "7c2bde1490af",
         "c58f1d2e890a",
         "b1d98889a4ad",
+        # Unpublished steps consolidated into c3d2e4f601ab for v0.3.1.
+        "74e5d4f912a6",
+        "9d8695419436",
+        "872d9c3e104b",
+        "e4f7a2c901bd",
     }
 )
 _UNSAFE_CONSISTENCIES = {

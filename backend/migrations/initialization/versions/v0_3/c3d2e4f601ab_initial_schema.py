@@ -1,11 +1,11 @@
-"""Create the complete v0.2 schema directly for a proven-empty installation.
+"""Create the complete v0.3.1 schema directly for a proven-empty installation.
 
 The immutable SQL snapshots were captured from the actual release migrations
 on empty SQLite and PostgreSQL databases. This revision executes final CREATE
 statements once; it neither replays historical migrations nor imports today's
 ORM metadata. Existing databases use the preserved upgrade/downgrade graphs.
 
-Revision ID: 5b7e5c149279
+Revision ID: c3d2e4f601ab
 Revises: None
 """
 
@@ -15,7 +15,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from alembic import context, op
 
-revision = "5b7e5c149279"
+revision = "c3d2e4f601ab"
 down_revision = None
 branch_labels = None
 depends_on = None
