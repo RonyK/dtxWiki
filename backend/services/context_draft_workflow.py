@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
+from graphlib import CycleError, TopologicalSorter
 from uuid import UUID
 
 from sqlalchemy import func
@@ -19,7 +21,11 @@ from backend.context_versions.history import HistoryGraph
 from backend.context_versions.merge import prefer_ours, result_hash
 from backend.models.base import utc_now
 from backend.models.change import ChangeOperation, ChangeSet
-from backend.models.context import ContextPageVersion, ContextVersionParent
+from backend.models.context import (
+    ContextPageVersion,
+    ContextVersionHistoryParent,
+    ContextVersionParent,
+)
 from backend.repositories.workspace_scoped import (
     delete_in_workspace,
     get_in_workspace,
@@ -115,6 +121,116 @@ def set_parents(session, version, parents) -> None:
             )
         )
     session.flush()
+
+
+# A saved v0.2 parent and the first Git parent the conversion assigned.
+HistoryParent = tuple[UUID | None, UUID | None]
+
+
+def history_parent_overrides(session, page) -> dict[UUID, HistoryParent]:
+    """The page's saved v0.2 parents that History draws, by version.
+
+    One that would close a cycle with later Git parents is left out.
+    """
+    overrides = {
+        version_id: (parent_id, converted_id)
+        for version_id, parent_id, converted_id in session.execute(
+            select_in_workspace(
+                ContextVersionHistoryParent,
+                workspace_id=page.workspace_id,
+                conditions=(ContextVersionHistoryParent.page_id == page.id,),
+            ).with_only_columns(
+                ContextVersionHistoryParent.version_id,
+                ContextVersionHistoryParent.parent_version_id,
+                ContextVersionHistoryParent.converted_parent_version_id,
+            )
+        )
+    }
+    if not overrides:
+        return {}
+    # The first slot stays even when NULL, so additional parents keep theirs.
+    parents: dict[UUID, list[UUID | None]] = {
+        version_id: [parent_id]
+        for version_id, parent_id in session.execute(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=page.workspace_id,
+                conditions=(ContextPageVersion.page_id == page.id,),
+            ).with_only_columns(
+                ContextPageVersion.id, ContextPageVersion.parent_version_id
+            )
+        )
+    }
+    for version_id, parent_id in session.execute(
+        select_in_workspace(
+            ContextVersionParent,
+            workspace_id=page.workspace_id,
+            conditions=(ContextVersionParent.page_id == page.id,),
+        )
+        .with_only_columns(
+            ContextVersionParent.version_id, ContextVersionParent.parent_version_id
+        )
+        .order_by(ContextVersionParent.version_id, ContextVersionParent.ordinal)
+    ):
+        parents.setdefault(version_id, []).append(parent_id)
+    return acyclic_history_overrides(parents, overrides)
+
+
+def history_merge_parent_ids(
+    git_parents: Sequence[UUID], first_git_parent: UUID | None, saved=None
+) -> list[UUID]:
+    """The Git parents History draws beside a version's previous version.
+
+    With a saved v0.2 parent, that parent and the first Git parent the
+    conversion assigned are the ones left out; otherwise the first Git parent.
+    """
+    left_out = set(saved) if saved is not None else {first_git_parent}
+    return [parent_id for parent_id in git_parents if parent_id not in left_out]
+
+
+def acyclic_history_overrides(
+    parents: Mapping[UUID, Sequence[UUID | None]],
+    overrides: Mapping[UUID, HistoryParent],
+) -> dict[UUID, HistoryParent]:
+    """The saved parents History can draw without a cycle.
+
+    ``parents`` holds each version's ordered Git parents, the first of which
+    may be None. Git ancestry alone is acyclic, so a cycle runs through a
+    saved parent: one such edge per cycle is left out until none is.
+    """
+    kept = dict(overrides)
+
+    def edges(version_id: UUID) -> list[UUID]:
+        git = [parent_id for parent_id in parents[version_id] if parent_id]
+        if version_id not in kept:
+            return git
+        saved = kept[version_id]
+        return [
+            *([saved[0]] if saved[0] else []),
+            *history_merge_parent_ids(git, None, saved),
+        ]
+
+    while True:
+        # Sorted, so every History page leaves out the same saved edges.
+        graph = {version_id: edges(version_id) for version_id in sorted(parents)}
+        try:
+            TopologicalSorter(graph).prepare()
+        except CycleError as error:
+            cycle = error.args[1]
+            # The cycle runs parent -> child; leaving a saved edge out must
+            # remove it, so the child's own Git parents cannot name it.
+            candidates = sorted(
+                child
+                for parent, child in zip(cycle, cycle[1:], strict=False)
+                if child in kept
+                and kept[child][0] == parent
+                and parent not in parents[child]
+            )
+            if not candidates:
+                return kept
+            del kept[candidates[0]]
+        else:
+            return kept
 
 
 def snapshot(page, version) -> MergeSnapshot:

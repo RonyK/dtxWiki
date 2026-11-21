@@ -28,6 +28,11 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.bootstrap import resolve_alembic_ini
 from backend.app.db import make_engine
 from backend.models import Base
+from backend.models.context import (
+    ContextPage,
+    ContextPageVersion,
+    ContextVersionHistoryParent,
+)
 from backend.models.workspace import Workspace
 from backend.scripts.migrate_data import _resolve_order, migrate_data
 from backend.scripts.seed_dev import seed_default_workspace
@@ -59,6 +64,45 @@ def _seed(url: str) -> None:
         session_factory = sessionmaker(bind=engine, expire_on_commit=False)
         with session_factory.begin() as session:
             seed_default_workspace(session)
+    finally:
+        engine.dispose()
+
+
+def _seed_history_parent(url: str) -> tuple[object, object]:
+    """A preserved History link: keyed by version_id, with a deferred parent."""
+    engine = make_engine(url)
+    try:
+        with sessionmaker(bind=engine, expire_on_commit=False).begin() as session:
+            workspace_id = session.scalar(
+                select(Workspace.id).where(Workspace.slug == "default")
+            )
+            page = ContextPage(workspace_id=workspace_id, slug="lineage", title="L")
+            session.add(page)
+            session.flush()
+            first, second = (
+                ContextPageVersion(
+                    workspace_id=workspace_id,
+                    page_id=page.id,
+                    version_no=number,
+                    body_md="body",
+                    content_hash="hash",
+                    actor_type="human",
+                    created_by_actor_kind="human",
+                    created_by_actor_id="seed",
+                )
+                for number in (1, 2)
+            )
+            session.add_all([first, second])
+            session.flush()
+            session.add(
+                ContextVersionHistoryParent(
+                    workspace_id=workspace_id,
+                    page_id=page.id,
+                    version_id=second.id,
+                    parent_version_id=first.id,
+                )
+            )
+            return second.id, first.id
     finally:
         engine.dispose()
 
@@ -175,6 +219,7 @@ def test_sqlite_to_sqlite_roundtrip(tmp_path: Path) -> None:
     src = f"sqlite:///{tmp_path / 'src.sqlite'}"
     dst = f"sqlite:///{tmp_path / 'dst.sqlite'}"
     _seed(src)
+    history = _seed_history_parent(src)
     _create_schema(dst)
 
     report = migrate_data(src, dst)
@@ -195,7 +240,14 @@ def test_sqlite_to_sqlite_roundtrip(tmp_path: Path) -> None:
             workspace_slug = conn.execute(
                 select(Workspace.slug).where(Workspace.slug == "default")
             ).scalar()
+            copied = conn.execute(
+                select(
+                    ContextVersionHistoryParent.version_id,
+                    ContextVersionHistoryParent.parent_version_id,
+                )
+            ).one()
         assert workspace_slug == "default"
+        assert tuple(copied) == history
     finally:
         engine.dispose()
 
@@ -270,6 +322,7 @@ def test_sqlite_to_postgres_roundtrip(tmp_path: Path) -> None:
 
     _reset_postgres(dst)
     _seed(src)
+    history = _seed_history_parent(src)
 
     report = migrate_data(src, dst)
 
@@ -282,7 +335,14 @@ def test_sqlite_to_postgres_roundtrip(tmp_path: Path) -> None:
             workspace_slug = conn.execute(
                 select(Workspace.slug).where(Workspace.slug == "default")
             ).scalar()
+            copied = conn.execute(
+                select(
+                    ContextVersionHistoryParent.version_id,
+                    ContextVersionHistoryParent.parent_version_id,
+                )
+            ).one()
         assert workspace_slug == "default"
+        assert tuple(copied) == history
     finally:
         engine.dispose()
 

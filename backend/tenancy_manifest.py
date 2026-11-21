@@ -85,6 +85,7 @@ WORKSPACE_PLANE_TABLES: frozenset[str] = frozenset(
         "context_media_usage",
         "context_page",
         "context_page_version",
+        "context_version_history_parent",
         "context_version_parent",
         "edge_projection",
         "feedback_item",

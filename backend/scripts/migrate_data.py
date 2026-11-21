@@ -30,7 +30,8 @@ from backend.services.ops.migration_preflight import (
     make_non_mutating_engine,
 )
 
-DeferredUpdate = tuple[Table, Any, dict[str, Any]]
+# Table, primary-key values in table.primary_key column order, restored values.
+DeferredUpdate = tuple[Table, tuple[Any, ...], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -404,7 +405,11 @@ def _copy_table(
                                     if row.get(col) is not None
                                 }
                                 if update_values:
-                                    pending.append((table, row["id"], update_values))
+                                    key = tuple(
+                                        row[column.name]
+                                        for column in table.primary_key.columns
+                                    )
+                                    pending.append((table, key, update_values))
                                 for col in deferred_cols:
                                     row[col] = None
                         inserted = dst_conn.execute(statement, rows)
@@ -439,8 +444,19 @@ def _apply_deferred_updates(target: Engine, updates: Sequence[DeferredUpdate]) -
     if not updates:
         return
     with target.begin() as conn:
-        for table, pk, values in updates:
-            conn.execute(table.update().where(table.c.id == pk).values(**values))
+        for table, key, values in updates:
+            conn.execute(
+                table.update()
+                .where(
+                    *(
+                        column == value
+                        for column, value in zip(
+                            table.primary_key.columns, key, strict=True
+                        )
+                    )
+                )
+                .values(**values)
+            )
 
 
 def main() -> None:

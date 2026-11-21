@@ -12518,6 +12518,8 @@ export interface components {
             created_at?: string | null;
             /** Graph Status */
             graph_status?: string | null;
+            /** History Merge Parent Version Ids */
+            history_merge_parent_version_ids?: string[];
             /** History Status */
             history_status?: ("closed" | "state_inconsistent" | "current_draft" | "published_snapshot" | "alternative_draft" | "discarded_draft" | "superseded_snapshot" | "superseded_draft") | null;
             /**

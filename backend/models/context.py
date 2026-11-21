@@ -444,6 +444,57 @@ class ContextPageVersion(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         self.body_md = value
 
 
+class ContextVersionHistoryParent(Base):
+    """A v0.2 first parent that the Git conversion replaced.
+
+    For actors who can read drafts, History draws it as the version's previous
+    version, plus the version's Git parents other than the one the conversion
+    assigned, unless that would close a cycle.
+    """
+
+    __tablename__ = "context_version_history_parent"
+    __table_args__ = (
+        CheckConstraint(
+            "version_id != parent_version_id",
+            name="ck_context_version_history_parent_not_self",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "page_id", "version_id"],
+            [
+                "context_page_version.workspace_id",
+                "context_page_version.page_id",
+                "context_page_version.id",
+            ],
+            name="fk_context_version_history_parent_version_owner",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "page_id", "parent_version_id"],
+            [
+                "context_page_version.workspace_id",
+                "context_page_version.page_id",
+                "context_page_version.id",
+            ],
+            name="fk_context_version_history_parent_parent_owner",
+        ),
+        Index(
+            "ix_context_version_history_parent_parent_owner",
+            "workspace_id",
+            "page_id",
+            "parent_version_id",
+        ),
+    )
+
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    page_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    version_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    parent_version_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    # An equality marker, not a reference: the conversion's first Git parent.
+    converted_parent_version_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True)
+    )
+
+
 class ContextVersionParent(Base):
     """Ordered additional parents; the first remains on the version row."""
 

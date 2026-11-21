@@ -78,9 +78,14 @@ from backend.services.actor_visible_read import (
     agent_version_is_visible,
     change_set_visible,
     context_page_visible,
+    context_parent_id_projection,
     context_parent_projection,
     context_version_is_visible,
     library_item_visible,
+)
+from backend.services.context_draft_workflow import (
+    history_merge_parent_ids,
+    history_parent_overrides,
 )
 from backend.services.context_drafts import project_context_draft, project_open_drafts
 from backend.services.context_lifecycle import (
@@ -1647,6 +1652,11 @@ class DomainReadService:
     ) -> ListChangesPayload:
         if not actor_can_read_audit_records(actor):
             raise ReadNotFoundError("target not found")
+        # History checks the page's whole lineage, then reads each listed
+        # version's parents. Keep fresh read sessions on one snapshot so both
+        # see the same ancestry; callers already in a transaction keep theirs.
+        if not session.in_transaction():
+            acquire_consistent_read_snapshot(session)
         self._require_visible_history_target(
             session=session,
             workspace_id=workspace_id,
@@ -2496,10 +2506,23 @@ class DomainReadService:
         versions: list[ContextPageVersion],
         actor: ActorContext | None,
     ) -> list[VersionEntry]:
+        if not versions:
+            return []
+
+        expose_draft_state = actor_can_read_drafts(actor)
+        # Saved v0.2 parents run through drafts. Actors who cannot read drafts
+        # keep the Git ancestry of the versions they can read.
+        history_parents = (
+            history_parent_overrides(session, page) if expose_draft_state else {}
+        )
         parent_ids = {
-            version.parent_version_id
+            parent_id
             for version in versions
-            if version.parent_version_id is not None
+            for parent_id in (
+                version.parent_version_id,
+                history_parents.get(version.id, (None,))[0],
+            )
+            if parent_id is not None
         }
         parents_by_id = (
             {
@@ -2508,7 +2531,10 @@ class DomainReadService:
                     select_in_workspace(
                         ContextPageVersion,
                         workspace_id=page.workspace_id,
-                        conditions=(ContextPageVersion.id.in_(parent_ids),),
+                        conditions=(
+                            ContextPageVersion.page_id == page.id,
+                            ContextPageVersion.id.in_(parent_ids),
+                        ),
                     )
                 )
             }
@@ -2525,7 +2551,6 @@ class DomainReadService:
         }
         actor_names = resolve_actor_display_names(session, missing_actor_keys)
         visible_head_id = visible_context_version_id(page, actor)[0]
-        expose_draft_state = actor_can_read_drafts(actor)
 
         closed_reasons = context_closed_reasons(
             session,
@@ -2542,6 +2567,16 @@ class DomainReadService:
                 parents_by_id.get(version.parent_version_id),
                 actor,
             )
+            visible_prior_id = visible_parent_id
+            saved = history_parents.get(version.id)
+            if saved is not None:
+                prior_relation, visible_prior_id = context_parent_id_projection(
+                    page.id,
+                    saved[0],
+                    parents_by_id.get(saved[0]),
+                    actor,
+                )
+            git_parent_ids = self._visible_parent_ids(session, version, actor)
             projection = project_context_version(
                 page,
                 version,
@@ -2562,11 +2597,12 @@ class DomainReadService:
                     or actor_names[(version.actor_type, version.actor_id)],
                     created_at=version.created_at,
                     parent_version_id=visible_parent_id,
-                    parent_version_ids=self._visible_parent_ids(
-                        session, version, actor
-                    ),
-                    prior_version_id=visible_parent_id,
+                    parent_version_ids=git_parent_ids,
+                    prior_version_id=visible_prior_id,
                     prior_relation=prior_relation,
+                    history_merge_parent_version_ids=history_merge_parent_ids(
+                        git_parent_ids, version.parent_version_id, saved
+                    ),
                     actor_id=version.actor_id,
                     is_current=(projection.is_visible_head),
                     is_current_published=(

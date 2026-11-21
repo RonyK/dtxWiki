@@ -209,8 +209,9 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     FKs remain on the workspace plane; the cross-plane edge census stays 61.
     MCP operation lifecycle fields extend the existing call log, without
     changing table or cross-plane FK counts.
-    Context commit parents add one workspace-only table with composite FKs:
-    93 resident and 35 insertable; cross-plane edges stay unchanged.
+    Context commit parents and preserved History parents add two workspace-only
+    tables with composite FKs: 94 resident and 36 insertable. Cross-plane edges
+    stay unchanged.
     """
 
     edges = workspace_to_control_fk_edges()
@@ -227,7 +228,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 93
+    assert len(resident) == 94
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
@@ -245,7 +246,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
     assert len(blocked) == 58
-    assert len(resident) - len(blocked) == 35
+    assert len(resident) - len(blocked) == 36
 
     assert (
         frozenset(edge.label for edge in edges if edge.all_columns_nullable)

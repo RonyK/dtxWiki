@@ -48,10 +48,31 @@
 
 ### Important changes
 
-- MCP tool contract revision 31 adds `closed_reason` (discarded, merged or
-  rejected) to Context version projections. `bring_in_context_version` is titled
-  "Merge context version", and Korean tool titles use the app's merge and review
-  wording. Refresh cached `tools/list` results and result schemas.
+- Upgrading from 0.2 with this release keeps each Context version's original
+  previous version for History, also when the upgrade stops at the 0.3.1
+  revision `c3d2e4f601ab` and continues later. Both runs need an online
+  database connection; the `--sql` mode is refused. Finish the upgrade before
+  `dtxwiki migrate-data`. A server whose drafts an earlier release already
+  converted does not get those links back. An Alembic downgrade to
+  `c3d2e4f601ab` removes them, and upgrading again does not restore them. To
+  go back to 0.2, restore the pre-upgrade backup, including the database.
+- MCP tool contract revision 31 follows revision 30 of 0.3.1. Refresh cached
+  `tools/list` results and result schemas. Context version projections add
+  `closed_reason` (discarded, merged or rejected). `bring_in_context_version`
+  is titled "Merge context version", and Korean tool titles use the app's
+  merge and review wording. `list_changes` adds `history_merge_parent_version_ids`,
+  the parents History draws beside `prior_version_id`. For actors who can read
+  drafts, `prior_version_id` can name the original previous version from 0.2,
+  which can differ from the Git `parent_version_id`.
+
+### Fixes
+
+- Preserve original Context version relationships in History when upgrading
+  from 0.2, including chains of unpublished drafts. A commit later brought into
+  such a draft is drawn beside the original previous version. Viewers keep the
+  published version history.
+- History no longer stops rendering on long histories whose versions connect
+  to versions listed above them.
 
 ## 0.3.1 — 2026-11-20
 

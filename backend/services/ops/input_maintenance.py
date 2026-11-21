@@ -44,6 +44,8 @@ CONSTRAINED_REVISIONS = frozenset(
         # v0.2.3 adds Labs policy and Inbox indexes; input CHECKs are unchanged.
         "00ba02774c4a",
         "c3d2e4f601ab",
+        # Context History parent storage retains the same input checks.
+        "002398e0fcdc",
     }
 )
 SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
@@ -58,6 +60,7 @@ _OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset(
         "5b7e5c149279",
         "00ba02774c4a",
         "c3d2e4f601ab",
+        "002398e0fcdc",
     }
 )
 FIELDS = {

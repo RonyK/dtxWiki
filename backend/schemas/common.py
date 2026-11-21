@@ -260,7 +260,11 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        human_approval_required. Refresh cached tool catalogs and schemas.
 #  31 -- Context version projections add closed_reason -- discarded, merged
 #        or rejected -- for a closed draft. Tool titles use the app's merge
-#        and review wording. Refresh cached tools and schemas.
+#        and review wording. list_changes adds history_merge_parent_version_ids,
+#        the parents History draws beside prior_version_id. For actors who can
+#        read drafts, prior_version_id can name a version's v0.2 first parent
+#        that the 0.3.1 Git conversion replaced, unless that would make the
+#        page's History cyclic. Refresh cached tools and schemas.
 # The revision the latest release shipped and its tool contract digest.
 # `make set-version` records the current revision and live digest here; release
 # verification rejects an artifact whose MCP_TOOL_CONTRACT_REVISION is not

@@ -1,12 +1,17 @@
 from collections import Counter
+from functools import wraps
 from logging.config import fileConfig
 
 import pygit2
 from alembic import context
 from alembic.migration import MigrationContext
+from alembic.runtime.migration import RevisionStep
 from alembic.util import CommandError
 from sqlalchemy import engine_from_config, event, pool
 
+from backend.migrations.revision_modules.unreleased._002398e0fcdc_capture import (
+    capture as history_capture,
+)
 from backend.models import Base
 from backend.models.search_index import include_non_fts5_object
 from backend.services.ops.alembic_migration_graph import (
@@ -225,6 +230,35 @@ def _reject_new_foreign_key_violations(connection, before: Counter) -> None:
         )
 
 
+def _preserve_context_history_during_upgrade(plan):
+    """Stage v0.2 Context parents around the frozen v0.3.1 draft conversion.
+
+    Revision 002398e0fcdc turns them into History rows, in this run or a
+    later one when this run stops at c3d2e4f601ab.
+    """
+
+    @wraps(plan)
+    def upgrade_with_history_capture(heads, migration_context):
+        connection = migration_context.connection
+        for step in plan(heads, migration_context):
+            # The same revision ID is used by fresh initialization. Its empty
+            # ancestry distinguishes it from the conversion of an existing DB.
+            converts = (
+                isinstance(step, RevisionStep)
+                and step.is_upgrade
+                and step.revision.revision == INITIALIZATION_REVISION
+                and step.revision.down_revision == "00ba02774c4a"
+            )
+            staged = history_capture.capture(connection) if converts else None
+            yield step
+            # Alembic asks for the next step only after this one ran, in the
+            # same transaction.
+            if staged is not None:
+                history_capture.record_converted(connection, staged)
+
+    return upgrade_with_history_capture
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -250,12 +284,21 @@ def run_migrations_online() -> None:
         _make_sqlite_ddl_transactional(connectable)
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            include_object=include_non_fts5_object,
-            **({"transactional_ddl": True} if sqlite else {}),
-        )
+        options = {
+            "connection": connection,
+            "target_metadata": target_metadata,
+            "include_object": include_non_fts5_object,
+        }
+        if sqlite:
+            options["transactional_ddl"] = True
+        context.configure(**options)
+
+        plan = context.get_context().opts.get("fn")
+        if getattr(plan, "__name__", "") == "upgrade":
+            # Configure before preflight queries can start a transaction.
+            context.configure(
+                **options, fn=_preserve_context_history_during_upgrade(plan)
+            )
 
         _select_initialization_route(connection)
         _reject_blind_nonbase_stamp(connection)
