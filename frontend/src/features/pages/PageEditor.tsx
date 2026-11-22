@@ -1337,21 +1337,15 @@ export function PageEditor({
     const contextLabel = t("editor.rail.context", { defaultValue: "Context" });
     const contextRootHref = workspacePath(routeWorkspaceId, "context");
     if (mode === "create") {
-      const parentItems = createParentNodeId
-        ? targetBreadcrumbs({
-            basePath: contextRootHref,
-            workspaceId: routeWorkspaceId,
-            rootLabel: contextLabel,
-            nodes: contextTree,
-            targetNodeId: createParentNodeId,
-          })
-        : [{ label: contextLabel, href: contextRootHref }];
-      const currentLabel =
-        title.trim() || createInitialTitle || t("editor.breadcrumbNewPage", { defaultValue: "New page" });
-      if (sameBreadcrumbLabel(parentItems.at(-1)?.label, currentLabel)) {
-        return parentItems;
-      }
-      return [...parentItems, { label: currentLabel }];
+      return targetBreadcrumbs({
+        basePath: contextRootHref,
+        workspaceId: routeWorkspaceId,
+        rootLabel: contextLabel,
+        nodes: contextTree,
+        targetNodeId: destinationNodeId,
+        childLabel:
+          title.trim() || createInitialTitle || t("editor.breadcrumbNewPage", { defaultValue: "New page" }),
+      });
     }
     return targetBreadcrumbs({
       basePath: contextRootHref,
@@ -1367,7 +1361,7 @@ export function PageEditor({
     contextActiveNodeId,
     contextTree,
     createInitialTitle,
-    createParentNodeId,
+    destinationNodeId,
     mode,
     page?.id,
     routeWorkspaceId,
@@ -7706,10 +7700,6 @@ function isCompactTitleInBarViewport() {
     width >= COMPACT_TITLE_IN_BAR_MIN_WIDTH ||
     (width >= COMPACT_TITLE_IN_BAR_SHORT_MIN_WIDTH && height <= COMPACT_EDITOR_MAX_HEIGHT)
   );
-}
-
-function sameBreadcrumbLabel(left: string | undefined, right: string) {
-  return left?.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function normalizeInitialTitle(value: string | null) {

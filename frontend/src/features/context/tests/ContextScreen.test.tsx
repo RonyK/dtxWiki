@@ -3007,6 +3007,12 @@ describe("ContextScreen", () => {
       "aria-selected",
       "true",
     );
+
+    await userEvent.click(breadcrumb.getByRole("link", { name: "Context" }));
+
+    expect(await screen.findByRole("heading", { name: "Context" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Inbox" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).not.toBeInTheDocument();
   });
 
   it("resolves detail by tree target_id for a page past the flat-list cap", async () => {

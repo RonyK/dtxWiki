@@ -11,6 +11,7 @@ export function targetBreadcrumbs({
   targetId,
   targetNodeId,
   fallbackLabel,
+  childLabel,
 }: {
   basePath?: string;
   workspaceId: string;
@@ -19,18 +20,22 @@ export function targetBreadcrumbs({
   targetId?: string | null;
   targetNodeId?: string | null;
   fallbackLabel?: string | null;
+  childLabel?: string;
 }): BreadcrumbItem[] {
-  const items: BreadcrumbItem[] = [{ label: rootLabel, href: basePath && workspaceId ? (basePath.startsWith("/workspaces/") ? basePath : workspacePath(workspaceId, basePath)) : undefined }];
+  // The first crumb links to the section dashboard. Folder crumbs use their
+  // own tree node IDs, and page crumbs use their document IDs.
+  const rootHref = basePath && workspaceId
+    ? (basePath.startsWith("/workspaces/") ? basePath : workspacePath(workspaceId, basePath))
+    : undefined;
+  const items: BreadcrumbItem[] = [{ label: rootLabel, href: rootHref }];
   const targetNode = targetNodeId
     ? nodes.find((node) => node.id === targetNodeId)
     : targetId
       ? nodes.find((node) => node.target_id === targetId)
       : null;
   for (const ancestor of targetNode?.breadcrumb ?? []) {
-    // The live tree API returns a path that can include the selected node as
-    // its final entry. Breadcrumbs adds the selected node separately so it is
-    // rendered as the non-link current page; omit that path entry to avoid a
-    // duplicated trailing label.
+    // The API can include the selected node as the final entry. Add it once
+    // below so its role as the current item or an ancestor is explicit.
     if (ancestor.id === targetNode?.id) {
       continue;
     }
@@ -45,6 +50,15 @@ export function targetBreadcrumbs({
           ? workspaceTargetHref(workspaceId, ancestor.section as "context" | "library" | "agent", ancestor.id, "folder")
           : undefined,
     });
+  }
+  // On a create screen the selected node is the parent, so keep it clickable.
+  // The new page is current even when its title matches an ancestor's title.
+  if (childLabel !== undefined) {
+    if (targetNode && !isSemanticSectionRoot(targetNode, rootLabel)) {
+      items.push({ label: targetNode.title, href: treeNodeHref(workspaceId, targetNode) ?? undefined });
+    }
+    items.push({ label: childLabel });
+    return items;
   }
   const currentLabel = targetNode?.title ?? fallbackLabel;
   if (currentLabel) {
