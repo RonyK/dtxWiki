@@ -7,12 +7,11 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import String, and_, case, cast, func, select, tuple_, type_coerce
+from sqlalchemy import and_, case, func, select, tuple_
 from sqlalchemy.orm import Session, aliased
 
 from backend.library_media.ports import LibraryBlobRepositoryFactory
 from backend.models.agent import AgentPage, AgentPageVersion
-from backend.models.base import UTCDateTime
 from backend.models.change import ChangeOperation, ChangeSet
 from backend.models.context import (
     ContextCitation,
@@ -125,6 +124,7 @@ from backend.services.lint import LintRegistry, page_format_warnings_for_body
 from backend.services.list_pagination import (
     _decode_keyset_cursor,
     _encode_keyset_cursor,
+    keyset_utc_timestamp,
 )
 from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
@@ -2470,18 +2470,10 @@ class DomainReadService:
             )
         version_no = ContextPageVersion.version_no
         if order_by_save_time:
-            saved_at = ContextPageVersion.last_saved_at
-            if session.get_bind().dialect.name == "sqlite":
-                # The legacy CURRENT_TIMESTAMP default omitted fractional
-                # seconds. Normalize those values for exact cursor comparisons.
-                saved_text = cast(saved_at, String)
-                saved_at = type_coerce(
-                    case(
-                        (func.length(saved_text) == 19, saved_text + ".000000"),
-                        else_=saved_text,
-                    ),
-                    UTCDateTime(),
-                )
+            saved_at = keyset_utc_timestamp(
+                ContextPageVersion.last_saved_at,
+                dialect_name=session.get_bind().dialect.name,
+            )
             if before_saved_at is not None:
                 stmt = stmt.where(
                     tuple_(saved_at, version_no) < (before_saved_at, before_version_no)
