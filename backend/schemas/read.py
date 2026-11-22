@@ -511,6 +511,7 @@ class VersionEntry(BaseModel):
     actor_type: str
     actor_display_name: str | None = None
     created_at: datetime | None = None
+    last_saved_at: datetime | None = None
     # Context uses the current Git ancestry for publishing and merges.
     parent_version_id: UUID | None = None
     parent_version_ids: list[UUID] = Field(default_factory=list)

@@ -266,7 +266,7 @@ describe("buildHistoryGraph", () => {
     }
   });
 
-  it("connects a published version to its earlier draft in drafts-first order", () => {
+  it("connects a published version to its source draft listed above it", () => {
     const nodes = contextHistoryNodes([
       version(2, 1, { version_status: "draft" }),
       version(4, 1),

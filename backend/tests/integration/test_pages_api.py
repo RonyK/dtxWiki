@@ -2600,6 +2600,13 @@ def test_pages_api_version_cursor_is_stable_newest_first(page_service):
     ids = [row["version_id"] for page in (first, second, third) for row in page["data"]]
     assert len(ids) == len(set(ids)) == 5
 
+    # The History route opts into save-time order even when the version
+    # numbers returned by the /versions endpoint follow a different order.
+    with page_service.session_factory.begin() as session:
+        older = session.get(ContextPageVersion, UUID(third["data"][0]["version_id"]))
+        newest = session.get(ContextPageVersion, UUID(current["version_id"]))
+        older.last_saved_at = newest.last_saved_at + timedelta(seconds=1)
+
     workspace_id = client.get("/api/v1/workspaces").json()["data"][
         "current_workspace_id"
     ]
@@ -2620,8 +2627,12 @@ def test_pages_api_version_cursor_is_stable_newest_first(page_service):
             "cursor": history_first["next_cursor"],
         },
     ).json()["data"]
-    assert [row["version_no"] for row in history_first["versions"]] == [6, 5]
-    assert [row["version_no"] for row in history_second["versions"]] == [4, 3]
+    assert [row["version_no"] for row in history_first["versions"]] == [1, 6]
+    assert [row["version_no"] for row in history_second["versions"]] == [5, 4]
+    top, next_row = history_first["versions"]
+    assert datetime.fromisoformat(top["last_saved_at"]) > datetime.fromisoformat(
+        next_row["last_saved_at"]
+    )
     assert {row["version_id"] for row in history_first["versions"]}.isdisjoint(
         {row["version_id"] for row in history_second["versions"]}
     )

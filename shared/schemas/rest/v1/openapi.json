@@ -25458,6 +25458,18 @@
             "title": "Is Visible Head",
             "type": "boolean"
           },
+          "last_saved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Saved At"
+          },
           "lines_added": {
             "anyOf": [
               {

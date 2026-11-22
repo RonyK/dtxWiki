@@ -3,7 +3,7 @@
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from backend.models.context import ContextPageVersion, ContextVersionHistoryParent
 from backend.models.tree import WorkspaceTreeNode
@@ -225,7 +225,7 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
                 workspace_id,
                 "context_page",
                 initial.id,
-                drafts_first=True,
+                order_context_by_save_time=True,
                 actor=editor,
             )
             .versions
@@ -283,45 +283,64 @@ def test_shared_drafts_merge_independently_and_keep_closed_commits(page_service)
     assert rebrought.page_metadata["placement_parent_node_id"] is None
     assert rebrought.parent_version_ids == brought.parent_version_ids
 
-    # REST History appends across the draft-to-commit boundary, even when a
-    # draft's merged parent is a newer commit. The default keeps version order.
-    with page_service.session_factory() as session:
-        history = DomainReadService().list_changes
-        options = {
-            "session": session,
-            "workspace_id": workspace_id,
-            "target_type": "context_page",
-            "target_id": initial.id,
-            "actor": editor,
-        }
-        first = history(**options, limit=1, drafts_first=True)
-        later = history(**options, limit=3, cursor=first.next_cursor, drafts_first=True)
-        commits = history(
-            **options, limit=50, cursor=later.next_cursor, drafts_first=True
+    # Tie two rows using both SQLite storage forms, including the pre-upgrade
+    # CURRENT_TIMESTAMP representation without a fractional part.
+    with page_service.session_factory.begin() as session:
+        earlier = session.get(ContextPageVersion, restarted.version_id)
+        same_second = earlier.last_saved_at.replace(microsecond=0)
+        earlier.last_saved_at = same_second
+        session.execute(
+            text("UPDATE context_page_version SET last_saved_at=:time WHERE id=:id"),
+            {
+                "time": same_second.strftime("%Y-%m-%d %H:%M:%S"),
+                "id": merged.version_id.hex,
+            },
         )
-        # Every page is capped, and the second one crosses from drafts to commits.
-        assert len(first.versions) == 1 and len(later.versions) == 3
-        assert later.versions[0].version_status == "draft"
-        assert later.versions[-1].version_status != "draft"
-        assert commits.next_cursor is None
 
-        # The drafts lead and the commits follow, each newest first by version
-        # number (which never changes), so no row is repeated, lost or moved.
-        paged = first.versions + later.versions + commits.versions
-        drafts = [row for row in paged if row.version_status == "draft"]
-        assert paged[: len(drafts)] == drafts
-        assert {row.version_id for row in drafts} == {
-            behind.version_id,
-            merged.version_id,
-            restarted.version_id,
-        }
-        for phase in (drafts, paged[len(drafts) :]):
-            numbers = [row.version_no for row in phase]
-            assert numbers == sorted(numbers, reverse=True)
-        # The default (MCP) order stays newest first by version number.
-        legacy = [row.version_no for row in history(**options, limit=50).versions]
-        assert legacy == sorted(legacy, reverse=True)
-        assert sorted(row.version_no for row in paged) == sorted(legacy)
+    history = DomainReadService().list_changes
+    options = {
+        "workspace_id": workspace_id,
+        "target_type": "context_page",
+        "target_id": initial.id,
+        "actor": editor,
+    }
+    rest_options = {**options, "order_context_by_save_time": True}
+
+    with page_service.session_factory() as session:
+        # Walk one page per row to exercise both sides of the tie breaking
+        # cursor, and confirm the list contains all the same visible versions.
+        legacy = history(session, **options, limit=50).versions
+        assert [row.version_no for row in legacy] == sorted(
+            (row.version_no for row in legacy), reverse=True
+        )
+        first = history(session, **rest_options, limit=1)
+        paged = first.versions.copy()
+        cursor = first.next_cursor
+        for _ in legacy[1:]:
+            assert cursor is not None
+            page = history(session, **rest_options, limit=1, cursor=cursor)
+            assert len(page.versions) == 1
+            paged.extend(page.versions)
+            cursor = page.next_cursor
+        assert cursor is None
+        assert paged == sorted(
+            legacy, key=lambda row: (row.last_saved_at, row.version_no), reverse=True
+        )
+        ids = [row.version_id for row in paged]
+        assert ids.index(moved) < ids.index(restarted.version_id)
+        old_entry = paged[ids.index(restarted.version_id)]
+
+    resaved = save(restarted, restarted.body_md + "\nRevisited the older draft.\n")
+    with page_service.session_factory() as session:
+        latest = history(session, **rest_options, limit=1)
+        entry = latest.versions[0]
+        assert entry.version_id == old_entry.version_id == resaved.version_id
+        assert entry.created_at == old_entry.created_at
+        assert entry.last_saved_at > old_entry.last_saved_at
+        older = history(session, **rest_options, limit=50, cursor=first.next_cursor)
+        assert [row.version_id for row in older.versions] == [
+            version_id for version_id in ids[1:] if version_id != resaved.version_id
+        ]
 
     rejected = begin()
     submitted = page_service.submit_context_edit_for_review(

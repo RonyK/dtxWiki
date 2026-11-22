@@ -216,7 +216,7 @@
     "firstVersionNoComparison": "The first version has no previous version to compare.",
     "previousVersionUnavailable": "The previous version is not available.",
     "event": "Event",
-    "help": "Versions are listed newest first, with open drafts at the top drawn dashed. Changes shows what a version changed from the version it was based on, Compare two versions diffs any pair, Start from this version opens a new draft from it, and Restore this version makes its content a new version.",
+    "help": "Versions are ordered by when they were last saved. Open draft markers are dashed. Changes shows what a version changed from the version it was based on, Compare two versions diffs any pair, Start from this version opens a new draft from it, and Restore this version makes its content a new version.",
     "loadingOlder": "Loading older versions",
     "loadOlder": "Load older versions",
     "latestDraft": "Latest draft",

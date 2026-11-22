@@ -5259,10 +5259,13 @@ describe("ContextScreen", () => {
         {
           data: {
             versions: [
-              historyVersion("version-2", 2, "draft", undefined, {
-                is_current: true,
-                is_latest_draft: true,
-              }),
+              {
+                ...historyVersion("version-2", 2, "draft", undefined, {
+                  is_current: true,
+                  is_latest_draft: true,
+                }),
+                last_saved_at: "2026-05-11T00:00:00Z",
+              },
               historyVersion("version-1", 1, "published", undefined, {
                 is_current: false,
                 is_current_published: true,
@@ -5290,6 +5293,8 @@ describe("ContextScreen", () => {
       .getByText("v1")
       .closest(".history-card") as HTMLElement;
 
+    expect(draftCard.querySelector("time")).toHaveAttribute("datetime", "2026-05-11T00:00:00Z");
+    expect(publishedCard.querySelector("time")).toHaveAttribute("datetime", "2026-05-09T00:00:00Z");
     expect(
       within(draftCard).getByRole("button", { name: "Show changes in v2 since v1" }),
     ).toBeInTheDocument();

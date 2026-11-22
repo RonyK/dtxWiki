@@ -133,9 +133,8 @@ export function buildHistoryGraph<T>(
     // False while older pages remain. A head that is not loaded may then
     // still be further down, so lane 0 stays reserved for it (I5).
     complete?: boolean;
-    // Context groups open drafts above commits, including draft parents of
-    // some historical commits, and publishes a draft as the same version
-    // after it brought in a newer commit.
+    // Context sorts by last save time, so a mutable parent can appear above
+    // its child. Saved historical parent links can also run upwards.
     allowParentsAbove?: boolean;
   } = {},
 ): HistoryGraph<T> {
