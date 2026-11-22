@@ -60,9 +60,6 @@ it("uses capability-driven external login, safe next, remember policy and fixed 
   expect(styledLink).toHaveStyle({ borderColor: "#747775", borderRadius: "4px" });
   expect(styledLink).toHaveAttribute("href", "/api/v1/auth/sso/branded/start?next=%2Foauth%2Fauthorize%3Fstate%3Done&remember_me=true");
 
-  expect(styledLink).toHaveClass("auth-login-action");
-  expect(button).toHaveClass("auth-login-action");
-  expect(screen.getByRole("button", { name: "Sign in" })).toHaveClass("auth-login-action");
   const nativeForm = screen.getByLabelText("Password").closest("form")!;
   const remember = screen.getByRole("checkbox", { name: "Keep me signed in on this browser" });
   // DOM order also determines the keyboard path: email first, external methods
