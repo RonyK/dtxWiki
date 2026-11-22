@@ -2457,31 +2457,36 @@ class DomainReadService:
         )
         if page is None:
             return [], None
-        stmt = select_in_workspace(
-            ContextPageVersion,
-            workspace_id=workspace_id,
-            conditions=(ContextPageVersion.page_id == target_id,),
-        )
+        conditions = [ContextPageVersion.page_id == target_id]
         if not actor_can_read_drafts(actor):
-            stmt = stmt.where(
+            conditions.append(
                 ContextPageVersion.version_status.in_(
                     PUBLISHED_CONTEXT_VERSION_STATUSES
                 )
             )
         version_no = ContextPageVersion.version_no
+        ordering = (version_no.desc(),)
         if order_by_save_time:
             saved_at = keyset_utc_timestamp(
                 ContextPageVersion.last_saved_at,
                 dialect_name=session.get_bind().dialect.name,
             )
             if before_saved_at is not None:
-                stmt = stmt.where(
+                conditions.append(
                     tuple_(saved_at, version_no) < (before_saved_at, before_version_no)
                 )
-            stmt = stmt.order_by(saved_at.desc())
+            ordering = (saved_at.desc(), *ordering)
         elif before_version_no is not None:
-            stmt = stmt.where(version_no < before_version_no)
-        rows = session.scalars(stmt.order_by(version_no.desc()).limit(limit + 1)).all()
+            conditions.append(version_no < before_version_no)
+        rows = session.scalars(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=workspace_id,
+                conditions=conditions,
+            )
+            .order_by(*ordering)
+            .limit(limit + 1)
+        ).all()
         selected = rows[:limit]
         entries = self._context_version_entries(session, page, selected, actor)
         if len(rows) <= limit:
