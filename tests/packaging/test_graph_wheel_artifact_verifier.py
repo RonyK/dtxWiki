@@ -7,6 +7,7 @@ need packaged backend payloads. The existing backend fixture remains generic.
 
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -16,12 +17,16 @@ from pathlib import Path
 
 import pytest
 
-from backend.schemas.common import MCP_RELEASED_TOOL_CONTRACT_DIGEST
 from scripts import release_version
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = REPO_ROOT / "scripts" / "verify_wheel_artifact.py"
 TOOL_CONTRACT = Path("backend/schemas/common.py")
+TOOL_CATALOG = Path("backend/mcp/protocol/tool_descriptors.py")
+PREVIOUS_REVISION = 7
+PREVIOUS_DIGEST = "70000000000a"
+ARTIFACT_REVISION = 8
+ARTIFACT_DIGEST = "80000000000b"
 _spec = importlib.util.spec_from_file_location(
     "_backend_artifact_fixtures",
     Path(__file__).with_name("test_wheel_artifact_verifier.py"),
@@ -68,10 +73,71 @@ def _write_sdist(target, stage):
     return target
 
 
-def _run_verifier(argument, *options):
+def _verifier_checkout(checkout):
+    scripts = checkout / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (VERIFIER.name, "deploy_static_bundle.py", "mcp_release_contract.py"):
+        shutil.copy(VERIFIER.parent / name, scripts / name)
+    (checkout / "pyproject.toml").write_text(
+        '[project]\nname = "dtxwiki"\nversion = "0.1.1"\n',
+        encoding="utf-8",
+    )
+    contract = checkout / TOOL_CONTRACT
+    contract.parent.mkdir(parents=True)
+    contract.write_text(
+        f"MCP_RELEASED_TOOL_CONTRACT_REVISION = {PREVIOUS_REVISION}\n"
+        f'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "{PREVIOUS_DIGEST}"\n'
+        f"MCP_TOOL_CONTRACT_REVISION = {PREVIOUS_REVISION}\n",
+        encoding="utf-8",
+    )
+    for args in (
+        ("init", "--quiet"),
+        ("add", "pyproject.toml", str(TOOL_CONTRACT)),
+        ("commit", "--quiet", "-m", "previous release"),
+        ("tag", "v0.1.1"),
+    ):
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Release test",
+                "-c",
+                "user.email=release-test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                "-c",
+                "core.hooksPath=",
+                "-c",
+                "init.templateDir=",
+                *args,
+            ],
+            cwd=checkout,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}
+            },
+            capture_output=True,
+            check=True,
+        )
+
+
+def _run_verifier(argument, *options, checkout=None):
+    if checkout is None and "--release-version" in options:
+        checkout = argument.parent / "verifier-checkout"
+        if not checkout.exists():
+            _verifier_checkout(checkout)
+    root = checkout or REPO_ROOT
     return subprocess.run(
-        [sys.executable, str(VERIFIER), str(argument), *options],
-        cwd=REPO_ROOT,
+        [
+            sys.executable,
+            str(root / "scripts" / VERIFIER.name),
+            str(argument),
+            *options,
+        ],
+        cwd=root,
         capture_output=True,
         text=True,
         check=False,
@@ -232,15 +298,24 @@ def _drop_unreleased(stage):
         )
 
 
-def _record_staged_tool_contract(stage):
+def _write_staged_tool_catalog(stage, digest):
+    catalog = stage / TOOL_CATALOG
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    catalog.write_text(
+        f"def tool_contract_digest():\n    return {digest!r}\n",
+        encoding="utf-8",
+    )
+
+
+def _record_staged_tool_contract(stage, *, revision=ARTIFACT_REVISION):
     path = stage / TOOL_CONTRACT
-    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         release_version._released_tool_contract_text(
-            REPO_ROOT, MCP_RELEASED_TOOL_CONTRACT_DIGEST
+            stage, ARTIFACT_DIGEST, revision=revision
         ),
         encoding="utf-8",
     )
+    _write_staged_tool_catalog(stage, ARTIFACT_DIGEST)
 
 
 def _release_schema_stage(tmp_path, artifact_kind="wheel", version="0.3.1"):
@@ -260,7 +335,6 @@ def _release_schema_stage(tmp_path, artifact_kind="wheel", version="0.3.1"):
     )
     _drop_unreleased(stage)
     _write_release_metadata(stage, artifact_kind, version)
-    _record_staged_tool_contract(stage)
     suffix = "-py3-none-any.whl" if artifact_kind == "wheel" else ".tar.gz"
     return stage, tmp_path / f"dtxwiki-{version}{suffix}"
 
@@ -498,31 +572,42 @@ def test_release_cli_uses_the_extracted_mapping_not_the_checkout(tmp_path):
     # this deliberately invalid checkout mapping. Copy the shipped verifier,
     # not its implementation, so the counterexample survives future releases.
     checkout = tmp_path / "unrelated-checkout"
-    scripts = checkout / "scripts"
-    scripts.mkdir(parents=True)
-    for name in (VERIFIER.name, "deploy_static_bundle.py"):
-        shutil.copy(VERIFIER.parent / name, scripts / name)
+    _verifier_checkout(checkout)
     manifest = checkout / "backend/migrations/release_manifest.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text('{"schema_releases": {}}', encoding="utf-8")
+    _write_staged_tool_catalog(checkout, PREVIOUS_DIGEST)
+    for package in ("backend", "backend/mcp", "backend/mcp/protocol"):
+        (checkout / package / "__init__.py").touch()
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(scripts / VERIFIER.name),
-            str(_release_dist(tmp_path)),
-            "--release-version",
-            RELEASE_VERSION,
-        ],
-        cwd=checkout,
-        capture_output=True,
-        text=True,
-        check=False,
+    dist = _release_dist(tmp_path)
+    result = _run_verifier(
+        dist, "--release-version", RELEASE_VERSION, checkout=checkout
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"{WHEEL_NAME}:" in result.stdout
     assert f"{SDIST_NAME}:" in result.stdout
+
+    wheel_stage = tmp_path / "release-wheel"
+    (wheel_stage / TOOL_CATALOG).unlink()
+    _write_wheel(dist / WHEEL_NAME, wheel_stage)
+    sdist_stage = tmp_path / "release-sdist"
+    with (sdist_stage / TOOL_CONTRACT).open("a", encoding="utf-8") as records:
+        records.write(f'\nMCP_RELEASED_TOOL_CONTRACT_DIGEST = "{ARTIFACT_DIGEST}"\n')
+    _write_sdist(dist / SDIST_NAME, sdist_stage)
+
+    result = _run_verifier(
+        dist, "--release-version", RELEASE_VERSION, checkout=checkout
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (
+        f"{WHEEL_NAME}: probing the packaged MCP tool contract failed" in result.stderr
+    )
+    assert (
+        f"{SDIST_NAME}: reading the packaged MCP tool contract record failed"
+        in result.stderr
+    )
 
 
 def test_release_cli_rejects_current_graph_without_a_new_schema_boundary(tmp_path):
@@ -602,6 +687,24 @@ def test_release_cli_checks_metadata_in_both_uploaded_artifacts(
     assert "metadata" not in result.stderr.lower()
 
     (stage / helper_init).unlink()
+    # The packaged catalog can change while both recorded revisions agree.
+    _write_staged_tool_catalog(stage, "90000000000c")
+    write_archive(artifact, stage)
+    result = _run_verifier(dist, "--release-version", version)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"{artifact.name}:" in result.stderr
+    assert "recorded MCP tool contract digest" in result.stderr
+
+    # A self-consistent artifact must still use the previous tag's revision
+    # plus exactly one when its catalog differs.
+    _record_staged_tool_contract(stage, revision=9)
+    write_archive(artifact, stage)
+    result = _run_verifier(dist, "--release-version", version)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"{artifact.name}:" in result.stderr
+    assert "MCP tool contract revision 9 must be 8" in result.stderr
+
+    _record_staged_tool_contract(stage)
     write_archive(artifact, stage)
 
     result = _run_verifier(dist, "--release-version", version)

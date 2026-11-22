@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -18,6 +20,9 @@ MANIFESTS = (
 )
 READMES = ("README.md", "README.ko.md", "npm/dtxwiki/README.md")
 OPENAPI = "shared/schemas/rest/v1/openapi.json"
+TOOL_CONTRACT = "backend/schemas/common.py"
+PRIOR_DIGEST = "70000000000a"
+CHANGED_DIGEST = "80000000000b"
 
 
 def _write(root: Path, relative: str, text: str) -> None:
@@ -34,8 +39,63 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     return {
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in root.rglob("*")
-        if path.is_file()
+        if path.is_file() and path.relative_to(root).parts[0] != ".git"
     }
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Release test",
+            "-c",
+            "user.email=release-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "tag.gpgsign=false",
+            "-c",
+            "core.hooksPath=",
+            "-c",
+            "init.templateDir=",
+            *args,
+        ],
+        cwd=root,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _contract(revision: int, digest: str, *, current: int | None = None) -> str:
+    return (
+        f"MCP_RELEASED_TOOL_CONTRACT_REVISION = {revision}\n"
+        f'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "{digest}"\n'
+        f"MCP_TOOL_CONTRACT_REVISION = {revision if current is None else current}\n"
+    )
+
+
+def _catalog(root: Path, digest: str) -> None:
+    _write(
+        root,
+        "backend/mcp/protocol/tool_descriptors.py",
+        f"def tool_contract_digest():\n    return {digest!r}\n",
+    )
+
+
+def _commit_release(
+    root: Path, project: str, version: str, revision: int, digest: str
+) -> None:
+    _write(root, "pyproject.toml", project.replace("1.2.3", version, 1))
+    _write(root, TOOL_CONTRACT, _contract(revision, digest))
+    _git(root, "add", "pyproject.toml", TOOL_CONTRACT)
+    _git(root, "commit", "--quiet", "-m", f"prepare {version}")
 
 
 @pytest.fixture
@@ -135,13 +195,35 @@ def release_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "Historical example: `dtxwiki==0.1.3`.\n"
         )
         _write(tmp_path, output, text)
-    _write(
-        tmp_path,
-        "backend/schemas/common.py",
-        "MCP_RELEASED_TOOL_CONTRACT_REVISION = 7\n"
-        'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "70000000000a"\n'
-        "MCP_TOOL_CONTRACT_REVISION = 8\n",
-    )
+    for package in ("backend", "backend/mcp", "backend/mcp/protocol"):
+        _write(tmp_path, f"{package}/__init__.py", "")
+    _catalog(tmp_path, CHANGED_DIGEST)
+    project = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
+    _git(tmp_path, "init", "--quiet")
+    for version, revision, digest in (
+        ("1.2.1", 6, "60000000000a"),
+        ("1.2.2", 7, PRIOR_DIGEST),
+    ):
+        _commit_release(tmp_path, project, version, revision, digest)
+        _git(tmp_path, "tag", f"v{version}")
+
+    # A higher version from a release line that was not merged into this
+    # checkout cannot supply its baseline.
+    _git(tmp_path, "switch", "--quiet", "--detach", "v1.2.1")
+    _commit_release(tmp_path, project, "2.4.5", 90, "99000000000a")
+    _git(tmp_path, "tag", "v2.4.5")
+    _git(tmp_path, "switch", "--quiet", "-")
+
+    # Publication merges the prepared version from this checkout. The tag
+    # itself is a merge commit on the publication branch.
+    _commit_release(tmp_path, project, "2.3.5", 11, PRIOR_DIGEST)
+    _git(tmp_path, "switch", "--quiet", "--detach", "v1.2.1")
+    _git(tmp_path, "merge", "--quiet", "--no-ff", "-m", "publish 2.3.5", "@{-1}")
+    _git(tmp_path, "tag", "v2.3.5")
+    _git(tmp_path, "switch", "--quiet", "-")
+
+    _write(tmp_path, "pyproject.toml", project)
+    _write(tmp_path, TOOL_CONTRACT, _contract(7, PRIOR_DIGEST, current=21))
     _write(tmp_path, "CHANGELOG.md", "## 0.1.4\n\nReleased before 1.2.3.\n")
     _write(
         tmp_path,
@@ -151,9 +233,7 @@ def release_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         release_version, "export_openapi", lambda root: _json(root, OPENAPI)
     )
-    monkeypatch.setattr(
-        release_version, "tool_contract_digest", lambda root: "80000000000b"
-    )
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     return tmp_path
 
 
@@ -206,36 +286,34 @@ def test_version_sync_updates_consumers_without_rewriting_history_or_dependencie
     assert (release_tree / "CHANGELOG.md").read_bytes() == before["CHANGELOG.md"]
     manifest = "backend/migrations/release_manifest.json"
     assert (release_tree / manifest).read_bytes() == before[manifest]
-    contract = release_tree / "backend/schemas/common.py"
-    # The upversion releases the revision accumulated since the last release.
-    assert contract.read_text() == (
-        "MCP_RELEASED_TOOL_CONTRACT_REVISION = 8\n"
-        'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "80000000000b"\n'
-        "MCP_TOOL_CONTRACT_REVISION = 8\n"
-    )
+    contract = release_tree / TOOL_CONTRACT
+    # v2.3.5 was prepared here and tagged after merging into the publication
+    # branch. Changing its digest advances its revision once across versions.
+    assert contract.read_text() == _contract(12, CHANGED_DIGEST)
     assert release_version.check(root=release_tree) == []
 
-    # A later contract change stays unreleased: regenerating the same version
-    # must not record it, or the next release would need a second revision.
-    contract.write_text(
-        "MCP_RELEASED_TOOL_CONTRACT_REVISION = 8\n"
-        'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "80000000000b"\n'
-        "MCP_TOOL_CONTRACT_REVISION = 9\n"
-    )
+    # Record a pending release commit but no tag. Re-running set keeps using
+    # the published baseline, including when another edit arrives before tag.
+    _git(release_tree, "add", "pyproject.toml", TOOL_CONTRACT)
+    _git(release_tree, "commit", "--quiet", "-m", "prepare release 2.4.6")
+    assert release_version.synchronize(root=release_tree, version="2.4.6") == []
+
+    later_digest = "90000000000c"
+    _catalog(release_tree, later_digest)
     after = _snapshot(release_tree)
     assert release_version.synchronize(root=release_tree) == []
     assert _snapshot(release_tree) == after
-
-    # A release branch whose shipped revision 8 changes before the tag records
-    # 9 by setting the same version again, without a dummy version bump.
     assert release_version.synchronize(root=release_tree, version="2.4.6") == [
-        "backend/schemas/common.py"
+        TOOL_CONTRACT
     ]
-    assert contract.read_text() == (
-        "MCP_RELEASED_TOOL_CONTRACT_REVISION = 9\n"
-        'MCP_RELEASED_TOOL_CONTRACT_DIGEST = "80000000000b"\n'
-        "MCP_TOOL_CONTRACT_REVISION = 9\n"
-    )
+    assert contract.read_text() == _contract(12, later_digest)
+
+    # Reverting to the previous release's catalog reuses its revision.
+    _catalog(release_tree, PRIOR_DIGEST)
+    assert release_version.synchronize(root=release_tree, version="2.4.6") == [
+        TOOL_CONTRACT
+    ]
+    assert contract.read_text() == _contract(11, PRIOR_DIGEST)
 
 
 def test_release_candidate_round_trip_uses_the_registry_version_spellings(
@@ -307,6 +385,12 @@ def test_version_check_reports_drift_and_failed_preflight_keeps_every_file(
     with pytest.raises(ValueError):
         release_version.synchronize(root=release_tree, version="02.4.6")
     assert _snapshot(release_tree) == before
+
+    _git(release_tree, "tag", "--delete", "v2.3.5", "v1.2.2", "v1.2.1")
+    with pytest.raises(ValueError, match="tag"):
+        release_version.synchronize(root=release_tree, version="2.4.6")
+    assert _snapshot(release_tree) == before
+    _git(release_tree, "tag", "v1.2.2", "HEAD~1")
 
     (release_tree / "README.ko.md").unlink()
     before_missing = _snapshot(release_tree)

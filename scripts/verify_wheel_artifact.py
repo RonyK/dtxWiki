@@ -31,7 +31,6 @@ from collections.abc import Sequence
 from email.parser import Parser
 from pathlib import Path
 
-from deploy_static_bundle import _local_entry_files
 from packaging.utils import (
     InvalidSdistFilename,
     InvalidWheelFilename,
@@ -39,6 +38,25 @@ from packaging.utils import (
     parse_wheel_filename,
 )
 from packaging.version import InvalidVersion, Version
+
+if __package__:
+    from .deploy_static_bundle import _local_entry_files
+    from .mcp_release_contract import (
+        next_tool_contract_revision,
+        previous_release_tool_contract,
+        read_recorded_tool_contract,
+        tool_contract_digest,
+    )
+else:
+    from deploy_static_bundle import _local_entry_files
+    from mcp_release_contract import (
+        next_tool_contract_revision,
+        previous_release_tool_contract,
+        read_recorded_tool_contract,
+        tool_contract_digest,
+    )
+
+CHECKOUT_ROOT = Path(__file__).resolve().parents[1]
 
 # This is Vite's emitted URL literal for our one shared D3 module Worker,
 # not a general JavaScript/import parser. Match its quoted content hash so an
@@ -384,10 +402,9 @@ def _check_release_schema(
     A patch with no database changes inherits its nearest earlier boundary.
     A prerelease can also use its matching final release's prepared boundary.
     An unrelated future entry cannot qualify an older package.
-    This is an explicit publishing check: development artifacts may qualify
+    This is an explicit publishing check. Development artifacts may qualify
     their runtime before the owner chooses the next release version. Release
-    artifacts must record the MCP tool contract they ship and contain no
-    unreleased migration or helper files.
+    artifacts must contain no unreleased migration or helper files.
     """
 
     try:
@@ -399,34 +416,51 @@ def _check_release_schema(
         *_check_release_identity(root, artifact, release_version, expected),
         *_check_schema_boundary(root, head, expected),
         *_check_unreleased_migrations(root),
-        *_check_unreleased_tool_contract(root, release_version),
     ]
 
 
-def _check_unreleased_tool_contract(root: Path, release_version: str) -> list[str]:
-    """Require make set-version to record the packaged MCP tool contract."""
-
-    relative = "backend/schemas/common.py"
-    missing = f"{relative} does not state both MCP tool contract revisions exactly once"
+def _check_released_tool_contract(
+    root: Path, release_version: str, previous_tool_contract: tuple[int, str]
+) -> list[str]:
+    """Check the recorded MCP release against this artifact and its predecessor."""
     try:
-        source = (root / relative).read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return [missing]
+        current, recorded_revision, recorded_digest = read_recorded_tool_contract(root)
+    except (OSError, ValueError) as error:
+        return [f"reading the packaged MCP tool contract record failed: {error}"]
 
-    current = re.findall(r"^MCP_TOOL_CONTRACT_REVISION = (\d+)$", source, re.MULTILINE)
-    released = re.findall(
-        r"^MCP_RELEASED_TOOL_CONTRACT_REVISION = (\d+)$", source, re.MULTILINE
+    failures = []
+    record_command = (
+        f"Run make set-version VERSION={release_version} on the release branch "
+        "to record it before publishing."
     )
-    if len(current) != 1 or len(released) != 1:
-        return [missing]
-    if current == released:
-        return []
-    return [
-        f"release artifact contains unreleased MCP tool contract revision "
-        f"{current[0]} (last released {released[0]}). Run make set-version "
-        f"VERSION={release_version} on the release branch to record it before "
-        "publishing"
-    ]
+    if current != recorded_revision:
+        failures.append(
+            f"release artifact contains unreleased MCP tool contract revision "
+            f"{current} (recorded revision {recorded_revision}). {record_command}"
+        )
+
+    try:
+        live_digest = tool_contract_digest(root)
+    except (OSError, ValueError) as error:
+        return [*failures, f"probing the packaged MCP tool contract failed: {error}"]
+    if live_digest != recorded_digest:
+        failures.append(
+            f"recorded MCP tool contract digest {recorded_digest} does not match "
+            f"the packaged catalog digest {live_digest}. {record_command}"
+        )
+
+    previous_revision, previous_digest = previous_tool_contract
+    expected_revision = next_tool_contract_revision(
+        previous_revision, previous_digest, live_digest
+    )
+    if current != expected_revision:
+        catalog_change = "unchanged" if live_digest == previous_digest else "changed"
+        failures.append(
+            f"MCP tool contract revision {current} must be {expected_revision} "
+            f"because the packaged catalog is {catalog_change} since the previous "
+            f"release at revision {previous_revision}."
+        )
+    return failures
 
 
 def _check_unreleased_migrations(root: Path) -> list[str]:
@@ -947,7 +981,11 @@ def _unpack(artifact: Path, extract: Path) -> tuple[Path | None, list[str]]:
 
 
 def verify_artifact(
-    artifact: Path, extract: Path, *, release_version: str | None = None
+    artifact: Path,
+    extract: Path,
+    *,
+    release_version: str | None = None,
+    previous_tool_contract: tuple[int, str] | None = None,
 ) -> tuple[list[str], str | None]:
     """Return this artifact's release-blocking problems and its evidence line."""
 
@@ -968,6 +1006,19 @@ def verify_artifact(
     if release_version is not None:
         problems.extend(_check_graph_release_bundle(root))
         problems.extend(_check_release_schema(root, artifact, head, release_version))
+        try:
+            if previous_tool_contract is None:
+                previous_tool_contract = previous_release_tool_contract(
+                    CHECKOUT_ROOT, release_version
+                )
+        except (OSError, ValueError) as error:
+            problems.append(f"resolving the previous MCP tool contract failed: {error}")
+        else:
+            problems.extend(
+                _check_released_tool_contract(
+                    root, release_version, previous_tool_contract
+                )
+            )
     if problems:
         return [f"{artifact.name}: {problem}" for problem in problems], None
     return [], (
@@ -989,8 +1040,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--release-version",
         help=(
             "require artifact metadata and effective schema boundary to match "
-            "this tag version, with a recorded MCP tool contract and no "
-            "unreleased migration or helper files"
+            "this tag version, with its MCP tool contract verified against "
+            "the previous release and no unreleased migration or helper files"
         ),
     )
     arguments = parser.parse_args(argv)
@@ -1007,6 +1058,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     dist = Path(arguments.dist)
 
     artifacts, failures = collect_artifacts(dist)
+    previous_tool_contract = None
+    if arguments.release_version is not None:
+        try:
+            previous_tool_contract = previous_release_tool_contract(
+                CHECKOUT_ROOT, arguments.release_version
+            )
+        except (OSError, ValueError) as error:
+            print(
+                f"FAIL: resolving the previous MCP tool contract failed: {error}",
+                file=sys.stderr,
+            )
+            return 1
+
     evidence: list[str] = []
     for artifact in artifacts:
         with tempfile.TemporaryDirectory() as workspace:
@@ -1014,6 +1078,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 artifact,
                 Path(workspace) / "artifact",
                 release_version=arguments.release_version,
+                previous_tool_contract=previous_tool_contract,
             )
         failures.extend(problems)
         if line is not None:

@@ -772,18 +772,17 @@ Release workflow는 PyPI·npm 게시 전 build job에서 태그 버전과 일치
 
 ### MCP tool contract revision
 
-클라이언트가 관찰할 수 있는 MCP tool 계약이 바뀐 릴리스는 직전 배포본의
-`MCP_TOOL_CONTRACT_REVISION`에서 1을 올립니다. 계약이 그대로면 번호를 유지합니다.
-다음 릴리스까지의 변경은 같은 revision의 이력, digest, CHANGELOG 안내에 합칩니다.
-이미 배포된 revision과 digest는 보존합니다.
+서버는 현재 도구 카탈로그에서 digest를 계산합니다. `make set-version`은 직전 배포
+태그의 digest와 비교해, 같으면 해당 태그의 revision을 사용하고 다르면 1을 올립니다.
+같은 버전으로 다시 실행할 때도 직전 배포 태그를 기준으로 계산합니다. 개발 PR에서는
+revision을 수정하지 않습니다.
 
-`make set-version`은 같은 앱 버전으로 다시 실행해도 현재 revision과 tool 계약
-digest를 `MCP_RELEASED_TOOL_CONTRACT_REVISION`과
-`MCP_RELEASED_TOOL_CONTRACT_DIGEST`에 기록합니다. `make sync-version`은 생성물을
-갱신할 때 사용합니다. 태그 전에 계약을 더 바꿨다면 직전 배포본과 비교합니다.
-기록된 revision을 직전 배포본이 이미 사용했다면 1을 올립니다. 이번 릴리스에서 처음
-기록한 번호라면 해당 revision의 이력과 digest를 갱신합니다. 그 뒤
-`make set-version`을 다시 실행합니다.
+버전을 확정하기 전에 직전 배포 태그가 로컬에 있어야 합니다. 도구는 현재 릴리스
+계보에서 대상 버전보다 앞선 태그를 찾습니다. 배포 job은 전체 Git 이력과 태그를
+가져오고, wheel과 sdist 각각에서 실제 카탈로그의 digest와 기록된 revision을 검증합니다.
+
+revision이 바뀌면 릴리스 준비 때 CHANGELOG의 `Important changes`에 클라이언트
+안내를 한 항목으로 기록합니다. `make sync-version`은 앱 버전 참조를 갱신합니다.
 
 ### 릴리스 migration 확정
 
