@@ -21,11 +21,22 @@ function Location() { const location = useLocation(); return <output>{location.p
 
 it("uses capability-driven external login, safe next, remember policy and fixed callback errors", async () => {
   let passwordLoginEnabled = true;
+  const styledMethod = {
+    ...provider,
+    slug: "branded",
+    method_id: "branded-saml",
+    protocol: "saml2",
+    display_name: "",
+    label: { en: "Continue with Branded" },
+    icon_url: "/api/v1/auth/methods/branded-saml/icon.png",
+    sign_in_button: { border_color: "#747775", border_radius: 4 },
+    start_url: "/api/v1/auth/sso/branded/start",
+  };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input).endsWith("/capabilities")
     ? json({ data: { signup_enabled: false, password_login: { enabled: passwordLoginEnabled }, login_methods: [
       { ...provider, label: { en: "Continue" } },
-      { ...provider, slug: "company", display_name: "Company SSO", label: { en: "Continue" } },
-      { ...provider, slug: "localized", display_name: "", label: { en: "Localized provider" } },
+      { ...provider, slug: "company", display_name: "Company SSO", label: { en: "Continue" }, sign_in_button: null },
+      styledMethod,
     ], password_recovery: { mode: "email", admin_assisted: false } } })
     : String(input).endsWith("/sso/email-conflict/request")
       ? json({ data: { status: "pending", request_id: "request-1" } }, 202)
@@ -35,8 +46,23 @@ it("uses capability-driven external login, safe next, remember policy and fixed 
   </MemoryRouter>);
   const button = await screen.findByRole("link", { name: "Example" });
   expect(screen.getByRole("link", { name: "Company SSO" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Localized provider" })).toBeInTheDocument();
   expect(button).toHaveStyle({ backgroundColor: "#0055aa", color: "#ffffff" });
+
+  const styledLink = screen.getByRole("link", { name: "Continue with Branded" });
+  const logo = within(styledLink).getByRole("presentation");
+  expect(logo).toHaveAttribute("src", styledMethod.icon_url);
+  expect(styledLink).toHaveStyle({ borderColor: "#747775", borderRadius: "4px" });
+  styledLink.focus();
+  fireEvent.error(logo);
+  expect(logo).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Continue with Branded" })).toBe(styledLink);
+  expect(styledLink).toHaveFocus();
+  expect(styledLink).toHaveStyle({ borderColor: "#747775", borderRadius: "4px" });
+  expect(styledLink).toHaveAttribute("href", "/api/v1/auth/sso/branded/start?next=%2Foauth%2Fauthorize%3Fstate%3Done&remember_me=true");
+
+  expect(styledLink).toHaveClass("auth-login-action");
+  expect(button).toHaveClass("auth-login-action");
+  expect(screen.getByRole("button", { name: "Sign in" })).toHaveClass("auth-login-action");
   const nativeForm = screen.getByLabelText("Password").closest("form")!;
   const remember = screen.getByRole("checkbox", { name: "Keep me signed in on this browser" });
   // DOM order also determines the keyboard path: email first, external methods

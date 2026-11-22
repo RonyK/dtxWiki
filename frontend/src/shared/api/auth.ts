@@ -76,6 +76,7 @@ type ReauthenticateResponse = {
 };
 
 export type LoginMethod = components["schemas"]["LoginMethodCapability"];
+export type LoginScreenMethod = components["schemas"]["LoginScreenMethodCapability"];
 
 export type LoginIdentity = {
   id: string;
@@ -95,7 +96,7 @@ type AuthCapabilitiesResponse = {
   data: {
     signup_enabled: boolean;
     password_login?: { enabled: boolean; email_enrollment_enabled?: boolean };
-    login_methods?: LoginMethod[];
+    login_methods?: LoginScreenMethod[];
     password_recovery: {
       mode: "email" | "admin_assisted" | "disabled";
       admin_assisted: boolean;

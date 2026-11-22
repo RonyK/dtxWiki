@@ -21,7 +21,7 @@ import {
   logout as logoutRequest,
   type AuthSession,
   type AuthUser,
-  type LoginMethod,
+  type LoginScreenMethod,
 } from "../api/auth";
 import { clearPersistedWorkspaceId, invalidateWorkspaceListCache } from "../api/workspace";
 import { setTreeFavoriteActor } from "../api/treeFavorites";
@@ -44,7 +44,7 @@ type AuthContextValue = {
   signupEnabled: boolean;
   passwordLoginEnabled: boolean;
   emailEnrollmentEnabled: boolean;
-  loginMethods: LoginMethod[];
+  loginMethods: LoginScreenMethod[];
   passwordRecoveryMode: PasswordRecoveryMode;
   passwordRecoveryAdminAssisted: boolean;
   capabilitiesError: string | null;
@@ -76,7 +76,7 @@ export function AuthProvider({
   const [signupEnabled, setSignupEnabled] = useState(false);
   const [passwordLoginEnabled, setPasswordLoginEnabled] = useState(true);
   const [emailEnrollmentEnabled, setEmailEnrollmentEnabled] = useState(false);
-  const [loginMethods, setLoginMethods] = useState<LoginMethod[]>([]);
+  const [loginMethods, setLoginMethods] = useState<LoginScreenMethod[]>([]);
   const [passwordRecoveryMode, setPasswordRecoveryMode] =
     useState<PasswordRecoveryMode>("disabled");
   const [passwordRecoveryAdminAssisted, setPasswordRecoveryAdminAssisted] =

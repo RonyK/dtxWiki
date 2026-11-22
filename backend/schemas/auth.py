@@ -388,11 +388,20 @@ class LoginMethodCapability(BaseModel):
     supports_reauthentication: bool
 
 
+class SignInButtonAppearanceCapability(BaseModel):
+    border_color: str
+    border_radius: int
+
+
+class LoginScreenMethodCapability(LoginMethodCapability):
+    sign_in_button: SignInButtonAppearanceCapability | None = None
+
+
 class AuthCapabilitiesData(BaseModel):
     signup_enabled: bool
     password_recovery: PasswordRecoveryCapabilities
     password_login: PasswordLoginCapability
-    login_methods: list[LoginMethodCapability]
+    login_methods: list[LoginScreenMethodCapability]
 
     model_config = ConfigDict(extra="forbid")
 

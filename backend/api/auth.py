@@ -239,7 +239,9 @@ def auth_capabilities(request: Request, response: Response):
                     and request.app.state.settings.auth_password_login_enabled
                 ),
             },
-            "login_methods": request.app.state.auth_providers.login_methods(),
+            "login_methods": request.app.state.auth_providers.login_methods(
+                include_sign_in_button=True
+            ),
             "password_recovery": {
                 "mode": request.app.state.settings.effective_password_recovery_mode,
                 "admin_assisted": (

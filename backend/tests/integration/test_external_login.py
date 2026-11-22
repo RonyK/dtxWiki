@@ -47,6 +47,7 @@ from backend.services.session_service import (
     SessionService,
     build_session_token_codec,
 )
+from backend.spi import SignInButtonAppearance
 from backend.spi.auth import ExternalAssertion
 from backend.spi.plugins import DtxwikiPlugin
 from backend.testing.fake_auth_method import FAKE_ISSUER, FakeAuthMethod, FakeSamlMethod
@@ -108,6 +109,45 @@ def begin(client, *, path="/api/v1/auth/sso/company/start", **params):
 
 def complete(client, state, code="valid"):
     return client.get(CALLBACK, params={"state": state, "code": code})
+
+
+def test_sign_in_appearance_is_exposed_only_in_login_capabilities(
+    page_service, tmp_path, monkeypatch
+):
+    branded = FakeAuthMethod()
+    branded.descriptor = replace(
+        branded.descriptor,
+        method_id="workplace",
+        branding=replace(
+            branded.descriptor.branding,
+            sign_in_button=SignInButtonAppearance(
+                border_color="#747775", border_radius=128
+            ),
+        ),
+    )
+    client, plain, registry = setup_client(
+        page_service,
+        tmp_path,
+        monkeypatch,
+        extra_methods=(branded,),
+        method=branded.descriptor.method_id,
+    )
+    registry.add({"slug": "plain", "method": plain.descriptor.method_id})
+
+    capabilities = client.get("/api/v1/auth/capabilities").json()["data"]
+    [company, plain_option] = capabilities["login_methods"]
+    assert company["sign_in_button"] == {
+        "border_color": "#747775",
+        "border_radius": 128,
+    }
+    assert plain_option["sign_in_button"] is None
+    assert client.get("/api/v1/capabilities").json()["data"]["auth"] == capabilities
+
+    assert complete(client, begin(client)).headers["location"] == "/dashboard"
+    identities = client.get("/api/v1/auth/identities").json()["data"]
+    assert "sign_in_button" not in identities["available_providers"][0]
+    verification = client.get("/api/v1/auth/verification").json()["data"]
+    assert "sign_in_button" not in verification["providers"][0]
 
 
 def configure_external_mail(client, registry, enabled):

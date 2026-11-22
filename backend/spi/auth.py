@@ -22,11 +22,20 @@ class MethodCapabilities:
 
 
 @dataclass(frozen=True)
+class SignInButtonAppearance:
+    """Optional border styling for a provider link on the Core login screen."""
+
+    border_color: str
+    border_radius: int
+
+
+@dataclass(frozen=True)
 class Branding:
     label: Mapping[str, str] = field(default_factory=lambda: {"en": "Continue"})
     icon: bytes | None = None
     background: str | None = None
     foreground: str | None = None
+    sign_in_button: SignInButtonAppearance | None = None
 
 
 @dataclass(frozen=True)

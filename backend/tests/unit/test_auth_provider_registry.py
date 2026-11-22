@@ -11,9 +11,28 @@ from PIL import Image
 
 from backend.app.settings import Settings
 from backend.services.auth.provider_registry import ProviderRegistry
+from backend.spi import SignInButtonAppearance
 from backend.spi.auth import BeginRequest, Branding, CallbackInput
 from backend.testing.fake_auth_method import FAKE_ISSUER, FakeAuthMethod, FakeSamlMethod
 from backend.testing.spi_conformance.auth import assert_auth_method_contract
+
+
+def test_invalid_sign_in_appearance_falls_back_without_disabling_provider():
+    method = FakeAuthMethod()
+    method.descriptor = replace(
+        method.descriptor,
+        branding=Branding(
+            sign_in_button=SignInButtonAppearance(
+                border_color="#737373", border_radius=True
+            ),
+        ),
+    )
+    settings = Settings(public_base_url="https://wiki.example.test")
+    registry = ProviderRegistry(settings, [method])
+    registry.add({"slug": "example", "method": method.descriptor.method_id})
+    [provider] = registry.login_methods(include_sign_in_button=True)
+    assert provider["sign_in_button"] is None
+    assert provider["start_url"] == "/api/v1/auth/sso/example/start"
 
 
 def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_branding(
@@ -61,6 +80,7 @@ def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_brandin
         label={"ko": "예제 로그인", "en": "Example login"},
         background="#FFFFFF",
         foreground="#000000",
+        sign_in_button=SignInButtonAppearance(border_color="#737373", border_radius=0),
     )
     method.descriptor = replace(method.descriptor, branding=branding)
     registry = ProviderRegistry(settings, [method])
@@ -71,6 +91,10 @@ def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_brandin
     assert exposed["display_name"] == ""
     assert exposed["label"]["ko"] == "예제 로그인"
     assert exposed["background"] == "#FFFFFF" and exposed["foreground"] == "#000000"
+    assert registry.login_methods(include_sign_in_button=True)[0]["sign_in_button"] == {
+        "border_color": "#737373",
+        "border_radius": 0,
+    }
     configured = ProviderRegistry(settings, [method])
     workspace_id = str(uuid4())
     configured.add(

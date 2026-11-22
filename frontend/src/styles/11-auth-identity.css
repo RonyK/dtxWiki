@@ -75,6 +75,36 @@
   line-height: 1.4;
 }
 
+.auth-screen .auth-login-action {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-block-size: 42px;
+  padding: 8px 12px;
+  line-height: 1.4;
+}
+
+.auth-login-action > span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.auth-login-action > svg {
+  flex-shrink: 0;
+}
+
+.auth-login-provider {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 16px;
+  text-align: start;
+  text-decoration: none;
+}
+
+.auth-login-provider > img {
+  object-fit: contain;
+}
+
 .auth-method-divider {
   display: flex;
   align-items: center;
@@ -89,12 +119,6 @@
   height: 1px;
   background: var(--border);
   content: "";
-}
-
-.auth-screen .auth-submit {
-  justify-content: center;
-  width: 100%;
-  min-height: 42px;
 }
 
 .auth-screen .auth-actions {

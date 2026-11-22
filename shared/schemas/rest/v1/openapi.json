@@ -3823,7 +3823,7 @@
         "properties": {
           "login_methods": {
             "items": {
-              "$ref": "#/components/schemas/LoginMethodCapability"
+              "$ref": "#/components/schemas/LoginScreenMethodCapability"
             },
             "title": "Login Methods",
             "type": "array"
@@ -14569,6 +14569,95 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "LoginScreenMethodCapability": {
+        "properties": {
+          "background": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "foreground": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Foreground"
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url"
+          },
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Label",
+            "type": "object"
+          },
+          "method_id": {
+            "title": "Method Id",
+            "type": "string"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          },
+          "sign_in_button": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignInButtonAppearanceCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "start_url": {
+            "title": "Start Url",
+            "type": "string"
+          },
+          "supports_reauthentication": {
+            "title": "Supports Reauthentication",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "method_id",
+          "protocol",
+          "display_name",
+          "label",
+          "start_url",
+          "supports_reauthentication"
+        ],
+        "title": "LoginScreenMethodCapability",
+        "type": "object"
+      },
       "McpAppCatalogData": {
         "additionalProperties": false,
         "properties": {
@@ -23943,6 +24032,24 @@
           "value"
         ],
         "title": "SettingsPolicyUpdateRequest",
+        "type": "object"
+      },
+      "SignInButtonAppearanceCapability": {
+        "properties": {
+          "border_color": {
+            "title": "Border Color",
+            "type": "string"
+          },
+          "border_radius": {
+            "title": "Border Radius",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "border_color",
+          "border_radius"
+        ],
+        "title": "SignInButtonAppearanceCapability",
         "type": "object"
       },
       "SignupConfigurationStatus": {
