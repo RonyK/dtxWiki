@@ -1213,7 +1213,7 @@
   min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--surface-subtle);
-  padding: 12px 10px;
+  padding: 12px 6px;
 }
 
 /* The rail itself is clipped to the viewport, so the list scrolls inside it —
@@ -1224,35 +1224,9 @@
   overflow-y: auto;
 }
 
-.ask-session-rail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-  padding: 0 2px;
-}
-
-.ask-session-rail-heading {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.ask-session-rail-heading .eyebrow {
-  margin: 0;
-}
-
-.ask-session-rail-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .ask-session-list {
   display: grid;
-  gap: 10px;
+  gap: 14px;
   /* H-2 (260908 UI audit): a grid's implicit track defaults to fitting its
      widest child's content width (the same min-width:auto overflow quirk
      flex items have), so the longest session title pushed the whole rail 63px
@@ -1263,87 +1237,75 @@
 
 .ask-session-date-group {
   display: grid;
-  gap: 6px;
+  gap: 2px;
 }
 
-.ask-session-date-divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Same type as the tree rail's section titles and the sidebar group labels. */
+.ask-session-date-label {
+  padding: 0 8px 2px;
   color: var(--ink-soft);
   font-size: 12px;
   font-weight: 700;
+  text-transform: uppercase;
 }
 
-.ask-session-date-divider::before,
-.ask-session-date-divider::after {
-  content: "";
-  height: 1px;
-  flex: 1;
-  background: var(--border);
-}
-
+/* Rows follow .tree-row: no card edge at rest, a neutral hover, and the
+   selected row as one tinted box with an even ring. */
 .ask-session-list button {
   display: grid;
-  gap: 5px;
+  gap: 1px;
   width: 100%;
   min-width: 0;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--ink-muted);
-  padding: 9px 10px;
+  padding: 6px 8px;
+  font: inherit;
   text-align: left;
 }
 
 .ask-session-list button.active {
-  border-color: var(--border-strong);
-  background: var(--surface-active);
+  background: var(--context-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ask) 45%, transparent);
   color: var(--ink);
-  box-shadow: inset 3px 0 0 var(--ask);
 }
 
-/* Hover stays weaker than the selected session: sharing one rule made every
-   row the pointer touched look like the current conversation. */
+.ask-session-list button.active .ask-session-title {
+  font-weight: 600;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .ask-session-list button:hover:not(.active) {
-    border-color: var(--border-strong);
     background: var(--surface-hover);
     color: var(--ink);
   }
 }
 
-.ask-session-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
+@media (forced-colors: active) {
+  .ask-session-list button.active {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
 .ask-session-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 700;
   min-width: 0;
-}
-
-/* The per-session turn count sits on the title line, right-aligned + muted. */
-.ask-session-turns {
-  flex-shrink: 0;
-  color: var(--ink-soft);
-  font-size: 12px;
-  white-space: nowrap;
 }
 
 .ask-session-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink-soft);
   font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 .ask-session-empty {
@@ -1377,7 +1339,8 @@
   --tree-accent-soft: var(--context-soft);
 }
 
-.tree-rail-header {
+.tree-rail-header,
+.ask-session-rail-header {
   flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
@@ -1390,7 +1353,8 @@
   text-transform: uppercase;
 }
 
-.tree-rail-header-actions {
+.tree-rail-header-actions,
+.ask-session-rail-actions {
   display: inline-flex;
   align-items: center;
   gap: 6px;

@@ -45,7 +45,7 @@ body[data-focus-mode="true"] .main-surface {
 /* Chips are their own type face; the caps of the panel label must not inherit
    into them, or the same `CountChip` reads "50 CLIENTS" here and "1 member"
    in a card header two sections away. */
-.panel-header :is(.count-chip, .status-pill) {
+:is(.panel-header, .ask-session-rail-header) :is(.count-chip, .status-pill) {
   letter-spacing: 0;
   text-transform: none;
 }
