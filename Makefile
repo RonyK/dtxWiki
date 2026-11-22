@@ -55,7 +55,7 @@ frontend-dev:
 
 export-schemas:
 	mkdir -p shared/schemas/rest/v1 shared/schemas/mcp/v1
-	$(VENV_PYTHON) -m backend.scripts.export_openapi > shared/schemas/rest/v1/openapi.json
+	$(VENV_PYTHON) -m backend.scripts.export_openapi --output shared/schemas/rest/v1/openapi.json
 	$(VENV_PYTHON) -m backend.scripts.export_mcp_schemas
 
 gen-client:

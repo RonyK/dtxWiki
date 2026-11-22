@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.scripts import export_mcp_schemas
+from backend.scripts import export_mcp_schemas, export_openapi
 from backend.scripts.export_mcp_schemas import build_mcp_schemas
 from backend.scripts.export_openapi import (
     ACCOUNT_REAUTHENTICATION_SECURITY,
@@ -245,6 +245,30 @@ def test_openapi_export_matches_checked_in_artifact(openapi_schema):
     assert generated == checked_in
 
 
+def test_openapi_file_export_leaves_complete_json_visible_during_write(
+    tmp_path, monkeypatch
+):
+    destination = tmp_path / "openapi.json"
+    previous = {"info": {"version": "old"}}
+    updated = {"info": {"version": "new"}}
+    destination.write_text(json.dumps(previous), encoding="utf-8")
+
+    def observe_partial_write(path, content, *, encoding):
+        with path.open("w", encoding=encoding) as handle:
+            handle.write(content[:1])
+            handle.flush()
+            assert json.loads(destination.read_text(encoding="utf-8")) == previous
+            handle.write(content[1:])
+
+    monkeypatch.setattr(export_openapi, "build_openapi_schema", lambda: updated)
+    monkeypatch.setattr(Path, "write_text", observe_partial_write)
+
+    export_openapi.main(["--output", str(destination)])
+
+    assert json.loads(destination.read_text(encoding="utf-8")) == updated
+    assert list(tmp_path.iterdir()) == [destination]
+
+
 def test_pin_http_response_descriptions_normalizes_defaults_and_preserves_authored():
     # Hand-built fake schema, deliberately NOT importing any of
     # export_openapi's description constants: this test must fail on the
@@ -445,12 +469,17 @@ def test_mcp_schema_export_prunes_only_after_the_writes_succeed(tmp_path):
     # the stale contract must still be there for the retry to remove.
     stale = tmp_path / "write_page.json"
     stale.write_text('{"input": {}, "output": {}}\n', encoding="utf-8")
+    third_tool = list(build_mcp_schemas())[2]
+    existing_contract = tmp_path / f"{third_tool}.json"
+    previous = '{"input": {}, "output": {}}\n'
+    existing_contract.write_text(previous, encoding="utf-8")
     untouched = _mcp_contract_directory_fingerprint()
     real_write_text = Path.write_text
     writes = itertools.count(1)
 
     def interrupted_write_text(self, *args, **kwargs):
         if next(writes) > 2:
+            real_write_text(self, "{", encoding="utf-8")
             raise OSError("export interrupted")
         return real_write_text(self, *args, **kwargs)
 
@@ -461,7 +490,9 @@ def test_mcp_schema_export_prunes_only_after_the_writes_succeed(tmp_path):
 
     assert _mcp_contract_directory_fingerprint() == untouched
     assert stale.exists()
+    assert existing_contract.read_text(encoding="utf-8") == previous
     assert len(list(tmp_path.glob("*.json"))) < len(build_mcp_schemas())
+    assert all(path.suffix == ".json" for path in tmp_path.iterdir())
 
 
 def test_mcp_schema_export_resolves_the_target_at_call_time(tmp_path, monkeypatch):
