@@ -17,9 +17,10 @@ from PIL import Image
 from pydantic import BaseModel, ConfigDict
 
 from backend.domain.auth_policy import provider_slug_valid
-from backend.spi.auth import AuthMethodPlugin, ProviderContext
+from backend.spi.auth import AuthMethodPlugin, ProviderContext, SignInButtonAppearance
 
 METHOD_PATTERN = re.compile(r"[a-z0-9][a-z0-9_.-]{0,126}\Z")
+HEX_COLOR_PATTERN = re.compile(r"#[0-9A-Fa-f]{6}")
 
 
 def resolve_secret(reference: str) -> str:
@@ -74,6 +75,7 @@ class ProviderRegistry:
         self.methods = {}
         self.icons = {}
         self.colors = {}
+        self.sign_in_buttons: dict[str, SignInButtonAppearance] = {}
         self.providers = {}
         self.settings = settings
         for method in methods:
@@ -121,6 +123,14 @@ class ProviderRegistry:
                     descriptor.branding.icon
                 )
             self.colors[descriptor.method_id] = branding_colors(descriptor.branding)
+            appearance = getattr(descriptor.branding, "sign_in_button", None)
+            if (
+                isinstance(appearance, SignInButtonAppearance)
+                and is_hex_color(appearance.border_color)
+                and type(appearance.border_radius) is int
+                and 0 <= appearance.border_radius <= 128
+            ):
+                self.sign_in_buttons[descriptor.method_id] = appearance
             self.methods[descriptor.method_id] = method
         if settings.auth_providers_file:
             path = Path(settings.auth_providers_file)
@@ -240,8 +250,8 @@ class ProviderRegistry:
     def get(self, slug: str) -> AuthProvider:
         return self.providers[slug]
 
-    def login_methods(self):
-        return [
+    def login_methods(self, *, include_sign_in_button: bool = False):
+        methods = [
             {
                 "slug": provider.slug,
                 "method_id": provider.policy.method,
@@ -262,6 +272,18 @@ class ProviderRegistry:
             for provider in self.providers.values()
             if provider.method.descriptor.interaction == "redirect"
         ]
+        if include_sign_in_button:
+            for method in methods:
+                appearance = self.sign_in_buttons.get(method["method_id"])
+                method["sign_in_button"] = (
+                    {
+                        "border_color": appearance.border_color,
+                        "border_radius": appearance.border_radius,
+                    }
+                    if appearance is not None
+                    else None
+                )
+        return methods
 
 
 def sanitize_icon(data: bytes) -> bytes:
@@ -277,13 +299,14 @@ def sanitize_icon(data: bytes) -> bytes:
         return output.getvalue()
 
 
+def is_hex_color(value: object) -> bool:
+    return isinstance(value, str) and HEX_COLOR_PATTERN.fullmatch(value) is not None
+
+
 def branding_colors(branding):
     fallback = {"background": None, "foreground": None}
     colors = (branding.background, branding.foreground)
-    if not all(
-        isinstance(value, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", value)
-        for value in colors
-    ):
+    if not all(is_hex_color(value) for value in colors):
         return fallback
 
     def luminance(color):

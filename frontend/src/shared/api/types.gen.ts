@@ -4873,7 +4873,7 @@ export interface components {
         /** AuthCapabilitiesData */
         AuthCapabilitiesData: {
             /** Login Methods */
-            login_methods: components["schemas"]["LoginMethodCapability"][];
+            login_methods: components["schemas"]["LoginScreenMethodCapability"][];
             password_login: components["schemas"]["PasswordLoginCapability"];
             password_recovery: components["schemas"]["PasswordRecoveryCapabilities"];
             /** Signup Enabled */
@@ -8824,6 +8824,32 @@ export interface components {
              */
             remember_me: boolean;
         };
+        /** LoginScreenMethodCapability */
+        LoginScreenMethodCapability: {
+            /** Background */
+            background?: string | null;
+            /** Display Name */
+            display_name: string;
+            /** Foreground */
+            foreground?: string | null;
+            /** Icon Url */
+            icon_url?: string | null;
+            /** Label */
+            label: {
+                [key: string]: string;
+            };
+            /** Method Id */
+            method_id: string;
+            /** Protocol */
+            protocol: string;
+            sign_in_button?: components["schemas"]["SignInButtonAppearanceCapability"] | null;
+            /** Slug */
+            slug: string;
+            /** Start Url */
+            start_url: string;
+            /** Supports Reauthentication */
+            supports_reauthentication: boolean;
+        };
         /** McpAppCatalogData */
         McpAppCatalogData: {
             /** Apps */
@@ -11979,6 +12005,13 @@ export interface components {
             key: string;
             /** Value */
             value: unknown;
+        };
+        /** SignInButtonAppearanceCapability */
+        SignInButtonAppearanceCapability: {
+            /** Border Color */
+            border_color: string;
+            /** Border Radius */
+            border_radius: number;
         };
         /** SignupConfigurationStatus */
         SignupConfigurationStatus: {

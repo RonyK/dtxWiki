@@ -1,4 +1,4 @@
-import { ArrowUpRight, KeyRound, LogIn, ShieldCheck, UserPlus } from "lucide-react";
+import { KeyRound, LogIn, UserPlus } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -10,9 +10,9 @@ import { isNonSpaAuthPath, safeNextPath } from "../../shared/auth/navigation";
 import { normalizeAccountEmail, normalizeAccountName, validateAccountPassword, rejectMultilinePaste, preventCompositionSubmit } from "../../shared/auth/identityPolicy";
 import { SegmentedControl } from "../../shared/components/SegmentedControl";
 import { StatusBanner } from "../../shared/components/StatusBanner";
-import { loginMethodLabel, loginMethodStyle } from "./loginMethodBranding";
 import { EmailConflictNotice } from "./EmailConflictNotice";
 import { SSO_ERROR_CODES } from "./ExternalAuthErrorBanner";
+import { ProviderSignInLink } from "./ProviderSignInLink";
 
 type AuthMode = "login" | "signup";
 
@@ -303,7 +303,7 @@ export function AuthScreen() {
               </p>
             ) : null}
             <div className="auth-actions">
-              <button className="icon-button primary auth-submit" disabled={submitting} type="submit">
+              <button className="icon-button primary auth-login-action" disabled={submitting} type="submit">
                 <KeyRound size={16} aria-hidden="true" />
                 <span>
                   {mode === "signup" ? t("actions.signup") : t("actions.login")}
@@ -333,18 +333,15 @@ export function AuthScreen() {
           {loginMethods.length > 0 ? (
             <div className="auth-provider-group" aria-label={t("sso.methods")}>
               {!passwordLoginEnabled ? <p className="auth-section-label">{t("welcome.external")}</p> : null}
-              {loginMethods.map((method) => {
-                const query = new URLSearchParams({
-                  next: safeNextPath(searchParams.get("next")),
-                  remember_me: String(rememberMe),
-                });
-                return <a className="icon-button auth-provider-button" key={method.slug} style={loginMethodStyle(method)}
-                  href={`${method.start_url}?${query.toString()}`}>
-                  {method.icon_url ? <img src={method.icon_url} width={20} height={20} alt="" /> : <ShieldCheck size={20} aria-hidden="true" />}
-                  <span>{loginMethodLabel(method, i18n.language)}</span>
-                  <ArrowUpRight size={16} aria-hidden="true" />
-                </a>;
-              })}
+              {loginMethods.map((method) => (
+                <ProviderSignInLink
+                  key={method.slug}
+                  method={method}
+                  language={i18n.language}
+                  next={safeNextPath(searchParams.get("next"))}
+                  rememberMe={rememberMe}
+                />
+              ))}
             </div>
           ) : null}
           {passwordLoginEnabled || loginMethods.length > 0 ? (

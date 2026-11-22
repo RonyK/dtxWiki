@@ -7,13 +7,96 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from PIL import Image
 
+from backend.api import auth, auth_sso
+from backend.app.plugins import PluginRegistry
 from backend.app.settings import Settings
+from backend.schemas.auth_verification import VerificationResponse
 from backend.services.auth.provider_registry import ProviderRegistry
+from backend.spi import SignInButtonAppearance
 from backend.spi.auth import BeginRequest, Branding, CallbackInput
 from backend.testing.fake_auth_method import FAKE_ISSUER, FakeAuthMethod, FakeSamlMethod
 from backend.testing.spi_conformance.auth import assert_auth_method_contract
+
+
+def test_invalid_sign_in_appearance_falls_back_without_disabling_provider():
+    method = FakeAuthMethod()
+    method.descriptor = replace(
+        method.descriptor,
+        branding=Branding(
+            sign_in_button=SignInButtonAppearance(
+                border_color="#737373", border_radius=True
+            ),
+        ),
+    )
+    settings = Settings(public_base_url="https://wiki.example.test")
+    registry = ProviderRegistry(settings, [method])
+    registry.add({"slug": "example", "method": method.descriptor.method_id})
+    [provider] = registry.login_methods(include_sign_in_button=True)
+    assert provider["sign_in_button"] is None
+    assert provider["start_url"] == "/api/v1/auth/sso/example/start"
+
+
+def test_sign_in_appearance_is_exposed_only_in_login_capabilities():
+    branded = FakeAuthMethod()
+    branded.descriptor = replace(
+        branded.descriptor,
+        method_id="workplace",
+        branding=Branding(
+            sign_in_button=SignInButtonAppearance(
+                border_color="#747775", border_radius=128
+            ),
+        ),
+    )
+    plain = FakeAuthMethod()
+    settings = Settings(public_base_url="https://wiki.example.test", _env_file=None)
+    registry = ProviderRegistry(settings, [branded, plain])
+    registry.add({"slug": "company", "method": branded.descriptor.method_id})
+    registry.add({"slug": "plain", "method": plain.descriptor.method_id})
+
+    app = FastAPI()
+    app.state.settings = settings
+    app.state.auth_providers = registry
+    app.state.plugin_registry = PluginRegistry()
+    app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(auth_sso.capabilities_router, prefix="/api/v1")
+    with TestClient(app) as client:
+        capabilities = client.get("/api/v1/auth/capabilities").json()["data"]
+        assert client.get("/api/v1/capabilities").json()["data"]["auth"] == capabilities
+
+    company, plain_option = capabilities["login_methods"]
+    assert company["sign_in_button"] == {
+        "border_color": "#747775",
+        "border_radius": 128,
+    }
+    assert plain_option["sign_in_button"] is None
+
+    # Account responses use the shared method shape even when given richer data.
+    identities = auth_sso.IdentityListResponse.model_validate(
+        {
+            "data": {
+                "has_password": True,
+                "identities": [],
+                "available_providers": [company],
+            }
+        }
+    ).model_dump()
+    verification = VerificationResponse.model_validate(
+        {
+            "data": {
+                "scope": "account",
+                "mode": "sso",
+                "verified": False,
+                "allowed_methods": ["sso"],
+                "providers": [company],
+            },
+        }
+    ).model_dump()
+    assert "sign_in_button" not in identities["data"]["available_providers"][0]
+    assert "sign_in_button" not in verification["data"]["providers"][0]
 
 
 def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_branding(
@@ -61,6 +144,7 @@ def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_brandin
         label={"ko": "예제 로그인", "en": "Example login"},
         background="#FFFFFF",
         foreground="#000000",
+        sign_in_button=SignInButtonAppearance(border_color="#737373", border_radius=0),
     )
     method.descriptor = replace(method.descriptor, branding=branding)
     registry = ProviderRegistry(settings, [method])
@@ -71,6 +155,10 @@ def test_provider_registry_rejects_unsafe_contracts_and_serves_sanitized_brandin
     assert exposed["display_name"] == ""
     assert exposed["label"]["ko"] == "예제 로그인"
     assert exposed["background"] == "#FFFFFF" and exposed["foreground"] == "#000000"
+    assert registry.login_methods(include_sign_in_button=True)[0]["sign_in_button"] == {
+        "border_color": "#737373",
+        "border_radius": 0,
+    }
     configured = ProviderRegistry(settings, [method])
     workspace_id = str(uuid4())
     configured.add(

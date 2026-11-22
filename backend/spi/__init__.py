@@ -16,6 +16,7 @@ from backend.spi.auth import (
     ProvisioningHook,
     ProvisioningResult,
     RedirectInstruction,
+    SignInButtonAppearance,
     WorkspaceRoleRequest,
 )
 from backend.spi.context import DatabaseProvider, ToolCallContext
@@ -93,6 +94,7 @@ __all__ = [
     "ProvisioningHook",
     "ProvisioningResult",
     "RedirectInstruction",
+    "SignInButtonAppearance",
     "WorkspaceRoleRequest",
     "SPI_VERSION",
     "DtxwikiPlugin",

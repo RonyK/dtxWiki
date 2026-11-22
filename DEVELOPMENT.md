@@ -168,6 +168,13 @@ plugin = DtxwikiPlugin(
 )
 ```
 
+리디렉션 로그인 방법은 `Branding`으로 번역 문구, PNG 로고, 배경색과 글자색을
+제공할 수 있습니다. 로그인 화면의 테두리를 꾸미려면 `backend.spi`의
+`SignInButtonAppearance`를 `Branding.sign_in_button`에 전달합니다. `border_color`는
+`#RRGGBB`, `border_radius`는 0–128 사이의 정수 CSS 픽셀 값입니다. 버튼의 크기와
+배치는 Core가 관리합니다. 이전 Core도 지원하는 플러그인은 해당 표시 타입을
+공개하는 Core에서만 `sign_in_button`을 전달합니다.
+
 provider의 issuer·client ID·secret 참조와 계정 생성·연결 정책은
 [운영 설정](DEPLOYMENT.md#별도-로그인-플러그인과-oidc-provider)에 둡니다. adapter는
 `AuthMethodPlugin`의 `descriptor`, `validate_config`, `begin`, `complete`를 구현하고
