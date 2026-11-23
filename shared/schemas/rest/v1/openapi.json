@@ -11959,6 +11959,42 @@
         "title": "LLMConnectionListResponse",
         "type": "object"
       },
+      "LLMConnectionRESTError": {
+        "additionalProperties": false,
+        "properties": {
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          },
+          "error_code": {
+            "description": "Error code, including adapter_endpoint_required when an adapter needs an endpoint profile.",
+            "title": "Error Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/EnvelopeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "envelope",
+          "error_code",
+          "message"
+        ],
+        "title": "LLMConnectionRESTError",
+        "type": "object"
+      },
       "LLMConnectionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -33643,7 +33679,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33653,7 +33689,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33663,7 +33699,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33673,7 +33709,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33683,7 +33719,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33693,7 +33729,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33737,7 +33773,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33747,7 +33783,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33757,7 +33793,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33767,7 +33803,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33777,7 +33813,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33787,7 +33823,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33846,7 +33882,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33856,7 +33892,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33866,7 +33902,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33876,7 +33912,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33886,7 +33922,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33896,7 +33932,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33943,7 +33979,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33953,7 +33989,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33963,7 +33999,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33973,7 +34009,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33983,7 +34019,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -33993,7 +34029,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -34049,7 +34085,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -34059,7 +34095,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -34069,7 +34105,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -34079,7 +34115,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -34089,7 +34125,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -34099,7 +34135,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47002,7 +47038,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47012,7 +47048,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47022,7 +47058,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47032,7 +47068,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47042,7 +47078,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47052,7 +47088,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47108,7 +47144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47118,7 +47154,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47128,7 +47164,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47138,7 +47174,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47148,7 +47184,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47158,7 +47194,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47227,7 +47263,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47237,7 +47273,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47247,7 +47283,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47257,7 +47293,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47267,7 +47303,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47277,7 +47313,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47334,7 +47370,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47344,7 +47380,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47354,7 +47390,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47364,7 +47400,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47374,7 +47410,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47384,7 +47420,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47450,7 +47486,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47460,7 +47496,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47470,7 +47506,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47480,7 +47516,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47490,7 +47526,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },
@@ -47500,7 +47536,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RESTErrorBody"
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
                 }
               }
             },

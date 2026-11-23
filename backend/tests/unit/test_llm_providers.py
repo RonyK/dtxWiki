@@ -722,6 +722,23 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
         create(registry, "vendor.custom_text", credential={"api_key": KEY, "x": KEY})
     assert KEY not in str(rejected.value)
 
+    # Root credential schemas must enumerate all secret keys as flat properties.
+    with pytest.raises(LLMAdapterRegistryError, match="flat object"):
+        LLMAdapterRegistry(
+            plugins={
+                "vendor": [
+                    factory(
+                        adapter_id="vendor.unsafe_options",
+                        credential_schema={
+                            "type": "object",
+                            "properties": {},
+                            "patternProperties": {"^api_": {"type": "string"}},
+                            "additionalProperties": False,
+                        },
+                    )
+                ]
+            }
+        )
     unsafe_registry = LLMAdapterRegistry(
         plugins={
             "vendor": [

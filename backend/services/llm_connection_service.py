@@ -6,9 +6,13 @@ import json
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
-from backend.llm.adapter_registry import LLMAdapterRegistry, LLMAdapterRegistryError
+from backend.llm.adapter_registry import (
+    LLMAdapterEndpointRequiredError,
+    LLMAdapterRegistry,
+    LLMAdapterRegistryError,
+)
 from backend.llm.credential_vault import (
     ConnectionScope,
     CredentialBinding,
@@ -44,12 +48,24 @@ class LLMConnectionService:
         self._vault = vault
         self._audit = AuditService()
 
+    def authorize_workspace_write(
+        self,
+        session: Session,
+        *,
+        owner_id: UUID,
+        actor: ActorContext,
+    ) -> None:
+        _lock_owner(session, "workspace", owner_id, actor)
+
     def list(
         self, session: Session, *, scope: ConnectionScope, owner_id: UUID
     ) -> list[dict]:
         model = _connection_model(scope)
         statement = _select_owned(model, owner_id).order_by(model.created_at, model.id)
-        return [_view(connection) for connection in session.scalars(statement)]
+        return [
+            _view(connection, has_credential=has_credential)
+            for connection, has_credential in session.execute(statement)
+        ]
 
     def get(
         self,
@@ -59,7 +75,8 @@ class LLMConnectionService:
         owner_id: UUID,
         connection_id: UUID,
     ) -> dict:
-        return _view(_get_owned(session, scope, owner_id, connection_id))
+        connection, has_credential = _get_owned(session, scope, owner_id, connection_id)
+        return _view(connection, has_credential=has_credential)
 
     def create(
         self,
@@ -69,9 +86,11 @@ class LLMConnectionService:
         owner_id: UUID,
         actor: ActorContext,
         request: LLMConnectionCreate,
-        expected_session_generation: int | None = None,
     ) -> dict:
-        _lock_owner(session, scope, owner_id, actor, expected_session_generation)
+        if scope == "user":
+            _lock_owner(session, scope, owner_id, actor)
+        else:
+            acquire_workspace_write_intent(session)
         descriptor = self._descriptor(request.adapter_id)
         credential = {
             name: value.get_secret_value() for name, value in request.credential.items()
@@ -113,7 +132,7 @@ class LLMConnectionService:
         session.add(connection)
         session.flush()
         self._emit(session, scope, owner_id, actor, connection, "created")
-        return _view(connection)
+        return _view(connection, has_credential=bool(credential))
 
     def update(
         self,
@@ -124,20 +143,20 @@ class LLMConnectionService:
         actor: ActorContext,
         connection_id: UUID,
         request: LLMConnectionUpdate,
-        expected_session_generation: int | None = None,
     ) -> dict:
-        _lock_owner(session, scope, owner_id, actor, expected_session_generation)
-        connection = _get_owned(session, scope, owner_id, connection_id, lock=True)
+        if scope == "user":
+            _lock_owner(session, scope, owner_id, actor)
+        else:
+            acquire_workspace_write_intent(session)
+        connection, has_credential = _get_owned(
+            session, scope, owner_id, connection_id, lock=True
+        )
         _require_revision(connection, request.expected_revision)
         if request.name is not None:
             connection.name = request.name
         if request.provider_options is not None or request.model_profiles is not None:
             descriptor = self._descriptor(connection.adapter_id)
-            if (
-                descriptor.config_schema_version != connection.config_schema_version
-                or descriptor.adapter_version
-                != connection.adapter_implementation_version
-            ):
+            if descriptor.config_schema_version != connection.config_schema_version:
                 raise LLMConnectionError(
                     "adapter_version_unavailable",
                     "The connection's adapter version is unavailable.",
@@ -156,14 +175,19 @@ class LLMConnectionService:
                     for profile in request.model_profiles
                 ]
             )
-            self._validate(connection.adapter_id, config, profiles, None)
+            endpoint = self._validate(connection.adapter_id, config, profiles, None)
+            connection.endpoint_profile = {
+                "kind": "adapter_default",
+                "base_url": endpoint,
+            }
+            connection.adapter_implementation_version = descriptor.adapter_version
             connection.provider_options = config
             connection.model_profiles = profiles
             connection.verification_status = "unverified"
             connection.verified_at = None
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "updated")
-        return _view(connection)
+        return _view(connection, has_credential=has_credential)
 
     def delete(
         self,
@@ -174,10 +198,12 @@ class LLMConnectionService:
         actor: ActorContext,
         connection_id: UUID,
         expected_revision: int,
-        expected_session_generation: int | None = None,
     ) -> dict:
-        _lock_owner(session, scope, owner_id, actor, expected_session_generation)
-        connection = _get_owned(session, scope, owner_id, connection_id, lock=True)
+        if scope == "user":
+            _lock_owner(session, scope, owner_id, actor)
+        else:
+            acquire_workspace_write_intent(session)
+        connection, _ = _get_owned(session, scope, owner_id, connection_id, lock=True)
         _require_revision(connection, expected_revision)
         connection.status = "deleted"
         connection.verification_status = "unverified"
@@ -186,7 +212,7 @@ class LLMConnectionService:
         connection.pending_credential = None
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "deleted")
-        return _view(connection)
+        return _view(connection, has_credential=False)
 
     def _descriptor(self, adapter_id: str):
         try:
@@ -213,6 +239,12 @@ class LLMConnectionService:
                     option for profile in profiles for option in profile["options"]
                 },
             )
+        except LLMAdapterEndpointRequiredError:
+            raise LLMConnectionError(
+                "adapter_endpoint_required",
+                "The adapter requires an endpoint profile.",
+                422,
+            ) from None
         except (ValueError, RecursionError):
             raise LLMConnectionError(
                 "config_schema_mismatch",
@@ -247,7 +279,14 @@ def _connection_model(scope: ConnectionScope) -> type[StoredConnection]:
 
 def _select_owned(model: type[StoredConnection], owner_id: UUID):
     owner_column = model.user_id if model is UserLLMConnection else model.workspace_id
-    return select(model).where(owner_column == owner_id, model.status != "deleted")
+    return (
+        select(model, model.active_credential.is_not(None).label("has_credential"))
+        .options(
+            defer(model.active_credential, raiseload=True),
+            defer(model.pending_credential, raiseload=True),
+        )
+        .where(owner_column == owner_id, model.status != "deleted")
+    )
 
 
 def _get_owned(
@@ -257,15 +296,18 @@ def _get_owned(
     connection_id: UUID,
     *,
     lock: bool = False,
-) -> StoredConnection:
+) -> tuple[StoredConnection, bool]:
     model = _connection_model(scope)
     statement = _select_owned(model, owner_id).where(model.id == connection_id)
-    connection = session.scalar(statement.with_for_update() if lock else statement)
-    if connection is None:
+    row = session.execute(
+        statement.with_for_update() if lock else statement
+    ).one_or_none()
+    if row is None:
         raise LLMConnectionError(
             "connection_unavailable", "LLM connection not found.", 404
         )
-    return connection
+    connection, has_credential = row
+    return connection, has_credential
 
 
 def _require_revision(connection: StoredConnection, expected_revision: int) -> None:
@@ -280,7 +322,6 @@ def _lock_owner(
     scope: ConnectionScope,
     owner_id: UUID,
     actor: ActorContext,
-    expected_session_generation: int | None,
 ) -> None:
     if (
         actor.token_kind != "session"
@@ -292,40 +333,25 @@ def _lock_owner(
             "human_session_required", "Browser session required.", 403
         )
     if scope == "workspace":
-        acquire_workspace_write_intent(session)
-        # The shipped single-database profile can serialize mutations with
-        # Workspace teardown and role changes in workspace -> user -> member order.
-        workspace = session.scalar(
-            select(Workspace.id).where(Workspace.id == owner_id).with_for_update()
-        )
+        workspace = session.scalar(select(Workspace.id).where(Workspace.id == owner_id))
         if workspace is None:
             raise LLMConnectionError("workspace_not_found", "Workspace not found.", 404)
     else:
         acquire_write_intent(session)
+    user_query = select(User).where(User.id == actor.user_id)
     user = session.scalar(
-        select(User).where(User.id == actor.user_id).with_for_update()
+        user_query.with_for_update() if scope == "user" else user_query
     )
     if user is None or user.status != "active":
         raise LLMConnectionError(
             "human_session_required", "Active browser session required.", 403
         )
-    if (
-        expected_session_generation is not None
-        and user.session_generation != expected_session_generation
-    ):
-        raise LLMConnectionError(
-            "recent_reauthentication_required",
-            "Recent account verification is required.",
-            403,
-        )
     if scope == "workspace":
         role = session.scalar(
-            select(WorkspaceMembership.role)
-            .where(
+            select(WorkspaceMembership.role).where(
                 WorkspaceMembership.workspace_id == owner_id,
                 WorkspaceMembership.user_id == actor.user_id,
             )
-            .with_for_update()
         )
         if role is None or normalize_role(role) != "owner":
             raise LLMConnectionError(
@@ -335,7 +361,7 @@ def _lock_owner(
             )
 
 
-def _view(connection: StoredConnection) -> dict:
+def _view(connection: StoredConnection, *, has_credential: bool) -> dict:
     # Keep the vault envelope, endpoint, and internal revision out of both
     # account and Workspace responses.
     return {
@@ -351,7 +377,7 @@ def _view(connection: StoredConnection) -> dict:
         "verification_status": connection.verification_status,
         "verified_at": connection.verified_at,
         "credential_updated_at": connection.credential_updated_at,
-        "has_credential": connection.active_credential is not None,
+        "has_credential": has_credential,
         "revision": connection.revision,
         "created_at": connection.created_at,
         "updated_at": connection.updated_at,

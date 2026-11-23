@@ -195,6 +195,18 @@ def update_command(
                     if install.kind == "systemd" and resources.root.is_dir()
                     else None
                 )
+                if production_env is not None:
+                    from backend.llm.credential_vault import create_keyring
+
+                    keyring = (
+                        Path(settings.llm_credential_keyring_file)
+                        if settings.llm_credential_keyring_file
+                        else resources.root / "llm-credential-keyring.json"
+                    )
+                    existed = keyring.exists()
+                    create_keyring(keyring)
+                    if owner is not None and not existed:
+                        os.chown(keyring, owner.st_uid, owner.st_gid)
                 bootstrap_app(settings)
                 if owner is not None:
                     problems = prod_setup.hand_data_to_service_user(

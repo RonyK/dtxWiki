@@ -8,15 +8,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
+from pydantic import Field
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.api.auth import current_session_token, status_code_for_auth_error
-from backend.api.auth_cookies import account_reauthentication_cookie_name
-from backend.api.auth_dependencies import (
-    SessionServiceDep,
-    no_store_response,
-    policy_for_request,
-)
+from backend.api.auth_dependencies import no_store_response
 from backend.api.deps import (
     RestActorDep,
     ServicesDep,
@@ -24,7 +19,6 @@ from backend.api.deps import (
     WorkspaceOwnerAccessDep,
     WorkspaceSessionFactoryDep,
 )
-from backend.api.request_origin import require_same_origin
 from backend.app.errors import build_rest_error_response
 from backend.schemas.common import RESTErrorBody
 from backend.schemas.llm_connection import (
@@ -34,11 +28,6 @@ from backend.schemas.llm_connection import (
     LLMConnectionUpdate,
 )
 from backend.services.llm_connection_service import LLMConnectionError
-from backend.services.session_service import (
-    RecentReauthenticationRequiredError,
-    SessionServiceError,
-    VerifiedRecentReauthentication,
-)
 from backend.spi.types import ActorContext
 
 
@@ -68,8 +57,20 @@ class LLMConnectionRoute(APIRoute):
 
 
 router = APIRouter(tags=["llm-connections"], route_class=LLMConnectionRoute)
+
+
+class LLMConnectionRESTError(RESTErrorBody):
+    error_code: str = Field(
+        description=(
+            "Error code, including adapter_endpoint_required when an adapter "
+            "needs an endpoint profile."
+        )
+    )
+
+
 REST_ERROR_RESPONSES = {
-    status: {"model": RESTErrorBody} for status in (401, 403, 404, 409, 422, 503)
+    status: {"model": LLMConnectionRESTError}
+    for status in (401, 403, 404, 409, 422, 503)
 }
 
 
@@ -79,6 +80,7 @@ class ConnectionOwner:
     owner_id: UUID
     actor: ActorContext
     session_factory: sessionmaker[Session]
+    control_session_factory: sessionmaker[Session] | None = None
 
 
 def account_owner(
@@ -100,41 +102,11 @@ def workspace_owner(
     actor: RestActorDep,
     _access: WorkspaceOwnerAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
+    control_session_factory: SessionFactoryDep,
 ) -> ConnectionOwner:
-    return ConnectionOwner("workspace", workspace_id, actor, session_factory)
-
-
-def verify_connection_write(
-    request: Request, sessions: SessionServiceDep
-) -> VerifiedRecentReauthentication:
-    require_same_origin(request, allow_local_dev=True)
-    try:
-        return policy_for_request(request, sessions).require(
-            session_token=current_session_token(request),
-            scope="account",
-            proof_token=request.cookies.get(
-                account_reauthentication_cookie_name(request.app.state.settings), ""
-            ),
-        )
-    except SessionServiceError as exc:
-        # Step-up can be required while the browser's session is still valid.
-        status = (
-            403
-            if isinstance(exc, RecentReauthenticationRequiredError)
-            else status_code_for_auth_error(exc)
-        )
-        raise HTTPException(
-            status_code=status,
-            detail={
-                "error_code": exc.error_code,
-                "message": str(exc) or exc.error_code,
-            },
-        ) from exc
-
-
-ConnectionWriteDep = Annotated[
-    VerifiedRecentReauthentication, Depends(verify_connection_write)
-]
+    return ConnectionOwner(
+        "workspace", workspace_id, actor, session_factory, control_session_factory
+    )
 
 
 def add_connection_routes(
@@ -162,9 +134,19 @@ def add_connection_routes(
     def create_connection(
         request: LLMConnectionCreate,
         owner: OwnerDep,
-        verification: ConnectionWriteDep,
         services: ServicesDep,
     ):
+        if owner.scope == "workspace":
+            if owner.control_session_factory is None:
+                raise RuntimeError(
+                    "Workspace connection writes require a control session"
+                )
+            with owner.control_session_factory() as control:
+                services.llm_connections.authorize_workspace_write(
+                    control,
+                    owner_id=owner.owner_id,
+                    actor=owner.actor,
+                )
         with owner.session_factory.begin() as session:
             record = services.llm_connections.create(
                 session,
@@ -172,7 +154,6 @@ def add_connection_routes(
                 owner_id=owner.owner_id,
                 actor=owner.actor,
                 request=request,
-                expected_session_generation=verification.session_generation,
             )
         return {"data": record}
 
@@ -180,9 +161,19 @@ def add_connection_routes(
         connection_id: UUID,
         request: LLMConnectionUpdate,
         owner: OwnerDep,
-        verification: ConnectionWriteDep,
         services: ServicesDep,
     ):
+        if owner.scope == "workspace":
+            if owner.control_session_factory is None:
+                raise RuntimeError(
+                    "Workspace connection writes require a control session"
+                )
+            with owner.control_session_factory() as control:
+                services.llm_connections.authorize_workspace_write(
+                    control,
+                    owner_id=owner.owner_id,
+                    actor=owner.actor,
+                )
         with owner.session_factory.begin() as session:
             record = services.llm_connections.update(
                 session,
@@ -191,7 +182,6 @@ def add_connection_routes(
                 actor=owner.actor,
                 connection_id=connection_id,
                 request=request,
-                expected_session_generation=verification.session_generation,
             )
         return {"data": record}
 
@@ -199,9 +189,19 @@ def add_connection_routes(
         connection_id: UUID,
         expected_revision: Annotated[int, Query(ge=1)],
         owner: OwnerDep,
-        verification: ConnectionWriteDep,
         services: ServicesDep,
     ):
+        if owner.scope == "workspace":
+            if owner.control_session_factory is None:
+                raise RuntimeError(
+                    "Workspace connection writes require a control session"
+                )
+            with owner.control_session_factory() as control:
+                services.llm_connections.authorize_workspace_write(
+                    control,
+                    owner_id=owner.owner_id,
+                    actor=owner.actor,
+                )
         with owner.session_factory.begin() as session:
             record = services.llm_connections.delete(
                 session,
@@ -210,7 +210,6 @@ def add_connection_routes(
                 actor=owner.actor,
                 connection_id=connection_id,
                 expected_revision=expected_revision,
-                expected_session_generation=verification.session_generation,
             )
         return {"data": record}
 

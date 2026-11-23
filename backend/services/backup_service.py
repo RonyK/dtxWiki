@@ -45,6 +45,7 @@ SERVICE_GROUP = "dtxwiki"
 DB_BACKUP_NAME = "dtxwiki.sqlite"
 JWT_BACKUP_NAME = "jwt.pem"
 SESSION_SECRET_BACKUP_NAME = "session_secret"
+LLM_KEYRING_BACKUP_NAME = "llm-credential-keyring.json"
 ENV_BACKUP_NAME = "dtxwiki.env"
 USER_FILES_DIRNAME = "files"
 LIBRARY_CHECKPOINT_DIRNAME = "library"
@@ -197,6 +198,16 @@ def create_backup(
             if jwt_src.exists():
                 files.append(_copy_secret(jwt_src, backup_dir / JWT_BACKUP_NAME))
 
+        keyring_src = (
+            Path(settings.llm_credential_keyring_file)
+            if settings.llm_credential_keyring_file
+            else base / LLM_KEYRING_BACKUP_NAME
+        )
+        if keyring_src.exists():
+            files.append(
+                _copy_secret(keyring_src, backup_dir / LLM_KEYRING_BACKUP_NAME)
+            )
+
         # The session secret lives as the DTXWIKI_SESSION_SECRET *value* (env
         # file), not a standalone file, so capture the resolved value on EVERY
         # tier. A legacy {data_dir}/session_secret file still takes precedence.
@@ -304,6 +315,18 @@ def restore_backup(
         from backend.cli.prod_setup import set_key_ownership
 
         set_key_ownership(jwt_dest, SERVICE_GROUP)
+
+    keyring_backup = backup_dir / LLM_KEYRING_BACKUP_NAME
+    if keyring_backup.exists():
+        keyring_dest = (
+            Path(settings.llm_credential_keyring_file)
+            if settings.llm_credential_keyring_file
+            else base / LLM_KEYRING_BACKUP_NAME
+        )
+        _restore_secret(keyring_backup, keyring_dest)
+        from backend.cli.prod_setup import set_key_ownership
+
+        set_key_ownership(keyring_dest, SERVICE_GROUP)
 
     secret_backup = backup_dir / SESSION_SECRET_BACKUP_NAME
     if secret_backup.exists():

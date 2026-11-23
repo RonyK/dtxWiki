@@ -7991,6 +7991,24 @@ export interface components {
             data: components["schemas"]["LLMConnectionView"][];
             envelope?: components["schemas"]["RESTResultEnvelope"];
         };
+        /** LLMConnectionRESTError */
+        LLMConnectionRESTError: {
+            envelope: components["schemas"]["RESTResultEnvelope"];
+            /**
+             * Error Code
+             * @description Error code, including adapter_endpoint_required when an adapter needs an endpoint profile.
+             */
+            error_code: string;
+            /** Message */
+            message: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id?: string;
+            /** Warnings */
+            warnings?: components["schemas"]["EnvelopeWarning"][];
+        };
         /** LLMConnectionResponse */
         LLMConnectionResponse: {
             data: components["schemas"]["LLMConnectionView"];
@@ -17397,7 +17415,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -17406,7 +17424,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -17415,7 +17433,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -17424,7 +17442,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -17433,7 +17451,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -17442,7 +17460,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -17475,7 +17493,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -17484,7 +17502,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -17493,7 +17511,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -17502,7 +17520,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -17511,7 +17529,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -17520,7 +17538,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -17551,7 +17569,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -17560,7 +17578,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -17569,7 +17587,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -17578,7 +17596,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -17587,7 +17605,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -17596,7 +17614,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -17629,7 +17647,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -17638,7 +17656,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -17647,7 +17665,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -17656,7 +17674,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -17665,7 +17683,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -17674,7 +17692,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -17709,7 +17727,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -17718,7 +17736,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -17727,7 +17745,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -17736,7 +17754,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -17745,7 +17763,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -17754,7 +17772,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -25813,7 +25831,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -25822,7 +25840,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -25831,7 +25849,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -25840,7 +25858,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -25849,7 +25867,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -25858,7 +25876,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -25893,7 +25911,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -25902,7 +25920,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -25911,7 +25929,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -25920,7 +25938,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -25929,7 +25947,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -25938,7 +25956,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -25970,7 +25988,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -25979,7 +25997,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -25988,7 +26006,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -25997,7 +26015,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -26006,7 +26024,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -26015,7 +26033,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -26049,7 +26067,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -26058,7 +26076,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -26067,7 +26085,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -26076,7 +26094,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -26085,7 +26103,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -26094,7 +26112,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };
@@ -26130,7 +26148,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Forbidden */
@@ -26139,7 +26157,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Not Found */
@@ -26148,7 +26166,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Conflict */
@@ -26157,7 +26175,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -26166,7 +26184,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
             /** @description Service Unavailable */
@@ -26175,7 +26193,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RESTErrorBody"];
+                    "application/json": components["schemas"]["LLMConnectionRESTError"];
                 };
             };
         };

@@ -604,9 +604,10 @@ Settings → Deployment의 `Identity & Recovery`는 provider·발신자·canonic
 
 ## 백업과 복구 점검
 
-SQLite DB만 복사하면 충분하지 않습니다. DB, 업로드/Library 파일, Context의 `repositories/`, session secret, OAuth signing
-key(내부 CA를 쓰면 Caddy `pki` 디렉터리 포함)를 한 세트로 보관해야 합니다. Docker의 `--tls internal`
-스택은 `caddy_data` volume도 같은 방식으로 보관합니다.
+SQLite DB만 복사하면 충분하지 않습니다. DB, 업로드/Library 파일, Context의 `repositories/`,
+session secret, OAuth signing key와 LLM 자격 증명 키링을 한 세트로 보관해야 합니다.
+내부 CA를 쓰면 Caddy `pki` 디렉터리도 포함합니다. Docker의 `--tls internal` 스택은
+`caddy_data` volume도 같은 방식으로 보관합니다.
 
 SQLite 설치에서는 업데이트 없이도 기존 검증 백업을 만들 수 있습니다.
 
@@ -649,6 +650,16 @@ sudo sha256sum "$BACKUP/dtxwiki.sqlite"
 같은 dtxWiki version을 설치한 뒤 `/health/ready`, 로그인, 첨부파일 읽기를 확인하세요. 복구할 때는
 서비스를 중지하고 `/var/lib/dtxwiki`와 `/etc/dtxwiki`를 함께 복원한 뒤 ownership을 확인하고
 `dtxwiki bootstrap`을 실행합니다.
+
+### LLM 자격 증명 키링
+
+키링은 `DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE`을 설정하면 해당 파일에, 그렇지 않으면 데이터
+디렉터리의 `llm-credential-keyring.json`에 저장됩니다. `dtxwiki setup production`, systemd
+`dtxwiki update`의 완료 단계와 Docker entrypoint는 파일이 없으면 생성하고 기존 파일은
+덮어쓰지 않습니다. `solo_local`의 기본 키링은 자격 증명을 처음 저장할 때 생성됩니다.
+`dtxwiki backup`은 키링이 있으면 JWT 키·session secret과 함께 보관하고 복구 시 되돌립니다.
+SQLite 전체 백업에는 암호화된 자격 증명과 키가 함께 들어 있으므로 백업도 비밀과 동등하게
+보호해야 합니다. 설정을 기존 키가 없는 다른 키링으로 변경하면 저장한 자격 증명을 읽을 수 없습니다.
 
 ### Context Git 저장소 점검
 

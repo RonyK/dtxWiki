@@ -249,6 +249,7 @@ def test_finalize_bootstrap_echoes_redacted_db_url(monkeypatch):
 def test_systemd_update_finalization_preserves_split_worker(
     monkeypatch, tmp_path, custom_env, explicit_env
 ):
+    monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "data"))
     default_env = tmp_path / "default.env"
     default_env.write_text("# Default file is untouched by a custom deployment\n")
     monkeypatch.setattr(cmd.prod_setup, "DEFAULT_ENV_FILE", default_env)
@@ -269,6 +270,9 @@ def test_systemd_update_finalization_preserves_split_worker(
     def bootstrap(settings):
         seen.append(settings.worker_mode)
         assert cmd.prod_setup.get_env_value(env, "DTXWIKI_WORKER_MODE") == "external"
+        keyring = tmp_path / "data" / "llm-credential-keyring.json"
+        assert keyring.is_file()
+        assert not settings.llm_credential_keyring_file
 
     monkeypatch.setattr(cmd, "bootstrap_app", bootstrap)
     data_root = RuntimeResources.for_settings(Settings()).root

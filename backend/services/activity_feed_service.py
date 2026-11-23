@@ -39,7 +39,7 @@ from backend.schemas.activity import (
 )
 from backend.services.activity_service import (
     ActivityService,
-    _audit_only_observation_event_clause,
+    _activity_audit_visibility_clause,
     _is_review_decision_activity_item,
     _is_system_activity_item,
     _review_decision_audit_event_clause,
@@ -491,7 +491,7 @@ class ActivityFeedService:
                 continue
             conditions = []
             if source == "audit":
-                conditions.append(~_audit_only_observation_event_clause())
+                conditions.append(_activity_audit_visibility_clause(actor))
                 # The same SQL split _audit_history applies, so audit rows of
                 # another kind are not scanned and hydrated only to be dropped.
                 if kind == "system":

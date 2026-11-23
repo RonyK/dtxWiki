@@ -47,6 +47,10 @@ class LLMAdapterRegistryError(ValueError):
     """
 
 
+class LLMAdapterEndpointRequiredError(LLMAdapterRegistryError):
+    """Registration requires an endpoint profile."""
+
+
 @dataclass(frozen=True)
 class _Registration:
     factory: LLMAdapterFactory
@@ -102,15 +106,17 @@ class LLMAdapterRegistry:
         descriptor = registration.descriptor
         # Provider options are returned as metadata. Credential fields must
         # enter storage only through the write-only vault input.
-        credential_fields = descriptor.credential_schema.get("properties", {})
         if _contains_write_only(descriptor.config_schema) or (
-            isinstance(credential_fields, Mapping)
-            and config.keys() & credential_fields.keys()
+            config.keys() & descriptor.credential_schema["properties"].keys()
         ):
             raise LLMAdapterRegistryError(
                 f"LLM adapter {adapter_id!r} cannot expose secret configuration fields"
             )
         self._validate_fields(registration, config, credential, model_options)
+        if descriptor.default_base_url is None:
+            raise LLMAdapterEndpointRequiredError(
+                "LLM adapter requires an endpoint profile"
+            )
         return self._resolve_endpoint(registration, None).url
 
     def create(
@@ -406,6 +412,18 @@ def _validated_snapshot(descriptor: LLMAdapterDescriptor) -> LLMAdapterDescripto
         if _uses_references(schema):
             raise LLMAdapterRegistryError(
                 f"LLM adapter {adapter_id!r} {name} must be self-contained"
+            )
+        if name == "credential_schema" and (
+            schema.get("type") != "object"
+            or not isinstance(schema.get("properties"), dict)
+            or schema.get("additionalProperties") is not False
+            or not set(schema)
+            <= {"type", "properties", "required", "additionalProperties"}
+            or not set(schema.get("required", ())) <= set(schema["properties"])
+        ):
+            raise LLMAdapterRegistryError(
+                f"LLM adapter {adapter_id!r} credential_schema must be "
+                "a flat object of properties"
             )
         schemas[name] = MappingProxyType(schema)
     return replace(

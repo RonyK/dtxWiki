@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import os
 import re
 import stat
@@ -19,6 +20,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from backend.app.data_dir import data_dir
 from backend.app.runtime_credentials import publish_private_credential_file
+
+logger = logging.getLogger(__name__)
 
 _KEY_ID = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 _MAX_KEYRING_BYTES = 64 * 1024
@@ -95,6 +98,15 @@ class FileCredentialVault:
         self, encrypted: Mapping[str, str], *, binding: CredentialBinding
     ) -> dict[str, str]:
         _, keys = self._read_keyring(create_local=False)
+        if not isinstance(encrypted, Mapping):
+            logger.warning("LLM credential: malformed envelope")
+            raise CredentialVaultError("LLM credential cannot be decrypted")
+        if (
+            not isinstance(encrypted.get("key_id"), str)
+            or encrypted["key_id"] not in keys
+        ):
+            logger.warning("LLM credential keyring: unknown key_id")
+            raise CredentialVaultError("LLM credential cannot be decrypted")
         try:
             nonce = _decode(encrypted["nonce"])
             if len(nonce) != _NONCE_BYTES:
@@ -108,6 +120,7 @@ class FileCredentialVault:
             ):
                 raise ValueError
         except (InvalidTag, LookupError, ValueError, TypeError, binascii.Error):
+            logger.warning("LLM credential: malformed or authentication failed")
             raise CredentialVaultError("LLM credential cannot be decrypted") from None
         return credential
 
@@ -115,11 +128,9 @@ class FileCredentialVault:
         if self._keyring_file:
             path = Path(self._keyring_file)
             initialize = False
-        elif self._solo_local:
-            path = data_dir() / "llm-credential-keyring.json"
-            initialize = create_local
         else:
-            raise CredentialVaultError("LLM credential keyring is unavailable")
+            path = data_dir() / "llm-credential-keyring.json"
+            initialize = self._solo_local and create_local
 
         try:
             try:
@@ -127,12 +138,7 @@ class FileCredentialVault:
             except FileNotFoundError:
                 if not initialize:
                     raise
-                key_id = uuid4().hex
-                keyring = {
-                    "active_key_id": key_id,
-                    "keys": {key_id: _encode(AESGCM.generate_key(bit_length=256))},
-                }
-                publish_private_credential_file(path, json.dumps(keyring).encode())
+                create_keyring(path)
                 raw = _read_private_keyring_file(path)
 
             keyring = json.loads(raw)
@@ -142,7 +148,11 @@ class FileCredentialVault:
                 raise ValueError
             keys = {}
             for key_id, encoded in keyring["keys"].items():
-                if not _KEY_ID.fullmatch(key_id) or not isinstance(encoded, str):
+                if (
+                    not isinstance(key_id, str)
+                    or not _KEY_ID.fullmatch(key_id)
+                    or not isinstance(encoded, str)
+                ):
                     raise ValueError
                 key = _decode(encoded)
                 if len(key) != 32:
@@ -151,18 +161,40 @@ class FileCredentialVault:
             active = keyring.get("active_key_id")
             if not isinstance(active, str) or active not in keys:
                 raise ValueError
-        except (OSError, ValueError, binascii.Error, RecursionError):
+        except (OSError, ValueError, binascii.Error, RecursionError) as exc:
+            reason = (
+                "missing"
+                if isinstance(exc, FileNotFoundError)
+                else "permission"
+                if isinstance(exc, PermissionError)
+                else "unreadable"
+                if isinstance(exc, OSError)
+                else "malformed"
+            )
+            logger.warning("LLM credential keyring: %s", reason)
             raise CredentialVaultError(
                 "LLM credential keyring is unavailable"
             ) from None
         return active, keys
 
 
+def create_keyring(path: Path) -> None:
+    """Publish a keyring once, without replacing an existing one."""
+    if path.exists():
+        return
+    key_id = uuid4().hex
+    keyring = {
+        "active_key_id": key_id,
+        "keys": {key_id: _encode(AESGCM.generate_key(bit_length=256))},
+    }
+    publish_private_credential_file(path, json.dumps(keyring).encode())
+
+
 def _read_private_keyring_file(path: Path) -> bytes:
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
     with os.fdopen(fd, "rb") as handle:
         mode = os.fstat(handle.fileno()).st_mode
-        if not stat.S_ISREG(mode) or (os.name != "nt" and mode & 0o077):
+        if not stat.S_ISREG(mode):
             raise ValueError
         raw = handle.read(_MAX_KEYRING_BYTES + 1)
     if len(raw) > _MAX_KEYRING_BYTES:

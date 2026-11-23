@@ -37,6 +37,16 @@ if [ -z "${DTXWIKI_SESSION_SECRET:-}" ]; then
     export DTXWIKI_SESSION_SECRET_FILE="${SECRET_FILE}"
 fi
 
+# Stable LLM vault keyring; the init service creates it before app and worker.
+LLM_KEYRING="${DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE:-${DATA_DIR}/llm-credential-keyring.json}"
+if [ ! -f "${LLM_KEYRING}" ]; then
+    keyring_tmp="$(mktemp "${LLM_KEYRING}.XXXXXX")"
+    python -c 'import json,secrets; k=secrets.token_hex(16); print(json.dumps({"active_key_id":k,"keys":{k:secrets.token_urlsafe(32)}}))' > "${keyring_tmp}"
+    ln "${keyring_tmp}" "${LLM_KEYRING}" || [ -f "${LLM_KEYRING}" ]
+    rm -f "${keyring_tmp}"
+fi
+export DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE="${LLM_KEYRING}"
+
 # Stable OAuth/MCP signing key — generated once, persisted on the data volume.
 # Never overwritten (rotating invalidates every issued token).
 if [ ! -f "${KEY_PATH}" ]; then

@@ -850,7 +850,11 @@ class ServiceRegistry:
         from backend.llm.credential_vault import FileCredentialVault
         from backend.services.llm_connection_service import LLMConnectionService
 
-        settings = self.settings or Settings()
+        if self.settings is None:
+            raise RuntimeError(
+                "LLM connection services require container-resolved settings"
+            )
+        settings = self.settings
         return LLMConnectionService(
             registry=self.llm_adapter_registry,
             vault=FileCredentialVault(

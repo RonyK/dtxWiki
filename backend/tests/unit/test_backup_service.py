@@ -204,6 +204,7 @@ def test_create_backup_non_sqlite_marks_db_absent(tmp_path):
     base.mkdir()
     jwt = tmp_path / "jwt.pem"
     jwt.write_text("KEYDATA", encoding="utf-8")
+    (base / "llm-credential-keyring.json").write_text("KEYRING", encoding="utf-8")
     settings = Settings(
         database_url="postgresql+pg8000://user:pass@localhost/db",
         oauth_jwt_private_key_path=str(jwt),
@@ -218,6 +219,7 @@ def test_create_backup_non_sqlite_marks_db_absent(tmp_path):
     assert not (backup_dir / "dtxwiki.sqlite").exists()
     names = {e["name"] for e in manifest["files"]}
     assert "jwt.pem" in names  # secrets are still captured
+    assert "llm-credential-keyring.json" in names
     backup_service.verify_backup_integrity(backup_dir)
 
 
@@ -229,6 +231,8 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path):
     jwt = tmp_path / "jwt.pem"
     jwt.write_text("ORIGINAL", encoding="utf-8")
     settings = _settings_for(db, jwt)
+    keyring = base / "llm-credential-keyring.json"
+    keyring.write_text("ORIGINAL KEYRING", encoding="utf-8")
 
     backup_dir = backup_service.create_backup(settings, version="0.1.0", data_dir=base)
     # A pre-Git schema-2 checkpoint restores normally and retires newer Git data.
@@ -245,11 +249,13 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path):
     _make_db(db, 5)  # now 8 rows
     assert _row_count(db) == 8
     jwt.write_text("CORRUPTED", encoding="utf-8")
+    keyring.write_text("CORRUPTED", encoding="utf-8")
 
     backup_service.restore_backup(backup_dir, settings, data_dir=base)
 
     assert _row_count(db) == 3
     assert jwt.read_text(encoding="utf-8") == "ORIGINAL"
+    assert keyring.read_text(encoding="utf-8") == "ORIGINAL KEYRING"
     assert not repositories.exists()
 
     # A failed Git migration can leave orphan objects after its SQL changes
@@ -681,12 +687,15 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
     )
     checkpoint_git = GitSnapshotStore(first / "files" / "repositories")
     assert checkpoint_git.list_heads(orphan_workspace_id) == {}
-    assert checkpoint_git.read(
-        workspace_id=orphan_workspace_id,
-        page_id=orphan_page_id,
-        commit_oid=orphan_oid,
-        descriptor=ContentDescriptor(),
-    ) == orphan_body
+    assert (
+        checkpoint_git.read(
+            workspace_id=orphan_workspace_id,
+            page_id=orphan_page_id,
+            commit_oid=orphan_oid,
+            descriptor=ContentDescriptor(),
+        )
+        == orphan_body
+    )
     assert (
         first_manifest["library_checkpoint"]["tree_sha256"]
         == second_manifest["library_checkpoint"]["tree_sha256"]
@@ -712,24 +721,30 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
         )
         == current_body
     )
-    assert git.read(
-        workspace_id=workspace_id,
-        page_id=page_id,
-        commit_oid=historical_oid,
-        descriptor=ContentDescriptor(),
-    ) == historical_body
+    assert (
+        git.read(
+            workspace_id=workspace_id,
+            page_id=page_id,
+            commit_oid=historical_oid,
+            descriptor=ContentDescriptor(),
+        )
+        == historical_body
+    )
     with sqlite3.connect(db) as connection:
         assert connection.execute(
             "SELECT body_md, content_hash FROM context_page_version WHERE id=?",
             (historical_id,),
         ).fetchone() == (None, content_hash(historical_body.decode()))
     assert git.list_heads(orphan_workspace_id) == {}
-    assert git.read(
-        workspace_id=orphan_workspace_id,
-        page_id=orphan_page_id,
-        commit_oid=orphan_oid,
-        descriptor=ContentDescriptor(),
-    ) == orphan_body
+    assert (
+        git.read(
+            workspace_id=orphan_workspace_id,
+            page_id=orphan_page_id,
+            commit_oid=orphan_oid,
+            descriptor=ContentDescriptor(),
+        )
+        == orphan_body
+    )
     git.commit(
         workspace_id=orphan_workspace_id,
         page_id=orphan_page_id,
@@ -760,9 +775,7 @@ def test_default_backup_checkpoints_configured_library_and_restores_it(tmp_path)
     ):
         backup_service.verify_backup_integrity(unmapped)
     unexpected.rmdir()
-    copied_orphan = (
-        unmapped / "files" / "repositories" / f"{orphan_workspace_id}.git"
-    )
+    copied_orphan = unmapped / "files" / "repositories" / f"{orphan_workspace_id}.git"
     (copied_orphan / "refs").rename(copied_orphan / ".missing-refs")
     with pytest.raises(
         backup_service.BackupIntegrityError,

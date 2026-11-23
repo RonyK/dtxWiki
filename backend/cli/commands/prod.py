@@ -508,6 +508,26 @@ def setup_production(
     runner.action(
         f"ensure JWT key at {jwt_key} (readable by {service_user})", _ensure_key
     )
+    data_dir = Path(existing.get("DTXWIKI_DATA_DIR") or prod_setup.DEFAULT_DATA_DIR)
+    keyring_path = Path(
+        existing.get("DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE")
+        or data_dir / "llm-credential-keyring.json"
+    )
+
+    def _ensure_keyring() -> None:
+        from backend.llm.credential_vault import create_keyring
+
+        create_keyring(keyring_path)
+        applied = prod_setup.set_key_ownership(
+            keyring_path, service_user, echo=typer.echo
+        )
+        if is_root and not applied:
+            blocking.append(
+                f"LLM keyring {keyring_path} could not be made readable by "
+                f"'{service_user}'"
+            )
+
+    runner.action(f"ensure LLM keyring at {keyring_path}", _ensure_keyring)
     app_mode = existing.get("DTXWIKI_APP_MODE", "team")
     session_secret = existing.get("DTXWIKI_SESSION_SECRET") or ""
     replace_secret = prod_setup.session_secret_needs_replacement(
@@ -524,13 +544,13 @@ def setup_production(
     # 3/7 env file (full write when fresh; targeted update on reconfigure)
     typer.echo("[3/7] env file")
     db_url = existing.get("DTXWIKI_DATABASE_URL") or database_url
-    data_dir = Path(existing.get("DTXWIKI_DATA_DIR") or prod_setup.DEFAULT_DATA_DIR)
     if is_fresh:
         content = prod_setup.render_production_env(
             domain=domain,
             session_secret=session_secret,
             jwt_key_path=jwt_key,
             database_url=db_url,
+            data_dir=str(data_dir),
             tls_mode=tls_mode,
             forwarded_allow_ips=forwarded_allow_ips,
             worker_mode="external" if install_systemd else "managed",

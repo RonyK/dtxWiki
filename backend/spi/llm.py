@@ -283,7 +283,8 @@ class LLMAdapterDescriptor:
     never changes protocol. ``options`` lists the common options the adapter
     can encode. Both schemas are self-contained JSON Schema 2020-12 documents
     (no ``$schema``, references, ``$id`` or anchors); ``credential_schema``
-    declares input-only secret fields.
+    declares input-only secret fields as a flat object with ``properties``,
+    optional ``required``, and ``additionalProperties: false``.
     """
 
     adapter_id: str
