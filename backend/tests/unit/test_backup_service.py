@@ -223,7 +223,7 @@ def test_create_backup_non_sqlite_marks_db_absent(tmp_path):
     backup_service.verify_backup_integrity(backup_dir)
 
 
-def test_backup_then_restore_recovers_db_and_secret(tmp_path):
+def test_backup_then_restore_recovers_db_and_secret(tmp_path, monkeypatch):
     base = tmp_path / "data"
     base.mkdir()
     db = base / "dtxwiki.sqlite"
@@ -233,8 +233,15 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path):
     settings = _settings_for(db, jwt)
     keyring = base / "llm-credential-keyring.json"
     keyring.write_text("ORIGINAL KEYRING", encoding="utf-8")
+    # The backed-up env names the JWT path and leaves the keyring at its
+    # data-dir default, as `dtxwiki setup production` writes it.
+    env_file = tmp_path / "dtxwiki.env"
+    original_env = f'DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH="{jwt}"\n'
+    env_file.write_text(original_env, encoding="utf-8")
 
-    backup_dir = backup_service.create_backup(settings, version="0.1.0", data_dir=base)
+    backup_dir = backup_service.create_backup(
+        settings, version="0.1.0", data_dir=base, env_file=env_file
+    )
     # A pre-Git schema-2 checkpoint restores normally and retires newer Git data.
     manifest = backup_service.read_manifest(backup_dir)
     manifest["schema"] = 2
@@ -245,17 +252,50 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path):
     repositories.mkdir()
     (repositories / "newer-data").write_bytes(b"retired by the older DB restore")
 
-    # Mutate live state after the backup.
+    # Mutate live state after the backup: both secrets were moved and the
+    # live env points at the new files.
     _make_db(db, 5)  # now 8 rows
     assert _row_count(db) == 8
-    jwt.write_text("CORRUPTED", encoding="utf-8")
-    keyring.write_text("CORRUPTED", encoding="utf-8")
+    jwt.unlink()
+    keyring.unlink()
+    new_jwt = tmp_path / "new-jwt.pem"
+    new_keyring = tmp_path / "new-keyring.json"
+    new_jwt.write_text("NEW JWT", encoding="utf-8")
+    new_keyring.write_text("NEW KEYRING", encoding="utf-8")
+    env_file.write_text(
+        f"DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH={new_jwt}\n"
+        f"DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE={new_keyring}\n",
+        encoding="utf-8",
+    )
+    current_settings = settings.model_copy(
+        update={
+            "oauth_jwt_private_key_path": str(new_jwt),
+            "llm_credential_keyring_file": str(new_keyring),
+        }
+    )
+    from backend.cli import prod_setup
 
-    backup_service.restore_backup(backup_dir, settings, data_dir=base)
+    ownership_calls = []
+    monkeypatch.setattr(
+        prod_setup,
+        "set_key_ownership",
+        lambda path, group: ownership_calls.append((path, group)),
+    )
+    backup_service.restore_backup(
+        backup_dir, current_settings, data_dir=base, env_file=env_file
+    )
 
     assert _row_count(db) == 3
+    # Secrets return to the paths the restored env uses, not the live ones.
     assert jwt.read_text(encoding="utf-8") == "ORIGINAL"
     assert keyring.read_text(encoding="utf-8") == "ORIGINAL KEYRING"
+    assert new_jwt.read_text(encoding="utf-8") == "NEW JWT"
+    assert new_keyring.read_text(encoding="utf-8") == "NEW KEYRING"
+    assert env_file.read_text(encoding="utf-8") == original_env
+    assert ownership_calls == [
+        (jwt, backup_service.SERVICE_GROUP),
+        (keyring, backup_service.SERVICE_GROUP),
+    ]
     assert not repositories.exists()
 
     # A failed Git migration can leave orphan objects after its SQL changes

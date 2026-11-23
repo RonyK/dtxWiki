@@ -134,8 +134,10 @@ _KEY_SPECS: tuple[ConfigKeySpec, ...] = (
         env="DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE",
         summary="Path to the LLM credential encryption keyring.",
         blast_radius="data_migration",
-        warning=("A replacement keyring without the existing keys makes "
-                 "stored LLM credentials undecryptable."),
+        warning=(
+            "A replacement keyring without the existing keys makes "
+            "stored LLM credentials undecryptable."
+        ),
         dangerous=True,
     ),
     ConfigKeySpec(
