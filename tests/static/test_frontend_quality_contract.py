@@ -174,12 +174,12 @@ def test_topbar_keeps_workspace_switcher_separate_from_search_track():
 
     expanded_columns = (
         "grid-template-columns: minmax(var(--sidebar-w), max-content) "
-        "minmax(280px, 620px) minmax(0, 1fr);"
+        "minmax(280px, 620px) auto;"
     )
     collapsed_columns = (
         "grid-template-columns: "
         "minmax(var(--sidebar-collapsed-w), max-content) "
-        "minmax(240px, 620px) minmax(0, 1fr);"
+        "minmax(240px, 620px) auto;"
     )
     assert any(
         expanded_columns in body and "column-gap: 12px;" in body

@@ -28,10 +28,16 @@
 
 /* No border-right: the cell is sized by the workspace title, so a rule here
    read as the sidebar's edge continuing upward while sitting up to 145px away
-   from it. The top bar is one surface instead. */
+   from it. The top bar is one surface instead.
+
+   Brand and actions pad only toward the bar's outer edges. `.topbar`'s
+   column-gap is the one space between cells, so the workspace switcher sits a
+   single gap from the search box (or, on narrow layouts, the search icon).
+   Inner padding on both sides stacked to 28px on desktop and 24px on a phone,
+   where every other control in the bar is 6-12px apart. */
 .topbar-brand {
   height: 100%;
-  padding: 0 16px;
+  padding-inline: 16px 0;
 }
 
 /* Wraps the glyph + "dtxWiki" as one link to the dashboard. It replaces
@@ -50,7 +56,7 @@
   justify-self: end;
   justify-content: flex-end;
   min-width: max-content;
-  padding: 0 16px;
+  padding-inline: 0 16px;
 }
 
 .topbar-search {
@@ -102,6 +108,8 @@
   background: transparent;
   color: var(--ink);
   padding: 0;
+  /* A narrow box ends the placeholder with an ellipsis, not mid-letter. */
+  text-overflow: ellipsis;
 }
 
 .topbar-search input::placeholder {
@@ -373,14 +381,18 @@
 /* Keep the command search fluid across tablet-width desktop windows. The
    navigation actions remain an intrinsic trailing column, so Settings, Account
    and language controls never sit underneath a fixed-width search field. */
+/* The brand track's floor is the sidebar width, as in the wider layouts: the
+   cell's own content is always wider, so the floor never opens a gap. A fixed
+   220px floor here did -- the collapsed brand is only ~100px (glyph plus the
+   initials-only switcher), which left 128px of empty bar before the search. */
 @media (min-width: 1025px) and (max-width: 1240px) {
   .topbar {
-    grid-template-columns: minmax(260px, max-content) minmax(120px, 1fr) auto;
+    grid-template-columns: minmax(var(--sidebar-w), max-content) minmax(120px, 1fr) auto;
     column-gap: 8px;
   }
 
   .app-shell[data-sidebar-collapsed="true"] .topbar {
-    grid-template-columns: minmax(220px, max-content) minmax(120px, 1fr) auto;
+    grid-template-columns: minmax(var(--sidebar-collapsed-w), max-content) minmax(120px, 1fr) auto;
   }
 
   .topbar-brand,
@@ -389,9 +401,12 @@
     min-width: 0;
   }
 
-  .topbar-brand,
+  .topbar-brand {
+    padding-inline-start: 12px;
+  }
+
   .topbar-actions {
-    padding-inline: 12px;
+    padding-inline-end: 12px;
   }
 
   .workspace-switcher-button {
@@ -616,7 +631,6 @@
   font-size: 12px;
 }
 
-.mobile-search-link,
 .mobile-nav-toggle {
   display: none;
 }
@@ -705,9 +719,14 @@
 /* M-3 (260908 UI audit): this mobile override used to live in
    07-settings-policy.css, a Settings-owned stylesheet, alongside every other
    shell selector it hides -- .topbar-search and .sidebar are both defined
-   above, in this file. */
+   above, in this file.
+
+   The signed-in search box stays visible at every width; the workspace
+   switcher and it share the bar (07-settings-policy.css). Only the signed-out
+   placeholder in that slot is hidden, so the public topbar keeps its
+   two-track rule. */
 @media (max-width: 1024px) {
-  .topbar-search,
+  .topbar-search--placeholder,
   .sidebar {
     display: none;
   }

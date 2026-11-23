@@ -40,8 +40,6 @@
     "skip": "본문으로 건너뛰기",
     "openNavigation": "내비게이션 열기",
     "closeNavigation": "내비게이션 닫기",
-    "openSearch": "검색 열기",
-    "searchTitle": "검색",
     "inbox": "수신함",
     "inboxUnread": "수신함, 안 읽은 메시지 있음",
     "settings": "설정",

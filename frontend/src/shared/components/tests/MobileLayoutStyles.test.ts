@@ -75,23 +75,24 @@ describe("mobile layout regression styles", () => {
       /@media \(max-width: 1024px\)[\s\S]*?\s\.workspace-switcher-button \{[^}]*width:\s*100%;/,
     );
     expect(workspaceStyles).toMatch(
-      /@media \(max-width: 480px\)\s*\{[\s\S]*?\.topbar-brand \{[^}]*padding-inline:\s*8px;[\s\S]*?\.topbar-brand \.prism-glyph\s*\{[^}]*display:\s*none;/,
+      /@media \(max-width: 480px\)\s*\{[\s\S]*?\.topbar-brand \{[^}]*padding-inline:\s*8px 0;[\s\S]*?\.topbar-brand \.prism-glyph\s*\{[^}]*display:\s*none;/,
     );
   });
 
   it("gives the tablet workspace switcher the width its brand cell has", () => {
-    // The ceiling used to be a flat min(210px, 100%) that never lifted, so at
-    // 768x1024 the switcher sat at 210px inside a 576px brand cell, and at
-    // 1024x768 inside an 832px one -- measured in the running app.
+    // The switcher and the search box share the bar: the switcher takes what
+    // the title needs up to a quarter of the viewport (220px at most) and the
+    // search box the rest. A percentage ceiling is ignored while the brand
+    // track measures its content, so the cap has to be in vw.
     expect(workspaceStyles).toMatch(
-      /@media \(max-width: 1024px\)[\s\S]*?\s\.workspace-switcher-button \{[^}]*max-width:\s*min\(340px, 100%\);/,
+      /@media \(max-width: 1024px\)[\s\S]*?\s\.workspace-switcher-button \{[^}]*max-width:\s*min\(220px, 25vw\);/,
     );
     // The label carried a second, unconditional 200px cap, so raising the
     // button alone changed nothing visible.
     expect(ruleBody(".workspace-switcher-label", shellStyles)).not.toContain(
       "max-width:",
     );
-    // A <button> centres its text; harmless at 184px, stranding at 340px.
+    // A <button> centres its text; harmless at 184px, stranding at wider widths.
     expect(ruleBody(".workspace-switcher-label", shellStyles)).toContain(
       "text-align: start",
     );
@@ -200,15 +201,14 @@ describe("mobile layout regression styles", () => {
     expect(compactBody).toContain("min-height: 80px");
   });
 
-  it("hides the topbar's middle slot below 1024px, for both auth states", () => {
-    // The two-track mobile rule only works because the middle of the topbar's
-    // three children is hidden at this breakpoint. Shell renders
-    // `.topbar-search` there in BOTH auth states now -- the real search box
-    // signed in, an aria-hidden placeholder signed out -- so this one rule
-    // covers both. Shell.test.tsx pins the markup side; neither half is
-    // sufficient alone, which is the lesson from this bug recurring.
+  it("hides only the signed-out middle slot below 1024px", () => {
+    // Signed in, the search box stays and the bar has three tracks. Signed
+    // out, the public two-track rule only works because the aria-hidden
+    // placeholder in the middle slot is hidden. Shell.test.tsx pins the
+    // markup side; neither half is sufficient alone, which is the lesson from
+    // this bug recurring.
     expect(shellStyles).toMatch(
-      /@media \(max-width: 1024px\)\s*\{[^}]*\.topbar-search,\s*\.sidebar\s*\{[^}]*display:\s*none;/,
+      /@media \(max-width: 1024px\)\s*\{[^}]*\.topbar-search--placeholder,\s*\.sidebar\s*\{[^}]*display:\s*none;/,
     );
   });
 

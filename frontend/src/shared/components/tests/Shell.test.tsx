@@ -147,10 +147,6 @@ describe("Shell", () => {
     expect(
       screen.getByRole("menuitem", { name: "Open Setup" }),
     ).toHaveAttribute("href", "/workspaces/11111111-1111-4111-8111-111111111111/setup");
-    expect(screen.getByRole("link", { name: "Open Search" })).toHaveAttribute(
-      "href",
-      "/workspaces/11111111-1111-4111-8111-111111111111/search",
-    );
     expect(screen.getByTestId("location")).toHaveTextContent("/workspaces/11111111-1111-4111-8111-111111111111/dashboard");
   });
 
@@ -1578,9 +1574,9 @@ describe("Shell", () => {
 
   it("gives the signed-out topbar the same three-slot grid as the signed-in one", async () => {
     // The mobile rule declares TWO tracks (`minmax(0, 1fr) auto`) while this
-    // header always renders THREE children. Signed in that works, because the
-    // middle child is `.topbar-search`, which 02-shell.css hides below 1024px.
-    // Signed out the middle child was an unclassed `<div />`: it stayed
+    // header always renders THREE children. Signed in, the bar declares three
+    // tracks of its own. Signed out, the middle child is the placeholder that
+    // 02-shell.css hides below 1024px; it was once an unclassed `<div />`: it stayed
     // in-flow, kept generating a column, and pushed `.topbar-actions` onto an
     // implicit second row. Measured on the running app at every width from 320
     // to 1024, `grid-template-rows` read "21px 44px" signed out against "55px"
@@ -1600,7 +1596,7 @@ describe("Shell", () => {
     expect(children).toHaveLength(3);
     expect(children[0]).toHaveClass("topbar-brand");
     // The slot the mobile rule relies on being hidden.
-    expect(children[1]).toHaveClass("topbar-search");
+    expect(children[1]).toHaveClass("topbar-search", "topbar-search--placeholder");
     expect(children[2]).toHaveClass("topbar-actions");
   });
 

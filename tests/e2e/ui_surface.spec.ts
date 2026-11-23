@@ -437,13 +437,14 @@ test.describe("UI surface", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await gotoWorkspaceDashboard(page);
 
-    const searchLink = page.getByRole("link", { name: "Open Search" });
-    await expect(searchLink).toBeVisible();
+    const searchBox = page.getByRole("combobox", { name: "Search workspace" });
+    await expect(searchBox).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Mobile" })).toBeHidden();
 
-    await searchLink.click();
+    await searchBox.fill("default");
+    await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(new RegExp(`/workspaces/${workspace.id}/search$`));
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${workspace.id}/search\\?q=default$`));
     await expect(
       page.getByRole("heading", { name: "Search", exact: true }),
     ).toBeVisible();
@@ -494,12 +495,21 @@ test.describe("UI surface", () => {
     await expect(page.getByRole("heading", { name: "Workspace Operations", exact: true })).toBeVisible();
     const switcher = page.getByRole("button", { name: /Switch workspace/ });
     await expect(switcher).toBeVisible();
+    const searchForm = page.getByRole("search", { name: "Workspace search" });
+    await expect(searchForm).toBeVisible();
     const switcherBox = await switcher.boundingBox();
+    const mobileSearchBox = await searchForm.boundingBox();
     const mobileActionsBox = await actions.boundingBox();
     expect(switcherBox).not.toBeNull();
+    expect(mobileSearchBox).not.toBeNull();
     expect(mobileActionsBox).not.toBeNull();
-    expect(switcherBox!.width).toBeGreaterThanOrEqual(120);
+    // The two share the bar rather than one of them disappearing.
+    expect(switcherBox!.width).toBeGreaterThanOrEqual(90);
+    expect(mobileSearchBox!.width).toBeGreaterThanOrEqual(90);
     expect(switcherBox!.x + switcherBox!.width).toBeLessThanOrEqual(
+      mobileSearchBox!.x - 6,
+    );
+    expect(mobileSearchBox!.x + mobileSearchBox!.width).toBeLessThanOrEqual(
       mobileActionsBox!.x - 6,
     );
     expect(

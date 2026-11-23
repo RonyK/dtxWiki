@@ -467,10 +467,15 @@ h3 {
   border-right: 0;
 }
 
+/* The actions track is `auto`, not minmax(0, 1fr): its floor is the actions'
+   own width, so when the bar is short the search box shrinks toward 280px
+   instead of the actions spilling left over it. With a 0 floor, 1241-1416px
+   windows drew Inbox and Settings on top of the search box (-109px at 1280
+   with a long workspace title). Spare width still goes to this track. */
 .topbar {
   grid-area: topbar;
   display: grid;
-  grid-template-columns: minmax(var(--sidebar-w), max-content) minmax(280px, 620px) minmax(0, 1fr);
+  grid-template-columns: minmax(var(--sidebar-w), max-content) minmax(280px, 620px) auto;
   align-items: center;
   column-gap: 12px;
   height: var(--topbar-h);
@@ -488,13 +493,13 @@ h3 {
   .app-shell[data-sidebar-collapsed="true"] .topbar {
     grid-template-columns:
       minmax(var(--sidebar-collapsed-w), max-content) minmax(240px, 620px)
-      minmax(0, 1fr);
+      auto;
   }
 
   .app-shell[data-sidebar-collapsed="true"] .topbar-brand {
     justify-content: flex-start;
     gap: 8px;
-    padding: 0 12px;
+    padding-inline: 12px 0;
   }
 
   .app-shell[data-sidebar-collapsed="true"] .brand-name {

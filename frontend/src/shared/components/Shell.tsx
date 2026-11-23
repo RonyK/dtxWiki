@@ -573,8 +573,10 @@ export function Shell({ children }: ShellProps) {
             // The current workspace's dashboard, not a plain "home" -- there
             // is no workspace-agnostic surface to send an authenticated
             // reader to. Signed out, the glyph+name stay plain: /dashboard
-            // would only bounce them straight to /login.
-            <Link className="topbar-brand-link" to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "dashboard") : "/workspaces/find"}>
+            // would only bounce them straight to /login. The label keeps the
+            // link named below 1025px, where .brand-name is display:none and
+            // the glyph alone is aria-hidden.
+            <Link aria-label="dtxWiki" className="topbar-brand-link" to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "dashboard") : "/workspaces/find"}>
               <PrismGlyph />
               <span className="brand-name">dtxWiki</span>
             </Link>
@@ -593,13 +595,14 @@ export function Shell({ children }: ShellProps) {
             />
           ) : null}
         </div>
-        {/* Remount to clear previews and abort requests when Agent visibility changes. */}
+        {/* Clear previews and abort requests when the workspace or Agent visibility changes. */}
         {isAuthenticated ? (
           <CommandSearchBox
-            key={`${routeWorkspaceId}:${String(labsPreferences.agent)}`}
+            key={`${navigationWorkspaceId}:${String(labsPreferences.agent)}`}
             includeAgents={labsPreferences.agent}
             labels={shellLabels}
             navGroups={navGroups}
+            selectedId={navigationWorkspaceId ?? ""}
           />
         ) : (
           /* The topbar is a grid and this is its MIDDLE child, so it has to
@@ -630,16 +633,6 @@ export function Shell({ children }: ShellProps) {
         <div className="topbar-actions">
           {isAuthenticated ? (
             <>
-              <NavLink
-                aria-label={t("topbar.openSearch", {
-                  defaultValue: "Open Search",
-                })}
-                className="icon-button mobile-search-link"
-                to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "search") : "/workspaces/find"}
-                title={t("topbar.searchTitle", { defaultValue: "Search" })}
-              >
-                <Search size={16} aria-hidden="true" />
-              </NavLink>
               <NavLink
                 aria-label={
                   inboxUnread
@@ -902,14 +895,15 @@ function CommandSearchBox({
   includeAgents,
   labels,
   navGroups,
+  selectedId,
 }: {
   includeAgents: boolean;
   labels: ShellLabels;
   navGroups: ReturnType<typeof navGroupsForLabels>;
+  selectedId: string;
 }) {
   const navigate = useNavigate();
   const { t: tSearch } = useTranslation("search");
-  const selectedId = parseWorkspaceRoute(useLocation().pathname)?.workspaceId ?? "";
   const containerRef = useRef<HTMLFormElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isApple = useMemo(() => isApplePlatform(), []);
@@ -1069,21 +1063,25 @@ function CommandSearchBox({
     submitToSearch();
   }
 
-  function submitToSearch() {
-    navigate(selectedId ? `${workspacePath(selectedId, "search")}?q=${encodeURIComponent(trimmedQuery)}` : "/workspaces/find");
+  // Leaving through the box returns it to rest. Focus leaves too, so a phone
+  // drops its keyboard and the switcher the focused box covers comes back.
+  function leaveTo(to: string) {
+    navigate(to);
     setOpen(false);
     setQuery("");
     setPreviewResults([]);
+    inputRef.current?.blur();
+  }
+
+  function submitToSearch() {
+    leaveTo(selectedId ? `${workspacePath(selectedId, "search")}?q=${encodeURIComponent(trimmedQuery)}` : "/workspaces/find");
   }
 
   function activate(item: CommandTarget | undefined) {
     if (!item) {
       return;
     }
-    navigate(item.to);
-    setOpen(false);
-    setQuery("");
-    setPreviewResults([]);
+    leaveTo(item.to);
   }
 
   function openPreviewResult(result: RankedSearchResult) {
@@ -1091,10 +1089,7 @@ function CommandSearchBox({
     if (!href) {
       return;
     }
-    navigate(href);
-    setOpen(false);
-    setQuery("");
-    setPreviewResults([]);
+    leaveTo(href);
   }
 
   function activateSearchOption(option: CommandSearchOption | undefined) {
