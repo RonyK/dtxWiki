@@ -3950,7 +3950,7 @@ export function ContextHistory({
             <AvatarWithTimestamp
               actorType={entry.actor_type}
               name={entry.actor_display_name ?? null}
-              timestamp={entry.created_at ?? null}
+              timestamp={entry.last_saved_at ?? entry.created_at ?? null}
             />
             {reviewStatus ? (
               <span className="context-history-review">
@@ -4036,7 +4036,7 @@ export function ContextHistory({
         <div className="history-help">
           {t("history.help", {
             defaultValue:
-              "Review versions newest first. Changes shows what a version changed from the version it was based on; Compare two versions diffs any pair.",
+              "Versions are ordered by when they were last saved. Open draft markers are dashed. Changes shows what a version changed from its base. Compare two versions shows the differences between any pair.",
           })}
         </div>
         <div className="history-compare-toolbar">

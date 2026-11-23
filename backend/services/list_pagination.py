@@ -14,7 +14,26 @@ import json
 from datetime import datetime
 from uuid import UUID
 
+from sqlalchemy import SQLColumnExpression, String, case, cast, func, type_coerce
+
+from backend.models.base import UTCDateTime
+
 _CURSOR_VERSION = 1
+
+
+def keyset_utc_timestamp(
+    column: SQLColumnExpression[datetime], *, dialect_name: str
+) -> SQLColumnExpression[datetime]:
+    """Order and compare legacy SQLite timestamps at full microsecond precision."""
+    if dialect_name != "sqlite":
+        return column
+    # SQLite's legacy CURRENT_TIMESTAMP default omitted fractional seconds.
+    # Match the ORM's six-digit datetime binds without rounding other rows.
+    timestamp = cast(column, String)
+    return type_coerce(
+        case((func.length(timestamp) == 19, timestamp + ".000000"), else_=timestamp),
+        UTCDateTime(),
+    )
 
 
 def _encode_keyset_cursor(updated_at: datetime, item_id: UUID) -> str:

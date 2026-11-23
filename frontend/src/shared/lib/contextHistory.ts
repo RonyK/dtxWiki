@@ -140,12 +140,10 @@ export function priorRelationForVersion(entry: VersionEntry): PriorRelation {
 
 // Context versions name their own parent, so lineage comes straight from the
 // API: prior_version_id and history_merge_parent_version_ids, both already
-// projected to what this actor may see.
+// projected to what this actor may see. Keep the API's last-saved order across pages.
 export function contextHistoryNodes(
   versions: VersionEntry[],
 ): HistoryGraphNode<VersionEntry>[] {
-  // The History API already lists open drafts first (the tip of the history),
-  // so the layout keeps its order.
   return versions.map((entry) => ({
     entry,
     id: entry.version_id,

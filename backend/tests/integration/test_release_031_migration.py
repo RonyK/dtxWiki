@@ -327,7 +327,7 @@ def _history(session, workspace_id, page_id, role):
         workspace_id,
         "context_page",
         page_id,
-        drafts_first=True,
+        order_context_by_save_time=True,
         actor=ActorContext(
             actor_kind="human",
             actor_id=f"{role}-user",

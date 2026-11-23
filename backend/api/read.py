@@ -4655,20 +4655,23 @@ def list_changes(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: str | None = None,
 ):
-    with session_factory() as session:
-        return {
-            "data": svc.domain_read.list_changes(
-                session=session,
-                workspace_id=workspace_id,
-                target_type=target_type,
-                target_id=target_id,
-                include_diff=include_diff,
-                limit=limit,
-                cursor=cursor,
-                actor=actor,
-                drafts_first=target_type == "context_page",
-            )
-        }
+    try:
+        with session_factory() as session:
+            return {
+                "data": svc.domain_read.list_changes(
+                    session=session,
+                    workspace_id=workspace_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    include_diff=include_diff,
+                    limit=limit,
+                    cursor=cursor,
+                    actor=actor,
+                    order_context_by_save_time=True,
+                )
+            }
+    except ReadServiceError as exc:
+        return read_service_error_response(exc)
 
 
 @router.post(

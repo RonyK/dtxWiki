@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation, ChangeSet
@@ -114,6 +114,21 @@ def test_saved_draft_projection_pages_reviewless_and_open_rows(session_factory):
         page.latest_draft_version_id = pending.id
         session.flush()
         assert rejected.last_saved_at == instant + timedelta(minutes=7)
+        # Upgraded SQLite rows can retain the CURRENT_TIMESTAMP format
+        # without fractions. Exercise it at the cursor and in a timestamp tie.
+        session.execute(
+            text(
+                "UPDATE context_page_version "
+                "SET last_saved_at = :saved_at WHERE id = :id"
+            ),
+            [
+                {
+                    "saved_at": row.last_saved_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "id": row.id.hex,
+                }
+                for row in (editing, reviewless)
+            ],
+        )
         workspace_id, page_id = workspace.id, page.id
         expected = [pending.id, editing.id, reviewless.id, tie.id]
         rejected_id, discarded_id = rejected.id, discarded.id

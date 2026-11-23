@@ -3,6 +3,7 @@ import binascii
 import json
 import re
 from collections.abc import Collection
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -123,6 +124,7 @@ from backend.services.lint import LintRegistry, page_format_warnings_for_body
 from backend.services.list_pagination import (
     _decode_keyset_cursor,
     _encode_keyset_cursor,
+    keyset_utc_timestamp,
 )
 from backend.services.mcp_read_projection import record_served_read
 from backend.services.okf import (
@@ -159,20 +161,18 @@ def _encode_version_history_cursor(
     target_type: str,
     target_id: UUID,
     before_version_no: int,
-    drafts: bool = False,
+    before_saved_at: datetime | None = None,
 ) -> str:
-    payload = json.dumps(
-        {
-            "v": 1,
-            "workspace_id": str(workspace_id),
-            "target_type": target_type,
-            "target_id": str(target_id),
-            "before_version_no": before_version_no,
-            # Still paging the open drafts that lead REST Context History.
-            **({"drafts": True} if drafts else {}),
-        },
-        separators=(",", ":"),
-    ).encode("utf-8")
+    boundary = {
+        "v": 2 if before_saved_at is not None else 1,
+        "workspace_id": str(workspace_id),
+        "target_type": target_type,
+        "target_id": str(target_id),
+        "before_version_no": before_version_no,
+    }
+    if before_saved_at is not None:
+        boundary["before_saved_at"] = before_saved_at.astimezone(UTC).isoformat()
+    payload = json.dumps(boundary, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
 
 
@@ -182,10 +182,10 @@ def _decode_version_history_cursor(
     workspace_id: UUID,
     target_type: str,
     target_id: UUID,
-) -> tuple[int | None, bool]:
-    """The cursor's version-number boundary and whether it is in the drafts phase."""
+    order_by_save_time: bool,
+) -> tuple[int | None, datetime | None]:
     if cursor is None:
-        return None, False
+        return None, None
     try:
         padding = "=" * (-len(cursor) % 4)
         payload = json.loads(
@@ -197,16 +197,25 @@ def _decode_version_history_cursor(
         ) from exc
     if (
         not isinstance(payload, dict)
-        or payload.get("v") != 1
+        or payload.get("v") != (2 if order_by_save_time else 1)
         or payload.get("workspace_id") != str(workspace_id)
         or payload.get("target_type") != target_type
         or payload.get("target_id") != str(target_id)
-        or not isinstance(payload.get("before_version_no"), int)
+        or type(payload.get("before_version_no")) is not int
         or payload["before_version_no"] < 1
-        or not isinstance(payload.get("drafts", False), bool)
     ):
         raise ReadValidationError("cursor must be an opaque version pagination token")
-    return payload["before_version_no"], payload.get("drafts", False)
+    before_saved_at = None
+    if order_by_save_time:
+        try:
+            before_saved_at = datetime.fromisoformat(payload["before_saved_at"])
+            if before_saved_at.utcoffset() != UTC.utcoffset(None):
+                raise ValueError
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ReadValidationError(
+                "cursor must be an opaque version pagination token"
+            ) from exc
+    return payload["before_version_no"], before_saved_at
 
 
 _SAFE_EXTRACTION_SUMMARY = re.compile(
@@ -1648,7 +1657,7 @@ class DomainReadService:
         cursor: str | None = None,
         *,
         actor: ActorContext | None = None,
-        drafts_first: bool = False,
+        order_context_by_save_time: bool = False,
     ) -> ListChangesPayload:
         if not actor_can_read_audit_records(actor):
             raise ReadNotFoundError("target not found")
@@ -1706,7 +1715,9 @@ class DomainReadService:
             limit,
             cursor,
             actor,
-            drafts_first=drafts_first and target_type == "context_page",
+            order_by_save_time=(
+                order_context_by_save_time and target_type == "context_page"
+            ),
         )
         return ListChangesPayload(
             versions=versions,
@@ -2401,28 +2412,30 @@ class DomainReadService:
         cursor: str | None,
         actor: ActorContext | None,
         *,
-        drafts_first: bool,
+        order_by_save_time: bool,
     ) -> tuple[list[VersionEntry], str | None]:
         """One page of versions, newest first, and the cursor of the next.
 
-        With ``drafts_first`` (REST Context History) the open drafts lead and
-        the commits follow. Both phases order by version number, which never
-        changes, so a later page only appends to the rows already shown.
+        REST Context History uses save time for every version. The other
+        callers use version number alone.
         """
-        before_version_no, in_drafts = _decode_version_history_cursor(
+        before_version_no, before_saved_at = _decode_version_history_cursor(
             cursor,
             workspace_id=workspace_id,
             target_type=target_type,
             target_id=target_id,
+            order_by_save_time=order_by_save_time,
         )
 
-        def next_cursor(last_version_no: int, *, drafts: bool = False) -> str:
+        def next_cursor(
+            last_version_no: int, last_saved_at: datetime | None = None
+        ) -> str:
             return _encode_version_history_cursor(
                 workspace_id=workspace_id,
                 target_type=target_type,
                 target_id=target_id,
                 before_version_no=last_version_no,
-                drafts=drafts,
+                before_saved_at=last_saved_at,
             )
 
         if target_type != "context_page":
@@ -2444,51 +2457,36 @@ class DomainReadService:
         )
         if page is None:
             return [], None
-        can_read_drafts = actor_can_read_drafts(actor)
-        drafts_phase = (
-            drafts_first and can_read_drafts and (cursor is None or in_drafts)
-        )
-
-        def newest(conditions, before: int | None, count: int):
-            if before is not None:
-                conditions = (*conditions, ContextPageVersion.version_no < before)
-            return session.scalars(
-                select_in_workspace(
-                    ContextPageVersion, workspace_id=workspace_id, conditions=conditions
-                )
-                .order_by(ContextPageVersion.version_no.desc())
-                .limit(count)
-            ).all()
-
-        on_page = ContextPageVersion.page_id == target_id
-        rows = (
-            list(
-                newest(
-                    (on_page, ContextPageVersion.version_status == "draft"),
-                    before_version_no,
-                    limit + 1,
-                )
-            )
-            if drafts_phase
-            else []
-        )
-        if len(rows) <= limit:
-            if not can_read_drafts:
-                status = ContextPageVersion.version_status.in_(
+        conditions = [ContextPageVersion.page_id == target_id]
+        if not actor_can_read_drafts(actor):
+            conditions.append(
+                ContextPageVersion.version_status.in_(
                     PUBLISHED_CONTEXT_VERSION_STATUSES
                 )
-                commits = (on_page, status)
-            elif drafts_first:
-                commits = (on_page, ContextPageVersion.version_status != "draft")
-            else:
-                commits = (on_page,)
-            rows.extend(
-                newest(
-                    commits,
-                    None if drafts_phase else before_version_no,
-                    limit + 1 - len(rows),
-                )
             )
+        version_no = ContextPageVersion.version_no
+        ordering = (version_no.desc(),)
+        if order_by_save_time:
+            saved_at = keyset_utc_timestamp(
+                ContextPageVersion.last_saved_at,
+                dialect_name=session.get_bind().dialect.name,
+            )
+            if before_saved_at is not None:
+                conditions.append(
+                    tuple_(saved_at, version_no) < (before_saved_at, before_version_no)
+                )
+            ordering = (saved_at.desc(), *ordering)
+        elif before_version_no is not None:
+            conditions.append(version_no < before_version_no)
+        rows = session.scalars(
+            select_in_workspace(
+                ContextPageVersion,
+                workspace_id=workspace_id,
+                conditions=conditions,
+            )
+            .order_by(*ordering)
+            .limit(limit + 1)
+        ).all()
         selected = rows[:limit]
         entries = self._context_version_entries(session, page, selected, actor)
         if len(rows) <= limit:
@@ -2496,7 +2494,7 @@ class DomainReadService:
         last = selected[-1]
         return entries, next_cursor(
             last.version_no,
-            drafts=drafts_phase and last.version_status == "draft",
+            last.last_saved_at if order_by_save_time else None,
         )
 
     def _context_version_entries(
@@ -2596,6 +2594,7 @@ class DomainReadService:
                     actor_display_name=version.actor_display_name
                     or actor_names[(version.actor_type, version.actor_id)],
                     created_at=version.created_at,
+                    last_saved_at=version.last_saved_at,
                     parent_version_id=visible_parent_id,
                     parent_version_ids=git_parent_ids,
                     prior_version_id=visible_prior_id,

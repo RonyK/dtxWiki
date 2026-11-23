@@ -12595,6 +12595,8 @@ export interface components {
              * @default false
              */
             is_visible_head: boolean;
+            /** Last Saved At */
+            last_saved_at?: string | null;
             /** Lines Added */
             lines_added?: number | null;
             /** Lines Removed */

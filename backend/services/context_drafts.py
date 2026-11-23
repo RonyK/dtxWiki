@@ -9,7 +9,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import Session, load_only
 
 from backend.models.audit import AuditEvent
 from backend.models.change import ChangeOperation
@@ -35,6 +35,7 @@ from backend.services.context_version_refs import (
     context_version_ref,
     written_context_version_id,
 )
+from backend.services.list_pagination import keyset_utc_timestamp
 from backend.services.read_errors import ReadNotFoundError, ReadValidationError
 
 
@@ -303,9 +304,15 @@ def _encode_cursor(page, version):
 
 
 def _select_open_drafts(
-    workspace_id: UUID, page_id: UUID, boundary: tuple[datetime, UUID] | None
+    session: Session,
+    workspace_id: UUID,
+    page_id: UUID,
+    boundary: tuple[datetime, UUID] | None,
 ):
     """Apply the saved-draft ordering and its exclusive continuation boundary."""
+    saved_at_column = keyset_utc_timestamp(
+        ContextPageVersion.last_saved_at, dialect_name=session.get_bind().dialect.name
+    )
     conditions = [
         ContextPageVersion.page_id == page_id,
         ContextPageVersion.version_status == "draft",
@@ -314,14 +321,13 @@ def _select_open_drafts(
         saved_at, version_id = boundary
         conditions.append(
             or_(
-                ContextPageVersion.last_saved_at < saved_at,
-                (ContextPageVersion.last_saved_at == saved_at)
-                & (ContextPageVersion.id > version_id),
+                saved_at_column < saved_at,
+                (saved_at_column == saved_at) & (ContextPageVersion.id > version_id),
             )
         )
     return select_in_workspace(
         ContextPageVersion, workspace_id=workspace_id, conditions=conditions
-    ).order_by(ContextPageVersion.last_saved_at.desc(), ContextPageVersion.id.asc())
+    ).order_by(saved_at_column.desc(), ContextPageVersion.id.asc())
 
 
 def list_context_drafts(session, *, workspace_id, page_id, actor, limit=5, cursor=None):
@@ -404,11 +410,11 @@ def _project_open_drafts(session, page, actor, *, limit=5, boundary=None):
         return OpenDrafts()
     workspace_id, page_id = page.workspace_id, page.id
     total = session.scalar(
-        _select_open_drafts(workspace_id, page_id, None)
+        _select_open_drafts(session, workspace_id, page_id, None)
         .order_by(None)
         .with_only_columns(func.count(), maintain_column_froms=True)
     )
-    query = _select_open_drafts(workspace_id, page_id, boundary).options(
+    query = _select_open_drafts(session, workspace_id, page_id, boundary).options(
         load_only(
             ContextPageVersion.id,
             ContextPageVersion.page_id,
