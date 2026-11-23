@@ -784,10 +784,22 @@ def test_httpx_transport_reports_what_reached_the_provider():
 
         return handler
 
+    class InterruptedBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'{"partial":'
+            raise httpx.ReadTimeout("body stalled")
+
+    def interrupted_reply(_request):
+        return httpx.Response(200, stream=InterruptedBody())
+
     for handler, expected in (
-        (raising(httpx.ConnectError("refused")), ("network_error", "not_sent")),
-        (raising(httpx.ReadTimeout("slow")), ("timeout", "unknown")),
-        (raising(httpx.RemoteProtocolError("reset")), ("network_error", "unknown")),
+        (raising(httpx.ConnectError("refused")), ("network_error", "not_sent", None)),
+        (raising(httpx.ReadTimeout("slow")), ("timeout", "unknown", None)),
+        (
+            raising(httpx.RemoteProtocolError("reset")),
+            ("network_error", "unknown", None),
+        ),
+        (interrupted_reply, ("timeout", "sent", 200)),
     ):
         transport = HttpxLLMTransport(transport=httpx.MockTransport(handler))
         with pytest.raises(LLMAdapterError) as error:
@@ -799,7 +811,11 @@ def test_httpx_transport_reports_what_reached_the_provider():
                     timeout_seconds=1,
                 )
             )
-        assert (error.value.code, error.value.delivery) == expected
+        assert (
+            error.value.code,
+            error.value.delivery,
+            error.value.status_code,
+        ) == expected
 
     def answer(request):
         assert json.loads(request.content) == {"q": 1}

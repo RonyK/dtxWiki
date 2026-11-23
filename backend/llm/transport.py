@@ -7,7 +7,7 @@ from collections.abc import Mapping
 
 import httpx
 
-from backend.spi.llm import LLMAdapterError, TransportResponse
+from backend.spi.llm import Delivery, LLMAdapterError, TransportResponse
 
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
 
@@ -54,6 +54,7 @@ class HttpxLLMTransport:
             transport=self._transport,
             follow_redirects=False,
         )
+        response = None
         try:
             request = client.build_request(
                 "POST", url, headers=dict(headers), json=dict(payload)
@@ -61,9 +62,11 @@ class HttpxLLMTransport:
             response = await client.send(request, stream=True)
             try:
                 body = await response.aread()
-            except httpx.DecodingError:
-                # The status and headers still describe the reply when its
-                # body is unreadable.
+            except httpx.RequestError as exc:
+                if response.is_success and not isinstance(exc, httpx.DecodingError):
+                    raise
+                # Adapters can classify an HTTP error and honor Retry-After
+                # from the headers alone when the body is unreadable.
                 body = b""
             finally:
                 with contextlib.suppress(httpx.HTTPError):
@@ -72,11 +75,19 @@ class HttpxLLMTransport:
             # An injected transport can fail before handing over a response.
             raise LLMAdapterError("invalid_response", delivery="sent") from None
         except httpx.RequestError as exc:
+            delivery: Delivery = "unknown"
+            status_code = None
+            if response is not None:
+                delivery = "sent"
+                status_code = response.status_code
+            elif isinstance(exc, _NOT_SENT):
+                delivery = "not_sent"
             raise LLMAdapterError(
                 "timeout"
                 if isinstance(exc, httpx.TimeoutException)
                 else "network_error",
-                delivery="not_sent" if isinstance(exc, _NOT_SENT) else "unknown",
+                delivery=delivery,
+                status_code=status_code,
             ) from None
         finally:
             # The reply is already read. A teardown failure must not turn it
