@@ -3127,8 +3127,13 @@ input[type="checkbox"].switch-control:checked::before {
       "main";
   }
 
+  /* Signed in, the bar holds three cells: brand (nav toggle, glyph and the
+     workspace switcher), the search box, and the actions. The brand cell is as
+     wide as its content, which the switcher's ceiling below bounds, and the
+     search box takes every pixel left -- so the two share the bar instead of
+     one of them disappearing. */
   .topbar {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
   }
 
   /* `.app-shell-public .topbar` (01-base.css) is declared outside any media
@@ -3158,15 +3163,16 @@ input[type="checkbox"].switch-control:checked::before {
     display: inline;
   }
 
-  /* 340px, not the 210px this used to be. The old ceiling never lifted, so on
-     a tablet the switcher stayed a 210px chip while the brand cell around it
-     had room to spare -- measured 210px inside 576px at 768x1024 and inside
-     832px at 1024x768. 100% still governs the phone, where the brand cell is
-     the real constraint. */
+  /* The switcher's share of the bar: as wide as the workspace title needs, up
+     to a quarter of the viewport and never past 220px, the ceiling the
+     1025-1240px layout uses. The search box gets the rest, so at 768px a long
+     title takes 192px and search 330px; at 390px it is 98px against 103px.
+     `vw`, not a percentage: a percentage max-width is ignored while the brand
+     track measures its content, which let a long title claim the whole bar. */
   .workspace-switcher-button {
     width: 100%;
     min-width: 0;
-    max-width: min(340px, 100%);
+    max-width: min(220px, 25vw);
   }
 
   .workspace-controls {
@@ -3233,19 +3239,50 @@ input[type="checkbox"].switch-control:checked::before {
     display: none;
   }
 
-  .mobile-search-link {
-    display: inline-flex;
-  }
-
   /* M-3 (260908 UI audit): the .topbar-search/.sidebar mobile hide moved to
      02-shell.css, which already owns both selectors' base rules. */
 
-  .topbar-actions {
-    gap: 6px;
-    padding: 0 10px;
+  /* Touch keyboards have no Ctrl/Cmd+K; the 1025-1240px layout drops the
+     hint for its narrower box too. */
+  .topbar-search kbd {
+    display: none;
   }
 
-  .topbar-actions .icon-button:not(.mobile-search-link):not(.primary):not(.language-toggle) {
+  /* Results open as a sheet under the bar, as the workspace menu does on a
+     phone. Anchored to the box they were as narrow as it -- 103px at 390px. */
+  .command-dropdown {
+    position: fixed;
+    top: var(--topbar-h);
+    right: 12px;
+    left: 12px;
+    max-height: min(420px, calc(100dvh - var(--topbar-h) - 12px));
+  }
+
+  /* The input spans the whole box under the icon, so a tap anywhere in it
+     focuses search -- on a phone the box is only 50-103px wide. It also drops
+     the input's own 44px coarse-pointer floor, which pushed it out of the box
+     into the language button at 320px; the box keeps the 44px target. */
+  .topbar-search {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .topbar-search > svg {
+    grid-area: 1 / 1;
+    pointer-events: none;
+  }
+
+  .app-shell .topbar-search input {
+    grid-area: 1 / 1;
+    min-width: 0;
+    padding-inline-start: 24px;
+  }
+
+  .topbar-actions {
+    gap: 6px;
+    padding-inline: 0 10px;
+  }
+
+  .topbar-actions .icon-button:not(.primary):not(.language-toggle) {
     display: none;
   }
 
@@ -4186,7 +4223,7 @@ input[type="checkbox"].switch-control:checked::before {
 
   .topbar-brand {
     gap: 6px;
-    padding-inline: 8px;
+    padding-inline: 8px 0;
   }
 
   .workspace-controls {
@@ -4196,6 +4233,13 @@ input[type="checkbox"].switch-control:checked::before {
   }
 
   .topbar-brand .prism-glyph {
+    display: none;
+  }
+
+  /* With the glyph and the name both hidden, the dashboard link was an empty
+     0x0 flex item: it still took a 6px gap from the switcher and a Tab stop
+     with nowhere to draw its focus ring. The drawer carries Dashboard. */
+  .topbar-brand-link {
     display: none;
   }
 

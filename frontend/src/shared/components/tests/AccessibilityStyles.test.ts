@@ -71,13 +71,13 @@ describe("cross-route accessibility styles", () => {
     );
   });
 
-  it("keeps the mobile sidebar/topbar-search hide in the shell stylesheet, not Settings (M-3)", () => {
+  it("keeps the mobile sidebar/topbar-placeholder hide in the shell stylesheet, not Settings (M-3)", () => {
     const shell = styles("02-shell.css");
     const settings = styles("07-settings-policy.css");
     expect(shell).toMatch(
-      /@media \(max-width: 1024px\)\s*\{\s*\.topbar-search,\s*\.sidebar\s*\{[^}]*display:\s*none;/,
+      /@media \(max-width: 1024px\)\s*\{\s*\.topbar-search--placeholder,\s*\.sidebar\s*\{[^}]*display:\s*none;/,
     );
-    expect(settings).not.toMatch(/\.topbar-search,\s*\.sidebar\s*\{/);
+    expect(settings).not.toMatch(/\.topbar-search(--placeholder)?,\s*\.sidebar\s*\{/);
   });
 
   it("desaturates a disabled primary icon button instead of just fading it (L-1)", () => {

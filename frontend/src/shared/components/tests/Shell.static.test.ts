@@ -152,7 +152,7 @@ describe("shared chrome CSS regressions", () => {
     const shellBlock = mediumBlocks.find(
       (block) =>
         block.includes(
-          "grid-template-columns: minmax(260px, max-content) minmax(120px, 1fr) auto",
+          "grid-template-columns: minmax(var(--sidebar-w), max-content) minmax(120px, 1fr) auto",
         ) && block.includes(".topbar-search kbd"),
     );
 

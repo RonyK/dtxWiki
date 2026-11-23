@@ -573,8 +573,10 @@ export function Shell({ children }: ShellProps) {
             // The current workspace's dashboard, not a plain "home" -- there
             // is no workspace-agnostic surface to send an authenticated
             // reader to. Signed out, the glyph+name stay plain: /dashboard
-            // would only bounce them straight to /login.
-            <Link className="topbar-brand-link" to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "dashboard") : "/workspaces/find"}>
+            // would only bounce them straight to /login. The label keeps the
+            // link named below 1025px, where .brand-name is display:none and
+            // the glyph alone is aria-hidden.
+            <Link aria-label="dtxWiki" className="topbar-brand-link" to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "dashboard") : "/workspaces/find"}>
               <PrismGlyph />
               <span className="brand-name">dtxWiki</span>
             </Link>
@@ -630,16 +632,6 @@ export function Shell({ children }: ShellProps) {
         <div className="topbar-actions">
           {isAuthenticated ? (
             <>
-              <NavLink
-                aria-label={t("topbar.openSearch", {
-                  defaultValue: "Open Search",
-                })}
-                className="icon-button mobile-search-link"
-                to={navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "search") : "/workspaces/find"}
-                title={t("topbar.searchTitle", { defaultValue: "Search" })}
-              >
-                <Search size={16} aria-hidden="true" />
-              </NavLink>
               <NavLink
                 aria-label={
                   inboxUnread
