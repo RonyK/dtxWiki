@@ -2377,6 +2377,21 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("region", { name: "Page properties" })).not.toBeInTheDocument();
   });
 
+  it("keeps the Context breadcrumb and folder link when the new page has the folder's title", async () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const folderId = "77777777-7777-4777-8777-777777777777";
+    await renderDestinationPickerEditor(`/pages/new?parent=${folderId}&title=Inbox`);
+
+    const breadcrumb = within(screen.getByRole("navigation", { name: "Page location" }));
+    expect(breadcrumb.getByRole("link", { name: "Context" })).toHaveAttribute(
+      "href", `/workspaces/${workspaceId}/context`,
+    );
+    expect(breadcrumb.getByRole("link", { name: "Inbox" })).toHaveAttribute(
+      "href", `/workspaces/${workspaceId}/context/folders/${folderId}`,
+    );
+    expect(breadcrumb.getByText("Inbox", { selector: '[aria-current="page"]' })).toBeInTheDocument();
+  });
+
   it("keeps a portaled Destination picker owned by page properties while expanding branches", async () => {
     const fetchMock = await renderDestinationPickerEditor();
     const propertiesToggle = screen.getByRole("button", { name: "Page properties" });
@@ -2419,6 +2434,10 @@ describe("PageEditor", () => {
     expect(screen.queryByRole("tree", { name: "Destination tree" })).not.toBeInTheDocument();
     expect(destination).toHaveTextContent(/Hello Page/);
     expect(destination).toHaveFocus();
+    const breadcrumb = within(screen.getByRole("navigation", { name: "Page location" }));
+    expect(breadcrumb.getByRole("link", { name: "Hello Page" })).toHaveAttribute(
+      "href", `/workspaces/${page.workspace_id}/context/pages/${page.id}`,
+    );
   });
 
   it("dismisses the Destination picker and Page properties one layer at a time", async () => {
@@ -8040,7 +8059,7 @@ async function openBlockMenuFromEditor() {
 // in the Context tree and the geometry stubbed so the Page properties popover
 // and the portaled Destination picker can position themselves. Returns the
 // fetch mock so a test can assert that nothing was written.
-async function renderDestinationPickerEditor() {
+async function renderDestinationPickerEditor(initialEntry = "/pages/new?from=context") {
   vi.stubGlobal("innerWidth", 1440);
   vi.stubGlobal("innerHeight", 900);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
@@ -8085,7 +8104,7 @@ async function renderDestinationPickerEditor() {
   });
 
   renderWithRouter(
-    "/pages/new?from=context",
+    initialEntry,
     <Route path="/workspaces/:workspaceId/context/pages/new" element={<RoutedPageEditor mode="create" />} />,
   );
 

@@ -122,10 +122,7 @@ describe("targetBreadcrumbs", () => {
     ]);
   });
 
-  // P10.1: an explicit workspace id switches an ANCESTOR that is itself a
-  // Context page to the canonical permalink — a folder ancestor has no page
-  // id to canonicalize and always keeps the query-param tree-target link.
-  it("links a Context-page ancestor to its canonical permalink when a workspace id is supplied", () => {
+  it("links a folder ancestor by node ID and a Context-page ancestor by page ID", () => {
     const ancestorPageId = "44444444-4444-4444-8444-444444444444";
     const pageAncestor = treeNode("ancestor-page-node", "Runbook Index", {
       target_id: ancestorPageId,
