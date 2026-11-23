@@ -1,5 +1,8 @@
+import argparse
 import json
 import sys
+from collections.abc import Sequence
+from pathlib import Path
 
 from backend.api.auth_sso import BINDING_COOKIE, EMAIL_CONFLICT_COOKIE
 from backend.api.auth_verification import email_binding_name
@@ -11,6 +14,7 @@ from backend.policy.rest_scopes import (
     REST_SESSION_ONLY_ROUTES,
     REST_SESSION_UNSCOPED_ROUTES,
 )
+from backend.scripts._schema_artifact import write_schema_artifact
 
 RouteKey = tuple[str, str]
 
@@ -312,9 +316,16 @@ def _pin_http_response_descriptions(schema: dict) -> None:
                     response["description"] = description
 
 
-def main() -> None:
-    json.dump(build_openapi_schema(), sys.stdout, indent=2, sort_keys=True)
-    sys.stdout.write("\n")
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Export the REST OpenAPI schema.")
+    parser.add_argument("--output", type=Path, help="Write the schema to this file.")
+    args = parser.parse_args(argv)
+
+    content = json.dumps(build_openapi_schema(), indent=2, sort_keys=True) + "\n"
+    if args.output is None:
+        sys.stdout.write(content)
+    else:
+        write_schema_artifact(args.output, content)
 
 
 if __name__ == "__main__":

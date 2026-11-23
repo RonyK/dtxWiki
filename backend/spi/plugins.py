@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from starlette.types import ASGIApp
 
     from backend.spi.auth import AuthMethodPlugin
+    from backend.spi.llm import LLMAdapterFactory
 
 
 type JobValue = (
@@ -172,6 +173,8 @@ class DtxwikiPlugin:
     worker_handlers: Callable[[], Mapping[str, JobHandler]] | None = None
     cli: typer.Typer | None = None
     migrations: PluginMigrations | None = None
+    # Adapter ids must start with "<name>."; see backend.spi.llm.
+    llm_adapters: Callable[[], Iterable[LLMAdapterFactory]] | None = None
 
 
 __all__ = [

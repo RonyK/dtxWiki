@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Important changes
+
+- The MCP tool contract adds the Ask warnings `llm_composer_retryable`,
+  `llm_answer_incomplete` and `llm_answer_refused`. Refresh cached tool catalogs
+  and result schemas.
+
+### LLM adapters
+
+- Add the public LLM adapter contract (`backend.spi.llm`, adapter SPI 1.0) and
+  the `DtxwikiPlugin.llm_adapters` hook. Core SPI is now 1.2, so a plugin that
+  pins `requires_spi="==1.1"` no longer loads.
+- Built-in adapters for Anthropic Messages, OpenAI Responses, OpenAI Chat
+  Completions (and compatible servers) and the Gemini API register the same
+  way plugin adapters do. Each makes at most one provider call per request and
+  reports a normalized result, token usage and error.
+- `DTXWIKI_LLM_PROVIDER` keeps its models, temperature and two retries.
+  `openai` sends `max_completion_tokens` instead of the deprecated
+  `max_tokens`.
+- Ask uses only a completed answer. It shows an evidence summary with
+  `llm_composer_retryable` for a temporary failure, `llm_answer_incomplete` for a
+  cut-off or unusable reply, `llm_answer_refused` for a declined or filtered
+  reply, or `llm_provider_unavailable` when an administrator needs to investigate.
+  Saved turns with `llm_composer_failed` display a generic fallback message.
+
 ## 0.3.2 — 2026-11-21
 
 ### Important changes

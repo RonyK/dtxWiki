@@ -1,52 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Literal
-
-MessageRole = Literal["system", "user", "assistant", "tool"]
-
-
-@dataclass(frozen=True)
-class LLMToolCall:
-    name: str
-    arguments: dict[str, Any] = field(default_factory=dict)
-    call_id: str | None = None
-
-
-@dataclass(frozen=True)
-class LLMMessage:
-    role: MessageRole
-    content: str
-    name: str | None = None
-    tool_call_id: str | None = None
-    tool_calls: list[LLMToolCall] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class LLMRequest:
-    messages: list[LLMMessage]
-    tools: list[dict[str, Any]] = field(default_factory=list)
-    model: str | None = None
-    temperature: float = 0.0
-    max_tokens: int = 1024
-    timeout: float | None = None
-
-
-@dataclass(frozen=True)
-class LLMResponse:
-    provider: str
-    model: str
-    content: str
-    tool_calls: list[LLMToolCall] = field(default_factory=list)
-    stop_reason: str | None = None
-    raw: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def truncated(self) -> bool:
-        """True when generation stopped because the max_tokens budget ran out
-        (Anthropic ``max_tokens``, OpenAI ``length``) rather than reaching a
-        natural end of turn - the content must not be presented as a complete
-        answer."""
-        return self.stop_reason in {"max_tokens", "length"}
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -84,33 +37,6 @@ class RerankResponse:
     model: str
     # Best-first; each ``index`` points back into the request documents.
     results: list[RerankResult]
-
-
-class LLMProviderError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        provider: str,
-        status_code: int | None = None,
-        error_type: str | None = None,
-        retryable: bool = False,
-    ) -> None:
-        super().__init__(message)
-        self.provider = provider
-        self.status_code = status_code
-        self.error_type = error_type
-        self.retryable = retryable
-
-
-class LLMProvider(ABC):
-    @abstractmethod
-    def chat(self, request: LLMRequest) -> LLMResponse:
-        raise NotImplementedError
-
-    @abstractmethod
-    async def async_chat(self, request: LLMRequest) -> LLMResponse:
-        raise NotImplementedError
 
 
 class EmbeddingProvider(ABC):

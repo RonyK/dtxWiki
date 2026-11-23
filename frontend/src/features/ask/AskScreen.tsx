@@ -1281,8 +1281,8 @@ function AskSessionRail({
   return (
     <aside className="ask-session-rail" aria-label={copy.rail.ariaLabel}>
       <div className="ask-session-rail-header">
-        <div className="ask-session-rail-heading">
-          <p className="eyebrow">{copy.rail.heading}</p>
+        <div className="panel-title-with-count">
+          <span>{copy.rail.heading}</span>
           <CountChip
             value={sessions.length}
             approxMore={hasMore}
@@ -1331,7 +1331,7 @@ function AskSessionRail({
             <div className="ask-session-list">
               {groupedSessions.map((group) => (
                 <div className="ask-session-date-group" key={group.bucketKey}>
-                  <div className="ask-session-date-divider">
+                  <div className="ask-session-date-label">
                     {formatGroupHeader(group.bucketKey, bucketTranslator(copy), askLocaleCode(locale))}
                   </div>
                   {group.sessions.map((session) => {
@@ -1345,19 +1345,16 @@ function AskSessionRail({
                         type="button"
                         onClick={() => onSelect(session.id)}
                       >
-                        <span className="ask-session-header">
-                          <span className="ask-session-title">
-                            {askDisplayTitle(session, copy)}
-                          </span>
-                          <span className="ask-session-turns">
-                            {formatTurns(session.turn_count, copy)}
-                          </span>
+                        <span className="ask-session-title">
+                          {askDisplayTitle(session, copy)}
                         </span>
                         <span className="ask-session-meta">
                           <RelativeTime
                             value={activityAt}
                             locale={askLocaleCode(locale)}
                           />
+                          <span aria-hidden="true">·</span>
+                          <span>{formatTurns(session.turn_count, copy)}</span>
                         </span>
                       </button>
                     );

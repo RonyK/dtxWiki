@@ -17,14 +17,13 @@ from sqlalchemy import select
 from backend.app.container import assemble
 from backend.app.main import create_app
 from backend.app.settings import Settings
-from backend.llm.registry import (
-    resolve_embedding_provider,
-    resolve_llm_provider,
-    resolve_reranker,
-)
+from backend.llm.adapter_registry import LLMAdapterRegistry
+from backend.llm.adapters import build_builtin_llm_adapters
+from backend.llm.legacy import resolve_llm_provider
+from backend.llm.registry import resolve_embedding_provider, resolve_reranker
 from backend.models.workspace import Workspace
 from backend.services.ask_service import (
-    LLM_COMPOSER_FAILED_WARNING,
+    LLM_COMPOSER_RETRYABLE_WARNING,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
 )
 from backend.tests.conftest import (
@@ -55,7 +54,9 @@ def _misconfigured_settings() -> Settings:
 
 
 def test_resolve_llm_provider_reports_reason_instead_of_raising():
-    provider, reason = resolve_llm_provider(_misconfigured_settings())
+    provider, reason = resolve_llm_provider(
+        _misconfigured_settings(), LLMAdapterRegistry(build_builtin_llm_adapters())
+    )
 
     assert provider is None
     assert reason and "API key" in reason
@@ -68,7 +69,9 @@ def test_resolve_llm_provider_reports_unknown_provider():
         llm_provider="not-a-provider",
     )
 
-    provider, reason = resolve_llm_provider(settings)
+    provider, reason = resolve_llm_provider(
+        settings, LLMAdapterRegistry(build_builtin_llm_adapters())
+    )
 
     assert provider is None
     assert reason and "DTXWIKI_LLM_PROVIDER" in reason
@@ -175,19 +178,21 @@ def test_ask_turn_answers_and_discloses_why_the_model_was_skipped(
 def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
     session_factory, page_service
 ):
-    """A transient provider error used to be `pass`-ed with no user signal."""
+    """A composer failure used to be `pass`-ed with no user signal. A declined
+    reply must reach the saved turn with its own warning, not a retry hint."""
 
-    from backend.llm.base import LLMProviderError
     from backend.schemas.ask import AskSessionCreate, AskTurnCreate
-    from backend.services.ask_service import AskService
+    from backend.services.ask_service import (
+        LLM_ANSWER_REFUSED_WARNING,
+        AskService,
+    )
+    from backend.spi.llm import CanonicalTextResult
 
-    class _FailingProvider:
-        def chat(self, request):
-            # `provider` is keyword-only with no default. Omitting it raised
-            # TypeError instead, which the service's generic `except Exception`
-            # arm also warns on -- so this test passed without ever exercising
-            # the LLMProviderError path it names.
-            raise LLMProviderError("anthropic API returned 401", provider="anthropic")
+    class _RefusingProvider:
+        def generate(self, **_kwargs):
+            # A wrong signature would raise TypeError instead, which the
+            # service's generic `except Exception` arm warns on differently.
+            return CanonicalTextResult(text="I can't help.", termination="refused")
 
     workspace_id = _workspace_id(session_factory)
     with session_factory.begin() as session:
@@ -201,7 +206,7 @@ def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
         actor_id=str(uuid4()),
         actor_provenance="browser_session",
     )
-    service = AskService(provider=_FailingProvider())
+    service = AskService(provider=_RefusingProvider())
 
     with session_factory.begin() as session:
         ask_session = service.create_session(
@@ -211,7 +216,7 @@ def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
             actor_kind="human",
             actor_id=str(uuid4()),
         )
-        _detail, warnings = service.create_turn(
+        detail, warnings = service.create_turn(
             session=session,
             workspace_id=workspace_id,
             ask_session_id=ask_session.id,
@@ -220,17 +225,22 @@ def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
             actor_id=str(uuid4()),
         )
 
-    assert LLM_COMPOSER_FAILED_WARNING in warnings
+    # The saved turn answers with the evidence summary, not the refusal, and
+    # keeps the warning: create_turn forwards only Ask's own codes.
+    assert "I can't help." not in detail.assistant_message
+    assert "Composer Failure Evidence" in detail.assistant_message
+    assert LLM_ANSWER_REFUSED_WARNING in warnings
+    assert LLM_ANSWER_REFUSED_WARNING in detail.warning_codes
 
 
 def test_an_unexpected_composer_exception_does_not_promise_a_retry(
     session_factory, page_service
 ):
-    """`llm_composer_failed` tells the user retrying may compose a full answer.
+    """`llm_composer_retryable` tells the user to try again later.
 
-    That is true of an upstream 401 or timeout and never true of a bug in our
-    own composer, so the two arms must not emit the same code — otherwise the
-    only advice a user gets for a server-side crash is one that cannot work.
+    That fits an upstream timeout or overload and never a bug in our own
+    composer, so the two arms must not emit the same code — otherwise the only
+    advice a user gets for a server-side crash is one that cannot work.
     """
 
     from backend.schemas.ask import AskSessionCreate, AskTurnCreate
@@ -240,7 +250,7 @@ def test_an_unexpected_composer_exception_does_not_promise_a_retry(
     )
 
     class _BuggyProvider:
-        def chat(self, request):
+        def generate(self, **_kwargs):
             raise TypeError("composer bug, not an upstream failure")
 
     workspace_id = _workspace_id(session_factory)
@@ -275,7 +285,7 @@ def test_an_unexpected_composer_exception_does_not_promise_a_retry(
         )
 
     assert LLM_PROVIDER_UNAVAILABLE_WARNING in warnings
-    assert LLM_COMPOSER_FAILED_WARNING not in warnings
+    assert LLM_COMPOSER_RETRYABLE_WARNING not in warnings
 
 
 def test_a_broken_embedding_config_disables_semantic_indexing_instead_of_the_job(

@@ -452,7 +452,11 @@ WARNING_CODES = (
     # Ask answer-pipeline degradation. The answer is still served from the
     # deterministic evidence pack; these say why it is not the composed one.
     "llm_provider_unavailable",
+    # Retained for stored Ask turns whose original failure cause is unknown.
     "llm_composer_failed",
+    "llm_composer_retryable",
+    "llm_answer_incomplete",
+    "llm_answer_refused",
     # One or more workspace shards could not be reached while building a
     # cross-workspace admin job listing/summary, so the result is a partial
     # one -- the reachable workspaces' data, not every workspace's.

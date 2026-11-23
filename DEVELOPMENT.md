@@ -132,8 +132,9 @@ export DTXWIKI_DATABASE_URL="sqlite+pysqlite:///${DTXWIKI_DEMO_DIR}/dtxwiki-demo
 외부 배포 패키지는 `dtxwiki.plugins` entry point로 `DtxwikiPlugin` 인스턴스 또는
 이를 반환하는 인자 없는 factory를 내보냅니다. 이름은 소문자로 시작하는
 `[a-z][a-z0-9_]*` 형식의 최대 47자이며, 배포자가 `DTXWIKI_PLUGINS`에서 명시적으로 선택해야
-로드됩니다. core SPI는 `backend.spi.SPI_VERSION = "1.1"`, 로그인 method SPI는
-`backend.spi.auth.AUTH_METHOD_SPI_VERSION = "1.0"`입니다. `requires_core`와
+로드됩니다. core SPI는 `backend.spi.SPI_VERSION = "1.2"`, 로그인 method SPI는
+`backend.spi.auth.AUTH_METHOD_SPI_VERSION = "1.0"`, LLM adapter SPI는
+`backend.spi.llm.LLM_ADAPTER_SPI_VERSION = "1.0"`입니다. `requires_core`와
 `requires_spi`는 각각 PEP 440 version specifier입니다.
 
 예를 들어 private 패키지의 `pyproject.toml`에 다음 entry point를 등록합니다.
@@ -243,6 +244,24 @@ ack·재시도 한도와 지연을 관리합니다. 작업은 중복 전달에 �
   `workspace_id`가 있는 테이블은 시작 시 거부합니다. 비활성화된 플러그인의
   데이터까지 blocker 집계와 workspace 삭제에 연결하는 수명주기가 필요하기
   때문입니다.
+- `llm_adapters()`: `backend.spi.llm.LLMAdapterFactory` 목록. 아래 LLM adapter
+  계약을 따릅니다.
+
+LLM adapter 하나는 API 규격 하나를 구현합니다. `adapter_id`는 `<플러그인 이름>.<규격>`
+형식이고 `builtin.` namespace는 core 전용입니다. `descriptor`는 구현 version, 표시
+이름, 비밀이 아닌 연결 설정과 입력 전용 credential의 JSON Schema, 인코딩할 수 있는
+공통 옵션(`COMMON_OPTIONS`)과 기본 HTTPS endpoint를 선언합니다. schema는 Draft 2020-12
+형식이며 `$ref`·`$id`·anchor 없이 자기 완결적이어야 합니다. `create(connection,
+transport)`가 만든 `TextGenerationPort.generate()`는 provider를 최대 한 번 호출하고
+응답을 `CanonicalTextResult`(종료 유형·usage)로, 실패를 `LLMAdapterError`(code·delivery)로
+정규화합니다. 요청이 설정하지 않은 옵션은 보내지 않고, provider 오류 문구는 예외에
+담지 않습니다. 재시도·endpoint 정책·proxy·TLS와 모델 capability 검사는 core가 맡습니다.
+adapter는 주입된 transport로만 통신하며 연결의 base URL 밖으로 요청하거나 URL에
+credential을 넣을 수 없습니다(query parameter는 허용). 웹 앱은 시작할 때 registry를
+검증하고, worker와 CLI는 LLM adapter를 만들지 않습니다.
+`backend.testing.spi_conformance.llm.assert_llm_adapter_contract`에 플러그인 이름과
+provider 응답 fixture를 넣어 계약을 확인합니다. 현재 Ask는 `DTXWIKI_LLM_PROVIDER`로
+고른 내장 adapter만 사용합니다.
 
 플러그인 migration은 core head 적용 뒤 단일 DB에 실행되며 core가 제공하는
 Alembic 환경과 별도 `alembic_version_<name>`을 사용합니다. 플러그인의 `env.py`는

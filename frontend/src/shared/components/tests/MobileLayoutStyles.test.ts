@@ -389,12 +389,12 @@ describe("mobile layout regression styles", () => {
     // .ask-session-rail-body's clientWidth into the main content, clipping
     // the title mid-word instead of eliding it via .ask-session-title's
     // text-overflow:ellipsis. min-width:0 at every level of the chain (rail,
-    // list grid, button grid item, header flex row) is required for the
-    // ellipsis to ever take effect. Matches .tree-rail's own min-width:0.
+    // list grid, button grid item, title) is required for the ellipsis to
+    // ever take effect. Matches .tree-rail's own min-width:0.
     expect(ruleBody(".ask-session-rail", knowledgeStyles)).toContain("min-width: 0");
     expect(ruleBody(".ask-session-list", knowledgeStyles)).toContain("min-width: 0");
     expect(ruleBody(".ask-session-list button", knowledgeStyles)).toContain("min-width: 0");
-    expect(ruleBody(".ask-session-header", knowledgeStyles)).toContain("min-width: 0");
+    expect(ruleBody(".ask-session-title", knowledgeStyles)).toContain("min-width: 0");
   });
 
   it("lets the Ask screen's own composer-clearance rule outrank the shared mobile-action reservation", () => {

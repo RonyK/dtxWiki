@@ -115,6 +115,15 @@ test("Context activity shows changes, decisions and exact links", async ({ page,
   await expect(submitRows).toHaveCount(2);
   await expect(secondSubmitRow).toHaveCount(1);
   await expect(secondSubmitRow.getByRole('link',{name:'해당 리뷰 보기'})).toHaveAttribute('href',workspaceUrl(wid, `review/${secondSubmitted.review_item_id}`));
+
+  // Exercise a two-digit relative time regardless of how fast the events were seeded.
+  const renameTime = renamed.locator('.context-event-time');
+  const recordedAt = await renameTime.getAttribute('datetime') ?? '';
+  const renameTimestamp = Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/.test(recordedAt) ? recordedAt : `${recordedAt}Z`);
+  expect(Number.isFinite(renameTimestamp), 'rename has a recorded timestamp').toBeTruthy();
+  await page.clock.setFixedTime(renameTimestamp + 15_000);
+  await page.reload();
+  await expect(renameTime).toHaveText('15초 전');
   await page.setViewportSize({width:1440,height:1900});
   await page.locator('.context-reader').screenshot({path:`${out}/implemented-desktop.png`});
   for(const width of [390,320]){
@@ -127,7 +136,8 @@ test("Context activity shows changes, decisions and exact links", async ({ page,
     }));
     expect(metrics.every(m=>m.actorRight&&m.overflow===0)).toBeTruthy();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBe(0);
-    if(width===390)await page.locator('.context-reader').screenshot({path:`${out}/implemented-mobile.png`});
+    const screenshot = width === 390 ? 'implemented-mobile.png' : 'implemented-mobile-320.png';
+    await page.locator('.context-reader').screenshot({path:`${out}/${screenshot}`});
   }
   const author=moved.getByRole('button',{name:/전체 이름/});
   await author.click();

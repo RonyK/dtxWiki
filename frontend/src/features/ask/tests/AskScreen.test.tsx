@@ -701,7 +701,7 @@ describe("AskScreen", () => {
     expect(screen.queryByText("raw warning req-secret")).toBeNull();
   });
 
-  it("renders search-plane warnings from the shared catalog in Korean", async () => {
+  it("renders search and saved composer warnings from the shared catalog in Korean", async () => {
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return {
@@ -727,7 +727,14 @@ describe("AskScreen", () => {
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
         return {
           data: sessionDetail([
-            askTurn({ warning_codes: ["keyword_lane_unavailable"] }),
+            askTurn({
+              warning_codes: ["keyword_lane_unavailable", "llm_composer_failed"],
+            }),
+            askTurn({
+              id: "turn-2",
+              turn_no: 2,
+              warning_codes: ["llm_composer_retryable"],
+            }),
           ]),
         };
       }
@@ -746,6 +753,14 @@ describe("AskScreen", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("keyword lane unavailable")).toBeNull();
+    expect(
+      screen.getByText("답변 모델의 응답을 사용하지 못해 근거 요약을 표시했습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "답변 모델이 이번에 답하지 못해 근거 요약으로 답했습니다. 잠시 후 다시 시도하고, 계속 실패하면 관리자에게 문의하세요.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("discards a stale Load more page when the list reloads mid-flight", async () => {

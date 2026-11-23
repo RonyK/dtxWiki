@@ -87,6 +87,7 @@ from backend.schemas.mcp.review_tools import (
     ListRequestedChangesOutput,
 )
 from backend.schemas.mcp.upload_tools import UploadImageInput, UploadImageToolOutput
+from backend.scripts._schema_artifact import write_schema_artifact
 
 # Anchored to the directory that holds the `backend` package, not to the
 # process cwd: main() deletes stale contracts, and a cwd-relative target would
@@ -254,9 +255,9 @@ def main(schema_dir: Path | None = None) -> None:
         )
     schemas = build_mcp_schemas()
     for tool_name, schema in schemas.items():
-        (target / f"{tool_name}.json").write_text(
+        write_schema_artifact(
+            target / f"{tool_name}.json",
             json.dumps(schema, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
         )
     # A removed tool leaves its JSON behind untouched, so the drift check in
     # `make verify-generated-schemas` sees no change and certifies a directory
@@ -266,7 +267,7 @@ def main(schema_dir: Path | None = None) -> None:
     # (pinned by test_mcp_schema_export_prunes_only_after_the_writes_succeed).
     for artifact in sorted(target.glob("*.json")):
         if artifact.stem not in schemas:
-            artifact.unlink()
+            artifact.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

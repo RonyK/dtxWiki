@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from backend.app.settings import Settings
+    from backend.spi.llm import LLMAdapterFactory
 
 # PostgreSQL identifiers have a 63-byte limit; the version-table prefix uses
 # 16 bytes, leaving 47 ASCII bytes for a collision-free plugin name.
@@ -51,6 +52,15 @@ class PluginRegistry:
             if plugin.auth_methods is not None
             for method in plugin.auth_methods()
         )
+
+    def llm_adapters(self) -> dict[str, tuple[LLMAdapterFactory, ...]]:
+        """Contributed LLM adapters by plugin name, which is their namespace."""
+
+        return {
+            plugin.name: tuple(plugin.llm_adapters())
+            for plugin in self.plugins
+            if plugin.llm_adapters is not None
+        }
 
     def capabilities(self) -> tuple[str, ...]:
         return tuple(plugin.name for plugin in self.plugins)

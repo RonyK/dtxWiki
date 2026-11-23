@@ -271,6 +271,9 @@ def create_app(
     # readiness: a process that cannot land workspace writes should never
     # reach the point of accepting them.
     check_storage_topology(resolved_container.db)
+    # Validate plugin LLM adapters before serving. Workers and CLI commands
+    # load the same plugins but never build adapters, so they are not blocked.
+    _ = resolved_container.services.llm_adapter_registry
     app = DtxwikiApp(
         title=resolved_settings.app_name,
         version=resolved_settings.app_version,

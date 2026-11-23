@@ -835,6 +835,17 @@ class ServiceRegistry:
         return LibrarySemanticOverlayService(job_queue=self.job_queue)
 
     @cached_property
+    def llm_adapter_registry(self):
+        from backend.app.plugins import load_plugins
+        from backend.llm.adapter_registry import LLMAdapterRegistry
+        from backend.llm.adapters import build_builtin_llm_adapters
+
+        return LLMAdapterRegistry(
+            build_builtin_llm_adapters(),
+            load_plugins(self.settings).llm_adapters(),
+        )
+
+    @cached_property
     def library_preview_provider_registry(self):
         from backend.services.preview_provider_registry import (
             PreviewProviderRegistry,
@@ -1227,7 +1238,7 @@ class AppContainer:
 
     def get_ask_service(self):
         if self.ask_service is None:
-            from backend.llm.registry import resolve_llm_provider
+            from backend.llm.legacy import resolve_llm_provider
             from backend.services.ask_service import AskService
 
             # A bad DTXWIKI_LLM_PROVIDER setting must not 500 the Ask surface:
@@ -1235,7 +1246,9 @@ class AppContainer:
             # escapes every handler's try/except and takes Ask down entirely.
             # Degrade to the deterministic evidence pack and carry the reason so
             # the user is told why the answer style changed.
-            provider, reason = resolve_llm_provider(self.settings)
+            provider, reason = resolve_llm_provider(
+                self.settings, self.services.llm_adapter_registry
+            )
             if reason:
                 # Say it once server-side. The UI tells the user to ask an admin
                 # to check the LLM settings, and before the degrade this reason

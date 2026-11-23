@@ -1,7 +1,9 @@
 import logging
 import re
 from collections import Counter
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from types import MappingProxyType
 from uuid import UUID
 
 from sqlalchemy import func, select, tuple_
@@ -12,12 +14,7 @@ from backend.domain.input_policy import (
     fit_generated_title,
     normalize_ask_user_message,
 )
-from backend.llm.base import (
-    LLMMessage,
-    LLMProvider,
-    LLMProviderError,
-    LLMRequest,
-)
+from backend.llm.generation import TextGenerator
 from backend.models.ask import (
     AskSession,
     AskTurn,
@@ -70,6 +67,7 @@ from backend.services.tree_service import (
     create_tree_node,
     resolve_tree_parent,
 )
+from backend.spi.llm import LLMAdapterError, TextMessage
 from backend.utils.uuid import parse_uuid_or_none
 
 USER_MESSAGE_MAX_CHARS = 8000
@@ -84,16 +82,41 @@ ASK_FORWARDABLE_WARNINGS = frozenset(
 )
 # Codes Ask raises about its OWN answer pipeline rather than about a search
 # lane. They travel back on the same list so they reach the turn unfiltered.
+# The answer-model warnings tell the reader when to contact an administrator,
+# when to try again, and when the model returned an unusable or declined reply.
 LLM_PROVIDER_UNAVAILABLE_WARNING = "llm_provider_unavailable"
-LLM_COMPOSER_FAILED_WARNING = "llm_composer_failed"
+LLM_COMPOSER_RETRYABLE_WARNING = "llm_composer_retryable"
+LLM_ANSWER_INCOMPLETE_WARNING = "llm_answer_incomplete"
+LLM_ANSWER_REFUSED_WARNING = "llm_answer_refused"
 # The workspace asked for a retrieval mode this deployment cannot serve. Already
 # registered in WARNING_CODES with no producer -- reserved for exactly this.
 UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING = "unsupported_retrieval_mode_fallback"
 ASK_SELF_WARNINGS = frozenset(
     {
         LLM_PROVIDER_UNAVAILABLE_WARNING,
-        LLM_COMPOSER_FAILED_WARNING,
+        LLM_COMPOSER_RETRYABLE_WARNING,
+        LLM_ANSWER_INCOMPLETE_WARNING,
+        LLM_ANSWER_REFUSED_WARNING,
         UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING,
+    }
+)
+# A reply that is not a completed answer, by how it ended. Anything else
+# (including completed but blank) is incomplete.
+_TERMINATION_WARNINGS: Mapping[str, str] = MappingProxyType(
+    {
+        "refused": LLM_ANSWER_REFUSED_WARNING,
+        "blocked": LLM_ANSWER_REFUSED_WARNING,
+    }
+)
+# A failed call, by its normalized code. Codes not listed need an
+# administrator (credentials, permissions, model, quota, request shape).
+_ERROR_WARNINGS: Mapping[str, str] = MappingProxyType(
+    {
+        "rate_limited": LLM_COMPOSER_RETRYABLE_WARNING,
+        "provider_unavailable": LLM_COMPOSER_RETRYABLE_WARNING,
+        "timeout": LLM_COMPOSER_RETRYABLE_WARNING,
+        "network_error": LLM_COMPOSER_RETRYABLE_WARNING,
+        "invalid_response": LLM_ANSWER_INCOMPLETE_WARNING,
     }
 )
 PROMPT_INJECTION_PATTERNS = (
@@ -187,7 +210,7 @@ class AskService:
         search_service: SearchService | None = None,
         audit_service: AuditService | None = None,
         tree_read_service: TreeReadService | None = None,
-        provider: LLMProvider | None = None,
+        provider: TextGenerator | None = None,
         graph_service: GraphService | None = None,
         provider_unavailable_reason: str | None = None,
     ) -> None:
@@ -637,36 +660,41 @@ class AskService:
             search_warnings = [*search_warnings, LLM_PROVIDER_UNAVAILABLE_WARNING]
         if self.provider is not None:
             try:
-                response = self.provider.chat(
-                    LLMRequest(
-                        messages=[
-                            LLMMessage(role="system", content=_COMPOSER_SYSTEM),
-                            LLMMessage(
-                                role="user",
-                                content=(f"{question}\n\n[Evidence pack]\n{pack_text}"),
-                            ),
-                        ],
-                        max_tokens=1024,
-                    )
+                result = self.provider.generate(
+                    system=_COMPOSER_SYSTEM,
+                    messages=(
+                        TextMessage(
+                            role="user",
+                            text=f"{question}\n\n[Evidence pack]\n{pack_text}",
+                        ),
+                    ),
+                    max_output_tokens=1024,
                 )
-                if not response.truncated and response.content.strip():
-                    answer = response.content.strip()
+                # Only a completed answer replaces the pack: truncated,
+                # refused or filtered output is not an answer.
+                if result.termination == "completed" and result.text.strip():
+                    answer = result.text.strip()
                 else:
                     search_warnings = [
                         *search_warnings,
-                        LLM_COMPOSER_FAILED_WARNING,
+                        _TERMINATION_WARNINGS.get(
+                            result.termination, LLM_ANSWER_INCOMPLETE_WARNING
+                        ),
                     ]
-            except LLMProviderError:
-                # Transient upstream failure (auth, 5xx, timeout). The pack is a
-                # valid answer, but the user must know it is not the composed one.
-                logger.warning("Ask composer call failed; using deterministic pack")
-                search_warnings = [*search_warnings, LLM_COMPOSER_FAILED_WARNING]
+            except LLMAdapterError as exc:
+                # The pack is a valid answer, but the user must know it is not
+                # the composed one, and whether retrying or an admin can help.
+                logger.warning(
+                    "Ask composer call failed (%s); using deterministic pack",
+                    exc.code,
+                )
+                search_warnings = [
+                    *search_warnings,
+                    _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING),
+                ]
             except Exception:
-                # Not LLM_COMPOSER_FAILED_WARNING: that one tells the user
-                # "retrying may compose a full answer", which is true of an
-                # upstream hiccup and never true of a bug in our own composer.
-                # An unexpected exception here is the server's problem, so say
-                # the thing that is actionable — ask an admin.
+                # Unexpected composer errors need an administrator to inspect
+                # the server log.
                 logger.warning(
                     "Ask composer failed unexpectedly; using deterministic pack",
                     exc_info=True,
