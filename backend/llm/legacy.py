@@ -58,8 +58,7 @@ _CAPABILITIES = LLMModelCapabilities(options=frozenset({"temperature"}))
 _TEMPERATURE = 0.0
 _TIMEOUT_SECONDS = 120.0
 
-# The statuses this path has always retried, plus status-less transport
-# failures. Kept as statuses so normalization changes cannot alter it.
+# HTTP error statuses this path has always retried.
 RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504, 529})
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_RETRY_BASE_DELAY = 0.5
@@ -108,9 +107,11 @@ class RetryingTextGeneration:
 
 
 def _retryable(error: LLMAdapterError) -> bool:
-    if error.status_code is None:
+    status_code = error.status_code
+    # A successful status confirms delivery even if the body read failed.
+    if status_code is None or 200 <= status_code < 300:
         return error.code in ("timeout", "network_error")
-    return error.status_code in RETRYABLE_STATUS_CODES
+    return status_code in RETRYABLE_STATUS_CODES
 
 
 def build_llm_provider(

@@ -209,6 +209,14 @@ def test_legacy_retry_policy_keeps_its_statuses_and_backoff():
         ([failure("provider_unavailable", 501)], 1, [], "provider_unavailable"),
         # A status-less transport timeout is retried until the budget runs out.
         ([failure("timeout")] * 3, 3, [0.5, 1.0], "timeout"),
+        # A successful HTTP status only proves headers arrived. Legacy Ask
+        # retries interrupted body reads within the same budget.
+        (
+            [failure("timeout", 200), failure("network_error", 200), ok],
+            3,
+            [0.5, 1.0],
+            ok,
+        ),
     ):
         port = ScriptedPort(outcomes)
         sleeps: list[float] = []
