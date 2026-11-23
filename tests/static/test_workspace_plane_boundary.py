@@ -470,6 +470,11 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "account_inbox_entry, a control-plane table keyed by the authenticated "
         "user. The workspace inbox routes use WorkspaceSessionFactoryDep."
     ),
+    "backend/api/llm_connections.py": (
+        "The personal LLM routes use the authenticated user's control-plane "
+        "connection records. The workspace routes use WorkspaceSessionFactoryDep "
+        "for workspace-owned records after the owner role check."
+    ),
     "backend/api/oauth.py": (
         "MIXED. Every route delegates through oauth_service.py, which reads "
         "OAuthClient/OAuthGrant/User (identity-plane) on this session. The "

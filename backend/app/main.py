@@ -25,6 +25,7 @@ from backend.api.inbox import router as inbox_router
 from backend.api.library_preview import router as library_preview_router
 from backend.api.library_semantic import router as library_semantic_router
 from backend.api.link_preview import router as link_preview_router
+from backend.api.llm_connections import router as llm_connections_router
 from backend.api.llms_txt import router as llms_txt_router
 from backend.api.mcp_apps import router as mcp_apps_router
 from backend.api.mcp_chats import router as mcp_chats_router
@@ -386,6 +387,7 @@ def create_app(
     include_shared_router(app, capabilities_router, prefix="/api/v1")
     include_shared_router(app, admin_router, prefix="/api/v1")
     include_shared_router(app, users_router, prefix="/api/v1")
+    include_shared_router(app, llm_connections_router, prefix="/api/v1")
     include_shared_router(app, inbox_router, prefix="/api/v1")
     include_shared_router(app, workspace_members_router, prefix="/api/v1")
     include_shared_router(app, workspace_access_router, prefix="/api/v1")

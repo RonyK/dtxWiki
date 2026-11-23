@@ -495,6 +495,10 @@ class ActivityService:
             AuditEvent.workspace_id == workspace_id,
             not_(_audit_only_observation_event_clause()),
         )
+        if actor is None or actor.role != "owner":
+            statement = statement.where(
+                AuditEvent.target_kind != "workspace_llm_connection"
+            )
         if item_ids is not None:
             statement = statement.where(AuditEvent.id.in_(item_ids))
         if since is not None:

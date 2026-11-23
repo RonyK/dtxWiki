@@ -124,6 +124,12 @@ OPENAPI_ACCOUNT_REAUTHENTICATION_ROUTES: set[RouteKey] = {
     ("POST", "/api/v1/auth/password/set"),
     # Accounts without a password confirm their withdrawal this way.
     ("DELETE", "/api/v1/users/me"),
+    ("POST", "/api/v1/me/llm-connections"),
+    ("PATCH", "/api/v1/me/llm-connections/{connection_id}"),
+    ("DELETE", "/api/v1/me/llm-connections/{connection_id}"),
+    ("POST", "/api/v1/workspaces/{workspace_id}/llm-connections"),
+    ("PATCH", "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}"),
+    ("DELETE", "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}"),
 }
 
 OPENAPI_LOGIN_TRANSACTION_ROUTES: set[RouteKey] = {

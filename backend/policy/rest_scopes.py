@@ -500,6 +500,16 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
 # callers still pass through workspace/role checks below. DEC-018 keeps
 # AgentPage activation out of MCP/PAT/OAuth scope surfaces entirely.
 REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
+    ("GET", "/api/v1/me/llm-connections"),
+    ("POST", "/api/v1/me/llm-connections"),
+    ("GET", "/api/v1/me/llm-connections/{connection_id}"),
+    ("PATCH", "/api/v1/me/llm-connections/{connection_id}"),
+    ("DELETE", "/api/v1/me/llm-connections/{connection_id}"),
+    ("GET", "/api/v1/workspaces/{workspace_id}/llm-connections"),
+    ("POST", "/api/v1/workspaces/{workspace_id}/llm-connections"),
+    ("GET", "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}"),
+    ("PATCH", "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}"),
+    ("DELETE", "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}"),
     ("GET", "/api/v1/users/me/deletion-preview"),
     ("DELETE", "/api/v1/users/me"),
     ("PATCH", "/api/v1/users/me/default-workspace"),

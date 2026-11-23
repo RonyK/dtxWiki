@@ -846,6 +846,20 @@ class ServiceRegistry:
         )
 
     @cached_property
+    def llm_connections(self):
+        from backend.llm.credential_vault import FileCredentialVault
+        from backend.services.llm_connection_service import LLMConnectionService
+
+        settings = self.settings or Settings()
+        return LLMConnectionService(
+            registry=self.llm_adapter_registry,
+            vault=FileCredentialVault(
+                keyring_file=settings.llm_credential_keyring_file,
+                solo_local=settings.app_mode == "solo_local",
+            ),
+        )
+
+    @cached_property
     def library_preview_provider_registry(self):
         from backend.services.preview_provider_registry import (
             PreviewProviderRegistry,

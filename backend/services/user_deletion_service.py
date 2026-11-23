@@ -48,6 +48,7 @@ from backend.repositories.workspace_scoped import (
     update_in_workspace,
 )
 from backend.services.audit_service import AuditService
+from backend.services.auth.account_credentials import retire_user_llm_connections
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.inbox.recipients import retire_workspace_recipient
@@ -555,6 +556,13 @@ class UserDeletionService:
                     workspace.account_deletion_user_id = user.id
                 WorkspaceMembershipService._sync_owner_projection(session, workspace)
             self._revoke_access(session, user, requested_at)
+            retire_user_llm_connections(
+                session,
+                user_id=user.id,
+                now=requested_at,
+                actor_kind="human",
+                actor_id=str(actor_user_id),
+            )
             self.audit_service.emit(
                 session=session,
                 workspace_id=None,

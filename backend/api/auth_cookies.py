@@ -6,8 +6,13 @@ from backend.api.cookie_budget import set_bounded_cookie
 from backend.app.settings import Settings
 
 ADMIN_PROOF_PATHS = ("/api/v1/admin", "/api/v1/auth/verification")
-# Self-withdrawal from an account without a password accepts the account proof.
-ACCOUNT_PROOF_PATHS = ("/api/v1/auth", "/api/v1/users/me")
+ACCOUNT_PROOF_PATHS = (
+    "/api/v1/auth",
+    "/api/v1/users/me",
+    "/api/v1/me/llm-connections",
+    # The workspace ID is a dynamic path segment before /llm-connections.
+    "/api/v1/workspaces",
+)
 
 
 def account_reauthentication_cookie_name(settings: Settings) -> str:

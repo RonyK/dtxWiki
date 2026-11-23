@@ -89,6 +89,30 @@ class LLMAdapterRegistry:
     def descriptors(self) -> tuple[LLMAdapterDescriptor, ...]:
         return tuple(self.descriptor(key) for key in sorted(self._registrations))
 
+    def validate_registration(
+        self,
+        adapter_id: str,
+        *,
+        config: Mapping[str, object],
+        credential: Mapping[str, str] | None,
+        model_options: Iterable[str],
+    ) -> str:
+        """Validate stored input and resolve the adapter's default endpoint."""
+        registration = self._registration(adapter_id)
+        descriptor = registration.descriptor
+        # Provider options are returned as metadata. Credential fields must
+        # enter storage only through the write-only vault input.
+        credential_fields = descriptor.credential_schema.get("properties", {})
+        if _contains_write_only(descriptor.config_schema) or (
+            isinstance(credential_fields, Mapping)
+            and config.keys() & credential_fields.keys()
+        ):
+            raise LLMAdapterRegistryError(
+                f"LLM adapter {adapter_id!r} cannot expose secret configuration fields"
+            )
+        self._validate_fields(registration, config, credential, model_options)
+        return self._resolve_endpoint(registration, None).url
+
     def create(
         self,
         adapter_id: str,
@@ -109,25 +133,8 @@ class LLMAdapterRegistry:
         """
 
         registration = self._registration(adapter_id)
-        if not capabilities.options <= registration.descriptor.options:
-            raise LLMAdapterRegistryError(
-                f"LLM adapter {adapter_id!r} cannot encode the model's options"
-            )
-        for validator, instance, name in (
-            (registration.config, config, "config"),
-            (registration.credential, credential, "credential"),
-        ):
-            if not validator.is_valid(dict(instance)):
-                raise LLMAdapterRegistryError(
-                    f"LLM adapter {adapter_id!r} rejected the {name}"
-                )
-        endpoint = _Endpoint.parse(
-            (base_url or registration.descriptor.default_base_url or "").rstrip("/")
-        )
-        if endpoint is None:
-            raise LLMAdapterRegistryError(
-                f"LLM adapter {adapter_id!r} needs an https base URL"
-            )
+        self._validate_fields(registration, config, credential, capabilities.options)
+        endpoint = self._resolve_endpoint(registration, base_url)
         connection = LLMConnection(
             base_url=endpoint.url,
             config=MappingProxyType(copy.deepcopy(dict(config))),
@@ -142,6 +149,41 @@ class LLMAdapterRegistry:
                 f"LLM adapter {adapter_id!r} did not build a text generation port"
             )
         return _GuardedPort(port, model, capabilities, secrets=secrets)
+
+    @staticmethod
+    def _validate_fields(
+        registration: _Registration,
+        config: Mapping[str, object],
+        credential: Mapping[str, str] | None,
+        model_options: Iterable[str],
+    ) -> None:
+        adapter_id = registration.descriptor.adapter_id
+        if not set(model_options) <= registration.descriptor.options:
+            raise LLMAdapterRegistryError(
+                f"LLM adapter {adapter_id!r} cannot encode the model's options"
+            )
+        for validator, instance, name in (
+            (registration.config, config, "config"),
+            (registration.credential, credential, "credential"),
+        ):
+            if instance is not None and not validator.is_valid(dict(instance)):
+                raise LLMAdapterRegistryError(
+                    f"LLM adapter {adapter_id!r} rejected the {name}"
+                )
+
+    @staticmethod
+    def _resolve_endpoint(
+        registration: _Registration, base_url: str | None
+    ) -> _Endpoint:
+        endpoint = _Endpoint.parse(
+            (base_url or registration.descriptor.default_base_url or "").rstrip("/")
+        )
+        if endpoint is None:
+            raise LLMAdapterRegistryError(
+                f"LLM adapter {registration.descriptor.adapter_id!r} "
+                "needs an https base URL"
+            )
+        return endpoint
 
     def _registration(self, adapter_id: str) -> _Registration:
         try:
@@ -398,6 +440,16 @@ def _uses_references(schema: object) -> bool:
         )
     if isinstance(schema, list):
         return any(_uses_references(item) for item in schema)
+    return False
+
+
+def _contains_write_only(schema: object) -> bool:
+    if isinstance(schema, Mapping):
+        return schema.get("writeOnly") is True or any(
+            _contains_write_only(value) for value in schema.values()
+        )
+    if isinstance(schema, list):
+        return any(_contains_write_only(item) for item in schema)
     return False
 
 

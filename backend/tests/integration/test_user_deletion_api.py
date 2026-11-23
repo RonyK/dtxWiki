@@ -12,6 +12,7 @@ from backend.models import (
     AccountInboxEntry,
     ApiToken,
     AppMetadata,
+    AuditEvent,
     ChangeSet,
     ContextMediaUsage,
     ContextPage,
@@ -20,10 +21,12 @@ from backend.models import (
     MCPClient,
     User,
     UserFavorite,
+    UserLLMConnection,
     Workspace,
     WorkspaceCredentialGrant,
     WorkspaceInboxEntry,
     WorkspaceInboxRecipient,
+    WorkspaceLLMConnection,
     WorkspaceMembership,
     WorkspaceTreeNode,
 )
@@ -110,6 +113,33 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         shared = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         shared_id = shared.id
         shared_title = shared.title
+        connection_fields = {
+            "name": "Example",
+            "adapter_id": "builtin.openai",
+            "adapter_implementation_version": "1",
+            "config_schema_version": 1,
+            "endpoint_profile": {},
+            "active_credential": {"ciphertext": "active fixture"},
+            "pending_credential": {"ciphertext": "pending fixture"},
+        }
+        target_connection_id, dormant_connection_id, shared_connection_id = (
+            uuid4() for _ in range(3)
+        )
+        session.add_all(
+            [
+                UserLLMConnection(
+                    id=target_connection_id, user_id=target.user_id, **connection_fields
+                ),
+                UserLLMConnection(
+                    id=dormant_connection_id,
+                    user_id=dormant.user_id,
+                    **connection_fields,
+                ),
+                WorkspaceLLMConnection(
+                    id=shared_connection_id, workspace_id=shared_id, **connection_fields
+                ),
+            ]
+        )
         client_id = session.scalar(
             select(MCPClient.id).where(MCPClient.workspace_id == shared_id)
         )
@@ -396,6 +426,10 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             == 200
         )
     assert users.deactivate_user(email=dormant.email) is True
+    with factory() as session:
+        dormant_connection = session.get(UserLLMConnection, dormant_connection_id)
+        assert dormant_connection.active_credential is None
+        assert dormant_connection.pending_credential is None
     png = bytes.fromhex(
         "89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c"
         "020000000b4944415478da6364f80f00010501012718e3660000000049454e44"
@@ -540,6 +574,18 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             )
         )
         assert replica.revoked_at is not None
+        target_connection = session.get(UserLLMConnection, target_connection_id)
+        assert (target_connection.status, target_connection.revision) == ("disabled", 2)
+        assert target_connection.active_credential is None
+        assert target_connection.pending_credential is None
+        audit = session.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "llm.connection.disabled",
+                AuditEvent.target_id == target_connection_id,
+            )
+        )
+        assert audit.workspace_id is None
+        assert audit.payload == {"status": "disabled", "revision": 2}
 
     # Restoring returns the prior status; the user signs in again and may
     # request deletion anew.
@@ -552,6 +598,10 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     }
     with factory() as session:
         assert session.get(Workspace, personal_id).account_deletion_user_id is None
+        assert (
+            session.get(UserLLMConnection, target_connection_id).active_credential
+            is None
+        )
     assert (
         user_client.post(
             "/api/v1/auth/login",
@@ -764,6 +814,10 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     assert service.purge_due(blob_store_provider=provider, now=deadline) == 1
     with factory() as session:
         assert session.get(User, target.user_id) is None
+        assert session.get(UserLLMConnection, target_connection_id) is None
+        assert session.get(
+            WorkspaceLLMConnection, shared_connection_id
+        ).active_credential == {"ciphertext": "active fixture"}
         assert session.get(User, admin.user_id) is not None
         # The author's name stays on what they wrote after the account is gone.
         assert (

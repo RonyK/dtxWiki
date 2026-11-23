@@ -82,6 +82,7 @@ GLOBAL_TABLES = frozenset(
         "server_admins",
         "users",
         "user_identities",
+        "user_llm_connection",
         "workspace",
     }
 )
@@ -109,6 +110,7 @@ TERMINAL_TEARDOWN_TABLES = frozenset(
         "tree_policy",
         "workspace_media_quota_usage",
         "workspace_media_write_intent",
+        "workspace_llm_connection",
         "workspace_memberships",
         "workspace_tree_node",
     }

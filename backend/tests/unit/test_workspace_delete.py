@@ -11,6 +11,8 @@ from backend.models import (
     LibraryLogicalQuotaUsage,
     StoredBlobRow,
     User,
+    UserLLMConnection,
+    WorkspaceLLMConnection,
     WorkspaceMediaQuotaUsage,
     WorkspaceMediaWriteIntent,
 )
@@ -163,10 +165,37 @@ def test_delete_fails_fast_when_required_media_intent_is_missing(session_factory
         assert session.get(Workspace, workspace_id) is not None
 
 
-def test_delete_workspace_drains_empty_media_control_rows(session_factory):
+def test_delete_workspace_drains_empty_media_control_rows_and_llm_connections(
+    session_factory,
+):
     with session_factory.begin() as session:
         actor, workspace_id = _create_deletable_workspace(session)
         _configure_empty_media_scope(session, workspace_id)
+        default_id = session.scalar(
+            select(Workspace.id).where(Workspace.slug == "default")
+        )
+        connection_fields = {
+            "name": "Example",
+            "adapter_id": "builtin.openai",
+            "adapter_implementation_version": "1",
+            "config_schema_version": 1,
+            "endpoint_profile": {},
+            "active_credential": {"ciphertext": "fixture"},
+        }
+        own_id, other_id, personal_id = (uuid4() for _ in range(3))
+        session.add_all(
+            [
+                WorkspaceLLMConnection(
+                    id=own_id, workspace_id=workspace_id, **connection_fields
+                ),
+                WorkspaceLLMConnection(
+                    id=other_id, workspace_id=default_id, **connection_fields
+                ),
+                UserLLMConnection(
+                    id=personal_id, user_id=actor.user_id, **connection_fields
+                ),
+            ]
+        )
 
     with session_factory.begin() as session:
         deleted = WorkspaceWriteService().delete_workspace(
@@ -178,6 +207,9 @@ def test_delete_workspace_drains_empty_media_control_rows(session_factory):
     assert deleted == workspace_id
     with session_factory() as session:
         assert session.get(Workspace, workspace_id) is None
+        assert session.get(WorkspaceLLMConnection, own_id) is None
+        assert session.get(WorkspaceLLMConnection, other_id) is not None
+        assert session.get(UserLLMConnection, personal_id) is not None
         assert session.get(WorkspaceMediaWriteIntent, workspace_id) is None
         assert session.get(WorkspaceMediaQuotaUsage, workspace_id) is None
         assert session.get(ContextMediaLogicalQuotaUsage, workspace_id) is None
