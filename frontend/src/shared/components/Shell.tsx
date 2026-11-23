@@ -595,13 +595,14 @@ export function Shell({ children }: ShellProps) {
             />
           ) : null}
         </div>
-        {/* Remount to clear previews and abort requests when Agent visibility changes. */}
+        {/* Clear previews and abort requests when the workspace or Agent visibility changes. */}
         {isAuthenticated ? (
           <CommandSearchBox
-            key={`${routeWorkspaceId}:${String(labsPreferences.agent)}`}
+            key={`${navigationWorkspaceId}:${String(labsPreferences.agent)}`}
             includeAgents={labsPreferences.agent}
             labels={shellLabels}
             navGroups={navGroups}
+            selectedId={navigationWorkspaceId ?? ""}
           />
         ) : (
           /* The topbar is a grid and this is its MIDDLE child, so it has to
@@ -894,14 +895,15 @@ function CommandSearchBox({
   includeAgents,
   labels,
   navGroups,
+  selectedId,
 }: {
   includeAgents: boolean;
   labels: ShellLabels;
   navGroups: ReturnType<typeof navGroupsForLabels>;
+  selectedId: string;
 }) {
   const navigate = useNavigate();
   const { t: tSearch } = useTranslation("search");
-  const selectedId = parseWorkspaceRoute(useLocation().pathname)?.workspaceId ?? "";
   const containerRef = useRef<HTMLFormElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isApple = useMemo(() => isApplePlatform(), []);
@@ -1061,21 +1063,25 @@ function CommandSearchBox({
     submitToSearch();
   }
 
-  function submitToSearch() {
-    navigate(selectedId ? `${workspacePath(selectedId, "search")}?q=${encodeURIComponent(trimmedQuery)}` : "/workspaces/find");
+  // Leaving through the box returns it to rest. Focus leaves too, so a phone
+  // drops its keyboard and the switcher the focused box covers comes back.
+  function leaveTo(to: string) {
+    navigate(to);
     setOpen(false);
     setQuery("");
     setPreviewResults([]);
+    inputRef.current?.blur();
+  }
+
+  function submitToSearch() {
+    leaveTo(selectedId ? `${workspacePath(selectedId, "search")}?q=${encodeURIComponent(trimmedQuery)}` : "/workspaces/find");
   }
 
   function activate(item: CommandTarget | undefined) {
     if (!item) {
       return;
     }
-    navigate(item.to);
-    setOpen(false);
-    setQuery("");
-    setPreviewResults([]);
+    leaveTo(item.to);
   }
 
   function openPreviewResult(result: RankedSearchResult) {
@@ -1083,10 +1089,7 @@ function CommandSearchBox({
     if (!href) {
       return;
     }
-    navigate(href);
-    setOpen(false);
-    setQuery("");
-    setPreviewResults([]);
+    leaveTo(href);
   }
 
   function activateSearchOption(option: CommandSearchOption | undefined) {

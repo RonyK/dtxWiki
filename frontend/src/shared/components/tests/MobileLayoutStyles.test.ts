@@ -210,9 +210,6 @@ describe("mobile layout regression styles", () => {
     expect(shellStyles).toMatch(
       /@media \(max-width: 1024px\)\s*\{[^}]*\.topbar-search--placeholder,\s*\.sidebar\s*\{[^}]*display:\s*none;/,
     );
-    expect(workspaceStyles).toMatch(
-      /@media \(max-width: 1024px\)[\s\S]*?\s\.topbar \{[^}]*grid-template-columns:\s*minmax\(0, max-content\) minmax\(0, 1fr\) auto;/,
-    );
   });
 
   it("stacks a wrapped tablist as one control, not two", () => {

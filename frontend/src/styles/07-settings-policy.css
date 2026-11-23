@@ -4221,6 +4221,11 @@ input[type="checkbox"].switch-control:checked::before {
     column-gap: 6px;
   }
 
+  /* Give the focused search field the switcher's space on phones. */
+  .topbar:has(> .command-search:focus-within) > .topbar-brand > .workspace-controls {
+    display: none;
+  }
+
   .topbar-brand {
     gap: 6px;
     padding-inline: 8px 0;
