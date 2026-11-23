@@ -33838,8 +33838,7 @@
         "summary": "Create Personal Llm Connection",
         "tags": [
           "llm-connections"
-        ],
-        "x-dtxwiki-confirmation-scope": "account"
+        ]
       }
     },
     "/api/v1/me/llm-connections/{connection_id}": {
@@ -33947,8 +33946,7 @@
         "summary": "Delete Personal Llm Connection",
         "tags": [
           "llm-connections"
-        ],
-        "x-dtxwiki-confirmation-scope": "account"
+        ]
       },
       "get": {
         "operationId": "get_personal_llm_connection_api_v1_me_llm_connections__connection_id__get",
@@ -34150,8 +34148,7 @@
         "summary": "Update Personal Llm Connection",
         "tags": [
           "llm-connections"
-        ],
-        "x-dtxwiki-confirmation-scope": "account"
+        ]
       }
     },
     "/api/v1/public/w/{workspace_slug}": {
@@ -47209,8 +47206,7 @@
         "summary": "Create Workspace Llm Connection",
         "tags": [
           "llm-connections"
-        ],
-        "x-dtxwiki-confirmation-scope": "account"
+        ]
       }
     },
     "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}": {
@@ -47328,8 +47324,7 @@
         "summary": "Delete Workspace Llm Connection",
         "tags": [
           "llm-connections"
-        ],
-        "x-dtxwiki-confirmation-scope": "account"
+        ]
       },
       "get": {
         "operationId": "get_workspace_llm_connection_api_v1_workspaces__workspace_id__llm_connections__connection_id__get",
@@ -47551,8 +47546,7 @@
         "summary": "Update Workspace Llm Connection",
         "tags": [
           "llm-connections"
-        ],
-        "x-dtxwiki-confirmation-scope": "account"
+        ]
       }
     },
     "/api/v1/workspaces/{workspace_id}/mcp-chats": {
