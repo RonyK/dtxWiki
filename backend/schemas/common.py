@@ -24,18 +24,9 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 # (`llmwiki.mcp.v1.tools.<N>`) so the two read as one lineage rather than as
 # rival version numbers.
 #
-# A release advances this by exactly one when its tool contract changes in a
-# way a client can observe: a tool added/removed/renamed, an input schema
-# changed, a result projection changed (including a field that only ever
-# appears inside `envelope.meta`), or the model-facing envelope allowlist
-# widened. A release without such a change keeps the revision. Changes between
-# two releases share that one revision, like migrations under `unreleased/`:
-# the first sets it to MCP_RELEASED_TOOL_CONTRACT_REVISION + 1, and later ones
-# amend its history entry, digest pin and CHANGELOG text instead of adding
-# another. The digest half of the published version (see
-# backend/mcp/protocol/tool_descriptors.py) is derived from the live catalog
-# and moves on its own, so forgetting to advance this degrades the marker's
-# readability, not its truthfulness.
+# make set-version derives the revision from the previous release tag. It
+# advances once when the tool contract digest changes. The server computes its
+# live digest from the catalog even during development.
 #
 # Revision history:
 #   1 -- Epic-1 wire contract: outputSchema off `tools/list`, three legacy
@@ -266,9 +257,8 @@ REST_SCHEMA_VERSION = "llmwiki.rest.v1"
 #        that the 0.3.1 Git conversion replaced, unless that would make the
 #        page's History cyclic. Refresh cached tools and schemas.
 # The revision the latest release shipped and its tool contract digest.
-# `make set-version` records the current revision and live digest here; release
-# verification rejects an artifact whose MCP_TOOL_CONTRACT_REVISION is not
-# recorded.
+# `make set-version` records the revision and digest here. Release verification
+# checks both against the catalog inside each artifact and the prior release.
 MCP_RELEASED_TOOL_CONTRACT_REVISION = 31
 MCP_RELEASED_TOOL_CONTRACT_DIGEST = "10ac5fe69e16"
 MCP_TOOL_CONTRACT_REVISION = 31

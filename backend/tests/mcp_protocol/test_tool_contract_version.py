@@ -13,20 +13,9 @@ constant asserted against a hand-written literal proves nothing: both sides
 are edited by the same person in the same commit, and neither is connected to
 the catalog. So the version this server publishes is half curated
 (``MCP_TOOL_CONTRACT_REVISION``, for humans) and half DERIVED from the live
-catalog (``tool_contract_digest()``), and the tests below are correspondingly
-of two kinds:
-
-* one pin, ``test_the_published_digest_is_pinned_to_the_live_catalog``, which
-  turns any contract change into a red test that names the constant to bump;
-* five BEHAVIOURAL tests that mutate the contract -- delete a tool, change an
-  input schema, change a result projection, widen the model-facing envelope
-  allowlist -- and assert the digest actually moves, plus one negative control
-  that a change which is NOT a contract change (catalog ordering) does not.
-
-Only the second kind can catch the derivation being severed, which is the way
-this marker would really die: someone replaces ``_tool_contract_material()``
-with a constant, or drops the output schemas from it, and a pin-only suite
-stays green because the pin gets updated to match.
+catalog (``tool_contract_digest()``). These tests verify the version string
+and that catalog, schema and envelope changes affect the live digest while
+changes in catalog ordering leave it stable.
 """
 
 from __future__ import annotations
@@ -51,56 +40,9 @@ from backend.mcp.protocol.tool_descriptors import (
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.common import (
-    MCP_RELEASED_TOOL_CONTRACT_DIGEST,
-    MCP_RELEASED_TOOL_CONTRACT_REVISION,
     MCP_SCHEMA_VERSION,
     MCP_TOOL_CONTRACT_REVISION,
 )
-
-# The digest of the tool contract as each revision shipped it, plus the one
-# unreleased revision. A change to the catalog, to any tool's input schema, to
-# any tool's output schema, or to the model-facing envelope allowlist will fail
-# the pin below. Released entries never change; `make set-version` records the
-# released entry's digest. The first change after a
-# release adds MCP_RELEASED_TOOL_CONTRACT_REVISION + 1 here and in
-# backend/schemas/common.py (with a line in its revision history); later changes
-# before the next release amend that entry and its history line. Either way,
-# say in CHANGELOG's Important changes what a client that does not know the new
-# revision should do.
-TOOL_CONTRACT_DIGESTS = {
-    1: "7cc83a9d3e5f",
-    2: "82a008f8ef4b",
-    3: "0541986a4f59",
-    4: "506e05abb9eb",
-    5: "629cc1dd8059",
-    6: "4631eccdf085",
-    7: "91c317f0b454",
-    8: "d19d6e9d70f2",
-    9: "ec9612747e81",
-    10: "4b8468ed1a7d",
-    11: "53f9cdc1af7b",
-    12: "f06e6852c23e",
-    13: "ca756c4fe38d",
-    14: "eb5ad6da1809",
-    15: "4fcf64184875",
-    16: "b8e18b04b7bb",
-    # Preserve historical catalog digests when a later revision supersedes them.
-    17: "5dcb74dc06ee",
-    18: "a31838390269",
-    19: "8d1f8f54fc8b",
-    20: "a9b2db9d822c",
-    21: "b3f00168ca4d",
-    22: "0a71cfc16f8a",
-    23: "276a3f379964",
-    24: "d00c78e6908b",
-    25: "49af948c21e0",
-    26: "6d4118f7809a",
-    27: "9d725068d7ba",
-    28: "fa9da086e872",
-    29: "bf0185b2915d",
-    30: "7f825bd114a8",
-    31: "10ac5fe69e16",
-}
 
 
 @pytest.fixture(autouse=True)
@@ -132,53 +74,6 @@ def _default_workspace_id(page_service):
         workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         assert workspace is not None, "default workspace not seeded"
         return workspace.id
-
-
-# --------------------------------------------------------------------------
-# The pin
-# --------------------------------------------------------------------------
-
-
-def test_the_published_digest_is_pinned_to_the_live_catalog():
-    unreleased = MCP_RELEASED_TOOL_CONTRACT_REVISION + 1
-    assert MCP_TOOL_CONTRACT_REVISION == max(TOOL_CONTRACT_DIGESTS), (
-        "MCP_TOOL_CONTRACT_REVISION was bumped without recording the new "
-        "revision's digest in TOOL_CONTRACT_DIGESTS (or vice versa)."
-    )
-    assert MCP_TOOL_CONTRACT_REVISION in {
-        MCP_RELEASED_TOOL_CONTRACT_REVISION,
-        unreleased,
-    }, (
-        "A release advances the MCP tool contract by one revision: changes since "
-        f"released revision {MCP_RELEASED_TOOL_CONTRACT_REVISION} share revision "
-        f"{unreleased}. Amend its digest, revision-history line and CHANGELOG "
-        "text instead of adding another revision."
-    )
-    assert (
-        TOOL_CONTRACT_DIGESTS[MCP_RELEASED_TOOL_CONTRACT_REVISION]
-        == MCP_RELEASED_TOOL_CONTRACT_DIGEST
-    ), (
-        f"Revision {MCP_RELEASED_TOOL_CONTRACT_REVISION} was recorded with digest "
-        f"{MCP_RELEASED_TOOL_CONTRACT_DIGEST}; restore that entry and record "
-        f"contract changes as revision {unreleased}. Before the tag of the release "
-        "that first recorded it, amend the entry and rerun make set-version "
-        "VERSION=X.Y.Z instead."
-    )
-    pinned = TOOL_CONTRACT_DIGESTS[MCP_TOOL_CONTRACT_REVISION]
-    assert tool_contract_digest() == pinned, (
-        "The MCP tool contract changed: a tool was added/removed/renamed, an "
-        "input or output schema moved, or the model-facing envelope allowlist "
-        "widened. If MCP_TOOL_CONTRACT_REVISION in backend/schemas/common.py "
-        f"is the released {MCP_RELEASED_TOOL_CONTRACT_REVISION}, set it to "
-        f"{unreleased} with a revision-history line and add the digest as entry "
-        f"{unreleased} here; if it is already {unreleased}, update that entry "
-        "and its history line. On a release branch after make set-version, "
-        "compare with the previous release tag: if it already shipped "
-        f"{MCP_RELEASED_TOOL_CONTRACT_REVISION}, add {unreleased} and rerun "
-        "make set-version VERSION=X.Y.Z; otherwise update entry "
-        f"{MCP_RELEASED_TOOL_CONTRACT_REVISION}. Tell clients what changed in "
-        "CHANGELOG's Important changes."
-    )
 
 
 def test_the_published_version_composes_the_family_the_revision_and_the_digest():
