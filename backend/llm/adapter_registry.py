@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from urllib.parse import unquote, urlsplit
 
+import httpx
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from packaging.version import InvalidVersion, Version
@@ -104,8 +105,8 @@ class LLMAdapterRegistry:
     ) -> str:
         """Validate stored input and resolve its endpoint.
 
-        ``base_url`` is an operator-approved endpoint; without one the
-        adapter's default endpoint is used.
+        ``base_url`` is the connection's endpoint (an operator profile or a
+        URL its owner entered); without one the adapter's default is used.
         """
         registration = self._registration(adapter_id)
         descriptor = registration.descriptor
@@ -194,7 +195,7 @@ class LLMAdapterRegistry:
         if endpoint is None:
             raise LLMAdapterRegistryError(
                 f"LLM adapter {registration.descriptor.adapter_id!r} "
-                "needs an https base URL"
+                "needs an http(s) base URL"
             )
         return endpoint
 
@@ -236,10 +237,10 @@ class LLMAdapterRegistry:
 
 @dataclass(frozen=True)
 class _Endpoint:
-    """An unambiguous https location: one origin and literal path segments."""
+    """An unambiguous http(s) location: one origin and literal path segments."""
 
     url: str
-    origin: tuple[str, int]
+    origin: tuple[str, str, int]
     segments: tuple[str, ...]
 
     @classmethod
@@ -258,16 +259,22 @@ class _Endpoint:
             return None
         try:
             parts = urlsplit(url)
-            port = 443 if parts.port is None else parts.port
+            default_port = {"https": 443, "http": 80}.get(parts.scheme)
+            port = default_port if parts.port is None else parts.port
         except ValueError:
             return None
         if (
-            port == 0
-            or parts.scheme != "https"
+            default_port is None
+            or port == 0
             or not parts.hostname
             or parts.username is not None
             or parts.password is not None
         ):
+            return None
+        try:
+            # The address must also be one the HTTP client can send to.
+            httpx.URL(url)
+        except (httpx.InvalidURL, ValueError):
             return None
         segments = tuple(parts.path.split("/")[1:])
         # Dot segments and separators, literal or percent-encoded, could make
@@ -279,7 +286,9 @@ class _Endpoint:
             for segment in segments
         ):
             return None
-        return cls(url=url, origin=(parts.hostname, port), segments=segments)
+        return cls(
+            url=url, origin=(parts.scheme, parts.hostname, port), segments=segments
+        )
 
     def contains(self, other: _Endpoint) -> bool:
         return (

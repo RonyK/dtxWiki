@@ -41,10 +41,16 @@ type ObjectSchema = {
 
 type ModelDraft = { key: string; profile: LlmModelProfile };
 
+// The endpoint select's value for "enter an address".
+const CUSTOM_ENDPOINT = "\u0000custom";
+
 type FormDraft = {
   name: string;
   adapterId: string;
   endpointId: string | null;
+  // An address typed here instead of the adapter's own or a listed one.
+  custom: boolean;
+  endpointUrl: string;
   config: Record<string, string | boolean>;
   credential: Record<string, string>;
   models: ModelDraft[];
@@ -82,12 +88,45 @@ function initialConfig(adapter: LlmAdapter | undefined): FormDraft["config"] {
   );
 }
 
-function draftFor(adapters: LlmAdapter[], editing: LlmConnection | null): FormDraft {
+/** Server-side form of an entered address, for comparing with the stored one. */
+function normalizedUrl(url: string) {
+  return url.trim().replace(/\/+$/, "");
+}
+
+/** An http(s) address without credentials, query or fragment. */
+function urlAccepted(url: string) {
+  try {
+    const parsed = new URL(url.trim());
+    return (
+      ["http:", "https:"].includes(parsed.protocol) &&
+      parsed.port !== "0" &&
+      !parsed.username &&
+      !parsed.password &&
+      !url.includes("?") &&
+      !url.includes("#") &&
+      // The server checks the address as typed, before a browser would
+      // resolve dot segments or backslashes in it.
+      !url.includes("\\") &&
+      !/%2f|%5c/i.test(url) &&
+      !/\/(\.|%2e){1,2}(\/|$)/i.test(url.trim())
+    );
+  } catch {
+    return false;
+  }
+}
+
+function draftFor(
+  adapters: LlmAdapter[],
+  editing: LlmConnection | null,
+  customEndpoints: boolean,
+): FormDraft {
   if (editing) {
     return {
       name: editing.name,
       adapterId: editing.adapter_id,
       endpointId: editing.endpoint_profile_id ?? null,
+      custom: editing.endpoint_url !== null,
+      endpointUrl: editing.endpoint_url ?? "",
       // An unset checkbox shows the value the schema says applies.
       config: {
         ...initialConfig(adapters.find((item) => item.adapter_id === editing.adapter_id)),
@@ -102,15 +141,22 @@ function draftFor(adapters: LlmAdapter[], editing: LlmConnection | null): FormDr
       models: editing.model_profiles.map((profile) => ({ key: newKey(), profile })),
     };
   }
-  const adapter = adapters.find((item) => item.endpoints.length > 0);
+  const adapter = adapters.find((item) => usableAdapter(item, customEndpoints));
   return {
     name: "",
     adapterId: adapter?.adapter_id ?? "",
     endpointId: adapter?.endpoints[0]?.id ?? null,
+    custom: adapter !== undefined && adapter.endpoints.length === 0,
+    endpointUrl: "",
     config: initialConfig(adapter),
     credential: {},
     models: [{ key: newKey(), profile: { id: newKey(), model_id: "" } }],
   };
+}
+
+/** A service type can be set up with a listed endpoint or an entered one. */
+function usableAdapter(adapter: LlmAdapter, customEndpoints: boolean) {
+  return adapter.endpoints.length > 0 || customEndpoints;
 }
 
 /**
@@ -182,9 +228,12 @@ function profilesPayload(models: ModelDraft[]): LlmModelProfile[] {
 }
 
 export function LlmConnectionsSection({
+  customEndpoints = true,
   labelledBy,
   scope,
 }: {
+  // Whether connections here may use an address entered in the form.
+  customEndpoints?: boolean;
   labelledBy: string;
   scope: LlmConnectionScope;
 }) {
@@ -348,6 +397,7 @@ export function LlmConnectionsSection({
       {editor && adapters ? (
         <ConnectionEditor
           adapters={adapters}
+          customEndpoints={customEndpoints}
           editing={editor.mode === "edit" ? editor.connection : null}
           language={i18n.language}
           onClose={() => {
@@ -473,10 +523,14 @@ function ConnectionCard({
         <div>
           <dt>{t("llm.fields.endpoint")}</dt>
           <dd>
-            {connection.endpoint_profile_id
-              ? (endpoint?.label ?? connection.endpoint_profile_id)
-              : t("llm.endpointDefault")}
-            {endpoint && reason === null ? (
+            {connection.endpoint_url
+              ? t("llm.endpointCustom")
+              : connection.endpoint_profile_id
+                ? (endpoint?.label ?? connection.endpoint_profile_id)
+                : t("llm.endpointDefault")}
+            {connection.endpoint_url ? (
+              <code className="llm-connection-url">{connection.endpoint_url}</code>
+            ) : endpoint && reason === null ? (
               <code className="llm-connection-url">{endpoint.base_url}</code>
             ) : null}
           </dd>
@@ -513,7 +567,8 @@ function ConnectionCard({
           aria-describedby={hintId}
           className="icon-button"
           type="button"
-          disabled={busy}
+          // Nothing can be checked until the setup can be used again.
+          disabled={busy || reason !== null}
           onClick={onVerify}
         >
           {t("llm.verify")}
@@ -546,6 +601,7 @@ function ConnectionCard({
 
 function ConnectionEditor({
   adapters,
+  customEndpoints,
   editing,
   language,
   onClose,
@@ -554,6 +610,7 @@ function ConnectionEditor({
   scope,
 }: {
   adapters: LlmAdapter[];
+  customEndpoints: boolean;
   editing: LlmConnection | null;
   language: string;
   onClose: () => void;
@@ -563,7 +620,9 @@ function ConnectionEditor({
 }) {
   const { t } = useTranslation("settings");
   const id = useId();
-  const [draft, setDraft] = useState<FormDraft>(() => draftFor(adapters, editing));
+  const [draft, setDraft] = useState<FormDraft>(() =>
+    draftFor(adapters, editing, customEndpoints),
+  );
   // What the stored options looked like in this form (options only, never
   // the key being typed); a saved edit moves it, so a later change back to
   // an old value is still sent.
@@ -588,11 +647,18 @@ function ConnectionEditor({
   const endpointChanged =
     editing !== null &&
     (editing.unavailable_reason === "endpoint_unavailable" ||
-      (draft.endpointId ?? null) !== (editing.endpoint_profile_id ?? null));
+      draft.custom !== (editing.endpoint_url !== null) ||
+      (draft.custom
+        ? normalizedUrl(draft.endpointUrl) !== editing.endpoint_url
+        : (draft.endpointId ?? null) !== (editing.endpoint_profile_id ?? null)));
   const endpointListed =
     adapter?.endpoints.some(
       (endpoint) => (endpoint.id ?? null) === (draft.endpointId ?? null),
     ) ?? false;
+  // The endpoint a key replacement or a new connection would be sent with.
+  const endpointUsable = draft.custom
+    ? customEndpoints && urlAccepted(draft.endpointUrl)
+    : endpointListed;
   const credentialEntered = Object.values(draft.credential).some((value) => value !== "");
   const required = new Set(credentialSchema.required ?? []);
   // A stored key is never sent to another endpoint, and an empty field keeps
@@ -604,11 +670,10 @@ function ConnectionEditor({
   const valid =
     draft.name.trim() !== "" &&
     adapter !== undefined &&
-    adapter.endpoints.length > 0 &&
     draft.models.length > 0 &&
     draft.models.every(({ profile }) => profile.model_id.trim() !== "") &&
     configComplete(configSchema, draft.config) &&
-    (!replaceCredential || (credentialComplete && endpointListed));
+    (!replaceCredential || (credentialComplete && endpointUsable));
 
   function setModel(key: string, patch: Partial<LlmModelProfile>) {
     setDraft((current) => ({
@@ -632,7 +697,7 @@ function ConnectionEditor({
         await createLlmConnection(scope, {
           name: draft.name.trim(),
           adapter_id: adapter.adapter_id,
-          endpoint_profile_id: draft.endpointId,
+          ...endpointChoice(draft),
           provider_options: configPayload(adapter, draft.config, {}, {}),
           model_profiles: profilesPayload(draft.models),
           credential,
@@ -671,7 +736,7 @@ function ConnectionEditor({
             credential,
             // Always the endpoint chosen here: an operator may have moved the
             // profile's address while keeping its id.
-            endpoint_profile_id: draft.endpointId,
+            ...endpointChoice(draft),
           });
           if (data.verification.status !== "succeeded") {
             // The key was checked and refused, so nothing was stored.
@@ -763,6 +828,7 @@ function ConnectionEditor({
                   ...draft,
                   adapterId: event.target.value,
                   endpointId: next?.endpoints[0]?.id ?? null,
+                  custom: next !== undefined && next.endpoints.length === 0,
                   config: initialConfig(next),
                   credential: {},
                 });
@@ -772,26 +838,32 @@ function ConnectionEditor({
                 <option
                   key={item.adapter_id}
                   value={item.adapter_id}
-                  disabled={item.endpoints.length === 0}
+                  disabled={!usableAdapter(item, customEndpoints)}
                 >
                   {adapterLabel(item, language, item.adapter_id)}
-                  {item.endpoints.length === 0 ? ` (${t("llm.needsOperatorEndpoint")})` : ""}
+                  {usableAdapter(item, customEndpoints)
+                    ? ""
+                    : ` (${t("llm.needsOperatorEndpoint")})`}
                 </option>
               ))}
             </select>
           </label>
-          {adapter && adapter.endpoints.length > 0 ? (
+          {adapter && usableAdapter(adapter, customEndpoints) ? (
             <label className="field-stack">
               {t("llm.fields.endpoint")}
               <select
-                value={draft.endpointId ?? ""}
+                value={draft.custom ? CUSTOM_ENDPOINT : (draft.endpointId ?? "")}
                 onChange={(event) =>
-                  setDraft({ ...draft, endpointId: event.target.value || null })
+                  setDraft(
+                    event.target.value === CUSTOM_ENDPOINT
+                      ? { ...draft, custom: true }
+                      : { ...draft, custom: false, endpointId: event.target.value || null },
+                  )
                 }
               >
                 {/* A stored endpoint the operator no longer allows stays
                     selected as such, so choosing another one is a change. */}
-                {endpointListed ? null : (
+                {draft.custom || endpointListed ? null : (
                   <option disabled value={draft.endpointId ?? ""}>
                     {t("llm.endpointRetired")}
                   </option>
@@ -801,6 +873,11 @@ function ConnectionEditor({
                     {endpoint.label ?? t("llm.endpointDefault")} · {endpoint.base_url}
                   </option>
                 ))}
+                {customEndpoints || draft.custom ? (
+                  <option disabled={!customEndpoints} value={CUSTOM_ENDPOINT}>
+                    {customEndpoints ? t("llm.endpointCustomOption") : t("llm.customEndpointOff")}
+                  </option>
+                ) : null}
               </select>
               <span className="field-hint">{t("llm.endpointHint")}</span>
               {editing?.unavailable_reason === "endpoint_unavailable" ? (
@@ -808,6 +885,23 @@ function ConnectionEditor({
                   {t("llm.endpointReconnect")}
                 </span>
               ) : null}
+            </label>
+          ) : null}
+          {draft.custom && customEndpoints ? (
+            <label className="field-stack">
+              {t("llm.fields.endpointUrl")}
+              <input
+                autoComplete="off"
+                inputMode="url"
+                maxLength={2048}
+                placeholder="https://llm.example.com/v1"
+                required
+                spellCheck={false}
+                type="url"
+                value={draft.endpointUrl}
+                onChange={(event) => setDraft({ ...draft, endpointUrl: event.target.value })}
+              />
+              <span className="field-hint">{t("llm.endpointUrlHint")}</span>
             </label>
           ) : null}
           {configFields.map(([name, property]) => (
@@ -915,6 +1009,13 @@ function ConnectionEditor({
       </form>
     </Dialog>
   );
+}
+
+/** The endpoint fields of a request: a listed endpoint or an entered URL. */
+function endpointChoice(draft: FormDraft) {
+  return draft.custom
+    ? { endpoint_profile_id: null, endpoint_url: draft.endpointUrl.trim() }
+    : { endpoint_profile_id: draft.endpointId };
 }
 
 function ConfigField({

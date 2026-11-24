@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models import User, UserLLMConnection, Workspace, WorkspaceLLMConnection
-from backend.repositories.workspace_repo import insert_workspace
 from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
@@ -45,11 +44,27 @@ def test_llm_connection_migration_traversal(tmp_path, dialect):
         with Session(engine) as session, session.begin():
             user = User(display_name="Existing account")
             session.add(user)
-            workspace = insert_workspace(
-                session, slug="existing", title="Existing Wiki"
-            )
             session.flush()
-            user_id, workspace_id = user.id, workspace.id
+            user_id = user.id
+        # Plain SQL: the ORM model already has the column this revision adds.
+        workspace_id = uuid4()
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO workspace (id, slug, title, name, goal, "
+                    "default_language, library_policy, write_policy, "
+                    "citation_policy, agent_injection_policy, review_policy, "
+                    "lint_policy, auto_fix_enabled, visibility, join_policy, "
+                    "created_by_actor_id, owner_actor_id, updated_at, created_at, "
+                    "directory_title_key) VALUES (:id, 'existing', 'Existing Wiki', "
+                    "'Existing Wiki', 'fixture', 'en', '{}', '{}', '{}', '{}', "
+                    "'{}', '{}', false, 'private', 'invite_only', :actor, :actor, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'existing wiki')"
+                ).bindparams(
+                    sa.bindparam("id", workspace_id, type_=sa.Uuid()),
+                    sa.bindparam("actor", uuid4(), type_=sa.Uuid()),
+                )
+            )
 
         command.upgrade(config, _REVISION)
         inspector = sa.inspect(engine)
@@ -87,6 +102,8 @@ def test_llm_connection_migration_traversal(tmp_path, dialect):
                 )
 
         with Session(engine) as session:
+            # An existing Workspace allows entered endpoint URLs.
+            assert session.get(Workspace, workspace_id).llm_custom_endpoints_enabled
             common = session.get(WorkspaceLLMConnection, workspace_connection_id)
             assert (common.status, common.verification_status) == (
                 "disabled",
@@ -108,6 +125,9 @@ def test_llm_connection_migration_traversal(tmp_path, dialect):
 
         command.downgrade(config, _PARENT)
         assert set(sa.inspect(engine).get_table_names()) == parent_tables
+        assert "llm_custom_endpoints_enabled" not in {
+            column["name"] for column in sa.inspect(engine).get_columns("workspace")
+        }
         command.upgrade(config, _REVISION)
         with Session(engine) as session:
             assert session.get(User, user_id).display_name == "Existing account"

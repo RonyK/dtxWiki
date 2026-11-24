@@ -1,8 +1,7 @@
 """Operator-approved LLM endpoints.
 
-A connection sends its credential to the adapter's built-in endpoint or to one
-of these. Users and Workspace owners choose from the list; they never enter a
-URL, so a server's network reach stays with its operator.
+A connection sends its credential to the adapter's built-in endpoint, to one
+of these, or to a URL its owner enters (where the Workspace allows that).
 """
 
 from __future__ import annotations
@@ -49,7 +48,7 @@ def parse_endpoint_profiles(raw: str) -> tuple[EndpointProfile, ...]:
         base_url = normalize_base_url(item["base_url"])
         if base_url is None:
             raise ValueError(
-                f"LLM endpoint profile {item['id']!r} needs an https base URL "
+                f"LLM endpoint profile {item['id']!r} needs an http(s) base URL "
                 "without credentials, query or fragment"
             )
         profiles.append(

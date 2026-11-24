@@ -2159,6 +2159,8 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     return <RouteLoading label={t("loading", { defaultValue: "Loading Settings" })} />;
   }
   const reviewPolicy = policies?.review;
+  // Entered LLM endpoint URLs are allowed unless the owner turned them off.
+  const llmCustomEndpoints = policies?.llm?.policy.custom_endpoints_enabled !== false;
   // Three outcomes, not two. "We could not read the capability" is not the
   // same claim as "this server cannot offer OAuth", and saying the latter when
   // a request simply failed tells an operator to go reconfigure a server that
@@ -3982,11 +3984,31 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
             ) : null}
             {activeSection === "workspace-llm" ? (
               routeWorkspaceId && canEditPolicies ? (
-                <LlmConnectionsSection
-                  key={routeWorkspaceId}
-                  labelledBy={SETTINGS_DESTINATION_HEADING_ID}
-                  scope={{ kind: "workspace", workspaceId: routeWorkspaceId }}
-                />
+                <>
+                  {policySaveError ? (
+                    <StatusBanner tone="warning">{policySaveError}</StatusBanner>
+                  ) : null}
+                  {policies?.llm ? (
+                    <PolicyGroupView
+                      key={`${routeWorkspaceId}:llm`}
+                      card={policies.llm}
+                      fields={llmPolicyFields(policies.llm.policy)}
+                      group="llm"
+                      busyKey={policyBusyKey}
+                      saveBlocked={policyBusyKey !== null}
+                      onFieldsSave={onPolicyFieldsSave}
+                      saveNotice={policySaved}
+                      summary={t("llm.policySummary")}
+                    />
+                  ) : null}
+                  {/* Keyed by the switch, so the list reloads what it allows. */}
+                  <LlmConnectionsSection
+                    key={`${routeWorkspaceId}:${String(llmCustomEndpoints)}`}
+                    customEndpoints={llmCustomEndpoints}
+                    labelledBy={SETTINGS_DESTINATION_HEADING_ID}
+                    scope={{ kind: "workspace", workspaceId: routeWorkspaceId }}
+                  />
+                </>
               ) : (
                 <StatusBanner tone="warning">{t("llm.ownerOnly")}</StatusBanner>
               )
@@ -9442,6 +9464,17 @@ function labsPolicyFields(policy: Record<string, unknown>) {
     settingField("labs.askEnabled", "ask_enabled", "Ask", "Allow workspace administrators to use Ask in this workspace."),
     settingField("labs.askRetrievalMode", "ask_retrieval_mode", "Ask retrieval mode", "Automatic uses the best mode this server can serve; a fixed choice falls back with a notice when it cannot."),
     settingField("labs.agentEnabled", "agent_enabled", "Agent", "Allow workspace administrators to use Agent in this workspace."),
+  ]);
+}
+
+function llmPolicyFields(policy: Record<string, unknown>) {
+  return labelledPolicyFields(policy, [
+    settingField(
+      "llm.customEndpointsEnabled",
+      "custom_endpoints_enabled",
+      "Entered endpoint addresses",
+      "Let shared connections use an address entered in their settings. When off, shared connections can use only the service's own endpoint and those the server operator lists; personal connections with an entered address will not be usable here once Ask uses LLM connections.",
+    ),
   ]);
 }
 

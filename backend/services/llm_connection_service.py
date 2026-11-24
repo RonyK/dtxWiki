@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING
+from urllib.parse import unquote
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -89,12 +90,16 @@ class LLMConnectionService:
             for descriptor in self._registry.descriptors()
         ]
 
-    def unavailable(self, connection: StoredConnection, endpoint: dict) -> str | None:
+    def unavailable(
+        self, connection: StoredConnection, endpoint: dict, *, custom_endpoints: bool
+    ) -> str | None:
         """Why a setup cannot be used as stored now, or None if it can.
 
         The endpoint is compared as stored: an operator change to its address
         (or a new adapter default) applies only through a key replacement, so
         a stored key is never sent to an address it was not verified with.
+        An entered URL needs ``custom_endpoints`` (the Workspace allows them;
+        always true for a personal connection's own settings).
         """
         try:
             descriptor = self._registry.descriptor(connection.adapter_id)
@@ -102,15 +107,27 @@ class LLMConnectionService:
             return "adapter_unavailable"
         if descriptor.config_schema_version != connection.config_schema_version:
             return "adapter_version_unavailable"
+        if endpoint.get("kind") == "custom":
+            return None if custom_endpoints else "custom_endpoint_disabled"
         if endpoint not in self._allowed_endpoints(descriptor):
             return "endpoint_unavailable"
         return None
 
-    def _view(self, connection: StoredConnection, *, has_credential: bool) -> dict:
+    def _view(
+        self,
+        connection: StoredConnection,
+        *,
+        has_credential: bool,
+        custom_endpoints: bool,
+    ) -> dict:
+        endpoint = connection.endpoint_profile
         return {
             **_view(connection, has_credential=has_credential),
+            "endpoint_url": (
+                endpoint["base_url"] if endpoint.get("kind") == "custom" else None
+            ),
             "unavailable_reason": self.unavailable(
-                connection, connection.endpoint_profile
+                connection, endpoint, custom_endpoints=custom_endpoints
             ),
         }
 
@@ -130,12 +147,21 @@ class LLMConnectionService:
         _lock_owner(session, scope, owner_id, actor)
 
     def list(
-        self, session: Session, *, scope: ConnectionScope, owner_id: UUID
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        custom_endpoints: bool,
     ) -> list[dict]:
         model = _connection_model(scope)
         statement = _select_owned(model, owner_id).order_by(model.created_at, model.id)
         return [
-            self._view(connection, has_credential=has_credential)
+            self._view(
+                connection,
+                has_credential=has_credential,
+                custom_endpoints=custom_endpoints,
+            )
             for connection, has_credential in session.execute(statement)
         ]
 
@@ -145,10 +171,13 @@ class LLMConnectionService:
         *,
         scope: ConnectionScope,
         owner_id: UUID,
+        custom_endpoints: bool,
         connection_id: UUID,
     ) -> dict:
         connection, has_credential = _get_owned(session, scope, owner_id, connection_id)
-        return self._view(connection, has_credential=has_credential)
+        return self._view(
+            connection, has_credential=has_credential, custom_endpoints=custom_endpoints
+        )
 
     def create(
         self,
@@ -156,6 +185,7 @@ class LLMConnectionService:
         *,
         scope: ConnectionScope,
         owner_id: UUID,
+        custom_endpoints: bool,
         actor: ActorContext,
         request: LLMConnectionCreate,
     ) -> dict:
@@ -170,7 +200,12 @@ class LLMConnectionService:
         profiles = [
             profile.model_dump(mode="json") for profile in request.model_profiles
         ]
-        endpoint = self._endpoint(descriptor, request.endpoint_profile_id)
+        endpoint = self._endpoint(
+            descriptor,
+            request.endpoint_profile_id,
+            request.endpoint_url,
+            custom_endpoints=custom_endpoints,
+        )
         self._validate(
             descriptor.adapter_id,
             request.provider_options,
@@ -200,7 +235,11 @@ class LLMConnectionService:
         session.add(connection)
         session.flush()
         self._emit(session, scope, owner_id, actor, connection, "created")
-        return self._view(connection, has_credential=bool(credential))
+        return self._view(
+            connection,
+            has_credential=bool(credential),
+            custom_endpoints=custom_endpoints,
+        )
 
     def update(
         self,
@@ -208,6 +247,7 @@ class LLMConnectionService:
         *,
         scope: ConnectionScope,
         owner_id: UUID,
+        custom_endpoints: bool,
         actor: ActorContext,
         connection_id: UUID,
         request: LLMConnectionUpdate,
@@ -263,7 +303,11 @@ class LLMConnectionService:
                     "Verify the LLM connection before enabling it.",
                     409,
                 )
-            code = self.unavailable(connection, connection.endpoint_profile)
+            code = self.unavailable(
+                connection,
+                connection.endpoint_profile,
+                custom_endpoints=custom_endpoints,
+            )
             if code is not None:
                 raise LLMConnectionError(
                     code, "The LLM connection cannot be used as stored.", 409
@@ -272,7 +316,9 @@ class LLMConnectionService:
             connection.status = request.status
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "updated")
-        return self._view(connection, has_credential=has_credential)
+        return self._view(
+            connection, has_credential=has_credential, custom_endpoints=custom_endpoints
+        )
 
     def owned(
         self,
@@ -296,6 +342,7 @@ class LLMConnectionService:
         *,
         scope: ConnectionScope,
         owner_id: UUID,
+        custom_endpoints: bool,
         connection_id: UUID,
         request: LLMCredentialReplace,
         credential: dict[str, str],
@@ -316,8 +363,13 @@ class LLMConnectionService:
                 409,
             )
         endpoint = (
-            self._endpoint(descriptor, request.endpoint_profile_id)
-            if "endpoint_profile_id" in request.model_fields_set
+            self._endpoint(
+                descriptor,
+                request.endpoint_profile_id,
+                request.endpoint_url,
+                custom_endpoints=custom_endpoints,
+            )
+            if {"endpoint_profile_id", "endpoint_url"} & request.model_fields_set
             else connection.endpoint_profile
         )
         self._validate(
@@ -335,6 +387,7 @@ class LLMConnectionService:
         *,
         scope: ConnectionScope,
         owner_id: UUID,
+        custom_endpoints: bool,
         actor: ActorContext,
         connection_id: UUID,
         revision: int,
@@ -354,7 +407,9 @@ class LLMConnectionService:
             connection.verification_status = "ready" if succeeded else "failed"
             connection.verified_at = utc_now() if succeeded else None
             self._emit(session, scope, owner_id, actor, connection, "verified")
-        return self._view(connection, has_credential=has_credential)
+        return self._view(
+            connection, has_credential=has_credential, custom_endpoints=custom_endpoints
+        )
 
     def swap_credential(
         self,
@@ -362,6 +417,7 @@ class LLMConnectionService:
         *,
         scope: ConnectionScope,
         owner_id: UUID,
+        custom_endpoints: bool,
         actor: ActorContext,
         connection_id: UUID,
         revision: int,
@@ -391,7 +447,11 @@ class LLMConnectionService:
         connection.verified_at = now
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "credential_rotated")
-        return self._view(connection, has_credential=bool(credential))
+        return self._view(
+            connection,
+            has_credential=bool(credential),
+            custom_endpoints=custom_endpoints,
+        )
 
     def _lock_for_write(
         self,
@@ -445,7 +505,30 @@ class LLMConnectionService:
             None,
         )
 
-    def _endpoint(self, descriptor, profile_id: str | None) -> dict:
+    def _endpoint(
+        self,
+        descriptor,
+        profile_id: str | None,
+        url: str | None = None,
+        *,
+        custom_endpoints: bool,
+    ) -> dict:
+        if url is not None:
+            if not custom_endpoints:
+                raise LLMConnectionError(
+                    "custom_endpoint_disabled",
+                    "This Workspace does not allow entered LLM endpoint URLs.",
+                    403,
+                )
+            base_url = normalize_base_url(url)
+            if base_url is None:
+                raise LLMConnectionError(
+                    "endpoint_url_invalid",
+                    "Enter an http or https URL without credentials, query "
+                    "or fragment.",
+                    422,
+                )
+            return {"kind": "custom", "base_url": base_url}
         wanted = "adapter_default" if profile_id is None else "operator"
         for endpoint in self._allowed_endpoints(descriptor):
             if endpoint["kind"] == wanted and endpoint.get("id") == profile_id:
@@ -468,6 +551,7 @@ class LLMConnectionService:
         *,
         scope: ConnectionScope,
         owner_id: UUID,
+        custom_endpoints: bool,
         actor: ActorContext,
         connection_id: UUID,
         expected_revision: int,
@@ -484,7 +568,9 @@ class LLMConnectionService:
         connection.active_credential = None
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "deleted")
-        return self._view(connection, has_credential=False)
+        return self._view(
+            connection, has_credential=False, custom_endpoints=custom_endpoints
+        )
 
     def _descriptor(self, adapter_id: str):
         try:
@@ -503,6 +589,16 @@ class LLMConnectionService:
         *,
         base_url: str,
     ) -> None:
+        # A key inside the address would be stored and shown with it.
+        if any(
+            value and (value in base_url or value in unquote(base_url))
+            for value in (credential or {}).values()
+        ):
+            raise LLMConnectionError(
+                "endpoint_url_invalid",
+                "The endpoint address must not contain the credential.",
+                422,
+            )
         try:
             json.dumps(config, allow_nan=False)
             self._registry.validate_registration(

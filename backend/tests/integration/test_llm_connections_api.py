@@ -483,3 +483,54 @@ def test_verification_applies_only_to_the_setup_it_checked(
     }
     rebound = owner.put(f"{item}/credential", json=replace).json()["data"]
     assert rebound["connection"]["unavailable_reason"] is None
+
+    # A URL entered for the connection (plain http included) is used as is,
+    # until the Workspace owner turns entered URLs off: shared connections
+    # then refuse them, while an account's own connections keep them.
+    served = {
+        "name": "Local server",
+        "adapter_id": adapter,
+        "endpoint_url": "http://10.0.0.5:11434/v1/",
+        "model_profiles": [{"id": "local", "model_id": "local-model"}],
+        "credential": {"api_key": "good-local"},
+    }
+    leaked = {**served, "endpoint_url": "http://10.0.0.5:11434/good-local/v1"}
+    assert owner.post(path, json=leaked).json()["error_code"] == (
+        "endpoint_url_invalid"
+    )
+    local = owner.post(path, json=served).json()["data"]
+    assert local["endpoint_url"] == "http://10.0.0.5:11434/v1"
+    local_item = f"{path}/{local['id']}"
+    checked = owner.post(f"{local_item}/verify", json={"expected_revision": 1})
+    assert checked.json()["data"]["verification"]["status"] == "succeeded"
+    assert calls[-1] == ("http://10.0.0.5:11434/v1/chat/completions", "local-model")
+    policies = f"/api/v1/workspaces/{workspace_id}/settings/policies"
+    card = owner.get(policies).json()["data"]["llm"]
+    assert card["policy"] == {"custom_endpoints_enabled": True}
+    off = owner.patch(
+        f"{policies}/batch",
+        json={
+            "group": "llm",
+            "expected_revision": card["revision"],
+            "changes": {"custom_endpoints_enabled": False},
+        },
+    )
+    assert off.status_code == 200, off.text
+    stored = owner.get(local_item).json()["data"]
+    assert stored["unavailable_reason"] == "custom_endpoint_disabled"
+    # A refusal before any call is no verification: the last one stands.
+    refused = owner.post(
+        f"{local_item}/verify", json={"expected_revision": stored["revision"]}
+    ).json()["data"]
+    assert refused["verification"]["error_code"] == "custom_endpoint_disabled"
+    assert refused["connection"]["verification_status"] == "ready"
+    enable = {"expected_revision": stored["revision"], "status": "enabled"}
+    assert owner.patch(local_item, json=enable).json()["error_code"] == (
+        "custom_endpoint_disabled"
+    )
+    assert owner.post(path, json=served).json()["error_code"] == (
+        "custom_endpoint_disabled"
+    )
+    personal = owner.post("/api/v1/me/llm-connections", json=served)
+    assert personal.status_code == 201, personal.text
+    assert personal.json()["data"]["unavailable_reason"] is None

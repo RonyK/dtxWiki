@@ -274,6 +274,28 @@ _GRAPH_SETTING_COLUMNS = {
 }
 
 
+# LLM card key -> Workspace column (control plane).
+_LLM_SETTING_COLUMNS = {"custom_endpoints_enabled": "llm_custom_endpoints_enabled"}
+
+
+def _llm_policy(workspace: Workspace) -> dict[str, object]:
+    return {
+        key: getattr(workspace, column) for key, column in _LLM_SETTING_COLUMNS.items()
+    }
+
+
+def llm_custom_endpoints_enabled(control_session: Session, workspace_id: UUID) -> bool:
+    """Whether the Workspace allows LLM endpoints entered as a URL."""
+
+    return bool(
+        control_session.scalar(
+            select(Workspace.llm_custom_endpoints_enabled).where(
+                Workspace.id == workspace_id
+            )
+        )
+    )
+
+
 def _graph_policy(workspace: Workspace) -> dict[str, object]:
     return {
         key: getattr(workspace, column)
@@ -304,10 +326,15 @@ def labs_feature_enabled(
     return bool(policy and policy.get(f"{feature}_enabled") is True)
 
 
-def _update_graph_setting(workspace: Workspace, key: str, value: object) -> None:
-    column = _GRAPH_SETTING_COLUMNS.get(key)
+def _update_switch(
+    workspace: Workspace,
+    key: str,
+    value: object,
+    columns: dict[str, str] = _GRAPH_SETTING_COLUMNS,
+) -> None:
+    column = columns.get(key)
     if column is None:
-        raise SettingsPolicyUpdateRejected(f"unknown knowledge graph setting: {key}")
+        raise SettingsPolicyUpdateRejected(f"unknown setting: {key}")
     # A JSON number or string is not a switch position; only true/false is.
     if not isinstance(value, bool):
         raise SettingsPolicyUpdateRejected(f"{key} must be true or false")
@@ -728,6 +755,11 @@ class SettingsService:
                 title="Labs",
                 policy=_labs_policy(workspace),
             ),
+            llm=_policy_card(
+                name="llm",
+                title="LLM connections",
+                policy=_llm_policy(workspace),
+            ),
             lint=_policy_card(
                 name="lint",
                 title="Lint rules",
@@ -866,12 +898,15 @@ class SettingsService:
                 self._update_lint_policy(workspace, key, value)
         elif group == "graph":
             for key, value in changes.items():
-                _update_graph_setting(workspace, key, value)
+                _update_switch(workspace, key, value)
+        elif group == "llm":
+            for key, value in changes.items():
+                _update_switch(workspace, key, value, _LLM_SETTING_COLUMNS)
         elif group == "labs":
             policy = dict(workspace.labs_policy or {})
             for key, value in changes.items():
                 if key in _GRAPH_SETTING_COLUMNS:
-                    _update_graph_setting(workspace, key, value)
+                    _update_switch(workspace, key, value)
                 elif key == "ask_retrieval_mode":
                     self._update_workspace_field(control_session, workspace, key, value)
                 elif key in {"ask_enabled", "agent_enabled"}:
@@ -1020,6 +1055,8 @@ class SettingsService:
             return {}
         if group == "graph":
             return _graph_policy(workspace)
+        if group == "llm":
+            return _llm_policy(workspace)
         if group == "labs":
             return _labs_policy(workspace)
         if group not in POLICY_GROUP_ATTRS:

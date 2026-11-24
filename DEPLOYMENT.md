@@ -663,10 +663,16 @@ SQLite 전체 백업에는 암호화된 자격 증명과 키가 함께 들어 �
 
 ### LLM 연결 endpoint와 검증
 
-사용자와 워크스페이스 소유자는 URL을 직접 입력하지 않습니다. 각 연결은 서비스 유형의 기본
-endpoint(Anthropic·OpenAI·Gemini)나 운영자가 허용한 endpoint 중 하나를 고릅니다. 사내
-gateway나 OpenAI 호환 서버를 허용하려면 `DTXWIKI_LLM_ENDPOINT_PROFILES_JSON`에 JSON 목록을
-지정합니다. 각 항목은 `id`(소문자), `adapter_id`, `base_url`(https), `label`을 가집니다.
+각 연결은 서비스 유형의 기본 endpoint(Anthropic·OpenAI·Gemini), 운영자가 지정한 endpoint,
+또는 사용자가 직접 입력한 http·https 주소 중 하나를 씁니다. 자주 쓰는 사내 gateway나 OpenAI
+호환 서버를 목록으로 제공하려면 `DTXWIKI_LLM_ENDPOINT_PROFILES_JSON`에 JSON 목록을 지정합니다.
+각 항목은 `id`(소문자), `adapter_id`, `base_url`(http·https), `label`을 가집니다.
+
+직접 입력은 기본으로 허용됩니다. 워크스페이스 소유자는 설정 > 공용 LLM 연결의 "직접 입력한
+엔드포인트 주소"를 꺼서 그 워크스페이스의 공용 연결이 직접 입력 주소를 쓰지 못하게 할 수
+있습니다. 개인 연결은 계정에 속하므로 이 설정과 관계없이 등록·검증할 수 있고, 설정을 끈
+워크스페이스에서는 Ask 연동 이후 사용이 막힙니다. API 서버는 입력된 주소로 요청과 키를 보내므로,
+서버가 접속해서는 안 되는 내부망 주소는 방화벽이나 egress proxy로 막으세요.
 
 ```bash
 DTXWIKI_LLM_ENDPOINT_PROFILES_JSON='[{"id":"team-gateway","adapter_id":"builtin.openai_compatible.chat_completions","base_url":"https://llm-gateway.example.com/v1","label":"Team gateway"}]'
@@ -675,7 +681,8 @@ DTXWIKI_LLM_ENDPOINT_PROFILES_JSON='[{"id":"team-gateway","adapter_id":"builtin.
 API·worker에 같은 값을 전달하세요. 항목을 지우거나 주소를 바꾸면(업그레이드로 서비스 유형의
 기본 주소가 바뀐 경우 포함) 그 endpoint를 쓰던 연결은 검증하거나 사용하도록 켤 수 없습니다.
 저장된 키는 검증하지 않은 주소로 보내지 않으므로, 키가 있는 연결은 편집에서 endpoint를 고르고
-새 키를 입력해야 하고, 키 없는 연결은 endpoint를 고르고 저장하면 됩니다. 연결 검증은 요청을 받은
+새 키를 입력해야 하고, 키 없는 연결은 endpoint를 고르고 저장하면 됩니다. 직접 입력한 주소를
+바꿀 때도 같습니다. 연결 검증은 요청을 받은
 API 서버가 바로 실행합니다. 모델마다 작은 요청을 한 번씩 보내며 모델당 최대 30초를 기다립니다.
 reverse proxy의 응답 시간 제한은 이보다 길게 두세요.
 

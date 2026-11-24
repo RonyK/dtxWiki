@@ -52,11 +52,22 @@ ModelProfiles = Annotated[
 CredentialValue = Annotated[SecretStr, Field(min_length=1)]
 
 
+EndpointUrl = Annotated[str, Field(min_length=1, max_length=2048)]
+
+
+def _one_endpoint(request):
+    if request.endpoint_profile_id is not None and request.endpoint_url is not None:
+        raise ValueError("choose an endpoint profile or enter a URL, not both")
+    return request
+
+
 class LLMConnectionCreate(BaseModel):
     name: ConnectionLabel
     adapter_id: ConnectionLabel
-    # An operator endpoint profile; omitted means the adapter's own endpoint.
+    # An operator endpoint profile, or a URL entered here (where the Workspace
+    # allows that); neither means the adapter's own endpoint.
     endpoint_profile_id: ConnectionLabel | None = None
+    endpoint_url: EndpointUrl | None = None
     provider_options: dict[str, Any] = Field(default_factory=dict, repr=False)
     model_profiles: ModelProfiles
     credential: dict[str, CredentialValue] = Field(
@@ -64,6 +75,8 @@ class LLMConnectionCreate(BaseModel):
     )
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    _validate_endpoint = model_validator(mode="after")(_one_endpoint)
 
 
 class LLMConnectionUpdate(BaseModel):
@@ -87,9 +100,10 @@ class LLMConnectionUpdate(BaseModel):
 class LLMCredentialReplace(BaseModel):
     """A replacement credential, verified before it replaces the active one.
 
-    The endpoint can change only together with a credential. Omit
-    ``endpoint_profile_id`` to keep the current endpoint; ``null`` selects
-    the adapter's own endpoint.
+    The endpoint can change only together with a credential. Omit both
+    endpoint fields to keep the current endpoint; otherwise they choose it as
+    on create, so ``endpoint_profile_id: null`` alone selects the adapter's
+    own endpoint.
     """
 
     expected_revision: PositiveInt
@@ -97,8 +111,11 @@ class LLMCredentialReplace(BaseModel):
         repr=False, json_schema_extra={"writeOnly": True}
     )
     endpoint_profile_id: ConnectionLabel | None = None
+    endpoint_url: EndpointUrl | None = None
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    _validate_endpoint = model_validator(mode="after")(_one_endpoint)
 
 
 class LLMVerificationRequest(BaseModel):
@@ -136,14 +153,18 @@ class LLMConnectionView(BaseModel):
     config_schema_version: int
     api_profile: str | None
     endpoint_profile_id: str | None
+    # The URL its owner entered; None for the adapter's own or a profile.
+    endpoint_url: str | None
     # Why the stored setup cannot be used now (the operator removed its
-    # adapter or version, or removed or moved its endpoint); None if it can.
-    # A moved endpoint is applied again only through a key replacement.
+    # adapter or version, or removed or moved its endpoint, or the Workspace
+    # no longer allows entered URLs); None if it can. A moved endpoint is
+    # applied again only through a key replacement.
     unavailable_reason: (
         Literal[
             "adapter_unavailable",
             "adapter_version_unavailable",
             "endpoint_unavailable",
+            "custom_endpoint_disabled",
         ]
         | None
     )

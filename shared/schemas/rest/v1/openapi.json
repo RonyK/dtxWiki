@@ -12035,6 +12035,19 @@
             ],
             "title": "Endpoint Profile Id"
           },
+          "endpoint_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Url"
+          },
           "model_profiles": {
             "items": {
               "$ref": "#/components/schemas/LLMModelProfile"
@@ -12262,6 +12275,17 @@
             ],
             "title": "Endpoint Profile Id"
           },
+          "endpoint_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Url"
+          },
           "has_credential": {
             "title": "Has Credential",
             "type": "boolean"
@@ -12306,7 +12330,8 @@
                 "enum": [
                   "adapter_unavailable",
                   "adapter_version_unavailable",
-                  "endpoint_unavailable"
+                  "endpoint_unavailable",
+                  "custom_endpoint_disabled"
                 ],
                 "type": "string"
               },
@@ -12353,6 +12378,7 @@
           "config_schema_version",
           "api_profile",
           "endpoint_profile_id",
+          "endpoint_url",
           "unavailable_reason",
           "provider_options",
           "model_profiles",
@@ -12370,7 +12396,7 @@
       },
       "LLMCredentialReplace": {
         "additionalProperties": false,
-        "description": "A replacement credential, verified before it replaces the active one.\n\nThe endpoint can change only together with a credential. Omit\n``endpoint_profile_id`` to keep the current endpoint; ``null`` selects\nthe adapter's own endpoint.",
+        "description": "A replacement credential, verified before it replaces the active one.\n\nThe endpoint can change only together with a credential. Omit both\nendpoint fields to keep the current endpoint; otherwise they choose it as\non create, so ``endpoint_profile_id: null`` alone selects the adapter's\nown endpoint.",
         "properties": {
           "credential": {
             "additionalProperties": {
@@ -12395,6 +12421,19 @@
               }
             ],
             "title": "Endpoint Profile Id"
+          },
+          "endpoint_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Url"
           },
           "expected_revision": {
             "minimum": 1.0,
@@ -24618,6 +24657,9 @@
           "lint": {
             "$ref": "#/components/schemas/PolicyCard"
           },
+          "llm": {
+            "$ref": "#/components/schemas/PolicyCard"
+          },
           "mcp_clients": {
             "items": {
               "$ref": "#/components/schemas/SettingsMcpClientData"
@@ -24652,6 +24694,7 @@
           "review",
           "lint",
           "graph",
+          "llm",
           "mcp_clients"
         ],
         "title": "SettingsPolicies",
@@ -24700,7 +24743,8 @@
               "review",
               "lint",
               "graph",
-              "labs"
+              "labs",
+              "llm"
             ],
             "title": "Group",
             "type": "string"
@@ -24727,7 +24771,8 @@
               "review",
               "lint",
               "graph",
-              "labs"
+              "labs",
+              "llm"
             ],
             "title": "Group",
             "type": "string"
