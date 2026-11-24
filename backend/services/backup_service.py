@@ -45,6 +45,7 @@ SERVICE_GROUP = "dtxwiki"
 DB_BACKUP_NAME = "dtxwiki.sqlite"
 JWT_BACKUP_NAME = "jwt.pem"
 SESSION_SECRET_BACKUP_NAME = "session_secret"
+LLM_KEYRING_BACKUP_NAME = "llm-credential-keyring.json"
 ENV_BACKUP_NAME = "dtxwiki.env"
 USER_FILES_DIRNAME = "files"
 LIBRARY_CHECKPOINT_DIRNAME = "library"
@@ -197,6 +198,16 @@ def create_backup(
             if jwt_src.exists():
                 files.append(_copy_secret(jwt_src, backup_dir / JWT_BACKUP_NAME))
 
+        keyring_src = (
+            Path(settings.llm_credential_keyring_file)
+            if settings.llm_credential_keyring_file
+            else base / LLM_KEYRING_BACKUP_NAME
+        )
+        if keyring_src.exists():
+            files.append(
+                _copy_secret(keyring_src, backup_dir / LLM_KEYRING_BACKUP_NAME)
+            )
+
         # The session secret lives as the DTXWIKI_SESSION_SECRET *value* (env
         # file), not a standalone file, so capture the resolved value on EVERY
         # tier. A legacy {data_dir}/session_secret file still takes precedence.
@@ -248,6 +259,25 @@ def create_backup(
         raise
 
 
+def _secret_restore_paths(
+    settings: Settings, base: Path, restored_env: Path | None
+) -> tuple[Path | None, Path]:
+    """Resolve configured secrets from the environment that will be live."""
+    if restored_env is not None:
+        from backend.cli.prod_setup import read_env_file
+
+        values = read_env_file(restored_env)
+        jwt_path = values.get("DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH")
+        keyring_path = values.get("DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE")
+    else:
+        jwt_path = settings.oauth_jwt_private_key_path
+        keyring_path = settings.llm_credential_keyring_file
+    return (
+        Path(jwt_path) if jwt_path else None,
+        Path(keyring_path) if keyring_path else base / LLM_KEYRING_BACKUP_NAME,
+    )
+
+
 def restore_backup(
     backup: Path,
     settings: Settings,
@@ -271,6 +301,9 @@ def restore_backup(
     manifest = read_manifest(backup_dir)
     verify_backup_integrity(backup_dir)  # refuse to restore a corrupt snapshot
     base = (data_dir or default_data_dir()).expanduser().resolve()
+    env_backup = backup_dir / ENV_BACKUP_NAME
+    restored_env = env_backup if env_file is not None and env_backup.exists() else None
+    jwt_dest, keyring_dest = _secret_restore_paths(settings, base, restored_env)
 
     db_backup = backup_dir / DB_BACKUP_NAME
     db_path = db_path_from_url(settings.database_url)
@@ -294,8 +327,7 @@ def restore_backup(
         _restore_sqlite(db_backup, db_path, repository_target=base / "repositories")
 
     jwt_backup = backup_dir / JWT_BACKUP_NAME
-    if jwt_backup.exists() and settings.oauth_jwt_private_key_path:
-        jwt_dest = Path(settings.oauth_jwt_private_key_path)
+    if jwt_backup.exists() and jwt_dest is not None:
         _restore_secret(jwt_backup, jwt_dest)
         # Restore runs as root, so the key would land root:root 0600 and the
         # dtxwiki systemd service (User=dtxwiki) could not read it -> crash loop.
@@ -305,6 +337,13 @@ def restore_backup(
 
         set_key_ownership(jwt_dest, SERVICE_GROUP)
 
+    keyring_backup = backup_dir / LLM_KEYRING_BACKUP_NAME
+    if keyring_backup.exists():
+        _restore_secret(keyring_backup, keyring_dest)
+        from backend.cli.prod_setup import set_key_ownership
+
+        set_key_ownership(keyring_dest, SERVICE_GROUP)
+
     secret_backup = backup_dir / SESSION_SECRET_BACKUP_NAME
     if secret_backup.exists():
         # Codex #34: {data_dir}/session_secret is the path the Docker entrypoint
@@ -313,9 +352,8 @@ def restore_backup(
         # neither mechanism it is inert but harmless.)
         _restore_secret(secret_backup, base / SESSION_SECRET_BACKUP_NAME)
 
-    env_backup = backup_dir / ENV_BACKUP_NAME
-    if env_backup.exists() and env_file is not None:
-        _restore_secret(env_backup, Path(env_file))
+    if restored_env is not None:
+        _restore_secret(restored_env, Path(env_file))
 
     # Schema-v1 include_files backups contained both uploads and library. In v2,
     # Library is the separately fenced checkpoint and this path restores uploads.

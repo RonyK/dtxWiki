@@ -251,7 +251,9 @@ LLM adapter 하나는 API 규격 하나를 구현합니다. `adapter_id`는 `<�
 형식이고 `builtin.` namespace는 core 전용입니다. `descriptor`는 구현 version, 표시
 이름, 비밀이 아닌 연결 설정과 입력 전용 credential의 JSON Schema, 인코딩할 수 있는
 공통 옵션(`COMMON_OPTIONS`)과 기본 HTTPS endpoint를 선언합니다. schema는 Draft 2020-12
-형식이며 `$ref`·`$id`·anchor 없이 자기 완결적이어야 합니다. `create(connection,
+형식이며 `$ref`·`$id`·anchor 없이 자기 완결적이어야 합니다. credential schema의
+최상위는 `type: object`, `properties`, 선택적 `required`, `additionalProperties: false`만
+사용합니다. 비밀 필드는 모두 최상위 properties에 선언합니다. `create(connection,
 transport)`가 만든 `TextGenerationPort.generate()`는 provider를 최대 한 번 호출하고
 응답을 `CanonicalTextResult`(종료 유형·usage)로, 실패를 `LLMAdapterError`(code·delivery)로
 정규화합니다. 요청이 설정하지 않은 옵션은 보내지 않고, provider 오류 문구는 예외에

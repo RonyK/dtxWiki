@@ -260,6 +260,7 @@ class Settings(BaseSettings):
     rerank_top_n: int = 8
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
+    llm_credential_keyring_file: str | None = None
     # Lease after which a 'running' job is considered abandoned by its worker
     # and reclaimed (requeued or terminally failed) by the worker loop.
     worker_lease_timeout_seconds: int = 600

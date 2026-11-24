@@ -16,11 +16,11 @@ Against the measured census that understates the edges by more than 20x
 (61 against 3) and the unwritable tables by 29x (58 against 2).
 Measured on this tree:
 
-- 93 shard-resident tables (92 WORKSPACE_PLANE + 1 MIXED_PLANE), carrying
+- 95 shard-resident tables (94 WORKSPACE_PLANE + 1 MIXED_PLANE), carrying
   61 FK constraints into control-plane parents. All 61 are single-column.
 - By parent: ``workspace`` 58 edges, ``users`` 3 edges.
-- 58 of those 93 tables are BLOCKED (at least one control-plane FK parent):
-  ``workspace`` blocks 58, ``users`` blocks 2. Only 35 are insertable.
+- 58 of those 95 tables are BLOCKED (at least one control-plane FK parent):
+  ``workspace`` blocks 58, ``users`` blocks 2. 37 are insertable.
 - 4 of the 61 edges have all-nullable local columns
   (``audit_event.workspace_id``, ``mcp_chat_session.owner_user_id``,
   ``mcp_client.created_by``, ``mcp_client.issued_to_user_id``).
@@ -164,10 +164,10 @@ EXPECTED_ALL_NULLABLE_EDGES: frozenset[str] = frozenset(
 
 
 def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
-    """Pin the census edge-by-edge: 61 edges, 58 of 93 tables blocked.
+    """Pin the census edge-by-edge: 61 edges, 58 of 95 tables blocked.
 
     Measured here, not copied: ``workspace`` 58 edges / 58 blocked tables,
-    ``users`` 3 edges / 2 blocked tables, 35 of the 93 shard-resident tables
+    ``users`` 3 edges / 2 blocked tables, 37 of the 95 shard-resident tables
     insertable, 4 edges all-nullable. Adding, removing or re-pointing any
     cross-plane FK changes ``labels`` and fails this test, which is the point
     -- the inventory is not allowed to move without a reviewer seeing it.
@@ -211,7 +211,8 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     changing table or cross-plane FK counts.
     Context commit parents and preserved History parents add two workspace-only
     tables with composite FKs: 94 resident and 36 insertable. Cross-plane edges
-    stay unchanged.
+    stay unchanged. Workspace LLM connections add a 95th resident table with
+    no control-plane FK, bringing insertable tables to 37.
     """
 
     edges = workspace_to_control_fk_edges()
@@ -228,7 +229,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     ]
 
     resident = WORKSPACE_PLANE_TABLES | MIXED_PLANE_TABLES
-    assert len(resident) == 94
+    assert len(resident) == 95
 
     by_parent = {
         parent: [edge for edge in edges if edge.parent == parent]
@@ -246,7 +247,7 @@ def test_the_workspace_to_control_fk_census_is_exactly_what_is_recorded():
     blocked = shard_blocked_tables()
     assert set(blocked) <= resident
     assert len(blocked) == 58
-    assert len(resident) - len(blocked) == 36
+    assert len(resident) - len(blocked) == 37
 
     assert (
         frozenset(edge.label for edge in edges if edge.all_columns_nullable)

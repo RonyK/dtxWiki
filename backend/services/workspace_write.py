@@ -51,6 +51,7 @@ from backend.models import (
     WorkspaceCredentialGrant,
     WorkspaceInboxEntry,
     WorkspaceInboxRecipient,
+    WorkspaceLLMConnection,
     WorkspaceMediaQuotaUsage,
     WorkspaceMediaWriteIntent,
     WorkspaceMembership,
@@ -584,6 +585,9 @@ class WorkspaceWriteService:
             delete(WorkspaceCredentialGrant).where(
                 WorkspaceCredentialGrant.workspace_id == workspace_id
             )
+        )
+        session.execute(
+            delete_in_workspace(WorkspaceLLMConnection, workspace_id=workspace_id)
         )
         session.execute(
             update(WorkspaceTreeNode)

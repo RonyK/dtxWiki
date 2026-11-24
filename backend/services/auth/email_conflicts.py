@@ -22,7 +22,10 @@ from backend.models.base import utc_now
 from backend.models.server_admin import ServerAdmin
 from backend.models.user import User
 from backend.services.audit_service import AuditService
-from backend.services.auth.account_credentials import revoke_user_credentials
+from backend.services.auth.account_credentials import (
+    retire_user_llm_connections,
+    revoke_user_credentials,
+)
 from backend.services.auth.login_transactions import AuthFlowError
 from backend.services.db_write_intent import acquire_write_intent
 
@@ -117,6 +120,9 @@ def release_account(
     user.email = None
     user.email_verified_at = None
     revoke_user_credentials(session, user, now)
+    retire_user_llm_connections(
+        session, user_id=user.id, now=now, actor_kind=actor_kind, actor_id=actor_id
+    )
     session.flush()
     _audit(
         session,

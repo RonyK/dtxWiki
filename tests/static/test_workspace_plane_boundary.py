@@ -75,6 +75,10 @@ from tests.static.test_architecture_boundaries import (
 # file (relative to repo root, posix) -> one-line reason this file is allowed
 # to call `.control_session_factory()`. Each entry records the allowed routing.
 CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
+    "backend/api/llm_connections.py": (
+        "Workspace writes recheck Workspace, User and membership on the control "
+        "session, close it, then write connections and audit on the Workspace session."
+    ),
     "backend/services/co_access.py": (
         "Reads only the control-plane Workspace usage-relation switch. "
         "Counters and trace history always use the caller's workspace Session. "
@@ -469,6 +473,12 @@ SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
         "Identity-plane only: the account inbox reads and marks "
         "account_inbox_entry, a control-plane table keyed by the authenticated "
         "user. The workspace inbox routes use WorkspaceSessionFactoryDep."
+    ),
+    "backend/api/llm_connections.py": (
+        "The personal LLM routes use the authenticated user's control-plane "
+        "connection records. The workspace routes use WorkspaceSessionFactoryDep "
+        "for workspace-owned records; writes recheck active user status and "
+        "owner role using a separate control-plane session."
     ),
     "backend/api/oauth.py": (
         "MIXED. Every route delegates through oauth_service.py, which reads "

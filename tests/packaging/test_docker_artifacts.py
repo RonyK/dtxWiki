@@ -179,6 +179,7 @@ def test_compose_gives_every_dtxwiki_service_the_secrets_as_files(service: str):
     assert env["DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH"] == JWT_KEY_FILE
     # An operator-pinned secret still wins; the default is empty, never a value.
     assert env["DTXWIKI_SESSION_SECRET"] == "${DTXWIKI_SESSION_SECRET:-}"
+    assert "DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE" not in env
     assert f"data:{DATA_VOLUME_TARGET}" in definition["volumes"]
 
 
@@ -274,9 +275,7 @@ def _run_entrypoint(tmp_path: Path, **env: str) -> tuple[dict[str, str], list[st
         **env,
     }
     subprocess.run(["sh", str(ENTRYPOINT), "probe"], env=full_env, check=True)
-    seen = dict(
-        line.split("=", 1) for line in probe_out.read_text().splitlines()
-    )
+    seen = dict(line.split("=", 1) for line in probe_out.read_text().splitlines())
     calls = call_log.read_text().splitlines() if call_log.exists() else []
     return seen, calls
 
@@ -304,6 +303,9 @@ def test_entrypoint_creates_the_secret_file_first_and_exports_only_its_path(
     assert seen["UMASK"] == "0027"
     # dtxwiki refuses to start without the secret file, so it exists before
     # the first dtxwiki command runs.
+    bad_parent = tmp_path / "missing" / "keyring.json"
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_entrypoint(tmp_path, DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE=str(bad_parent))
     assert calls == [
         f"dtxwiki keygen --output {tmp_path / 'data' / 'jwt.pem'} secret=present",
         "dtxwiki bootstrap secret=present",
@@ -314,12 +316,16 @@ def test_entrypoint_keeps_the_secret_across_restarts(tmp_path: Path):
     secret_file = tmp_path / "data" / "session_secret"
     _run_entrypoint(tmp_path, DTXWIKI_SESSION_SECRET_FILE=str(secret_file))
     first = secret_file.read_text(encoding="utf-8")
+    keyring = tmp_path / "data" / "llm-credential-keyring.json"
+    first_keyring = keyring.read_text(encoding="utf-8")
 
     _, calls = _run_entrypoint(
         tmp_path, DTXWIKI_SESSION_SECRET_FILE=str(secret_file), SKIP_BOOTSTRAP="1"
     )
 
     assert secret_file.read_text(encoding="utf-8") == first
+    assert keyring.read_text(encoding="utf-8") == first_keyring
+    assert stat.S_IMODE(keyring.stat().st_mode) == 0o600
     # The key exists now, and app/worker leave the single bootstrap to init.
     assert calls == []
 
@@ -468,25 +474,44 @@ def test_docker_exec_cli_works_with_the_compose_environment(built_image: str):
     try:
         mount = ["-v", f"{volume}:{DATA_VOLUME_TARGET}"]
         _docker(
-            "run", "--rm", "--name", f"{name}-init", *mount,
+            "run",
+            "--rm",
+            "--name",
+            f"{name}-init",
+            *mount,
             *_env_args(_service_env("init", variables)),
-            built_image, *compose["init"]["command"],
+            built_image,
+            *compose["init"]["command"],
         )
         _docker(
-            "run", "-d", "--init", "--name", containers[0], *mount,
+            "run",
+            "-d",
+            "--init",
+            "--name",
+            containers[0],
+            *mount,
             *_env_args(_service_env("app", variables)),
             built_image,
         )
         _docker(
-            "run", "-d", "--init", "--name", containers[1], *mount,
+            "run",
+            "-d",
+            "--init",
+            "--name",
+            containers[1],
+            *mount,
             *_env_args(_service_env("worker", variables)),
-            built_image, *compose["worker"]["command"],
+            built_image,
+            *compose["worker"]["command"],
         )
         app = containers[0]
         _wait_until_live(app)
 
         worker_component = _docker(
-            "exec", app, "python", "-c",
+            "exec",
+            app,
+            "python",
+            "-c",
             "import json, urllib.request; "
             "print(json.load(urllib.request.urlopen("
             "'http://127.0.0.1:21080/health/ready'))['components']['worker'])",
@@ -495,18 +520,35 @@ def test_docker_exec_cli_works_with_the_compose_environment(built_image: str):
         # image default used by existing deployments that only pull an image.
         assert worker_component == "n/a", "app started a second, managed worker"
         managed_pids = _docker(
-            "exec", app, "python", "-c", _MANAGED_WORKER_PIDS,
+            "exec",
+            app,
+            "python",
+            "-c",
+            _MANAGED_WORKER_PIDS,
         ).stdout.strip()
         assert managed_pids == "", f"app spawned managed workers: {managed_pids}"
 
         password = secrets.token_urlsafe(18)
         added = _docker(
-            "exec", app, "dtxwiki", "users", "add", "smoke-admin@example.test",
-            "--password", password,
+            "exec",
+            app,
+            "dtxwiki",
+            "users",
+            "add",
+            "smoke-admin@example.test",
+            "--password",
+            password,
         )
         assert "created user smoke-admin@example.test" in added.stdout
-        _docker("exec", app, "dtxwiki", "admin", "grant", "--email",
-                "smoke-admin@example.test")
+        _docker(
+            "exec",
+            app,
+            "dtxwiki",
+            "admin",
+            "grant",
+            "--email",
+            "smoke-admin@example.test",
+        )
         admins = json.loads(
             _docker("exec", app, "dtxwiki", "admin", "list", "--json").stdout
         )
@@ -574,7 +616,11 @@ def test_dockerignore_keeps_local_secrets_out_of_the_build_context(tmp_path: Pat
     exported = tmp_path / "exported"
 
     _docker(
-        "build", "-f", str(dockerfile), "--output", f"type=local,dest={exported}",
+        "build",
+        "-f",
+        str(dockerfile),
+        "--output",
+        f"type=local,dest={exported}",
         str(context),
     )
 
@@ -657,13 +703,19 @@ def test_caddy_template_validates(tmp_path: Path, template: str, image: str):
     caddyfile.chmod(0o644)
 
     result = _docker(
-        "run", "--rm",
-        "-v", f"{caddyfile}:/etc/caddy/Caddyfile:ro",
-        "-v", f"{certs}:/certs:ro",
-        "-e", "DTXWIKI_DOMAIN=wiki.example.test",
-        "-e", "DTXWIKI_ADMIN_EMAIL=admin@example.test",
+        "run",
+        "--rm",
+        "-v",
+        f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+        "-v",
+        f"{certs}:/certs:ro",
+        "-e",
+        "DTXWIKI_DOMAIN=wiki.example.test",
+        "-e",
+        "DTXWIKI_ADMIN_EMAIL=admin@example.test",
         image,
-        "sh", "-c",
+        "sh",
+        "-c",
         "mkdir -p /var/log/caddy && "
         "caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile",
     )
@@ -701,9 +753,15 @@ def test_nginx_example_loads_before_and_after_the_certificate(
         conf.write_text(text, encoding="utf-8")
         conf.chmod(0o644)
         result = _docker(
-            "run", "--rm", "--entrypoint", "nginx",
-            "-v", f"{conf}:/etc/nginx/conf.d/default.conf:ro", *mounts,
-            image, "-t",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "nginx",
+            "-v",
+            f"{conf}:/etc/nginx/conf.d/default.conf:ro",
+            *mounts,
+            image,
+            "-t",
             check=False,
         )
         assert result.returncode == 0, f"{phase}: {result.stderr}"
@@ -871,9 +929,19 @@ def _start_upstream(tmp_path: Path, network: str, started: list[str]) -> str:
     script.chmod(0o644)
     container = f"{network}-app"
     _docker(
-        "run", "-d", "--name", container, "--network", network,
-        "--network-alias", "app", "-v", f"{script}:/upstream.py:ro",
-        UPSTREAM_IMAGE, "python", "/upstream.py",
+        "run",
+        "-d",
+        "--name",
+        container,
+        "--network",
+        network,
+        "--network-alias",
+        "app",
+        "-v",
+        f"{script}:/upstream.py:ro",
+        UPSTREAM_IMAGE,
+        "python",
+        "/upstream.py",
     )
     started.append(container)
     return container
@@ -899,8 +967,16 @@ def _client(tmp_path: Path, network_args: list[str], host: str) -> dict:
     script.chmod(0o644)
     for _ in range(30):
         result = _docker(
-            "run", "--rm", *network_args, "-v", f"{script}:/client.py:ro",
-            UPSTREAM_IMAGE, "python", "/client.py", host, "443",
+            "run",
+            "--rm",
+            *network_args,
+            "-v",
+            f"{script}:/client.py:ro",
+            UPSTREAM_IMAGE,
+            "python",
+            "/client.py",
+            host,
+            "443",
         )
         responses = json.loads(result.stdout)
         if responses["plain"]["status"] is not None:
@@ -921,9 +997,19 @@ def test_caddy_keeps_app_headers_caps_bodies_and_logs_no_tokens(
     caddyfile.chmod(0o644)
     proxy = f"{network}-proxy"
     _docker(
-        "run", "-d", "--name", proxy, "--network", network, "--network-alias", "proxy",
-        "-e", "DTXWIKI_DOMAIN=proxy",
-        "-v", f"{caddyfile}:/etc/caddy/Caddyfile:ro", image,
+        "run",
+        "-d",
+        "--name",
+        proxy,
+        "--network",
+        network,
+        "--network-alias",
+        "proxy",
+        "-e",
+        "DTXWIKI_DOMAIN=proxy",
+        "-v",
+        f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+        image,
     )
     started.append(proxy)
 
@@ -985,9 +1071,17 @@ def test_nginx_keeps_app_headers_caps_bodies_and_logs_no_tokens(
         proxy = f"{network}-nginx-{label}"
         # Shares the upstream's network namespace: 127.0.0.1:21080 is the app.
         _docker(
-            "run", "-d", "--name", proxy, "--network", f"container:{upstream}",
-            "-v", f"{conf}:/etc/nginx/conf.d/default.conf:ro",
-            "-v", f"{certs}:/etc/letsencrypt:ro", NGINX_IMAGES[-1],
+            "run",
+            "-d",
+            "--name",
+            proxy,
+            "--network",
+            f"container:{upstream}",
+            "-v",
+            f"{conf}:/etc/nginx/conf.d/default.conf:ro",
+            "-v",
+            f"{certs}:/etc/letsencrypt:ro",
+            NGINX_IMAGES[-1],
         )
         started.append(proxy)
         results[label] = _client(

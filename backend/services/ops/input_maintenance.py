@@ -46,6 +46,7 @@ CONSTRAINED_REVISIONS = frozenset(
         "c3d2e4f601ab",
         # Context History parent storage retains the same input checks.
         "002398e0fcdc",
+        "dafc5339b3b1",
     }
 )
 SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
@@ -61,6 +62,7 @@ _OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset(
         "00ba02774c4a",
         "c3d2e4f601ab",
         "002398e0fcdc",
+        "dafc5339b3b1",
     }
 )
 FIELDS = {

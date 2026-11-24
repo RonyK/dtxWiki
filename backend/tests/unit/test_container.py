@@ -24,6 +24,8 @@ def test_registry_shares_tree_read_wiring():
 
     assert registry.tree is registry.tree  # memoized
     assert registry.tree.tree_read_service is registry.tree_read
+    with pytest.raises(RuntimeError, match="container-resolved settings"):
+        _ = registry.llm_connections
     assert registry.domain_read.tree_read_service is registry.tree_read
     assert registry.context_ingress.tree_read_service is registry.tree_read
 

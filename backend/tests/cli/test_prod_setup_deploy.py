@@ -25,6 +25,11 @@ from backend.app.bootstrap import current_alembic_head
 from backend.cli import prod_setup
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def isolated_production_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(prod_setup, "DEFAULT_DATA_DIR", str(tmp_path / "data-dir"))
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_TEMPLATE = REPO_ROOT / "infra" / "prod" / prod_setup.BACKEND_UNIT
 
@@ -76,13 +81,20 @@ def _paths(tmp_path: Path) -> dict[str, Path]:
 def _setup_args(paths: dict[str, Path], *extra: str) -> list[str]:
     paths["db"].parent.mkdir(parents=True, exist_ok=True)
     return [
-        "setup", "production",
-        "--domain", "wiki.example.com",
-        "--email", "admin@example.com",
-        "--env-file", str(paths["env"]),
-        "--jwt-key", str(paths["jwt"]),
-        "--caddyfile", str(paths["caddy"]),
-        "--database-url", f"sqlite+pysqlite:///{paths['db'].as_posix()}",
+        "setup",
+        "production",
+        "--domain",
+        "wiki.example.com",
+        "--email",
+        "admin@example.com",
+        "--env-file",
+        str(paths["env"]),
+        "--jwt-key",
+        str(paths["jwt"]),
+        "--caddyfile",
+        str(paths["caddy"]),
+        "--database-url",
+        f"sqlite+pysqlite:///{paths['db'].as_posix()}",
         "--skip-preflight",
         "--no-smoke",
         *extra,
@@ -103,8 +115,9 @@ def _db_revision(db: Path) -> str | None:
 def _db_has_user(db: Path, email: str) -> bool:
     with closing(sqlite3.connect(db)) as conn:
         return (
-            conn.execute("select count(*) from users where email = ?", (email,))
-            .fetchone()[0]
+            conn.execute(
+                "select count(*) from users where email = ?", (email,)
+            ).fetchone()[0]
             == 1
         )
 
@@ -120,6 +133,20 @@ def test_setup_bootstraps_and_hands_over_data_before_units_start(
     state_when_started: dict[str, object] = {}
     real_bootstrap = prod_commands.bootstrap_app
     real_hand_over = prod_setup.hand_data_to_service_user
+    from uuid import uuid4
+
+    from backend.llm.credential_vault import (
+        CredentialBinding,
+        FileCredentialVault,
+        create_keyring,
+    )
+
+    keyring = tmp_path / "data-dir" / "llm-credential-keyring.json"
+    create_keyring(keyring)  # As provisioned by the update finalizer.
+    vault = FileCredentialVault(keyring_file=None, solo_local=False)
+    binding = CredentialBinding("user", uuid4(), uuid4(), 1)
+    encrypted = vault.encrypt({"api_key": "retained-credential"}, binding=binding)
+    original_keyring = keyring.read_bytes()
 
     def recording_bootstrap(settings, app=None):
         events.append("bootstrap")
@@ -165,6 +192,50 @@ def test_setup_bootstraps_and_hands_over_data_before_units_start(
     }
     assert state_when_started == {"enable": expected, "restart": expected}
     assert prod_setup.get_env_value(paths["env"], "DTXWIKI_WORKER_MODE") == "external"
+    assert (
+        prod_setup.get_env_value(paths["env"], "DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE")
+        is None
+    )
+    result = runner.invoke(
+        cli_main.app,
+        _setup_args(
+            paths, "--reconfigure", "--no-caddy", "--no-systemd",
+            "--no-bootstrap", "--no-admin",
+        ),
+    )
+    assert result.exit_code == 0, _out(result)
+    assert (
+        prod_setup.get_env_value(paths["env"], "DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE")
+        is None
+    )
+    assert keyring.read_bytes() == original_keyring
+    assert vault.decrypt(encrypted, binding=binding) == {
+        "api_key": "retained-credential"
+    }
+    assert not (paths["jwt"].parent / "llm-credential-keyring.json").exists()
+    # A failure to grant the service access to the keyring must be reported.
+    monkeypatch.setattr(prod_commands.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(prod_setup, "set_env_file_ownership", lambda *a, **k: True)
+    monkeypatch.setattr(
+        prod_setup,
+        "set_key_ownership",
+        lambda path, *_a, **_kw: path.name != "llm-credential-keyring.json",
+    )
+    result = runner.invoke(
+        cli_main.app,
+        _setup_args(
+            paths,
+            "--reconfigure",
+            "--no-caddy",
+            "--no-systemd",
+            "--no-bootstrap",
+            "--no-admin",
+        ),
+    )
+    assert result.exit_code == 1, _out(result)
+    assert "LLM keyring" in _out(result) and "could not be made readable" in _out(
+        result
+    )
 
 
 def test_setup_without_bootstrap_says_the_services_will_refuse(
@@ -199,7 +270,8 @@ def test_windows_setup_uses_managed_worker_when_systemd_is_skipped(
     # Patch the command module's platform view without altering the host that
     # pytest, pathlib, and the other setup helpers actually run on.
     monkeypatch.setattr(
-        prod_commands, "sys",
+        prod_commands,
+        "sys",
         SimpleNamespace(platform="win32", stdin=prod_commands.sys.stdin),
     )
     monkeypatch.setattr(prod_setup.subprocess, "run", _Systemctl(events))
@@ -207,7 +279,10 @@ def test_windows_setup_uses_managed_worker_when_systemd_is_skipped(
     result = runner.invoke(
         cli_main.app,
         _setup_args(
-            paths, "--no-caddy", "--no-bootstrap", "--no-admin",
+            paths,
+            "--no-caddy",
+            "--no-bootstrap",
+            "--no-admin",
             *(["--reconfigure"] if reconfigure else []),
         ),
     )
@@ -267,10 +342,14 @@ def test_bind_host_for_a_remote_load_balancer_reaches_unit_and_env(
         cli_main.app,
         _setup_args(
             paths,
-            "--tls", "external",
-            "--bind-host", "0.0.0.0",
-            "--forwarded-ip", "10.0.0.2",
-            "--no-bootstrap", "--no-admin",
+            "--tls",
+            "external",
+            "--bind-host",
+            "0.0.0.0",
+            "--forwarded-ip",
+            "10.0.0.2",
+            "--no-bootstrap",
+            "--no-admin",
         ),
     )
 
@@ -289,9 +368,12 @@ def test_reconfigure_keeps_the_installed_bind_host(
     monkeypatch.setattr(prod_setup.subprocess, "run", _Systemctl([]))
     base = _setup_args(
         paths,
-        "--tls", "external",
-        "--forwarded-ip", "10.0.0.2",
-        "--no-bootstrap", "--no-admin",
+        "--tls",
+        "external",
+        "--forwarded-ip",
+        "10.0.0.2",
+        "--no-bootstrap",
+        "--no-admin",
     )
     first = runner.invoke(cli_main.app, [*base, "--bind-host", "10.0.0.5"])
     assert first.exit_code == 0, _out(first)
@@ -345,9 +427,7 @@ def test_render_backend_unit_changes_only_the_listen_address(tmp_path: Path):
 
     rendered = prod_setup.render_backend_unit(template, bind_host="::")
 
-    assert rendered == template.replace(
-        "--host 127.0.0.1 --port", "--host :: --port"
-    )
+    assert rendered == template.replace("--host 127.0.0.1 --port", "--host :: --port")
     installed = tmp_path / "dtxwiki.service"
     installed.write_text(rendered, encoding="utf-8")
     assert prod_setup.installed_bind_host(installed) == "::"
@@ -413,8 +493,12 @@ def test_setup_secures_the_env_file_it_wrote(
         cli_main.app,
         _setup_args(
             paths,
-            "--no-systemd", "--no-caddy", "--no-bootstrap", "--no-admin",
-            "--service-user", "wikisvc",
+            "--no-systemd",
+            "--no-caddy",
+            "--no-bootstrap",
+            "--no-admin",
+            "--service-user",
+            "wikisvc",
         ),
     )
 
@@ -470,8 +554,11 @@ def test_setup_writes_a_caddyfile_caddy_can_read(
             cli_main.app,
             _setup_args(
                 paths,
-                "--tls", "internal",
-                "--no-systemd", "--no-bootstrap", "--no-admin",
+                "--tls",
+                "internal",
+                "--no-systemd",
+                "--no-bootstrap",
+                "--no-admin",
             ),
         )
     finally:
@@ -668,12 +755,20 @@ def test_reconfigure_replaces_a_template_session_secret(
     result = runner.invoke(
         cli_main.app,
         [
-            "setup", "production",
-            "--env-file", str(env),
-            "--jwt-key", str(tmp_path / "jwt.pem"),
-            "--database-url", db_url,
+            "setup",
+            "production",
+            "--env-file",
+            str(env),
+            "--jwt-key",
+            str(tmp_path / "jwt.pem"),
+            "--database-url",
+            db_url,
             "--skip-preflight",
-            "--no-systemd", "--no-caddy", "--no-smoke", "--no-admin", "--no-bootstrap",
+            "--no-systemd",
+            "--no-caddy",
+            "--no-smoke",
+            "--no-admin",
+            "--no-bootstrap",
             "--reconfigure",
         ],
     )

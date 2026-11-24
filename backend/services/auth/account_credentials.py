@@ -1,15 +1,18 @@
 """Retire an account's live credentials and unfinished confirmations in one place."""
 
 from datetime import datetime
+from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from backend.models.api_token import ApiToken
 from backend.models.auth_identity import AuthLoginTransaction
 from backend.models.auth_verification import EmailReauthenticationChallenge
+from backend.models.llm_connection import UserLLMConnection
 from backend.models.password_reset import PasswordResetToken
 from backend.models.user import User
+from backend.services.audit_service import AuditService
 from backend.services.mail_delivery import terminalize_token_outboxes
 from backend.services.oauth_service import revoke_all_user_oauth_credentials
 
@@ -78,3 +81,51 @@ def revoke_user_credentials(session: Session, user: User, now: datetime) -> None
         .values(revoked_at=now)
     )
     revoke_all_user_oauth_credentials(session, user_id=user.id, revoked_at=now)
+
+
+def retire_user_llm_connections(
+    session: Session,
+    *,
+    user_id: UUID,
+    now: datetime,
+    actor_kind: str,
+    actor_id: str,
+) -> None:
+    """Retire personal LLM credentials while the caller locks the account."""
+    connection = UserLLMConnection
+    retired = session.execute(
+        update(connection)
+        .where(
+            connection.user_id == user_id,
+            connection.status != "deleted",
+            or_(
+                connection.status != "disabled",
+                connection.active_credential.is_not(None),
+                connection.pending_credential.is_not(None),
+            ),
+        )
+        .values(
+            status="disabled",
+            revision=connection.revision + 1,
+            secret_revision=connection.secret_revision + 1,
+            active_credential=None,
+            pending_credential=None,
+            verification_status="unverified",
+            verified_at=None,
+            updated_at=now,
+        )
+        .returning(connection.id, connection.revision)
+    ).all()
+    audit = AuditService()
+    for connection_id, revision in retired:
+        audit.emit(
+            session=session,
+            workspace_id=None,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            action="llm.connection.disabled",
+            target_kind="user_llm_connection",
+            target_id=connection_id,
+            payload={"status": "disabled", "revision": revision},
+            retention_class="sensitive",
+        )

@@ -56,17 +56,22 @@ def _publish_key(path: Path) -> None:
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
     )
+    publish_private_credential_file(path, pem)
+
+
+def publish_private_credential_file(path: Path, content: bytes) -> None:
+    """Publish a complete private credential file without replacing a winner."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".oauth-", dir=path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}-", dir=path.parent
+    )
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as handle:
-            handle.write(pem)
+            handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
         try:
-            # Publish only a fully written private file. Another initializer's
-            # key always wins over replacing an existing signing identity.
             os.link(temporary, path)
         except FileExistsError:
             pass

@@ -14,6 +14,11 @@ from backend.tests.utils.bootstrapped_sqlite import copy_migrated_sqlite
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def isolated_production_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(prod_setup, "DEFAULT_DATA_DIR", str(tmp_path / "data-dir"))
+
+
 def _out(result) -> str:
     """Combined stdout+stderr (this Click version routes err=True separately)."""
     text = result.stdout or ""
@@ -53,9 +58,11 @@ def test_config_set_then_show_roundtrip_redacts_secret(tmp_path: Path):
     set_result = runner.invoke(
         cli_main.app,
         [
-            "config", "set",
+            "config",
+            "set",
             "DTXWIKI_SESSION_SECRET=super-secret-value",
-            "--env-file", str(env),
+            "--env-file",
+            str(env),
             "--i-understand",
         ],
     )
@@ -160,8 +167,11 @@ def test_config_set_rejects_unknown_key(tmp_path: Path):
     result = runner.invoke(
         cli_main.app,
         [
-            "config", "set", "DTXWIKI_BOGUS=1",
-            "--env-file", str(tmp_path / "e.env"),
+            "config",
+            "set",
+            "DTXWIKI_BOGUS=1",
+            "--env-file",
+            str(tmp_path / "e.env"),
         ],
     )
     assert result.exit_code == 2
@@ -188,14 +198,29 @@ def test_config_set_dangerous_requires_flag(tmp_path: Path):
     result = runner.invoke(
         cli_main.app,
         [
-            "config", "set", "DTXWIKI_SESSION_SECRET=x",
-            "--env-file", str(tmp_path / "e.env"),
+            "config",
+            "set",
+            "DTXWIKI_SESSION_SECRET=x",
+            "--env-file",
+            str(tmp_path / "e.env"),
         ],
     )
     assert result.exit_code == 3
     assert "REFUSED" in _out(result)
     # No file written when refused.
     assert not (tmp_path / "e.env").exists()
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "config",
+            "set",
+            "DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE=/tmp/new",
+            "--env-file",
+            str(tmp_path / "e.env"),
+        ],
+    )
+    assert result.exit_code == 3
+    assert "undecryptable" in _out(result)
 
 
 def test_config_set_rejects_bad_typed_value(tmp_path: Path):
@@ -224,8 +249,11 @@ def test_config_set_rejects_non_url_public_base(tmp_path: Path):
     result = runner.invoke(
         cli_main.app,
         [
-            "config", "set", "DTXWIKI_PUBLIC_BASE_URL=not-a-url",
-            "--env-file", str(env),
+            "config",
+            "set",
+            "DTXWIKI_PUBLIC_BASE_URL=not-a-url",
+            "--env-file",
+            str(env),
         ],
     )
     assert result.exit_code == 2
@@ -305,10 +333,13 @@ def test_config_set_syncs_caddyfile_domain(tmp_path: Path):
     result = runner.invoke(
         cli_main.app,
         [
-            "config", "set",
+            "config",
+            "set",
             "DTXWIKI_PUBLIC_BASE_URL=https://new.example.com",
-            "--env-file", str(env),
-            "--caddyfile", str(caddy),
+            "--env-file",
+            str(env),
+            "--caddyfile",
+            str(caddy),
         ],
     )
     assert result.exit_code == 0, result.stdout
@@ -334,13 +365,20 @@ def test_setup_dry_run_writes_nothing(tmp_path: Path):
     result = runner.invoke(
         cli_main.app,
         [
-            "setup", "production",
-            "--domain", "wiki.example.com",
-            "--email", "admin@example.com",
-            "--env-file", paths["env"],
-            "--jwt-key", paths["jwt"],
-            "--caddyfile", paths["caddy"],
-            "--dry-run", "--skip-preflight",
+            "setup",
+            "production",
+            "--domain",
+            "wiki.example.com",
+            "--email",
+            "admin@example.com",
+            "--env-file",
+            paths["env"],
+            "--jwt-key",
+            paths["jwt"],
+            "--caddyfile",
+            paths["caddy"],
+            "--dry-run",
+            "--skip-preflight",
         ],
     )
     assert result.exit_code == 0, result.stdout
@@ -361,15 +399,25 @@ def test_setup_tls_none_completion_uses_http_scheme(tmp_path: Path):
     result = runner.invoke(
         cli_main.app,
         [
-            "setup", "production",
-            "--domain", "wiki.internal",
-            "--email", "admin@example.com",
-            "--env-file", paths["env"],
-            "--jwt-key", paths["jwt"],
-            "--database-url", db_url,
-            "--tls", "none", "--insecure-eval",
+            "setup",
+            "production",
+            "--domain",
+            "wiki.internal",
+            "--email",
+            "admin@example.com",
+            "--env-file",
+            paths["env"],
+            "--jwt-key",
+            paths["jwt"],
+            "--database-url",
+            db_url,
+            "--tls",
+            "none",
+            "--insecure-eval",
             "--skip-preflight",
-            "--no-systemd", "--no-caddy", "--no-smoke",
+            "--no-systemd",
+            "--no-caddy",
+            "--no-smoke",
         ],
     )
     assert result.exit_code == 0, result.stdout
@@ -385,14 +433,22 @@ def test_setup_fresh_writes_env_key_and_admin(tmp_path: Path):
     result = runner.invoke(
         cli_main.app,
         [
-            "setup", "production",
-            "--domain", "wiki.example.com",
-            "--email", "admin@example.com",
-            "--env-file", paths["env"],
-            "--jwt-key", paths["jwt"],
-            "--database-url", db_url,
+            "setup",
+            "production",
+            "--domain",
+            "wiki.example.com",
+            "--email",
+            "admin@example.com",
+            "--env-file",
+            paths["env"],
+            "--jwt-key",
+            paths["jwt"],
+            "--database-url",
+            db_url,
             "--skip-preflight",
-            "--no-systemd", "--no-caddy", "--no-smoke",
+            "--no-systemd",
+            "--no-caddy",
+            "--no-smoke",
         ],
     )
     assert result.exit_code == 0, result.stdout
@@ -416,16 +472,22 @@ def test_setup_reconfigure_preserves_secret_and_key(tmp_path: Path):
     paths = _common_paths(tmp_path)
     db_url = _tmp_db_url(tmp_path)
     base_args = [
-        "setup", "production",
-        "--env-file", paths["env"],
-        "--jwt-key", paths["jwt"],
-        "--database-url", db_url,
+        "setup",
+        "production",
+        "--env-file",
+        paths["env"],
+        "--jwt-key",
+        paths["jwt"],
+        "--database-url",
+        db_url,
         "--skip-preflight",
-        "--no-systemd", "--no-caddy", "--no-smoke", "--no-admin", "--no-bootstrap",
+        "--no-systemd",
+        "--no-caddy",
+        "--no-smoke",
+        "--no-admin",
+        "--no-bootstrap",
     ]
-    first = runner.invoke(
-        cli_main.app, [*base_args, "--domain", "wiki.example.com"]
-    )
+    first = runner.invoke(cli_main.app, [*base_args, "--domain", "wiki.example.com"])
     assert first.exit_code == 0, first.stdout
     env = Path(paths["env"])
     secret_before = prod_setup.get_env_value(env, "DTXWIKI_SESSION_SECRET")
@@ -465,21 +527,28 @@ def test_setup_reconfigure_backfills_data_dir(tmp_path: Path):
     result = runner.invoke(
         cli_main.app,
         [
-            "setup", "production",
-            "--domain", "wiki.example.com",
-            "--env-file", paths["env"],
-            "--jwt-key", paths["jwt"],
-            "--database-url", _tmp_db_url(tmp_path),
+            "setup",
+            "production",
+            "--domain",
+            "wiki.example.com",
+            "--env-file",
+            paths["env"],
+            "--jwt-key",
+            paths["jwt"],
+            "--database-url",
+            _tmp_db_url(tmp_path),
             "--skip-preflight",
-            "--no-systemd", "--no-caddy", "--no-smoke",
-            "--no-admin", "--no-bootstrap",
+            "--no-systemd",
+            "--no-caddy",
+            "--no-smoke",
+            "--no-admin",
+            "--no-bootstrap",
             "--reconfigure",
         ],
     )
     assert result.exit_code == 0, _out(result)
     assert (
-        prod_setup.get_env_value(env, "DTXWIKI_DATA_DIR")
-        == prod_setup.DEFAULT_DATA_DIR
+        prod_setup.get_env_value(env, "DTXWIKI_DATA_DIR") == prod_setup.DEFAULT_DATA_DIR
     )
 
 
@@ -487,31 +556,47 @@ def test_setup_reconfigure_preserves_custom_data_dir(tmp_path: Path):
     # A custom DATA_DIR the operator already set must be preserved, not clobbered.
     paths = _common_paths(tmp_path)
     env = Path(paths["env"])
+    keyring = tmp_path / "custom-keyring.json"
+    keyring.write_text("existing keyring", encoding="utf-8")
     env.write_text(
         "DTXWIKI_PUBLIC_BASE_URL=https://old.example.com\n"
         "DTXWIKI_SESSION_SECRET=" + ("s" * 80) + "\n"
-        "DTXWIKI_DATA_DIR=/srv/custom/dtxwiki\n"
+        f"DTXWIKI_DATA_DIR={tmp_path / 'custom-data'}\n"
+        f"DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE={keyring}\n"
         "DTXWIKI_APP_ENV=production\n",
         encoding="utf-8",
     )
     result = runner.invoke(
         cli_main.app,
         [
-            "setup", "production",
-            "--domain", "wiki.example.com",
-            "--env-file", paths["env"],
-            "--jwt-key", paths["jwt"],
-            "--database-url", _tmp_db_url(tmp_path),
+            "setup",
+            "production",
+            "--domain",
+            "wiki.example.com",
+            "--env-file",
+            paths["env"],
+            "--jwt-key",
+            paths["jwt"],
+            "--database-url",
+            _tmp_db_url(tmp_path),
             "--skip-preflight",
-            "--no-systemd", "--no-caddy", "--no-smoke",
-            "--no-admin", "--no-bootstrap",
+            "--no-systemd",
+            "--no-caddy",
+            "--no-smoke",
+            "--no-admin",
+            "--no-bootstrap",
             "--reconfigure",
         ],
     )
     assert result.exit_code == 0, _out(result)
-    assert (
-        prod_setup.get_env_value(env, "DTXWIKI_DATA_DIR") == "/srv/custom/dtxwiki"
+    assert prod_setup.get_env_value(env, "DTXWIKI_DATA_DIR") == str(
+        tmp_path / "custom-data"
     )
+    assert prod_setup.get_env_value(env, "DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE") == str(
+        keyring
+    )
+    assert keyring.read_text(encoding="utf-8") == "existing keyring"
+    assert not (tmp_path / "custom-data" / "llm-credential-keyring.json").exists()
 
 
 # default_signup_enabled is `app_mode == "solo_local"`: one remote mode and
@@ -579,12 +664,19 @@ def test_setup_preflight_dns_failure_aborts(tmp_path: Path, monkeypatch):
     result = runner.invoke(
         cli_main.app,
         [
-            "setup", "production",
-            "--domain", "missing.example.com",
-            "--env-file", paths["env"],
-            "--jwt-key", paths["jwt"],
-            "--no-systemd", "--no-caddy", "--no-smoke",
-            "--no-admin", "--no-bootstrap",
+            "setup",
+            "production",
+            "--domain",
+            "missing.example.com",
+            "--env-file",
+            paths["env"],
+            "--jwt-key",
+            paths["jwt"],
+            "--no-systemd",
+            "--no-caddy",
+            "--no-smoke",
+            "--no-admin",
+            "--no-bootstrap",
         ],
     )
     assert result.exit_code == 2

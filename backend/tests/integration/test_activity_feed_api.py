@@ -560,7 +560,12 @@ def test_api_new_contract_cursor_error_and_legacy_raw_are_independent(page_servi
 
 def test_api_uses_target_workspace_role_and_resolves_identity_after_workspace_read(
     page_service,
+    monkeypatch,
 ):
+    from backend.services import activity_feed_service
+
+    monkeypatch.setattr(activity_feed_service, "_BATCH_SIZE", 2)
+    monkeypatch.setattr(activity_feed_service, "_SCAN_BUDGET", 4)
     client = TestClient(
         create_app(
             settings=Settings(
@@ -600,15 +605,32 @@ def test_api_uses_target_workspace_role_and_resolves_identity_after_workspace_re
                 created_at=BASE,
             )
         )
+        connection_id = uuid4()
+        # These newer owner-only events fill the scan budget if the merged
+        # query waits until audit hydration to enforce visibility.
+        session.add_all(
+            AuditEvent(
+                workspace_id=target.id,
+                actor_kind="human",
+                actor_id=str(user.id),
+                action="llm.connection.updated",
+                target_kind="workspace_llm_connection",
+                target_id=connection_id,
+                created_at=BASE + timedelta(seconds=i),
+            )
+            for i in range(1, 5)
+        )
         target_id, user_id = target.id, user.id
     endpoint = f"/api/v1/workspaces/{target_id}/activity/feed?period=all"
     visible = client.get(endpoint)
     assert visible.status_code == 200, visible.text
-    entries = visible.json()["data"]["entries"]
+    data = visible.json()["data"]
+    entries = data["entries"]
     assert (
         len(entries) == 1
         and entries[0]["event"]["actor"]["display_name"] == "Resolved reader name"
     )
+    assert not data["has_more"] and data["next_cursor"] is None
     assert "Visible guide" not in visible.text
     with page_service.session_factory.begin() as session:
         grant_workspace_membership(
@@ -619,6 +641,16 @@ def test_api_uses_target_workspace_role_and_resolves_identity_after_workspace_re
     assert any(
         entry["event"]["tool_name"] == "read"
         for entry in allowed.json()["data"]["entries"]
+    )
+    assert str(connection_id) not in allowed.text
+    with page_service.session_factory.begin() as session:
+        grant_workspace_membership(
+            session, user_id=user_id, workspace_id=target_id, role="owner"
+        )
+    owned = client.get(endpoint + "&limit=1")
+    assert owned.status_code == 200, owned.text
+    assert owned.json()["data"]["entries"][0]["event"]["target"]["target_id"] == str(
+        connection_id
     )
 
 

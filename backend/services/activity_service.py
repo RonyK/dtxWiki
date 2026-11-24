@@ -493,7 +493,7 @@ class ActivityService:
     ) -> list[ActivityItemRead]:
         statement = select(AuditEvent).where(
             AuditEvent.workspace_id == workspace_id,
-            not_(_audit_only_observation_event_clause()),
+            _activity_audit_visibility_clause(actor),
         )
         if item_ids is not None:
             statement = statement.where(AuditEvent.id.in_(item_ids))
@@ -852,8 +852,11 @@ _AUDIT_ONLY_OBSERVATION_ACTIONS = (
 )
 
 
-def _audit_only_observation_event_clause():
-    return AuditEvent.action.in_(_AUDIT_ONLY_OBSERVATION_ACTIONS)
+def _activity_audit_visibility_clause(actor: ActorContext | None):
+    conditions = [AuditEvent.action.not_in(_AUDIT_ONLY_OBSERVATION_ACTIONS)]
+    if actor is None or actor.role != "owner":
+        conditions.append(AuditEvent.target_kind != "workspace_llm_connection")
+    return and_(*conditions)
 
 
 def _system_audit_event_clause():

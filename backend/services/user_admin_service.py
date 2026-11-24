@@ -3,8 +3,10 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from backend.models.base import utc_now
 from backend.models.user import User
 from backend.services.audit_service import AuditService
+from backend.services.auth.account_credentials import retire_user_llm_connections
 from backend.services.credential_hashing import CredentialHasher
 from backend.services.db_write_intent import acquire_write_intent
 from backend.services.oauth_service import revoke_live_token_grant_families
@@ -125,6 +127,13 @@ class UserAdminService:
             revoke_live_token_grant_families(
                 session,
                 user_id=user.id,
+            )
+            retire_user_llm_connections(
+                session,
+                user_id=user.id,
+                now=utc_now(),
+                actor_kind="system",
+                actor_id="cli:users.deactivate",
             )
             session.flush()
             return changed

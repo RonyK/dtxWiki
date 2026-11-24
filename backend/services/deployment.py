@@ -130,6 +130,17 @@ _KEY_SPECS: tuple[ConfigKeySpec, ...] = (
         dangerous=True,
     ),
     ConfigKeySpec(
+        field="llm_credential_keyring_file",
+        env="DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE",
+        summary="Path to the LLM credential encryption keyring.",
+        blast_radius="data_migration",
+        warning=(
+            "A replacement keyring without the existing keys makes "
+            "stored LLM credentials undecryptable."
+        ),
+        dangerous=True,
+    ),
+    ConfigKeySpec(
         field="database_url",
         env="DTXWIKI_DATABASE_URL",
         summary="SQLAlchemy database URL.",
