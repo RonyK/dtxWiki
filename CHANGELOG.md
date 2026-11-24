@@ -30,10 +30,10 @@
 
 ### Backup and rollback
 
-- `dtxwiki rollback` stops before changing anything when the backed-up env
-  keeps its data, database, Library, JWT key or LLM keyring at other paths
-  than the live env. Restored keys are made readable by the data directory's
-  group instead of a fixed `dtxwiki` group.
+- `dtxwiki rollback` stops before changing anything when the backed-up and
+  live env files resolve to different data, database or Library locations.
+  JWT keys and LLM keyrings follow the backed-up env and are made readable by
+  the data directory's group.
 
 ## 0.3.2 — 2026-11-21
 

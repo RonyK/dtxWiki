@@ -236,9 +236,10 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path, monkeypatch):
     # The backed-up env names the JWT path and data directory and leaves the
     # keyring at its data-dir default, as `dtxwiki setup production` writes it.
     env_file = tmp_path / "dtxwiki.env"
-    original_env = (
-        f'DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH="{jwt}"\nDTXWIKI_DATA_DIR={base}\n'
+    storage_env = (
+        f"DTXWIKI_DATA_DIR={base}\nDTXWIKI_DATABASE_URL={settings.database_url}\n"
     )
+    original_env = f'{storage_env}DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH="{jwt}"\n'
     env_file.write_text(original_env, encoding="utf-8")
 
     backup_dir = backup_service.create_backup(
@@ -256,18 +257,21 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path, monkeypatch):
 
     # Mutate live state after the backup: the data directory moved, so the
     # backed-up env would read files the restore never wrote.
-    # Budget exception (two rows): a moved path and a missing live env file
-    # fail on separate branches of the comparison; the second let a mismatched
-    # restore through in review. restore_backup checks again on its own, and
-    # only these rows show that it then changes nothing (database, keys, env
-    # file); the rollback test covers the earlier check alone.
+    # Budget exception (two rows): an explicit move and a missing live env
+    # exercise different inputs. Missing env must use defaults; skipping the
+    # check in that case previously let a mismatched restore through.
+    # These rows verify restore_backup itself leaves the DB, keys and env
+    # untouched, while the rollback test covers the earlier check.
     _make_db(db, 5)  # now 8 rows
     assert _row_count(db) == 8
     jwt.unlink()
     keyring.unlink()
-    moved = f"DTXWIKI_DATA_DIR={tmp_path / 'secret-moved'}\n"
+    moved = (
+        f"DTXWIKI_DATA_DIR={tmp_path / 'secret-moved'}\n"
+        f"DTXWIKI_DATABASE_URL={settings.database_url}\n"
+    )
     for live_env in (moved, None):
-        if live_env is None:  # a missing live env names no path at all
+        if live_env is None:
             env_file.unlink()
         else:
             env_file.write_text(live_env, encoding="utf-8")
@@ -285,7 +289,21 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path, monkeypatch):
         else:
             assert env_file.read_text(encoding="utf-8") == live_env
 
-    env_file.write_text(original_env, encoding="utf-8")
+    moved_jwt = tmp_path / "current-jwt.pem"
+    moved_keyring = tmp_path / "current-keyring.json"
+    moved_jwt.write_text("CURRENT JWT", encoding="utf-8")
+    moved_keyring.write_text("CURRENT KEYRING", encoding="utf-8")
+    env_file.write_text(
+        f"{storage_env}DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH={moved_jwt}\n"
+        f"DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE={moved_keyring}\n",
+        encoding="utf-8",
+    )
+    live_settings = settings.model_copy(
+        update={
+            "oauth_jwt_private_key_path": str(moved_jwt),
+            "llm_credential_keyring_file": str(moved_keyring),
+        }
+    )
     from backend.cli import prod_setup
 
     ownership_calls = []
@@ -295,12 +313,14 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path, monkeypatch):
         lambda path, group, **_kw: ownership_calls.append((path, group)),
     )
     backup_service.restore_backup(
-        backup_dir, settings, data_dir=base, env_file=env_file
+        backup_dir, live_settings, data_dir=base, env_file=env_file
     )
 
     assert _row_count(db) == 3
     assert jwt.read_text(encoding="utf-8") == "ORIGINAL"
     assert keyring.read_text(encoding="utf-8") == "ORIGINAL KEYRING"
+    assert moved_jwt.read_text(encoding="utf-8") == "CURRENT JWT"
+    assert moved_keyring.read_text(encoding="utf-8") == "CURRENT KEYRING"
     assert env_file.read_text(encoding="utf-8") == original_env
     # Keys take the data directory's group: the account it was handed to.
     assert ownership_calls == [

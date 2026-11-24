@@ -336,8 +336,8 @@ def test_run_check_delegates(monkeypatch):
 
 def _rollback_settings(tmp_path):
     base = tmp_path / "data"
-    base.mkdir()
-    db = base / "dtxwiki.sqlite"
+    db = base / "data" / "dtxwiki.sqlite"
+    db.parent.mkdir(parents=True)
     sqlite3.connect(str(db)).close()
     jwt = tmp_path / "jwt.pem"
     jwt.write_text("key", encoding="utf-8")
@@ -352,7 +352,23 @@ def _rollback_settings(tmp_path):
 
 def test_run_rollback_reinstalls_old_then_restores(monkeypatch, tmp_path):
     settings, base = _rollback_settings(tmp_path)
-    backup_dir = backup_service.create_backup(settings, version="0.1.0", data_dir=base)
+    env_file = tmp_path / "dtxwiki.env"
+    backed_up_env = f"DTXWIKI_DATA_DIR={base}\n"
+    env_file.write_text(backed_up_env, encoding="utf-8")
+    backup_dir = backup_service.create_backup(
+        settings, version="0.1.0", data_dir=base, env_file=env_file
+    )
+    database_url = f"sqlite:///{base.as_posix()}/data/./dtxwiki.sqlite?timeout=15"
+    library_root = base / "library"
+    env_file.write_text(
+        f"DTXWIKI_DATA_DIR={base}/\n"
+        f"DTXWIKI_DATABASE_URL={database_url}\n"
+        f"DTXWIKI_LIBRARY_BLOB_ROOT={library_root}\n",
+        encoding="utf-8",
+    )
+    settings = settings.model_copy(
+        update={"database_url": database_url, "library_blob_root": str(library_root)}
+    )
     calls = []
     monkeypatch.setattr(us, "_run_argv", lambda argv, echo, **_kw: calls.append(argv))
 
@@ -362,11 +378,13 @@ def test_run_rollback_reinstalls_old_then_restores(monkeypatch, tmp_path):
         method="venv",
         yes=True,
         data_dir=base,
+        env_file=str(env_file),
         echo=lambda *a: lines.append(" ".join(str(x) for x in a)),
     )
     assert result.ok
     assert result.to_version == "0.1.0"
     assert result.backup_dir == backup_dir
+    assert env_file.read_text(encoding="utf-8") == backed_up_env
     # the OLD version is pinned + force-reinstalled (anti-brick: code down first)
     assert any("dtxwiki==0.1.0" in argv for argv in calls)
     assert any("--force-reinstall" in argv for argv in calls)
@@ -509,9 +527,13 @@ def test_run_rollback_integrity_failure_aborts_before_reinstall(monkeypatch, tmp
     moved = backup_service.create_backup(
         settings, version="0.1.0", data_dir=base, env_file=env_file
     )
-    env_file.write_text(f"DTXWIKI_DATA_DIR={tmp_path / 'moved'}\n", encoding="utf-8")
+    database_url = f"sqlite:///{(tmp_path / 'moved.sqlite').as_posix()}"
+    env_file.write_text(
+        f"DTXWIKI_DATA_DIR={base}\nDTXWIKI_DATABASE_URL={database_url}\n",
+        encoding="utf-8",
+    )
     result = us.run_rollback(
-        settings,
+        settings.model_copy(update={"database_url": database_url}),
         method="venv",
         yes=True,
         data_dir=base,
@@ -521,6 +543,8 @@ def test_run_rollback_integrity_failure_aborts_before_reinstall(monkeypatch, tmp
     )
     assert not result.ok and result.exit_code == 2
     assert "storage paths changed" in result.message
+    assert "DTXWIKI_DATABASE_URL" in result.message
+    assert database_url not in result.message
     assert calls == []
 
 

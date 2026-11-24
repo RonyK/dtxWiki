@@ -28,8 +28,10 @@ from pathlib import Path, PurePosixPath
 from uuid import UUID, uuid4
 
 from sqlalchemy.engine import make_url
+from sqlalchemy.util import asbool
 
 from backend.app.data_dir import data_dir as default_data_dir
+from backend.app.data_dir import default_sqlite_path
 from backend.app.settings import Settings
 from backend.services.ops import db_lock
 
@@ -43,15 +45,6 @@ JWT_BACKUP_NAME = "jwt.pem"
 SESSION_SECRET_BACKUP_NAME = "session_secret"
 LLM_KEYRING_BACKUP_NAME = "llm-credential-keyring.json"
 ENV_BACKUP_NAME = "dtxwiki.env"
-# Where the restored env file looks for its data. A restore puts files where
-# the live configuration keeps them, so these must be the same in both.
-STORAGE_PATH_KEYS = (
-    "DTXWIKI_DATA_DIR",
-    "DTXWIKI_DATABASE_URL",
-    "DTXWIKI_LIBRARY_BLOB_ROOT",
-    "DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH",
-    "DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE",
-)
 USER_FILES_DIRNAME = "files"
 LIBRARY_CHECKPOINT_DIRNAME = "library"
 LIBRARY_CHECKPOINT_PREFIX = f"{USER_FILES_DIRNAME}/{LIBRARY_CHECKPOINT_DIRNAME}"
@@ -86,14 +79,7 @@ class BackupPathsChangedError(BackupIntegrityError):
 
 
 def check_restore_paths(backup: Path, env_file: Path | None) -> None:
-    """Refuse a restore whose env file moved its storage since the backup.
-
-    Restoring the env file brings back its paths, while the data is restored
-    where the live configuration keeps it. If the two differ, the restore
-    would report success and the restarted service would read other files.
-    The error names the settings, never their values: a database URL can
-    carry a password.
-    """
+    """Check storage restored to live destinations before replacing the env."""
     if env_file is None:
         return
     env_backup = resolve_backup_dir(backup) / ENV_BACKUP_NAME
@@ -101,17 +87,31 @@ def check_restore_paths(backup: Path, env_file: Path | None) -> None:
         return
     from backend.cli.prod_setup import read_env_file
 
-    restored = read_env_file(env_backup)
-    # A missing live env file has none of the settings: any path the
-    # backed-up env names differs from it.
-    live = read_env_file(Path(env_file))
-    changed = [key for key in STORAGE_PATH_KEYS if restored.get(key) != live.get(key)]
+    restored = _storage_locations(read_env_file(env_backup))
+    live = _storage_locations(read_env_file(env_file))
+    changed = [key for key in restored if restored[key] != live[key]]
     if changed:
+        # A database URL can carry a password. Report setting names only.
         raise BackupPathsChangedError(
-            "storage paths changed since this backup ("
-            + ", ".join(changed)
-            + "); set them back to the backed-up values before restoring"
+            f"storage paths changed since this backup ({', '.join(changed)})"
         )
+
+
+def _storage_locations(env: dict[str, str]) -> dict[str, Path | str]:
+    # Keys and keyrings have separate destinations derived from the restored env.
+    base = default_data_dir(env=env).resolve()
+    database_url = env.get("DTXWIKI_DATABASE_URL")
+    return {
+        "DTXWIKI_DATA_DIR": base,
+        "DTXWIKI_DATABASE_URL": (
+            default_sqlite_path(base=base).resolve()
+            if database_url is None
+            else _database_location(database_url)
+        ),
+        "DTXWIKI_LIBRARY_BLOB_ROOT": _library_root(
+            env.get("DTXWIKI_LIBRARY_BLOB_ROOT"), base
+        ).resolve(),
+    }
 
 
 @dataclass(frozen=True)
@@ -168,6 +168,23 @@ def db_path_from_url(database_url: str) -> Path | None:
     return Path(database)
 
 
+def _database_location(database_url: str) -> Path | str:
+    # Normalize ordinary SQLite files. Other URLs may carry connection
+    # options that select a different database.
+    try:
+        path = db_path_from_url(database_url)
+        if path is None or str(path).startswith(("file:", "~")):
+            return database_url
+        url = make_url(database_url)
+        if url.drivername not in {"sqlite", "sqlite+pysqlite"} or asbool(
+            url.query.get("uri", False)
+        ):
+            return database_url
+    except (TypeError, ValueError):
+        return database_url
+    return Path(os.path.abspath(path)).resolve()
+
+
 def create_backup(
     settings: Settings,
     *,
@@ -218,7 +235,7 @@ def create_backup(
         library_checkpoint = _omitted_library_checkpoint()
         repository_checkpoint = _omitted_library_checkpoint()
         if includes_db:
-            library_root = _library_root(settings, base)
+            library_root = _library_root(settings.library_blob_root, base)
             _validate_library_root_location(library_root, backups_root)
             library_entries, library_checkpoint = _copy_library_checkpoint(
                 library_root, backup_dir
@@ -357,7 +374,7 @@ def restore_backup(
         and manifest.get("checkpoint_kind") == "full"
         and db_path is not None
     ):
-        library_root = _library_root(settings, base)
+        library_root = _library_root(settings.library_blob_root, base)
         _validate_library_root_location(library_root, base / BACKUPS_DIRNAME)
         _restore_full_checkpoint(
             backup_dir,
@@ -1569,8 +1586,7 @@ def _commit_restore_swaps(swaps: list[_RestoreSwap]) -> None:
                 pass
 
 
-def _library_root(settings: Settings, base: Path) -> Path:
-    configured = settings.library_blob_root
+def _library_root(configured: str | None, base: Path) -> Path:
     return _absolute_path(Path(configured) if configured else base / "library")
 
 
