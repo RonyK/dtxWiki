@@ -37,8 +37,7 @@ def _connection_constraints(table_name: str) -> tuple[CheckConstraint, ...]:
             name=f"ck_{table_name}_revisions",
         ),
         CheckConstraint(
-            "status <> 'deleted' OR "
-            "(active_credential IS NULL AND pending_credential IS NULL)",
+            "status <> 'deleted' OR active_credential IS NULL",
             name=f"ck_{table_name}_deleted_credentials",
         ),
     )
@@ -58,7 +57,6 @@ class _ConnectionFields:
         JSON, default=list, server_default="[]"
     )
     active_credential: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
-    pending_credential: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
     secret_revision: Mapped[int] = mapped_column(default=0, server_default="0")
     revision: Mapped[int] = mapped_column(default=1, server_default="1")
     status: Mapped[str] = mapped_column(

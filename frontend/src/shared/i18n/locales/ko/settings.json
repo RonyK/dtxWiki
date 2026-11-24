@@ -98,6 +98,14 @@
     "labs": {
       "label": "실험실",
       "description": "이 워크스페이스의 실험 기능을 관리합니다."
+    },
+    "llm": {
+      "label": "LLM 연결",
+      "description": "내 API 키로 등록한 LLM 서비스입니다. 나만 보고 사용할 수 있습니다."
+    },
+    "workspaceLlm": {
+      "label": "공용 LLM 연결",
+      "description": "이 워크스페이스가 비용을 부담하는 LLM 서비스입니다. 소유자가 관리하며 키는 워크스페이스에 속합니다."
     }
   },
   "crossLinks": {
@@ -2189,5 +2197,102 @@
     "heldReopened": "“{{title}}”에 새 관리자가 지정되어 계정과 함께 삭제되지 않습니다.",
     "scheduledLabel": "삭제",
     "cleanupFailedLabel": "정리"
+  },
+  "llm": {
+    "add": "서비스 추가",
+    "addTitle": "LLM 서비스 추가",
+    "editTitle": "LLM 서비스 편집",
+    "close": "닫기",
+    "loading": "LLM 연결을 불러오는 중…",
+    "emptyTitle": "등록한 LLM 서비스가 없습니다",
+    "emptyPersonal": "내 API 키로 서비스를 추가하세요. 나만 보고 사용할 수 있습니다.",
+    "emptyWorkspace": "이 워크스페이스의 API 키로 팀이 함께 쓸 서비스를 추가하세요.",
+    "verifyHint": "검증하면 모델마다 작은 요청을 바로 보내며 최대 약 30초 걸릴 수 있습니다. 제공자 요금이 조금 발생할 수 있습니다.",
+    "verify": "검증",
+    "enable": "사용",
+    "disable": "중지",
+    "enableNeedsVerification": "검증에 성공해야 사용할 수 있습니다.",
+    "edit": "편집",
+    "deleteLabel": "{{name}} 삭제",
+    "deleteTitle": "{{name}}을(를) 삭제할까요?",
+    "deleteBody": "저장한 키를 여기서 파기합니다. 키가 유출되었을 수 있다면 제공자 콘솔에서도 키를 폐기하세요.",
+    "endpointDefault": "제공자 기본 엔드포인트",
+    "endpointHint": "dtxWiki 서버가 접속하는 주소입니다. 서버 운영자가 허용한 엔드포인트만 표시됩니다.",
+    "needsOperatorEndpoint": "운영자 엔드포인트 필요",
+    "unsupportedConfig": "이 서비스의 일부 설정은 여기서 편집할 수 없습니다.",
+    "keyHint": "키는 서버에서 암호화해 보관하며 다시 표시하지 않습니다.",
+    "replaceKey": "키 교체",
+    "replaceKeyHint": "모든 칸을 비워 두면 지금 키를 유지합니다. 입력하면 저장된 키 전체를 바꿉니다. 새 키는 먼저 검증하고, 성공했을 때만 저장합니다.",
+    "endpointNeedsKey": "새 엔드포인트에 사용할 키를 입력하세요. 저장된 키는 다른 엔드포인트로 보내지 않습니다.",
+    "addModel": "모델 추가",
+    "removeModel": "{{model}} 모델 제거",
+    "transferNotice": "이 서비스를 사용하면 질문과 근거 일부가 이 서비스로 전송되고, 요금은 키를 가진 제공자 계정에 청구됩니다.",
+    "conflict": "다른 곳에서 이 연결이 바뀌었습니다.",
+    "reloadLatest": "최신 내용 불러오기",
+    "status": {
+      "enabled": "사용 중",
+      "disabled": "중지됨"
+    },
+    "verification": {
+      "ready": "검증됨",
+      "unverified": "검증 필요",
+      "failed": "검증 실패",
+      "stale": "다시 검증 필요",
+      "running": "검증 중"
+    },
+    "result": {
+      "failed": "검증하지 못했습니다.",
+      "outcome_unknown": "결과를 확인하지 못했습니다. 제공자 요금이 발생했을 수 있습니다.",
+      "authentication_failed": "제공자가 키를 거절했습니다.",
+      "permission_denied": "이 키로는 해당 모델을 사용할 수 없습니다.",
+      "not_found": "모델이나 엔드포인트를 찾지 못했습니다. 모델 ID를 확인하세요.",
+      "quota_exhausted": "제공자 계정의 한도나 크레딧이 부족합니다.",
+      "rate_limited": "제공자가 요청을 제한하고 있습니다. 잠시 후 다시 시도하세요.",
+      "provider_unavailable": "제공자를 사용할 수 없습니다. 잠시 후 다시 시도하세요.",
+      "provider_error": "제공자가 오류를 반환했습니다. 잠시 후 다시 시도하세요.",
+      "invalid_response": "제공자의 응답을 읽지 못했습니다.",
+      "timeout": "제공자가 제시간에 응답하지 않았습니다.",
+      "network_error": "제공자에 연결하지 못했습니다.",
+      "invalid_request": "제공자가 요청을 거절했습니다. 모델 설정을 확인하세요.",
+      "unsupported_option": "모델이 설정한 옵션을 지원하지 않습니다.",
+      "config_schema_mismatch": "설정이 이 서비스의 형식과 맞지 않습니다.",
+      "unexpected_result": "모델이 예상과 다르게 응답했습니다.",
+      "endpoint_unavailable": "이 엔드포인트는 더 이상 허용되지 않습니다. 서버 운영자에게 문의하세요.",
+      "adapter_unavailable": "이 서비스 유형을 서버에서 사용할 수 없습니다.",
+      "adapter_version_unavailable": "이 서비스 유형의 버전을 서버에서 사용할 수 없습니다.",
+      "credential_unavailable": "저장한 키를 읽지 못했습니다. 키를 다시 입력하세요."
+    },
+    "fields": {
+      "name": "이름",
+      "provider": "서비스 유형",
+      "endpoint": "엔드포인트",
+      "credential": "자격 증명",
+      "models": "모델",
+      "modelId": "모델 ID",
+      "displayName": "표시 이름(선택)",
+      "verifiedAt": "마지막 검증"
+    },
+    "credentialFields": {
+      "api_key": "API 키"
+    },
+    "errors": {
+      "load": "LLM 연결을 불러오지 못했습니다.",
+      "action": "요청을 처리하지 못했습니다. 다시 시도하세요.",
+      "save": "연결을 저장하지 못했습니다.",
+      "connection_not_verified": "검증에 성공해야 사용할 수 있습니다.",
+      "connection_revision_conflict": "다른 곳에서 이 연결이 바뀌었습니다. 새로 불러온 뒤 다시 시도하세요.",
+      "adapter_endpoint_required": "이 서비스 유형은 서버 운영자가 정한 엔드포인트가 필요합니다.",
+      "endpoint_profile_unavailable": "이 서비스 유형에서 쓸 수 없는 엔드포인트입니다.",
+      "config_schema_mismatch": "설정이나 키가 이 서비스의 형식과 맞지 않습니다.",
+      "adapter_unavailable": "이 서비스 유형을 서버에서 사용할 수 없습니다.",
+      "adapter_version_unavailable": "이 서비스 유형의 버전을 서버에서 사용할 수 없습니다.",
+      "llm_vault_unavailable": "지금은 서버가 키를 보관할 수 없습니다. 서버 운영자에게 문의하세요.",
+      "validation_failed": "입력한 내용을 확인한 뒤 다시 시도하세요."
+    },
+    "ownerOnly": "이 워크스페이스의 소유자만 공용 LLM 연결을 관리할 수 있습니다.",
+    "keyRejected": "새 키를 저장하지 않았습니다.",
+    "endpointRetired": "더 이상 허용되지 않는 엔드포인트 — 다른 엔드포인트를 고르세요",
+    "chooseOption": "값을 고르세요",
+    "endpointUnavailable": "저장된 엔드포인트를 지금 그대로는 쓸 수 없습니다. 편집에서 엔드포인트를 골라 저장하면 다시 연결합니다."
   }
 }

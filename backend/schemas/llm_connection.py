@@ -55,6 +55,8 @@ CredentialValue = Annotated[SecretStr, Field(min_length=1)]
 class LLMConnectionCreate(BaseModel):
     name: ConnectionLabel
     adapter_id: ConnectionLabel
+    # An operator endpoint profile; omitted means the adapter's own endpoint.
+    endpoint_profile_id: ConnectionLabel | None = None
     provider_options: dict[str, Any] = Field(default_factory=dict, repr=False)
     model_profiles: ModelProfiles
     credential: dict[str, CredentialValue] = Field(
@@ -69,6 +71,8 @@ class LLMConnectionUpdate(BaseModel):
     name: ConnectionLabel | None = None
     provider_options: dict[str, Any] | None = Field(default=None, repr=False)
     model_profiles: ModelProfiles | None = None
+    # Enabling requires a successful verification of the current setup.
+    status: Literal["enabled", "disabled"] | None = None
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
@@ -80,6 +84,50 @@ class LLMConnectionUpdate(BaseModel):
         return self
 
 
+class LLMCredentialReplace(BaseModel):
+    """A replacement credential, verified before it replaces the active one.
+
+    The endpoint can change only together with a credential. Omit
+    ``endpoint_profile_id`` to keep the current endpoint; ``null`` selects
+    the adapter's own endpoint.
+    """
+
+    expected_revision: PositiveInt
+    credential: dict[str, CredentialValue] = Field(
+        repr=False, json_schema_extra={"writeOnly": True}
+    )
+    endpoint_profile_id: ConnectionLabel | None = None
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+
+class LLMVerificationRequest(BaseModel):
+    expected_revision: PositiveInt
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+
+VerificationOutcome = Literal["succeeded", "failed", "outcome_unknown"]
+
+
+class LLMVerificationModelResult(BaseModel):
+    model_profile_id: str
+    outcome: VerificationOutcome
+    error_code: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LLMVerificationResult(BaseModel):
+    """``outcome_unknown``: the provider may have answered; nothing recorded."""
+
+    status: VerificationOutcome
+    error_code: str | None
+    results: list[LLMVerificationModelResult]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class LLMConnectionView(BaseModel):
     id: UUID
     name: str
@@ -87,6 +135,18 @@ class LLMConnectionView(BaseModel):
     adapter_implementation_version: str
     config_schema_version: int
     api_profile: str | None
+    endpoint_profile_id: str | None
+    # Why the stored setup cannot be used now (the operator removed its
+    # adapter or version, or removed or moved its endpoint); None if it can.
+    # A moved endpoint is applied again only through a key replacement.
+    unavailable_reason: (
+        Literal[
+            "adapter_unavailable",
+            "adapter_version_unavailable",
+            "endpoint_unavailable",
+        ]
+        | None
+    )
     provider_options: dict[str, Any]
     model_profiles: list[LLMModelProfile]
     status: Literal["enabled", "disabled", "deleted"]
@@ -107,3 +167,39 @@ class LLMConnectionResponse(RESTResponseBase):
 
 class LLMConnectionListResponse(RESTResponseBase):
     data: list[LLMConnectionView]
+
+
+class LLMVerificationData(BaseModel):
+    connection: LLMConnectionView
+    verification: LLMVerificationResult
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LLMVerificationResponse(RESTResponseBase):
+    data: LLMVerificationData
+
+
+class LLMAdapterEndpoint(BaseModel):
+    # ``None`` is the adapter's own endpoint; otherwise an operator profile.
+    id: str | None
+    label: str | None
+    base_url: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LLMAdapterView(BaseModel):
+    adapter_id: str
+    adapter_version: str
+    display_name: dict[str, str]
+    config_schema: dict[str, Any]
+    credential_schema: dict[str, Any]
+    options: list[str]
+    endpoints: list[LLMAdapterEndpoint]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LLMAdapterListResponse(RESTResponseBase):
+    data: list[LLMAdapterView]

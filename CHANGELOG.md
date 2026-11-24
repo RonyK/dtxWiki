@@ -35,6 +35,22 @@
   JWT keys and LLM keyrings follow the backed-up env and use the configured
   systemd service group.
 
+### LLM connections
+
+- Settings lists personal LLM connections under Your account and shared ones
+  under This workspace (owners only). Add, edit, verify, enable, disable and
+  delete them there.
+- Verifying sends one small request per model right away and records the
+  result. A connection can be enabled only after its current setup verifies.
+  A replacement key is checked before it is saved; a refused one is never
+  stored.
+- `DTXWIKI_LLM_ENDPOINT_PROFILES_JSON` lists the extra endpoints, such as an
+  internal gateway or an OpenAI-compatible server, that connections may use.
+  Users choose from that list and never enter a URL. A stored key is never
+  sent to an address it was not verified with: when an endpoint is removed or
+  moved, the connection shows why it cannot be used and is reconnected from
+  Edit (with a new key if one is stored).
+
 ## 0.3.2 — 2026-11-21
 
 ### Important changes

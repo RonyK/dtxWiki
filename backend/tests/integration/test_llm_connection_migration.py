@@ -93,9 +93,7 @@ def test_llm_connection_migration_traversal(tmp_path, dialect):
                 "unverified",
             )
             assert (common.revision, common.secret_revision) == (1, 0)
-            assert (
-                common.active_credential is None and common.pending_credential is None
-            )
+            assert common.active_credential is None
             assert (
                 common.provider_options,
                 common.model_profiles,

@@ -17,6 +17,7 @@ import {
   Server,
   Settings2,
   ShieldCheck,
+  Sparkles,
   Star,
   Terminal,
   Trash2,
@@ -205,6 +206,7 @@ import {
   type LibraryPolicyCustomFormat,
   type LibraryPolicyFormatFamily,
 } from "./libraryPolicy/model";
+import { LlmConnectionsSection } from "./LlmConnectionsSection";
 import {
   UploadLimitControl,
   byteSizeDraftBytes,
@@ -217,6 +219,8 @@ export type SettingsSection =
   | "members"
   | "policies"
   | "mcp"
+  | "llm"
+  | "workspace-llm"
   | "labs"
   | "users"
   | "jobs"
@@ -695,7 +699,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
       searchParams.get("section"),
       searchParams.get("tab"),
     );
-  const activeSection: SettingsSection = scope === "account" ? routeSettings.section === "labs" ? "labs" : "mcp" : scope === "server" ? (["deployment", "users", "jobs", "attachments"].includes(routeSettings.section) ? routeSettings.section : "deployment") : routeSettings.section;
+  const activeSection: SettingsSection = scope === "account" ? routeSettings.section === "labs" || routeSettings.section === "llm" ? routeSettings.section : "mcp" : scope === "server" ? (["deployment", "users", "jobs", "attachments"].includes(routeSettings.section) ? routeSettings.section : "deployment") : routeSettings.section;
   const activePolicyTab = routeSettings.tab;
   useEffect(() => {
     if (scope === "account" && routeSettings.section === "labs" && navigationWorkspaceId) {
@@ -2037,6 +2041,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
         ? workspacePath(navigationWorkspaceId, "settings/integrations")
         : "/account/integrations";
     }
+    if (section === "llm" && !navigationWorkspaceId) return "/account/integrations";
     return navigationWorkspaceId ? workspacePath(navigationWorkspaceId, "settings") : "/workspaces/find";
   }
 
@@ -2090,6 +2095,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
     showDeployment: true,
     showUsers: true,
     showLabs: true,
+    showWorkspaceLlm: true,
     tokenCount: activeTokenCount,
   });
   const activeDestination = (() => {
@@ -3651,6 +3657,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
               showDeployment={isServerAdmin}
               showUsers={isServerAdmin}
               showLabs={canEditPolicies && Boolean(routeWorkspaceId)}
+              showWorkspaceLlm={canEditPolicies && Boolean(routeWorkspaceId)}
               tokenCount={activeTokenCount}
             />
           ) : (
@@ -3667,6 +3674,7 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
             showAttachments={canViewAttachments}
             showUsers={isServerAdmin}
             showLabs={canEditPolicies && Boolean(routeWorkspaceId)}
+            showWorkspaceLlm={canEditPolicies && Boolean(routeWorkspaceId)}
             tokenCount={activeTokenCount}
           />
           )}
@@ -3965,6 +3973,23 @@ function SettingsScreenBody({ scope }: { scope: "workspace" | "account" | "serve
             ) : null}
                 </div>
               </>
+            ) : null}
+            {activeSection === "llm" ? (
+              <LlmConnectionsSection
+                labelledBy={SETTINGS_DESTINATION_HEADING_ID}
+                scope={{ kind: "user" }}
+              />
+            ) : null}
+            {activeSection === "workspace-llm" ? (
+              routeWorkspaceId && canEditPolicies ? (
+                <LlmConnectionsSection
+                  key={routeWorkspaceId}
+                  labelledBy={SETTINGS_DESTINATION_HEADING_ID}
+                  scope={{ kind: "workspace", workspaceId: routeWorkspaceId }}
+                />
+              ) : (
+                <StatusBanner tone="warning">{t("llm.ownerOnly")}</StatusBanner>
+              )
             ) : null}
             {activeSection === "mcp" ? (
               <>
@@ -6750,6 +6775,7 @@ export type SettingsDestinationFlags = {
   showDeployment: boolean;
   showUsers: boolean;
   showLabs?: boolean;
+  showWorkspaceLlm?: boolean;
   tokenCount: number;
 };
 
@@ -6816,8 +6842,15 @@ export function settingsPolicyTabs(t: TFunction<"settings">) {
  */
 export function settingsDestinations(
   t: TFunction<"settings">,
-  { consentCount, showAttachments, showDeployment, showUsers, showLabs = false, tokenCount }:
-    SettingsDestinationFlags,
+  {
+    consentCount,
+    showAttachments,
+    showDeployment,
+    showUsers,
+    showLabs = false,
+    showWorkspaceLlm = false,
+    tokenCount,
+  }: SettingsDestinationFlags,
 ): { sections: SettingsDestination[]; groups: Array<{ id: SettingsSectionGroup; label: string }> } {
   const sections: SettingsDestination[] = [
     // Identity, then people, then the rules, then the operational tail.
@@ -6873,6 +6906,23 @@ export function settingsDestinations(
         count: tokenCount + consentCount,
         defaultValue: "{{count}} personal connections (access keys + OAuth apps)",
       }),
+    },
+    {
+      // Personal keys belong to the account, like MCP access: the same list
+      // shows in every workspace.
+      id: "llm",
+      group: "account",
+      icon: Sparkles,
+      label: t("sections.llm.label"),
+      description: t("sections.llm.description"),
+    },
+    {
+      id: "workspace-llm",
+      group: "workspace",
+      icon: Sparkles,
+      workspaceAdminOnly: true,
+      label: t("sections.workspaceLlm.label"),
+      description: t("sections.workspaceLlm.description"),
     },
     {
       id: "labs",
@@ -6972,7 +7022,14 @@ export function settingsDestinations(
     },
   ];
 
-  return { sections: showLabs ? sections : sections.filter((section) => section.id !== "labs"), groups };
+  return {
+    sections: sections.filter(
+      (section) =>
+        (showLabs || section.id !== "labs") &&
+        (showWorkspaceLlm || section.id !== "workspace-llm"),
+    ),
+    groups,
+  };
 }
 
 function SettingsSectionNav({
@@ -6983,6 +7040,7 @@ function SettingsSectionNav({
   showAttachments,
   showUsers,
   showLabs,
+  showWorkspaceLlm,
   tokenCount,
 }: {
   activeSection: SettingsSection;
@@ -6992,6 +7050,7 @@ function SettingsSectionNav({
   showAttachments: boolean;
   showUsers: boolean;
   showLabs: boolean;
+  showWorkspaceLlm: boolean;
   tokenCount: number;
 }) {
   const { t } = useTranslation("settings");
@@ -7002,6 +7061,7 @@ function SettingsSectionNav({
     showDeployment,
     showUsers,
     showLabs,
+    showWorkspaceLlm,
     tokenCount,
   });
   // The same pure filter the picker uses, so the two lists cannot disagree
@@ -10388,7 +10448,12 @@ function policyTabFromParam(tab: string | null): SettingsPolicyTab | null {
  * that `ReviewScreen`'s auto-approve deep links depend on.
  */
 function settingsSectionFromParam(section: string): SettingsRoute | null {
-  if (section === "workspace" || section === "members") {
+  if (
+    section === "workspace" ||
+    section === "members" ||
+    section === "llm" ||
+    section === "workspace-llm"
+  ) {
     return { section, tab: null };
   }
   // The five policy surfaces keep their ids as aliases, so every link ever

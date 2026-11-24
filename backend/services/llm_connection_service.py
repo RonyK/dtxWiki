@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -12,25 +13,36 @@ from backend.llm.adapter_registry import (
     LLMAdapterEndpointRequiredError,
     LLMAdapterRegistry,
     LLMAdapterRegistryError,
+    normalize_base_url,
 )
 from backend.llm.credential_vault import (
     ConnectionScope,
     CredentialBinding,
     CredentialVault,
     CredentialVaultError,
+    EncryptedCredential,
+    FileCredentialVault,
 )
+from backend.llm.endpoint_profiles import EndpointProfile, parse_endpoint_profiles
 from backend.models.base import utc_now
 from backend.models.llm_connection import UserLLMConnection, WorkspaceLLMConnection
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.policy.rbac import normalize_role
-from backend.schemas.llm_connection import LLMConnectionCreate, LLMConnectionUpdate
+from backend.schemas.llm_connection import (
+    LLMConnectionCreate,
+    LLMConnectionUpdate,
+    LLMCredentialReplace,
+)
 from backend.services.audit_service import AuditService
 from backend.services.db_write_intent import (
     acquire_workspace_write_intent,
     acquire_write_intent,
 )
 from backend.spi.types import ActorContext
+
+if TYPE_CHECKING:
+    from backend.app.settings import Settings
 
 StoredConnection = UserLLMConnection | WorkspaceLLMConnection
 
@@ -43,19 +55,79 @@ class LLMConnectionError(RuntimeError):
 
 
 class LLMConnectionService:
-    def __init__(self, *, registry: LLMAdapterRegistry, vault: CredentialVault) -> None:
+    def __init__(
+        self,
+        *,
+        registry: LLMAdapterRegistry,
+        vault: CredentialVault,
+        endpoint_profiles: tuple[EndpointProfile, ...] = (),
+    ) -> None:
         self._registry = registry
         self._vault = vault
+        self._endpoint_profiles = endpoint_profiles
         self._audit = AuditService()
 
-    def authorize_workspace_write(
+    def catalog(self) -> list[dict]:
+        """Installed adapters with the endpoints a connection may use."""
+        return [
+            {
+                "adapter_id": descriptor.adapter_id,
+                "adapter_version": descriptor.adapter_version,
+                "display_name": dict(descriptor.display_name),
+                "config_schema": dict(descriptor.config_schema),
+                "credential_schema": dict(descriptor.credential_schema),
+                "options": sorted(descriptor.options),
+                "endpoints": [
+                    {
+                        "id": endpoint.get("id"),
+                        "label": self._endpoint_label(endpoint),
+                        "base_url": endpoint["base_url"],
+                    }
+                    for endpoint in self._allowed_endpoints(descriptor)
+                ],
+            }
+            for descriptor in self._registry.descriptors()
+        ]
+
+    def unavailable(self, connection: StoredConnection, endpoint: dict) -> str | None:
+        """Why a setup cannot be used as stored now, or None if it can.
+
+        The endpoint is compared as stored: an operator change to its address
+        (or a new adapter default) applies only through a key replacement, so
+        a stored key is never sent to an address it was not verified with.
+        """
+        try:
+            descriptor = self._registry.descriptor(connection.adapter_id)
+        except LLMAdapterRegistryError:
+            return "adapter_unavailable"
+        if descriptor.config_schema_version != connection.config_schema_version:
+            return "adapter_version_unavailable"
+        if endpoint not in self._allowed_endpoints(descriptor):
+            return "endpoint_unavailable"
+        return None
+
+    def _view(self, connection: StoredConnection, *, has_credential: bool) -> dict:
+        return {
+            **_view(connection, has_credential=has_credential),
+            "unavailable_reason": self.unavailable(
+                connection, connection.endpoint_profile
+            ),
+        }
+
+    @property
+    def vault(self) -> CredentialVault:
+        return self._vault
+
+    def authorize_write(
         self,
         session: Session,
         *,
+        scope: ConnectionScope,
         owner_id: UUID,
         actor: ActorContext,
     ) -> None:
-        _lock_owner(session, "workspace", owner_id, actor)
+        """Browser session of the owner (or a Workspace owner), on control."""
+        _lock_owner(session, scope, owner_id, actor)
 
     def list(
         self, session: Session, *, scope: ConnectionScope, owner_id: UUID
@@ -63,7 +135,7 @@ class LLMConnectionService:
         model = _connection_model(scope)
         statement = _select_owned(model, owner_id).order_by(model.created_at, model.id)
         return [
-            _view(connection, has_credential=has_credential)
+            self._view(connection, has_credential=has_credential)
             for connection, has_credential in session.execute(statement)
         ]
 
@@ -76,7 +148,7 @@ class LLMConnectionService:
         connection_id: UUID,
     ) -> dict:
         connection, has_credential = _get_owned(session, scope, owner_id, connection_id)
-        return _view(connection, has_credential=has_credential)
+        return self._view(connection, has_credential=has_credential)
 
     def create(
         self,
@@ -98,8 +170,13 @@ class LLMConnectionService:
         profiles = [
             profile.model_dump(mode="json") for profile in request.model_profiles
         ]
-        endpoint = self._validate(
-            descriptor.adapter_id, request.provider_options, profiles, credential
+        endpoint = self._endpoint(descriptor, request.endpoint_profile_id)
+        self._validate(
+            descriptor.adapter_id,
+            request.provider_options,
+            profiles,
+            credential,
+            base_url=endpoint["base_url"],
         )
         connection = (
             UserLLMConnection(user_id=owner_id)
@@ -112,27 +189,18 @@ class LLMConnectionService:
         connection.adapter_implementation_version = descriptor.adapter_version
         connection.config_schema_version = descriptor.config_schema_version
         connection.api_profile = descriptor.adapter_id
-        connection.endpoint_profile = {"kind": "adapter_default", "base_url": endpoint}
+        connection.endpoint_profile = endpoint
         connection.provider_options = request.provider_options
         connection.model_profiles = profiles
         if credential:
             binding = CredentialBinding(scope, owner_id, connection.id, 1)
-            try:
-                connection.active_credential = self._vault.encrypt(
-                    credential, binding=binding
-                )
-            except CredentialVaultError:
-                raise LLMConnectionError(
-                    "llm_vault_unavailable",
-                    "LLM credential storage is unavailable.",
-                    503,
-                ) from None
+            connection.active_credential = self._encrypt(credential, binding)
             connection.secret_revision = binding.secret_revision
             connection.credential_updated_at = utc_now()
         session.add(connection)
         session.flush()
         self._emit(session, scope, owner_id, actor, connection, "created")
-        return _view(connection, has_credential=bool(credential))
+        return self._view(connection, has_credential=bool(credential))
 
     def update(
         self,
@@ -175,19 +243,224 @@ class LLMConnectionService:
                     for profile in request.model_profiles
                 ]
             )
-            endpoint = self._validate(connection.adapter_id, config, profiles, None)
-            connection.endpoint_profile = {
-                "kind": "adapter_default",
-                "base_url": endpoint,
-            }
+            self._validate(
+                connection.adapter_id,
+                config,
+                profiles,
+                None,
+                base_url=connection.endpoint_profile["base_url"],
+            )
             connection.adapter_implementation_version = descriptor.adapter_version
             connection.provider_options = config
             connection.model_profiles = profiles
             connection.verification_status = "unverified"
             connection.verified_at = None
+        if request.status == "enabled":
+            # Only a verified setup that can still be used as stored.
+            if connection.verification_status != "ready":
+                raise LLMConnectionError(
+                    "connection_not_verified",
+                    "Verify the LLM connection before enabling it.",
+                    409,
+                )
+            code = self.unavailable(connection, connection.endpoint_profile)
+            if code is not None:
+                raise LLMConnectionError(
+                    code, "The LLM connection cannot be used as stored.", 409
+                )
+        if request.status is not None:
+            connection.status = request.status
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "updated")
-        return _view(connection, has_credential=has_credential)
+        return self._view(connection, has_credential=has_credential)
+
+    def owned(
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        connection_id: UUID,
+    ) -> StoredConnection:
+        """The whole stored connection, encrypted credentials included."""
+        connection = _load_full(session, scope, owner_id, connection_id)
+        if connection is None:
+            raise LLMConnectionError(
+                "connection_unavailable", "LLM connection not found.", 404
+            )
+        return connection
+
+    def candidate(
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        connection_id: UUID,
+        request: LLMCredentialReplace,
+        credential: dict[str, str],
+    ) -> tuple[StoredConnection, dict]:
+        """Check a replacement credential and its endpoint before verifying.
+
+        Nothing is stored: a credential is saved only after it verifies.
+        """
+        connection = self.owned(
+            session, scope=scope, owner_id=owner_id, connection_id=connection_id
+        )
+        _require_revision(connection, request.expected_revision)
+        descriptor = self._descriptor(connection.adapter_id)
+        if descriptor.config_schema_version != connection.config_schema_version:
+            raise LLMConnectionError(
+                "adapter_version_unavailable",
+                "The connection's adapter version is unavailable.",
+                409,
+            )
+        endpoint = (
+            self._endpoint(descriptor, request.endpoint_profile_id)
+            if "endpoint_profile_id" in request.model_fields_set
+            else connection.endpoint_profile
+        )
+        self._validate(
+            connection.adapter_id,
+            connection.provider_options,
+            connection.model_profiles,
+            credential,
+            base_url=endpoint["base_url"],
+        )
+        return connection, endpoint
+
+    def record_verification(
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        actor: ActorContext,
+        connection_id: UUID,
+        revision: int,
+        status: str,
+    ) -> dict | None:
+        """Record a verification of ``revision``; None if it changed since.
+
+        An unconfirmed outcome (``outcome_unknown``) records nothing.
+        """
+        connection, has_credential = self._lock_for_write(
+            session, scope, owner_id, actor, connection_id
+        )
+        if connection.revision != revision:
+            return None
+        if status in ("succeeded", "failed"):
+            succeeded = status == "succeeded"
+            connection.verification_status = "ready" if succeeded else "failed"
+            connection.verified_at = utc_now() if succeeded else None
+            self._emit(session, scope, owner_id, actor, connection, "verified")
+        return self._view(connection, has_credential=has_credential)
+
+    def swap_credential(
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        actor: ActorContext,
+        connection_id: UUID,
+        revision: int,
+        credential: dict[str, str],
+        endpoint: dict,
+    ) -> dict | None:
+        """Store a verified credential; None if the connection changed since."""
+        connection, _ = self._lock_for_write(
+            session, scope, owner_id, actor, connection_id
+        )
+        if connection.revision != revision:
+            return None
+        now = utc_now()
+        secret_revision = connection.secret_revision + 1
+        connection.active_credential = (
+            self._encrypt(
+                credential,
+                CredentialBinding(scope, owner_id, connection.id, secret_revision),
+            )
+            if credential
+            else None
+        )
+        connection.secret_revision = secret_revision
+        connection.credential_updated_at = now
+        connection.endpoint_profile = endpoint
+        connection.verification_status = "ready"
+        connection.verified_at = now
+        connection.revision += 1
+        self._emit(session, scope, owner_id, actor, connection, "credential_rotated")
+        return self._view(connection, has_credential=bool(credential))
+
+    def _lock_for_write(
+        self,
+        session: Session,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        actor: ActorContext,
+        connection_id: UUID,
+    ) -> tuple[StoredConnection, bool]:
+        if scope == "user":
+            _lock_owner(session, scope, owner_id, actor)
+        else:
+            acquire_workspace_write_intent(session)
+        return _get_owned(session, scope, owner_id, connection_id, lock=True)
+
+    def _encrypt(
+        self, credential: dict[str, str], binding: CredentialBinding
+    ) -> EncryptedCredential:
+        try:
+            return self._vault.encrypt(credential, binding=binding)
+        except CredentialVaultError:
+            raise LLMConnectionError(
+                "llm_vault_unavailable",
+                "LLM credential storage is unavailable.",
+                503,
+            ) from None
+
+    def _allowed_endpoints(self, descriptor) -> list[dict]:
+        endpoints: list[dict] = []
+        if descriptor.default_base_url is not None:
+            endpoints.append(
+                {
+                    "kind": "adapter_default",
+                    "base_url": normalize_base_url(descriptor.default_base_url),
+                }
+            )
+        endpoints.extend(
+            {"kind": "operator", "id": profile.id, "base_url": profile.base_url}
+            for profile in self._endpoint_profiles
+            if profile.adapter_id == descriptor.adapter_id
+        )
+        return endpoints
+
+    def _endpoint_label(self, endpoint: dict) -> str | None:
+        return next(
+            (
+                profile.label
+                for profile in self._endpoint_profiles
+                if profile.id == endpoint.get("id")
+            ),
+            None,
+        )
+
+    def _endpoint(self, descriptor, profile_id: str | None) -> dict:
+        wanted = "adapter_default" if profile_id is None else "operator"
+        for endpoint in self._allowed_endpoints(descriptor):
+            if endpoint["kind"] == wanted and endpoint.get("id") == profile_id:
+                return endpoint
+        if profile_id is None:
+            raise LLMConnectionError(
+                "adapter_endpoint_required",
+                "The adapter requires an endpoint profile.",
+                422,
+            )
+        raise LLMConnectionError(
+            "endpoint_profile_unavailable",
+            "The endpoint profile is not available for this adapter.",
+            422,
+        )
 
     def delete(
         self,
@@ -209,10 +482,9 @@ class LLMConnectionService:
         connection.verification_status = "unverified"
         connection.verified_at = None
         connection.active_credential = None
-        connection.pending_credential = None
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "deleted")
-        return _view(connection, has_credential=False)
+        return self._view(connection, has_credential=False)
 
     def _descriptor(self, adapter_id: str):
         try:
@@ -228,16 +500,19 @@ class LLMConnectionService:
         config: dict,
         profiles: list[dict],
         credential: dict | None,
-    ) -> str:
+        *,
+        base_url: str,
+    ) -> None:
         try:
             json.dumps(config, allow_nan=False)
-            return self._registry.validate_registration(
+            self._registry.validate_registration(
                 adapter_id,
                 config=config,
                 credential=credential,
                 model_options={
                     option for profile in profiles for option in profile["options"]
                 },
+                base_url=base_url,
             )
         except LLMAdapterEndpointRequiredError:
             raise LLMConnectionError(
@@ -273,6 +548,19 @@ class LLMConnectionService:
         )
 
 
+def build_llm_connection_service(
+    settings: Settings, registry: LLMAdapterRegistry
+) -> LLMConnectionService:
+    return LLMConnectionService(
+        registry=registry,
+        vault=FileCredentialVault(
+            keyring_file=settings.llm_credential_keyring_file,
+            solo_local=settings.app_mode == "solo_local",
+        ),
+        endpoint_profiles=parse_endpoint_profiles(settings.llm_endpoint_profiles_json),
+    )
+
+
 def _connection_model(scope: ConnectionScope) -> type[StoredConnection]:
     return UserLLMConnection if scope == "user" else WorkspaceLLMConnection
 
@@ -283,7 +571,6 @@ def _select_owned(model: type[StoredConnection], owner_id: UUID):
         select(model, model.active_credential.is_not(None).label("has_credential"))
         .options(
             defer(model.active_credential, raiseload=True),
-            defer(model.pending_credential, raiseload=True),
         )
         .where(owner_column == owner_id, model.status != "deleted")
     )
@@ -361,6 +648,23 @@ def _lock_owner(
             )
 
 
+def _load_full(
+    session: Session,
+    scope: ConnectionScope,
+    owner_id: UUID,
+    connection_id: UUID,
+) -> StoredConnection | None:
+    model = _connection_model(scope)
+    owner_column = model.user_id if model is UserLLMConnection else model.workspace_id
+    return session.scalar(
+        select(model).where(
+            model.id == connection_id,
+            owner_column == owner_id,
+            model.status != "deleted",
+        )
+    )
+
+
 def _view(connection: StoredConnection, *, has_credential: bool) -> dict:
     # Keep the vault envelope, endpoint, and internal revision out of both
     # account and Workspace responses.
@@ -371,6 +675,7 @@ def _view(connection: StoredConnection, *, has_credential: bool) -> dict:
         "adapter_implementation_version": connection.adapter_implementation_version,
         "config_schema_version": connection.config_schema_version,
         "api_profile": connection.api_profile,
+        "endpoint_profile_id": connection.endpoint_profile.get("id"),
         "provider_options": connection.provider_options,
         "model_profiles": connection.model_profiles,
         "status": connection.status,

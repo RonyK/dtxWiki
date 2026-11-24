@@ -22,10 +22,14 @@ from backend.api.deps import (
 from backend.app.errors import build_rest_error_response
 from backend.schemas.common import RESTErrorBody
 from backend.schemas.llm_connection import (
+    LLMAdapterListResponse,
     LLMConnectionCreate,
     LLMConnectionListResponse,
     LLMConnectionResponse,
     LLMConnectionUpdate,
+    LLMCredentialReplace,
+    LLMVerificationRequest,
+    LLMVerificationResponse,
 )
 from backend.services.llm_connection_service import LLMConnectionError
 from backend.spi.types import ActorContext
@@ -109,10 +113,44 @@ def workspace_owner(
     )
 
 
+@router.get(
+    "/llm-adapters",
+    name="list_llm_adapters",
+    response_model=LLMAdapterListResponse,
+    responses=REST_ERROR_RESPONSES,
+)
+def list_llm_adapters(_actor: RestActorDep, services: ServicesDep):
+    """Installed API specifications and the endpoints connections may use."""
+    return {"data": services.llm_connections.catalog()}
+
+
 def add_connection_routes(
     path: str, resolve_owner: Callable[..., ConnectionOwner], *, name: str
 ) -> None:
     OwnerDep = Annotated[ConnectionOwner, Depends(resolve_owner)]
+
+    def authorize(owner: ConnectionOwner, services, *, personal: bool = False) -> None:
+        # Workspace writes check the account and role on the control plane
+        # and close that session before the Workspace session writes.
+        # Personal writes check inside their own transaction, except before
+        # a provider call, which must not be paid for an unauthorized actor.
+        if owner.scope == "workspace":
+            if owner.control_session_factory is None:
+                raise RuntimeError(
+                    "Workspace connection writes require a control session"
+                )
+            with owner.control_session_factory() as control:
+                services.llm_connections.authorize_write(
+                    control,
+                    scope=owner.scope,
+                    owner_id=owner.owner_id,
+                    actor=owner.actor,
+                )
+        elif personal:
+            with owner.session_factory() as control:
+                services.llm_connections.authorize_write(
+                    control, scope="user", owner_id=owner.owner_id, actor=owner.actor
+                )
 
     def list_connections(owner: OwnerDep, services: ServicesDep):
         with owner.session_factory() as session:
@@ -136,17 +174,7 @@ def add_connection_routes(
         owner: OwnerDep,
         services: ServicesDep,
     ):
-        if owner.scope == "workspace":
-            if owner.control_session_factory is None:
-                raise RuntimeError(
-                    "Workspace connection writes require a control session"
-                )
-            with owner.control_session_factory() as control:
-                services.llm_connections.authorize_workspace_write(
-                    control,
-                    owner_id=owner.owner_id,
-                    actor=owner.actor,
-                )
+        authorize(owner, services)
         with owner.session_factory.begin() as session:
             record = services.llm_connections.create(
                 session,
@@ -163,17 +191,7 @@ def add_connection_routes(
         owner: OwnerDep,
         services: ServicesDep,
     ):
-        if owner.scope == "workspace":
-            if owner.control_session_factory is None:
-                raise RuntimeError(
-                    "Workspace connection writes require a control session"
-                )
-            with owner.control_session_factory() as control:
-                services.llm_connections.authorize_workspace_write(
-                    control,
-                    owner_id=owner.owner_id,
-                    actor=owner.actor,
-                )
+        authorize(owner, services)
         with owner.session_factory.begin() as session:
             record = services.llm_connections.update(
                 session,
@@ -191,17 +209,7 @@ def add_connection_routes(
         owner: OwnerDep,
         services: ServicesDep,
     ):
-        if owner.scope == "workspace":
-            if owner.control_session_factory is None:
-                raise RuntimeError(
-                    "Workspace connection writes require a control session"
-                )
-            with owner.control_session_factory() as control:
-                services.llm_connections.authorize_workspace_write(
-                    control,
-                    owner_id=owner.owner_id,
-                    actor=owner.actor,
-                )
+        authorize(owner, services)
         with owner.session_factory.begin() as session:
             record = services.llm_connections.delete(
                 session,
@@ -212,6 +220,47 @@ def add_connection_routes(
                 expected_revision=expected_revision,
             )
         return {"data": record}
+
+    def verify_connection(
+        connection_id: UUID,
+        request: LLMVerificationRequest,
+        owner: OwnerDep,
+        services: ServicesDep,
+    ):
+        """Send one small request per model now and record whether it worked.
+
+        It never enables the connection. The provider may charge for it.
+        """
+        authorize(owner, services, personal=True)
+        connection, verification = services.llm_verifications.verify(
+            owner.session_factory,
+            scope=owner.scope,
+            owner_id=owner.owner_id,
+            actor=owner.actor,
+            connection_id=connection_id,
+            expected_revision=request.expected_revision,
+            before_write=lambda: authorize(owner, services, personal=True),
+        )
+        return {"data": {"connection": connection, "verification": verification}}
+
+    def replace_credential(
+        connection_id: UUID,
+        request: LLMCredentialReplace,
+        owner: OwnerDep,
+        services: ServicesDep,
+    ):
+        """Verify a new credential first; it is stored only if it works."""
+        authorize(owner, services, personal=True)
+        connection, verification = services.llm_verifications.replace_credential(
+            owner.session_factory,
+            scope=owner.scope,
+            owner_id=owner.owner_id,
+            actor=owner.actor,
+            connection_id=connection_id,
+            request=request,
+            before_write=lambda: authorize(owner, services, personal=True),
+        )
+        return {"data": {"connection": connection, "verification": verification}}
 
     item_path = f"{path}/{{connection_id}}"
     router.add_api_route(
@@ -235,6 +284,18 @@ def add_connection_routes(
             name=f"{action}_{name}_llm_connection",
             status_code=status,
             response_model=LLMConnectionResponse,
+            responses=REST_ERROR_RESPONSES,
+        )
+    for method, route_path, action, handler in (
+        ("POST", f"{item_path}/verify", "verify", verify_connection),
+        ("PUT", f"{item_path}/credential", "replace_credential", replace_credential),
+    ):
+        router.add_api_route(
+            route_path,
+            handler,
+            methods=[method],
+            name=f"{action}_{name}_llm_connection",
+            response_model=LLMVerificationResponse,
             responses=REST_ERROR_RESPONSES,
         )
 

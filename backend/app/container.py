@@ -847,20 +847,25 @@ class ServiceRegistry:
 
     @cached_property
     def llm_connections(self):
-        from backend.llm.credential_vault import FileCredentialVault
-        from backend.services.llm_connection_service import LLMConnectionService
+        from backend.services.llm_connection_service import (
+            build_llm_connection_service,
+        )
 
         if self.settings is None:
             raise RuntimeError(
                 "LLM connection services require container-resolved settings"
             )
-        settings = self.settings
-        return LLMConnectionService(
+        return build_llm_connection_service(self.settings, self.llm_adapter_registry)
+
+    @cached_property
+    def llm_verifications(self):
+        from backend.services.llm_verification_service import LLMVerificationService
+
+        connections = self.llm_connections
+        return LLMVerificationService(
+            connections=connections,
             registry=self.llm_adapter_registry,
-            vault=FileCredentialVault(
-                keyring_file=settings.llm_credential_keyring_file,
-                solo_local=settings.app_mode == "solo_local",
-            ),
+            vault=connections.vault,
         )
 
     @cached_property

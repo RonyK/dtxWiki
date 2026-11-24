@@ -4732,3 +4732,132 @@ input[type="checkbox"].switch-control:checked::before {
   }
 
 }
+
+/* LLM connections: one card per registered service. */
+.llm-connections-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.llm-connections-toolbar .field-hint {
+  flex: 1 1 280px;
+  margin: 0;
+}
+
+.llm-connection-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.llm-connection-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+
+.llm-connection-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.llm-connection-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.llm-connection-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.llm-connection-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.llm-connection-facts dt {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.llm-connection-facts dd {
+  margin: 2px 0 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.llm-connection-url {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.llm-connection-result {
+  margin: 0;
+}
+
+.llm-connection-actions,
+.llm-connection-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.llm-connection-dialog-actions {
+  justify-content: flex-end;
+}
+
+.llm-connection-form > fieldset,
+.llm-connection-form fieldset fieldset {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.llm-connection-form legend {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.llm-connection-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .llm-connection-model {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .llm-connection-model .field-stack:nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .llm-connection-actions .icon-button {
+    flex: 1 1 calc(50% - 8px);
+  }
+}

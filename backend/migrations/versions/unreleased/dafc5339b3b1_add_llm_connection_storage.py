@@ -29,7 +29,6 @@ def _connection_fields(table: str) -> tuple:
         sa.Column("provider_options", sa.JSON(), nullable=False, server_default="{}"),
         sa.Column("model_profiles", sa.JSON(), nullable=False, server_default="[]"),
         sa.Column("active_credential", sa.JSON(none_as_null=True)),
-        sa.Column("pending_credential", sa.JSON(none_as_null=True)),
         sa.Column("secret_revision", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("revision", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("status", sa.Text(), nullable=False, server_default="disabled"),
@@ -57,8 +56,7 @@ def _connection_fields(table: str) -> tuple:
             name=f"ck_{table}_revisions",
         ),
         sa.CheckConstraint(
-            "status <> 'deleted' OR "
-            "(active_credential IS NULL AND pending_credential IS NULL)",
+            "status <> 'deleted' OR active_credential IS NULL",
             name=f"ck_{table}_deleted_credentials",
         ),
     )

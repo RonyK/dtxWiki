@@ -11889,6 +11889,119 @@
         "title": "JsonConfigArtifact",
         "type": "object"
       },
+      "LLMAdapterEndpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "base_url"
+        ],
+        "title": "LLMAdapterEndpoint",
+        "type": "object"
+      },
+      "LLMAdapterListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/LLMAdapterView"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "LLMAdapterListResponse",
+        "type": "object"
+      },
+      "LLMAdapterView": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter_id": {
+            "title": "Adapter Id",
+            "type": "string"
+          },
+          "adapter_version": {
+            "title": "Adapter Version",
+            "type": "string"
+          },
+          "config_schema": {
+            "additionalProperties": true,
+            "title": "Config Schema",
+            "type": "object"
+          },
+          "credential_schema": {
+            "additionalProperties": true,
+            "title": "Credential Schema",
+            "type": "object"
+          },
+          "display_name": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Display Name",
+            "type": "object"
+          },
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/LLMAdapterEndpoint"
+            },
+            "title": "Endpoints",
+            "type": "array"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "adapter_id",
+          "adapter_version",
+          "display_name",
+          "config_schema",
+          "credential_schema",
+          "options",
+          "endpoints"
+        ],
+        "title": "LLMAdapterView",
+        "type": "object"
+      },
       "LLMConnectionCreate": {
         "additionalProperties": false,
         "properties": {
@@ -11908,6 +12021,19 @@
             "title": "Credential",
             "type": "object",
             "writeOnly": true
+          },
+          "endpoint_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Profile Id"
           },
           "model_profiles": {
             "items": {
@@ -12059,6 +12185,21 @@
               }
             ],
             "title": "Provider Options"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
           }
         },
         "required": [
@@ -12110,6 +12251,17 @@
             ],
             "title": "Credential Updated At"
           },
+          "endpoint_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Profile Id"
+          },
           "has_credential": {
             "title": "Has Credential",
             "type": "boolean"
@@ -12148,6 +12300,22 @@
             "title": "Status",
             "type": "string"
           },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "adapter_unavailable",
+                  "adapter_version_unavailable",
+                  "endpoint_unavailable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -12184,6 +12352,8 @@
           "adapter_implementation_version",
           "config_schema_version",
           "api_profile",
+          "endpoint_profile_id",
+          "unavailable_reason",
           "provider_options",
           "model_profiles",
           "status",
@@ -12196,6 +12366,47 @@
           "updated_at"
         ],
         "title": "LLMConnectionView",
+        "type": "object"
+      },
+      "LLMCredentialReplace": {
+        "additionalProperties": false,
+        "description": "A replacement credential, verified before it replaces the active one.\n\nThe endpoint can change only together with a credential. Omit\n``endpoint_profile_id`` to keep the current endpoint; ``null`` selects\nthe adapter's own endpoint.",
+        "properties": {
+          "credential": {
+            "additionalProperties": {
+              "format": "password",
+              "minLength": 1,
+              "type": "string",
+              "writeOnly": true
+            },
+            "title": "Credential",
+            "type": "object",
+            "writeOnly": true
+          },
+          "endpoint_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Profile Id"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "credential"
+        ],
+        "title": "LLMCredentialReplace",
         "type": "object"
       },
       "LLMModelProfile": {
@@ -12266,6 +12477,129 @@
           "model_id"
         ],
         "title": "LLMModelProfile",
+        "type": "object"
+      },
+      "LLMVerificationData": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/LLMConnectionView"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/LLMVerificationResult"
+          }
+        },
+        "required": [
+          "connection",
+          "verification"
+        ],
+        "title": "LLMVerificationData",
+        "type": "object"
+      },
+      "LLMVerificationModelResult": {
+        "additionalProperties": false,
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "model_profile_id": {
+            "title": "Model Profile Id",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "outcome_unknown"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_profile_id",
+          "outcome"
+        ],
+        "title": "LLMVerificationModelResult",
+        "type": "object"
+      },
+      "LLMVerificationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "LLMVerificationRequest",
+        "type": "object"
+      },
+      "LLMVerificationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/LLMVerificationData"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "LLMVerificationResponse",
+        "type": "object"
+      },
+      "LLMVerificationResult": {
+        "additionalProperties": false,
+        "description": "``outcome_unknown``: the provider may have answered; nothing recorded.",
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/LLMVerificationModelResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "outcome_unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "error_code",
+          "results"
+        ],
+        "title": "LLMVerificationResult",
         "type": "object"
       },
       "LibraryArtifactPayload": {
@@ -33661,6 +33995,93 @@
         ]
       }
     },
+    "/api/v1/llm-adapters": {
+      "get": {
+        "description": "Installed API specifications and the endpoints connections may use.",
+        "operationId": "list_llm_adapters_api_v1_llm_adapters_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMAdapterListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Llm Adapters",
+        "tags": [
+          "llm-connections"
+        ]
+      }
+    },
     "/api/v1/me/llm-connections": {
       "get": {
         "operationId": "list_personal_llm_connections_api_v1_me_llm_connections_get",
@@ -34146,6 +34567,224 @@
           }
         ],
         "summary": "Update Personal Llm Connection",
+        "tags": [
+          "llm-connections"
+        ]
+      }
+    },
+    "/api/v1/me/llm-connections/{connection_id}/credential": {
+      "put": {
+        "description": "Verify a new credential first; it is stored only if it works.",
+        "operationId": "replace_credential_personal_llm_connection_api_v1_me_llm_connections__connection_id__credential_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMCredentialReplace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMVerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Replace Credential Personal Llm Connection",
+        "tags": [
+          "llm-connections"
+        ]
+      }
+    },
+    "/api/v1/me/llm-connections/{connection_id}/verify": {
+      "post": {
+        "description": "Send one small request per model now and record whether it worked.\n\nIt never enables the connection. The provider may charge for it.",
+        "operationId": "verify_personal_llm_connection_api_v1_me_llm_connections__connection_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMVerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Verify Personal Llm Connection",
         "tags": [
           "llm-connections"
         ]
@@ -47544,6 +48183,244 @@
           }
         ],
         "summary": "Update Workspace Llm Connection",
+        "tags": [
+          "llm-connections"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}/credential": {
+      "put": {
+        "description": "Verify a new credential first; it is stored only if it works.",
+        "operationId": "replace_credential_workspace_llm_connection_api_v1_workspaces__workspace_id__llm_connections__connection_id__credential_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMCredentialReplace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMVerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Replace Credential Workspace Llm Connection",
+        "tags": [
+          "llm-connections"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}/verify": {
+      "post": {
+        "description": "Send one small request per model now and record whether it worked.\n\nIt never enables the connection. The provider may charge for it.",
+        "operationId": "verify_workspace_llm_connection_api_v1_workspaces__workspace_id__llm_connections__connection_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMVerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConnectionRESTError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Verify Workspace Llm Connection",
         "tags": [
           "llm-connections"
         ]

@@ -510,6 +510,17 @@ REST_SESSION_ONLY_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}"),
     ("PATCH", "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}"),
     ("DELETE", "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}"),
+    ("GET", "/api/v1/llm-adapters"),
+    ("POST", "/api/v1/me/llm-connections/{connection_id}/verify"),
+    ("PUT", "/api/v1/me/llm-connections/{connection_id}/credential"),
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}/verify",
+    ),
+    (
+        "PUT",
+        "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}/credential",
+    ),
     ("GET", "/api/v1/users/me/deletion-preview"),
     ("DELETE", "/api/v1/users/me"),
     ("PATCH", "/api/v1/users/me/default-workspace"),
