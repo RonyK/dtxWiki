@@ -31,6 +31,7 @@ type SchemaProperty = {
   title?: string;
   description?: string;
   enum?: unknown[];
+  default?: unknown;
 };
 
 type ObjectSchema = {
@@ -67,6 +68,20 @@ function adapterLabel(adapter: LlmAdapter | undefined, language: string, fallbac
   return names[language.split("-")[0]] ?? names.en ?? adapter.adapter_id;
 }
 
+/**
+ * A new connection's options as the form first shows them. A checkbox has no
+ * "not chosen" state, so each boolean starts at the value it displays (the
+ * schema default, else off) and is sent as shown.
+ */
+function initialConfig(adapter: LlmAdapter | undefined): FormDraft["config"] {
+  const properties = schemaOf(adapter?.config_schema).properties ?? {};
+  return Object.fromEntries(
+    Object.entries(properties)
+      .filter(([, property]) => property.type === "boolean")
+      .map(([key, property]) => [key, property.default === true]),
+  );
+}
+
 function draftFor(adapters: LlmAdapter[], editing: LlmConnection | null): FormDraft {
   if (editing) {
     return {
@@ -88,7 +103,7 @@ function draftFor(adapters: LlmAdapter[], editing: LlmConnection | null): FormDr
     name: "",
     adapterId: adapter?.adapter_id ?? "",
     endpointId: adapter?.endpoints[0]?.id ?? null,
-    config: {},
+    config: initialConfig(adapter),
     credential: {},
     models: [{ key: newKey(), profile: { id: newKey(), model_id: "" } }],
   };
@@ -697,7 +712,7 @@ function ConnectionEditor({
                   ...draft,
                   adapterId: event.target.value,
                   endpointId: next?.endpoints[0]?.id ?? null,
-                  config: {},
+                  config: initialConfig(next),
                   credential: {},
                 });
               }}
