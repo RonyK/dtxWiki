@@ -25,6 +25,8 @@
   cut-off or unusable reply, `llm_answer_refused` for a declined or filtered
   reply, or `llm_provider_unavailable` when an administrator needs to investigate.
   Saved turns with `llm_composer_failed` display a generic fallback message.
+- Provider options refuse a credential field's name at any depth, not only at
+  the top level, also when a plugin schema allows nested options.
 
 ### Backup and rollback
 
