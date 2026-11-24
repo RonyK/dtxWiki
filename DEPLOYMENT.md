@@ -673,9 +673,9 @@ DTXWIKI_LLM_ENDPOINT_PROFILES_JSON='[{"id":"team-gateway","adapter_id":"builtin.
 ```
 
 API·worker에 같은 값을 전달하세요. 항목을 지우거나 주소를 바꾸면 그 endpoint를 쓰던 연결은
-검증하지 못하고, 사용자가 새 endpoint와 키를 다시 입력해야 합니다. 연결 검증은 worker가
-실행하므로 worker가 꺼져 있으면 검증이 대기 상태로 남습니다. worker가 검증 도중 멈추면 그
-검증은 `outcome_unknown`으로 끝나며 자동으로 다시 보내지 않습니다.
+검증하지 못하고, 사용자가 새 endpoint와 키를 다시 입력해야 합니다. 연결 검증은 요청을 받은
+API 서버가 바로 실행합니다. 모델마다 작은 요청을 한 번씩 보내며 모델당 최대 30초를 기다립니다.
+reverse proxy의 응답 시간 제한은 이보다 길게 두세요.
 
 ### Context Git 저장소 점검
 

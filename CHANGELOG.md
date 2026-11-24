@@ -31,9 +31,9 @@
 - Settings lists personal LLM connections under Your account and shared ones
   under This workspace (owners only). Add, edit, verify, enable, disable and
   delete them there.
-- Verification runs in the worker and sends one small request per model. A
-  connection can be enabled only after its current setup verifies. A new key
-  replaces the old one only when its verification succeeds.
+- Verifying sends one small request per model right away and records the
+  result. A connection can be enabled only after its current setup verifies.
+  A new key is checked before it is saved; a refused key is never stored.
 - `DTXWIKI_LLM_ENDPOINT_PROFILES_JSON` lists the extra endpoints, such as an
   internal gateway or an OpenAI-compatible server, that connections may use.
   Users choose from that list and never enter a URL.

@@ -120,7 +120,6 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
             "config_schema_version": 1,
             "endpoint_profile": {},
             "active_credential": {"ciphertext": "active fixture"},
-            "pending_credential": {"ciphertext": "pending fixture"},
         }
         target_connection_id, dormant_connection_id, shared_connection_id = (
             uuid4() for _ in range(3)
@@ -429,7 +428,6 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
     with factory() as session:
         dormant_connection = session.get(UserLLMConnection, dormant_connection_id)
         assert dormant_connection.active_credential is None
-        assert dormant_connection.pending_credential is None
     png = bytes.fromhex(
         "89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c"
         "020000000b4944415478da6364f80f00010501012718e3660000000049454e44"
@@ -577,7 +575,6 @@ def test_withdrawal_retains_until_deadline_and_retries_blob_reclamation(
         target_connection = session.get(UserLLMConnection, target_connection_id)
         assert (target_connection.status, target_connection.revision) == ("disabled", 2)
         assert target_connection.active_credential is None
-        assert target_connection.pending_credential is None
         audit = session.scalar(
             select(AuditEvent).where(
                 AuditEvent.action == "llm.connection.disabled",

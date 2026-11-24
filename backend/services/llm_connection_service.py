@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -46,7 +45,6 @@ if TYPE_CHECKING:
     from backend.app.settings import Settings
 
 StoredConnection = UserLLMConnection | WorkspaceLLMConnection
-VerificationTarget = Literal["active", "candidate"]
 
 
 class LLMConnectionError(RuntimeError):
@@ -261,40 +259,39 @@ class LLMConnectionService:
         self._emit(session, scope, owner_id, actor, connection, "updated")
         return _view(connection, has_credential=has_credential)
 
-    def active_target(
+    def owned(
         self,
         session: Session,
         *,
         scope: ConnectionScope,
         owner_id: UUID,
         connection_id: UUID,
-        expected_revision: int,
-    ) -> str:
-        """The configuration hash a verification of the stored setup checks."""
-        connection, _ = _get_owned(session, scope, owner_id, connection_id)
-        _require_revision(connection, expected_revision)
-        return verification_hash(connection, "active")
+    ) -> StoredConnection:
+        """The whole stored connection, encrypted credentials included."""
+        connection = _load_full(session, scope, owner_id, connection_id)
+        if connection is None:
+            raise LLMConnectionError(
+                "connection_unavailable", "LLM connection not found.", 404
+            )
+        return connection
 
-    def stage_candidate(
+    def candidate(
         self,
         session: Session,
         *,
         scope: ConnectionScope,
         owner_id: UUID,
-        actor: ActorContext,
         connection_id: UUID,
         request: LLMCredentialReplace,
-    ) -> str:
-        """Store a replacement credential (and endpoint) beside the active one.
+        credential: dict[str, str],
+    ) -> tuple[StoredConnection, dict]:
+        """Check a replacement credential and its endpoint before verifying.
 
-        The candidate is used only by its verification: success swaps it in,
-        failure discards it. Returns the hash that verification checks.
+        Nothing is stored: a credential is saved only after it verifies.
         """
-        if scope == "user":
-            _lock_owner(session, scope, owner_id, actor)
-        else:
-            acquire_workspace_write_intent(session)
-        connection, _ = _get_owned(session, scope, owner_id, connection_id, lock=True)
+        connection = self.owned(
+            session, scope=scope, owner_id=owner_id, connection_id=connection_id
+        )
         _require_revision(connection, request.expected_revision)
         descriptor = self._descriptor(connection.adapter_id)
         if descriptor.config_schema_version != connection.config_schema_version:
@@ -308,9 +305,6 @@ class LLMConnectionService:
             if "endpoint_profile_id" in request.model_fields_set
             else connection.endpoint_profile
         )
-        credential = {
-            name: value.get_secret_value() for name, value in request.credential.items()
-        }
         self._validate(
             connection.adapter_id,
             connection.provider_options,
@@ -318,18 +312,85 @@ class LLMConnectionService:
             credential,
             base_url=endpoint["base_url"],
         )
-        binding = CredentialBinding(
-            scope,
-            owner_id,
-            connection.id,
-            connection.secret_revision + 1,
-            purpose="pending",
+        return connection, endpoint
+
+    def record_verification(
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        actor: ActorContext,
+        connection_id: UUID,
+        revision: int,
+        status: str,
+    ) -> dict | None:
+        """Record a verification of ``revision``; None if it changed since.
+
+        An unconfirmed outcome (``outcome_unknown``) records nothing.
+        """
+        connection, has_credential = self._lock_for_write(
+            session, scope, owner_id, actor, connection_id
         )
-        connection.pending_credential = {
-            "envelope": self._encrypt(credential, binding),
-            "endpoint_profile": endpoint,
-        }
-        return verification_hash(connection, "candidate")
+        if connection.revision != revision:
+            return None
+        if status in ("succeeded", "failed"):
+            succeeded = status == "succeeded"
+            connection.verification_status = "ready" if succeeded else "failed"
+            connection.verified_at = utc_now() if succeeded else None
+            self._emit(session, scope, owner_id, actor, connection, "verified")
+        return _view(connection, has_credential=has_credential)
+
+    def swap_credential(
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        actor: ActorContext,
+        connection_id: UUID,
+        revision: int,
+        credential: dict[str, str],
+        endpoint: dict,
+    ) -> dict | None:
+        """Store a verified credential; None if the connection changed since."""
+        connection, _ = self._lock_for_write(
+            session, scope, owner_id, actor, connection_id
+        )
+        if connection.revision != revision:
+            return None
+        now = utc_now()
+        secret_revision = connection.secret_revision + 1
+        connection.active_credential = (
+            self._encrypt(
+                credential,
+                CredentialBinding(scope, owner_id, connection.id, secret_revision),
+            )
+            if credential
+            else None
+        )
+        connection.secret_revision = secret_revision
+        connection.credential_updated_at = now
+        connection.endpoint_profile = endpoint
+        connection.verification_status = "ready"
+        connection.verified_at = now
+        connection.revision += 1
+        self._emit(session, scope, owner_id, actor, connection, "credential_rotated")
+        return _view(connection, has_credential=bool(credential))
+
+    def _lock_for_write(
+        self,
+        session: Session,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        actor: ActorContext,
+        connection_id: UUID,
+    ) -> tuple[StoredConnection, bool]:
+        if scope == "user":
+            _lock_owner(session, scope, owner_id, actor)
+        else:
+            acquire_workspace_write_intent(session)
+        return _get_owned(session, scope, owner_id, connection_id, lock=True)
 
     def _encrypt(
         self, credential: dict[str, str], binding: CredentialBinding
@@ -406,7 +467,6 @@ class LLMConnectionService:
         connection.verification_status = "unverified"
         connection.verified_at = None
         connection.active_credential = None
-        connection.pending_credential = None
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "deleted")
         return _view(connection, has_credential=False)
@@ -496,7 +556,6 @@ def _select_owned(model: type[StoredConnection], owner_id: UUID):
         select(model, model.active_credential.is_not(None).label("has_credential"))
         .options(
             defer(model.active_credential, raiseload=True),
-            defer(model.pending_credential, raiseload=True),
         )
         .where(owner_column == owner_id, model.status != "deleted")
     )
@@ -574,32 +633,21 @@ def _lock_owner(
             )
 
 
-def verification_hash(connection: StoredConnection, target: VerificationTarget) -> str:
-    """Name what a verification checks: configuration, endpoint and secret.
-
-    A result is applied only while this is unchanged, so an edit or a newer
-    key made during the call is never marked as verified. The name is not
-    part of it.
-    """
-    if target == "active":
-        endpoint = connection.endpoint_profile
-        secret: object = connection.secret_revision
-    else:
-        pending = connection.pending_credential or {}
-        endpoint = pending.get("endpoint_profile")
-        secret = (pending.get("envelope") or {}).get("nonce")
-    state = {
-        "target": target,
-        "adapter_id": connection.adapter_id,
-        "adapter_implementation_version": connection.adapter_implementation_version,
-        "config_schema_version": connection.config_schema_version,
-        "provider_options": connection.provider_options,
-        "model_profiles": connection.model_profiles,
-        "endpoint_profile": endpoint,
-        "secret": secret,
-    }
-    encoded = json.dumps(state, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(encoded.encode()).hexdigest()
+def _load_full(
+    session: Session,
+    scope: ConnectionScope,
+    owner_id: UUID,
+    connection_id: UUID,
+) -> StoredConnection | None:
+    model = _connection_model(scope)
+    owner_column = model.user_id if model is UserLLMConnection else model.workspace_id
+    return session.scalar(
+        select(model).where(
+            model.id == connection_id,
+            owner_column == owner_id,
+            model.status != "deleted",
+        )
+    )
 
 
 def _view(connection: StoredConnection, *, has_credential: bool) -> dict:

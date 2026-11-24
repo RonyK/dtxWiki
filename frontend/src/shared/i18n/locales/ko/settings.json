@@ -2207,9 +2207,8 @@
     "emptyTitle": "등록한 LLM 서비스가 없습니다",
     "emptyPersonal": "내 API 키로 서비스를 추가하세요. 나만 보고 사용할 수 있습니다.",
     "emptyWorkspace": "이 워크스페이스의 API 키로 팀이 함께 쓸 서비스를 추가하세요.",
-    "verifyHint": "검증하면 모델마다 작은 요청을 한 번 보내므로 제공자 요금이 조금 발생할 수 있습니다.",
+    "verifyHint": "검증하면 모델마다 작은 요청을 바로 보내며 최대 약 30초 걸릴 수 있습니다. 제공자 요금이 조금 발생할 수 있습니다.",
     "verify": "검증",
-    "cancelVerification": "검증 취소",
     "enable": "사용",
     "disable": "중지",
     "enableNeedsVerification": "검증에 성공해야 사용할 수 있습니다.",
@@ -2223,7 +2222,7 @@
     "unsupportedConfig": "이 서비스의 일부 설정은 여기서 편집할 수 없습니다.",
     "keyHint": "키는 서버에서 암호화해 보관하며 다시 표시하지 않습니다.",
     "replaceKey": "키 교체",
-    "replaceKeyHint": "비워 두면 지금 키를 유지합니다. 새 키는 검증에 성공한 뒤에만 사용하며, 그때까지 지금 키를 계속 씁니다.",
+    "replaceKeyHint": "비워 두면 지금 키를 유지합니다. 새 키는 먼저 검증하고, 성공했을 때만 저장합니다.",
     "endpointNeedsKey": "새 엔드포인트에 사용할 키를 입력하세요. 저장된 키는 다른 엔드포인트로 보내지 않습니다.",
     "addModel": "모델 추가",
     "removeModel": "{{model}} 모델 제거",
@@ -2239,14 +2238,10 @@
       "unverified": "검증 필요",
       "failed": "검증 실패",
       "stale": "다시 검증 필요",
-      "verifying": "검증 중",
-      "running": "검증 중",
-      "candidateRunning": "새 키 검증 중",
-      "candidateKept": "새 키를 적용하지 않았습니다. 지금 키를 계속 사용합니다."
+      "running": "검증 중"
     },
     "result": {
       "failed": "검증하지 못했습니다.",
-      "cancelled": "검증을 취소했습니다.",
       "outcome_unknown": "결과를 확인하지 못했습니다. 제공자 요금이 발생했을 수 있습니다.",
       "authentication_failed": "제공자가 키를 거절했습니다.",
       "permission_denied": "이 키로는 해당 모델을 사용할 수 없습니다.",
@@ -2262,13 +2257,10 @@
       "unsupported_option": "모델이 설정한 옵션을 지원하지 않습니다.",
       "config_schema_mismatch": "설정이 이 서비스의 형식과 맞지 않습니다.",
       "unexpected_result": "모델이 예상과 다르게 응답했습니다.",
-      "connection_changed": "검증 중에 연결 설정이 바뀌어 결과를 적용하지 않았습니다.",
-      "connection_unavailable": "연결이 더 이상 없습니다.",
       "endpoint_unavailable": "이 엔드포인트는 더 이상 허용되지 않습니다. 서버 운영자에게 문의하세요.",
       "adapter_unavailable": "이 서비스 유형을 서버에서 사용할 수 없습니다.",
       "adapter_version_unavailable": "이 서비스 유형의 버전을 서버에서 사용할 수 없습니다.",
-      "credential_unavailable": "저장한 키를 읽지 못했습니다. 키를 다시 입력하세요.",
-      "permission_revoked": "요청한 사람의 권한이 바뀌어 검증을 중단했습니다."
+      "credential_unavailable": "저장한 키를 읽지 못했습니다. 키를 다시 입력하세요."
     },
     "fields": {
       "name": "이름",
@@ -2289,7 +2281,6 @@
       "save": "연결을 저장하지 못했습니다.",
       "connection_not_verified": "검증에 성공해야 사용할 수 있습니다.",
       "connection_revision_conflict": "다른 곳에서 이 연결이 바뀌었습니다. 새로 불러온 뒤 다시 시도하세요.",
-      "verification_in_progress": "이 연결의 검증이 이미 진행 중입니다.",
       "adapter_endpoint_required": "이 서비스 유형은 서버 운영자가 정한 엔드포인트가 필요합니다.",
       "endpoint_profile_unavailable": "이 서비스 유형에서 쓸 수 없는 엔드포인트입니다.",
       "config_schema_mismatch": "설정이나 키가 이 서비스의 형식과 맞지 않습니다.",
@@ -2298,6 +2289,7 @@
       "llm_vault_unavailable": "지금은 서버가 키를 보관할 수 없습니다. 서버 운영자에게 문의하세요.",
       "validation_failed": "입력한 내용을 확인한 뒤 다시 시도하세요."
     },
-    "ownerOnly": "이 워크스페이스의 소유자만 공용 LLM 연결을 관리할 수 있습니다."
+    "ownerOnly": "이 워크스페이스의 소유자만 공용 LLM 연결을 관리할 수 있습니다.",
+    "keyRejected": "새 키를 저장하지 않았습니다."
   }
 }

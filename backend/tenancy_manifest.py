@@ -26,7 +26,6 @@ CONTROL_PLANE_TABLES: frozenset[str] = frozenset(
         "auth_login_transactions",
         "email_reauthentication_challenges",
         "email_outbox",
-        "llm_verification_operation",
         "oauth_access_token_jti",
         "oauth_clients",
         "oauth_codes",

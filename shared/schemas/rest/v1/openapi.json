@@ -12305,16 +12305,6 @@
             "title": "Updated At",
             "type": "string"
           },
-          "verification": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LLMVerificationView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "verification_status": {
             "enum": [
               "unverified",
@@ -12472,6 +12462,23 @@
         "title": "LLMModelProfile",
         "type": "object"
       },
+      "LLMVerificationData": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/LLMConnectionView"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/LLMVerificationResult"
+          }
+        },
+        "required": [
+          "connection",
+          "verification"
+        ],
+        "title": "LLMVerificationData",
+        "type": "object"
+      },
       "LLMVerificationModelResult": {
         "additionalProperties": false,
         "properties": {
@@ -12493,7 +12500,8 @@
           "outcome": {
             "enum": [
               "succeeded",
-              "failed"
+              "failed",
+              "outcome_unknown"
             ],
             "title": "Outcome",
             "type": "string"
@@ -12525,7 +12533,7 @@
         "additionalProperties": false,
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/LLMVerificationView"
+            "$ref": "#/components/schemas/LLMVerificationData"
           },
           "envelope": {
             "$ref": "#/components/schemas/RESTResultEnvelope"
@@ -12537,19 +12545,10 @@
         "title": "LLMVerificationResponse",
         "type": "object"
       },
-      "LLMVerificationView": {
+      "LLMVerificationResult": {
         "additionalProperties": false,
+        "description": "``outcome_unknown``: the provider may have answered; nothing recorded.",
         "properties": {
-          "connection_id": {
-            "format": "uuid",
-            "title": "Connection Id",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
           "error_code": {
             "anyOf": [
               {
@@ -12561,23 +12560,6 @@
             ],
             "title": "Error Code"
           },
-          "finished_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Finished At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
           "results": {
             "items": {
               "$ref": "#/components/schemas/LLMVerificationModelResult"
@@ -12587,36 +12569,20 @@
           },
           "status": {
             "enum": [
-              "queued",
-              "running",
               "succeeded",
               "failed",
-              "cancelled",
               "outcome_unknown"
             ],
             "title": "Status",
             "type": "string"
-          },
-          "target": {
-            "enum": [
-              "active",
-              "candidate"
-            ],
-            "title": "Target",
-            "type": "string"
           }
         },
         "required": [
-          "id",
-          "connection_id",
-          "target",
           "status",
           "error_code",
-          "results",
-          "created_at",
-          "finished_at"
+          "results"
         ],
-        "title": "LLMVerificationView",
+        "title": "LLMVerificationResult",
         "type": "object"
       },
       "LibraryArtifactPayload": {
@@ -34591,7 +34557,7 @@
     },
     "/api/v1/me/llm-connections/{connection_id}/credential": {
       "put": {
-        "description": "Verify a new credential; it replaces the active one only on success.",
+        "description": "Verify a new credential first; it is stored only if it works.",
         "operationId": "replace_credential_personal_llm_connection_api_v1_me_llm_connections__connection_id__credential_put",
         "parameters": [
           {
@@ -34616,7 +34582,7 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
@@ -34700,7 +34666,7 @@
     },
     "/api/v1/me/llm-connections/{connection_id}/verify": {
       "post": {
-        "description": "Queue a check of the stored setup; it never enables the connection.",
+        "description": "Send one small request per model now and record whether it worked.\n\nIt never enables the connection. The provider may charge for it.",
         "operationId": "verify_personal_llm_connection_api_v1_me_llm_connections__connection_id__verify_post",
         "parameters": [
           {
@@ -34725,7 +34691,7 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
@@ -34802,203 +34768,6 @@
           }
         ],
         "summary": "Verify Personal Llm Connection",
-        "tags": [
-          "llm-connections"
-        ]
-      }
-    },
-    "/api/v1/me/llm-verifications/{operation_id}": {
-      "get": {
-        "operationId": "get_verification_personal_llm_connection_api_v1_me_llm_verifications__operation_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "operation_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Operation Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMVerificationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          }
-        ],
-        "summary": "Get Verification Personal Llm Connection",
-        "tags": [
-          "llm-connections"
-        ]
-      }
-    },
-    "/api/v1/me/llm-verifications/{operation_id}/cancel": {
-      "post": {
-        "description": "Stop a verification; a provider call already sent may be billed.",
-        "operationId": "cancel_verification_personal_llm_connection_api_v1_me_llm_verifications__operation_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "operation_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Operation Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMVerificationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          }
-        ],
-        "summary": "Cancel Verification Personal Llm Connection",
         "tags": [
           "llm-connections"
         ]
@@ -48404,7 +48173,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}/credential": {
       "put": {
-        "description": "Verify a new credential; it replaces the active one only on success.",
+        "description": "Verify a new credential first; it is stored only if it works.",
         "operationId": "replace_credential_workspace_llm_connection_api_v1_workspaces__workspace_id__llm_connections__connection_id__credential_put",
         "parameters": [
           {
@@ -48439,7 +48208,7 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
@@ -48523,7 +48292,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/llm-connections/{connection_id}/verify": {
       "post": {
-        "description": "Queue a check of the stored setup; it never enables the connection.",
+        "description": "Send one small request per model now and record whether it worked.\n\nIt never enables the connection. The provider may charge for it.",
         "operationId": "verify_workspace_llm_connection_api_v1_workspaces__workspace_id__llm_connections__connection_id__verify_post",
         "parameters": [
           {
@@ -48558,7 +48327,7 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
@@ -48635,223 +48404,6 @@
           }
         ],
         "summary": "Verify Workspace Llm Connection",
-        "tags": [
-          "llm-connections"
-        ]
-      }
-    },
-    "/api/v1/workspaces/{workspace_id}/llm-verifications/{operation_id}": {
-      "get": {
-        "operationId": "get_verification_workspace_llm_connection_api_v1_workspaces__workspace_id__llm_verifications__operation_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "operation_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Operation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMVerificationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          }
-        ],
-        "summary": "Get Verification Workspace Llm Connection",
-        "tags": [
-          "llm-connections"
-        ]
-      }
-    },
-    "/api/v1/workspaces/{workspace_id}/llm-verifications/{operation_id}/cancel": {
-      "post": {
-        "description": "Stop a verification; a provider call already sent may be billed.",
-        "operationId": "cancel_verification_workspace_llm_connection_api_v1_workspaces__workspace_id__llm_verifications__operation_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "operation_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Operation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMVerificationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LLMConnectionRESTError"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          }
-        ],
-        "summary": "Cancel Verification Workspace Llm Connection",
         "tags": [
           "llm-connections"
         ]

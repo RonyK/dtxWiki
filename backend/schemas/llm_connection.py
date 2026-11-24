@@ -107,34 +107,25 @@ class LLMVerificationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
 
-VerificationStatus = Literal[
-    "queued", "running", "succeeded", "failed", "cancelled", "outcome_unknown"
-]
+VerificationOutcome = Literal["succeeded", "failed", "outcome_unknown"]
 
 
 class LLMVerificationModelResult(BaseModel):
     model_profile_id: str
-    outcome: Literal["succeeded", "failed"]
+    outcome: VerificationOutcome
     error_code: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
 
-class LLMVerificationView(BaseModel):
-    id: UUID
-    connection_id: UUID
-    target: Literal["active", "candidate"]
-    status: VerificationStatus
+class LLMVerificationResult(BaseModel):
+    """``outcome_unknown``: the provider may have answered; nothing recorded."""
+
+    status: VerificationOutcome
     error_code: str | None
     results: list[LLMVerificationModelResult]
-    created_at: datetime
-    finished_at: datetime | None
 
     model_config = ConfigDict(extra="forbid")
-
-
-class LLMVerificationResponse(RESTResponseBase):
-    data: LLMVerificationView
 
 
 class LLMConnectionView(BaseModel):
@@ -155,8 +146,6 @@ class LLMConnectionView(BaseModel):
     revision: int
     created_at: datetime
     updated_at: datetime
-    # The latest verification of this connection, in progress or finished.
-    verification: LLMVerificationView | None = None
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
@@ -167,6 +156,17 @@ class LLMConnectionResponse(RESTResponseBase):
 
 class LLMConnectionListResponse(RESTResponseBase):
     data: list[LLMConnectionView]
+
+
+class LLMVerificationData(BaseModel):
+    connection: LLMConnectionView
+    verification: LLMVerificationResult
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LLMVerificationResponse(RESTResponseBase):
+    data: LLMVerificationData
 
 
 class LLMAdapterEndpoint(BaseModel):

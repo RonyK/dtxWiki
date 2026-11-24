@@ -1,17 +1,16 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../shared/api/client";
 import {
-  cancelLlmVerification,
   createLlmConnection,
   deleteLlmConnection,
   listLlmAdapters,
   listLlmConnections,
   replaceLlmCredential,
   updateLlmConnection,
-  verificationInProgress,
   verifyLlmConnection,
   type LlmAdapter,
   type LlmConnection,
@@ -25,8 +24,6 @@ import { StatusBanner } from "../../shared/components/StatusBanner";
 import { StatusPill } from "../../shared/components/StatusPill";
 import { formatVersionTimestamp } from "../../shared/lib/datetime";
 import { SettingsEmptyState, SettingsLoadingRow } from "./SettingsPaneParts";
-
-const POLL_MS = 2000;
 
 type SchemaProperty = {
   type?: string;
@@ -140,7 +137,11 @@ export function LlmConnectionsSection({
   const [adapters, setAdapters] = useState<LlmAdapter[] | null>(null);
   const [connections, setConnections] = useState<LlmConnection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Kept apart from action errors so the next successful load clears it.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ id: string; verifying: boolean } | null>(null);
+  // The last check of each connection in this visit, to say why it failed.
+  const [results, setResults] = useState<Record<string, LlmVerification>>({});
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [deleting, setDeleting] = useState<LlmConnection | null>(null);
   const scopeKey = scope.kind === "user" ? "user" : `workspace:${scope.workspaceId}`;
@@ -156,9 +157,10 @@ export function LlmConnectionsSection({
       if (generation.current !== current) return;
       setAdapters(nextAdapters);
       setConnections(nextConnections);
+      setLoadError(null);
     } catch {
       if (generation.current !== current) return;
-      setError(t("llm.errors.load"));
+      setLoadError(t("llm.errors.load"));
     }
     // The scope object is rebuilt on every render; its key identifies it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -169,34 +171,32 @@ export function LlmConnectionsSection({
     setAdapters(null);
     setConnections(null);
     setError(null);
+    setLoadError(null);
+    setResults({});
     void reload();
     return () => {
       generation.current += 1;
     };
   }, [reload]);
 
-  // A verification finishes on the server; follow it while one is running.
-  const anyRunning = connections?.some((item) => verificationInProgress(item.verification));
-  useEffect(() => {
-    if (!anyRunning) return;
-    const timer = window.setTimeout(() => void reload(), POLL_MS);
-    return () => window.clearTimeout(timer);
-  }, [anyRunning, connections, reload]);
-
   const adapterById = useMemo(
     () => new Map((adapters ?? []).map((adapter) => [adapter.adapter_id, adapter])),
     [adapters],
   );
 
-  async function act(connection: LlmConnection, action: () => Promise<unknown>) {
-    setBusyId(connection.id);
+  async function act(
+    connection: LlmConnection,
+    action: () => Promise<unknown>,
+    verifying = false,
+  ) {
+    setBusy({ id: connection.id, verifying });
     setError(null);
     try {
       await action();
     } catch (caught) {
       setError(actionError(caught));
     } finally {
-      setBusyId(null);
+      setBusy(null);
       await reload();
     }
   }
@@ -209,6 +209,12 @@ export function LlmConnectionsSection({
       });
     }
     return t("llm.errors.action");
+  }
+
+  // A check of the previous settings says nothing about edited ones.
+  function forgetResult(state: EditorState) {
+    if (state.mode !== "edit") return;
+    setResults(({ [state.connection.id]: _forgotten, ...rest }) => rest);
   }
 
   const workspaceScope = scope.kind === "workspace";
@@ -229,9 +235,11 @@ export function LlmConnectionsSection({
           {t("llm.add")}
         </button>
       </div>
-      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      {error ?? loadError ? (
+        <StatusBanner tone="warning">{error ?? loadError}</StatusBanner>
+      ) : null}
       {connections === null ? (
-        error ? null : <SettingsLoadingRow>{t("llm.loading")}</SettingsLoadingRow>
+        loadError ? null : <SettingsLoadingRow>{t("llm.loading")}</SettingsLoadingRow>
       ) : connections.length === 0 ? (
         <SettingsEmptyState
           title={t("llm.emptyTitle")}
@@ -243,13 +251,12 @@ export function LlmConnectionsSection({
             <ConnectionCard
               key={connection.id}
               adapter={adapterById.get(connection.adapter_id)}
-              busy={busyId === connection.id}
+              busy={busy !== null}
               connection={connection}
               hintId={hintId}
               language={i18n.language}
-              onCancelVerification={(verification) =>
-                void act(connection, () => cancelLlmVerification(scope, verification.id))
-              }
+              result={results[connection.id]}
+              verifying={busy?.id === connection.id && busy.verifying}
               onDelete={() => setDeleting(connection)}
               onEdit={() => setEditor({ mode: "edit", connection })}
               onToggle={() =>
@@ -261,8 +268,20 @@ export function LlmConnectionsSection({
                 )
               }
               onVerify={() =>
-                void act(connection, () =>
-                  verifyLlmConnection(scope, connection.id, connection.revision),
+                void act(
+                  connection,
+                  async () => {
+                    const data = await verifyLlmConnection(
+                      scope,
+                      connection.id,
+                      connection.revision,
+                    );
+                    setResults((current) => ({
+                      ...current,
+                      [connection.id]: data.verification,
+                    }));
+                  },
+                  true,
                 )
               }
             />
@@ -274,8 +293,15 @@ export function LlmConnectionsSection({
           adapters={adapters}
           editing={editor.mode === "edit" ? editor.connection : null}
           language={i18n.language}
-          onClose={() => setEditor(null)}
+          onClose={() => {
+            // A save can store the settings and still have its new key
+            // refused; show what the server now has.
+            forgetResult(editor);
+            setEditor(null);
+            void reload();
+          }}
           onSaved={() => {
+            forgetResult(editor);
             setEditor(null);
             void reload();
           }}
@@ -285,7 +311,7 @@ export function LlmConnectionsSection({
       ) : null}
       {deleting ? (
         <ConfirmDialog
-          busy={busyId === deleting.id}
+          busy={busy?.id === deleting.id}
           confirmLabel={t("shell:actions.delete")}
           labelledBy={`${dialogId}-delete`}
           onCancel={() => setDeleting(null)}
@@ -305,13 +331,28 @@ export function LlmConnectionsSection({
   );
 }
 
+function resultMessage(t: TFunction<"settings">, result: LlmVerification) {
+  const reason = t(`llm.result.${result.error_code ?? result.status}`, {
+    defaultValue: t("llm.result.failed"),
+  });
+  // The provider may have answered (and billed) any call whose outcome is
+  // unknown, even when another model's refusal decided the result.
+  const unknown =
+    result.status === "outcome_unknown" ||
+    result.results.some((item) => item.outcome === "outcome_unknown");
+  return unknown && result.error_code !== "outcome_unknown"
+    ? `${reason} ${t("llm.result.outcome_unknown")}`
+    : reason;
+}
+
 function ConnectionCard({
   adapter,
   busy,
   connection,
   hintId,
   language,
-  onCancelVerification,
+  result,
+  verifying,
   onDelete,
   onEdit,
   onToggle,
@@ -322,22 +363,21 @@ function ConnectionCard({
   connection: LlmConnection;
   hintId: string;
   language: string;
-  onCancelVerification: (verification: LlmVerification) => void;
+  result: LlmVerification | undefined;
+  verifying: boolean;
   onDelete: () => void;
   onEdit: () => void;
   onToggle: () => void;
   onVerify: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const verification = connection.verification ?? null;
-  const running = verificationInProgress(verification);
   const endpoint = adapter?.endpoints.find(
     (item) => (item.id ?? null) === (connection.endpoint_profile_id ?? null),
   );
   const enabled = connection.status === "enabled";
   const ready = connection.verification_status === "ready";
   return (
-    <li className="llm-connection-card">
+    <li className="llm-connection-card" aria-busy={verifying}>
       <div className="llm-connection-head">
         <strong className="llm-connection-name">{connection.name}</strong>
         <span className="llm-connection-pills">
@@ -349,13 +389,19 @@ function ConnectionCard({
           />
           <StatusPill
             compact
-            status={running ? "running" : connection.verification_status}
-            tone={running ? "info" : ready ? "ok" : connection.verification_status === "failed" ? "danger" : "warn"}
+            status={verifying ? "running" : connection.verification_status}
+            tone={
+              verifying
+                ? "info"
+                : ready
+                  ? "ok"
+                  : connection.verification_status === "failed"
+                    ? "danger"
+                    : "warn"
+            }
             label={
-              running
-                ? verification?.target === "candidate"
-                  ? t("llm.verification.candidateRunning")
-                  : t("llm.verification.running")
+              verifying
+                ? t("llm.verification.running")
                 : t(`llm.verification.${connection.verification_status}`)
             }
           />
@@ -390,35 +436,21 @@ function ConnectionCard({
           </div>
         ) : null}
       </dl>
-      {verification && !running && verification.status !== "succeeded" ? (
+      {result && result.status !== "succeeded" && !verifying ? (
         <p className="field-hint llm-connection-result" role="status">
-          {verification.target === "candidate" ? `${t("llm.verification.candidateKept")} ` : ""}
-          {t(`llm.result.${verification.error_code ?? verification.status}`, {
-            defaultValue: t("llm.result.failed"),
-          })}
+          {resultMessage(t, result)}
         </p>
       ) : null}
       <div className="llm-connection-actions">
-        {running && verification ? (
-          <button
-            className="icon-button warning"
-            type="button"
-            disabled={busy}
-            onClick={() => onCancelVerification(verification)}
-          >
-            {t("llm.cancelVerification")}
-          </button>
-        ) : (
-          <button
-            aria-describedby={hintId}
-            className="icon-button"
-            type="button"
-            disabled={busy}
-            onClick={onVerify}
-          >
-            {t("llm.verify")}
-          </button>
-        )}
+        <button
+          aria-describedby={hintId}
+          className="icon-button"
+          type="button"
+          disabled={busy}
+          onClick={onVerify}
+        >
+          {t("llm.verify")}
+        </button>
         <button
           className={enabled ? "icon-button warning" : "icon-button success"}
           type="button"
@@ -428,7 +460,7 @@ function ConnectionCard({
         >
           {enabled ? t("llm.disable") : t("llm.enable")}
         </button>
-        <button className="icon-button" type="button" disabled={busy || running} onClick={onEdit}>
+        <button className="icon-button" type="button" disabled={busy} onClick={onEdit}>
           {t("llm.edit")}
         </button>
         <button
@@ -465,6 +497,10 @@ function ConnectionEditor({
   const { t } = useTranslation("settings");
   const id = useId();
   const [draft, setDraft] = useState<FormDraft>(() => draftFor(adapters, editing));
+  // The server's copy this dialog edits. A save that stores the settings
+  // but fails to start the key replacement moves it, so a retry sends only
+  // what is still missing, against the current revision.
+  const [baseline, setBaseline] = useState(editing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -517,30 +553,37 @@ function ConnectionEditor({
           model_profiles: profilesPayload(draft.models),
           credential,
         });
-      } else {
-        let revision = editing.revision;
+      } else if (baseline !== null) {
+        let revision = baseline.revision;
         const models = profilesPayload(draft.models);
         const config = configPayload(adapter, draft.config);
         const changed =
-          draft.name.trim() !== editing.name ||
+          draft.name.trim() !== baseline.name ||
           JSON.stringify(models) !==
-            JSON.stringify(normalizedProfiles(editing.model_profiles)) ||
-          JSON.stringify(config) !== JSON.stringify(editing.provider_options);
+            JSON.stringify(normalizedProfiles(baseline.model_profiles)) ||
+          JSON.stringify(config) !== JSON.stringify(baseline.provider_options);
         if (changed) {
-          const updated = await updateLlmConnection(scope, editing.id, {
+          const updated = await updateLlmConnection(scope, baseline.id, {
             expected_revision: revision,
             name: draft.name.trim(),
             model_profiles: models,
             provider_options: config,
           });
+          setBaseline(updated);
           revision = updated.revision;
         }
         if (replaceCredential) {
-          await replaceLlmCredential(scope, editing.id, {
+          const data = await replaceLlmCredential(scope, baseline.id, {
             expected_revision: revision,
             credential,
             ...(endpointChanged ? { endpoint_profile_id: draft.endpointId } : {}),
           });
+          setBaseline(data.connection);
+          if (data.verification.status !== "succeeded") {
+            // The key was checked and refused, so nothing was stored.
+            setError(`${t("llm.keyRejected")} ${resultMessage(t, data.verification)}`);
+            return;
+          }
         }
       }
       onSaved();

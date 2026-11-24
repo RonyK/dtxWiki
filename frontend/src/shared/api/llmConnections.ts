@@ -5,7 +5,8 @@ export type LlmAdapter = components["schemas"]["LLMAdapterView"];
 export type LlmAdapterEndpoint = components["schemas"]["LLMAdapterEndpoint"];
 export type LlmConnection = components["schemas"]["LLMConnectionView"];
 export type LlmModelProfile = components["schemas"]["LLMModelProfile"];
-export type LlmVerification = components["schemas"]["LLMVerificationView"];
+export type LlmVerification = components["schemas"]["LLMVerificationResult"];
+export type LlmVerificationData = components["schemas"]["LLMVerificationData"];
 export type LlmConnectionCreate = components["schemas"]["LLMConnectionCreate"];
 export type LlmConnectionUpdate = components["schemas"]["LLMConnectionUpdate"];
 export type LlmCredentialReplace = components["schemas"]["LLMCredentialReplace"];
@@ -77,43 +78,28 @@ export async function deleteLlmConnection(
   );
 }
 
-/** Queue a check of the stored setup. Asking again returns the same check. */
+/** Check the stored setup now; the provider may charge for the call. */
 export async function verifyLlmConnection(
   scope: LlmConnectionScope,
   connectionId: string,
   expectedRevision: number,
 ) {
-  const response = await apiRequest<{ data: LlmVerification }>(
+  const response = await apiRequest<{ data: LlmVerificationData }>(
     `${connectionPath(scope, connectionId)}/verify`,
     { method: "POST", body: JSON.stringify({ expected_revision: expectedRevision }) },
   );
   return response.data;
 }
 
-/** A new key replaces the current one only after its check succeeds. */
+/** A new key is checked first and stored only if the check succeeds. */
 export async function replaceLlmCredential(
   scope: LlmConnectionScope,
   connectionId: string,
   body: LlmCredentialReplace,
 ) {
-  const response = await apiRequest<{ data: LlmVerification }>(
+  const response = await apiRequest<{ data: LlmVerificationData }>(
     `${connectionPath(scope, connectionId)}/credential`,
     { method: "PUT", body: JSON.stringify(body) },
   );
   return response.data;
-}
-
-export async function cancelLlmVerification(
-  scope: LlmConnectionScope,
-  operationId: string,
-) {
-  const response = await apiRequest<{ data: LlmVerification }>(
-    `${base(scope)}/llm-verifications/${encodeURIComponent(operationId)}/cancel`,
-    { method: "POST" },
-  );
-  return response.data;
-}
-
-export function verificationInProgress(verification: LlmVerification | null | undefined) {
-  return verification?.status === "queued" || verification?.status === "running";
 }

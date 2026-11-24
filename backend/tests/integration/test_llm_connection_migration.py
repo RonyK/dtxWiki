@@ -8,13 +8,7 @@ from alembic.config import Config
 from sqlalchemy.orm import Session
 
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
-from backend.models import (
-    LLMVerificationOperation,
-    User,
-    UserLLMConnection,
-    Workspace,
-    WorkspaceLLMConnection,
-)
+from backend.models import User, UserLLMConnection, Workspace, WorkspaceLLMConnection
 from backend.repositories.workspace_repo import insert_workspace
 from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
@@ -23,7 +17,6 @@ _PARENT = "002398e0fcdc"
 _REVISION = "dafc5339b3b1"
 _PERSONAL = UserLLMConnection.__tablename__
 _WORKSPACE = WorkspaceLLMConnection.__tablename__
-_VERIFICATION = LLMVerificationOperation.__tablename__
 
 
 @pytest.mark.release_migration
@@ -63,7 +56,6 @@ def test_llm_connection_migration_traversal(tmp_path, dialect):
         assert set(inspector.get_table_names()) == parent_tables | {
             _PERSONAL,
             _WORKSPACE,
-            _VERIFICATION,
         }
         assert inspector.get_foreign_keys(_PERSONAL)[0]["referred_table"] == "users"
         assert inspector.get_foreign_keys(_WORKSPACE) == []
@@ -101,9 +93,7 @@ def test_llm_connection_migration_traversal(tmp_path, dialect):
                 "unverified",
             )
             assert (common.revision, common.secret_revision) == (1, 0)
-            assert (
-                common.active_credential is None and common.pending_credential is None
-            )
+            assert common.active_credential is None
             assert (
                 common.provider_options,
                 common.model_profiles,
@@ -115,33 +105,6 @@ def test_llm_connection_migration_traversal(tmp_path, dialect):
             personal.status = "deleted"
             with pytest.raises(sa.exc.DBAPIError, match="deleted_credentials"):
                 session.flush()
-
-        # One verification in progress per connection; finished ones stack.
-        def verification(status, scope="user", workspace=None):
-            return LLMVerificationOperation(
-                scope=scope,
-                user_id=user_id,
-                workspace_id=workspace,
-                connection_id=personal_id,
-                target="active",
-                config_hash="hash",
-                status=status,
-            )
-
-        with Session(engine) as session, session.begin():
-            session.add_all([verification("succeeded"), verification("failed")])
-            session.add(verification("queued"))
-        with Session(engine) as session:
-            stored = session.scalars(sa.select(LLMVerificationOperation)).all()
-            assert [item.results for item in stored] == [[], [], []]
-            for duplicate, constraint in (
-                (verification("running"), "UNIQUE|unique|duplicate"),
-                (verification("succeeded", "user", workspace_id), "workspace"),
-            ):
-                session.add(duplicate)
-                with pytest.raises(sa.exc.DBAPIError, match=constraint):
-                    session.flush()
-                session.rollback()
 
         command.downgrade(config, _PARENT)
         assert set(sa.inspect(engine).get_table_names()) == parent_tables
@@ -155,10 +118,12 @@ def test_llm_connection_migration_traversal(tmp_path, dialect):
                 )
                 == 0
             )
-            for model in (WorkspaceLLMConnection, LLMVerificationOperation):
-                assert (
-                    session.scalar(sa.select(sa.func.count()).select_from(model)) == 0
+            assert (
+                session.scalar(
+                    sa.select(sa.func.count()).select_from(WorkspaceLLMConnection)
                 )
+                == 0
+            )
     finally:
         if dialect == "postgresql":
             drop_reflected_postgres_metadata(engine)

@@ -77,9 +77,7 @@ from tests.static.test_architecture_boundaries import (
 CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
     "backend/api/llm_connections.py": (
         "Workspace writes recheck Workspace, User and membership on the control "
-        "session, close it, then write connections and audit on the Workspace session. "
-        "Verification operations are control-plane rows for both scopes "
-        "(ConnectionOwner.control), never mixed into a Workspace transaction."
+        "session, close it, then write connections and audit on the Workspace session."
     ),
     "backend/services/co_access.py": (
         "Reads only the control-plane Workspace usage-relation switch. "

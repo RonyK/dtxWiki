@@ -32,7 +32,6 @@ from backend.services.job_queue import JobQueueService
 from backend.services.mail_delivery import EmailDeliveryService
 from backend.services.ops import runtime_lock
 from backend.services.user_deletion_service import UserDeletionService
-from backend.worker.llm_verification_lane import build_llm_verification_lane
 from backend.worker.periodic import due_job_types
 from backend.worker.runtime import OneShotWorker, WorkerShutdownRequested
 from backend.worker.tick import seed_jobs_for_workspace
@@ -402,116 +401,102 @@ def _run_loop(
         return
     if on_ready is not None:
         on_ready()
-    # LLM verifications run beside the job loop, never inside it.
-    llm_lane = build_llm_verification_lane(
-        settings,
-        control=factory,
-        workspace_sessions=database_provider.session_for,
-    )
-    llm_lane.start()
-    try:
-        # Periodic registration and external mail delivery are not prerequisites
-        # for accepting jobs. In particular, SMTP must not delay the ready packet.
-        _seed_due_jobs(database_provider, settings, history_state)
-        _sweep_email_outbox(database_provider, settings)
-        _sweep_user_deletions(database_provider, blob_store_provider)
-        last_reclaim_monotonic = time.monotonic()
-        last_full_sweep_monotonic = time.monotonic()
-        last_email_sweep_monotonic = time.monotonic()
-        last_user_deletion_sweep_monotonic = time.monotonic()
+    # Periodic registration and external mail delivery are not prerequisites
+    # for accepting jobs. In particular, SMTP must not delay the ready packet.
+    _seed_due_jobs(database_provider, settings, history_state)
+    _sweep_email_outbox(database_provider, settings)
+    _sweep_user_deletions(database_provider, blob_store_provider)
+    last_reclaim_monotonic = time.monotonic()
+    last_full_sweep_monotonic = time.monotonic()
+    last_email_sweep_monotonic = time.monotonic()
+    last_user_deletion_sweep_monotonic = time.monotonic()
+    consecutive_dispatch_errors = 0
+
+    while True:
+        if shutdown.requested:
+            return
+        if time.monotonic() - last_reclaim_monotonic >= reclaim_interval_seconds:
+            # A long-running worker re-proves the database on reclaim's
+            # cadence: an upgrade (or a restore) performed while it kept
+            # running must stop it instead of letting it write to a schema
+            # its code was not built for.
+            _verify_database(settings)
+            worker.reclaim_stale_jobs_with_session_factory(
+                session_factory=factory,
+                lease_timeout_seconds=lease_timeout_seconds,
+            )
+            _seed_due_jobs(database_provider, settings, history_state)
+            last_reclaim_monotonic = time.monotonic()
+        # The outbox sweep is NOT on reclaim's cadence any more. It used to
+        # be, because an email_delivery Job carried the latency and the sweep
+        # was only a backstop; with that path deleted (MAIL-02) this IS the
+        # delivery route, and reclaim_interval_seconds is
+        # worker_lease_timeout_seconds/2 -- 300 s at the default -- which
+        # would mean a password-reset mail sitting in the outbox for five
+        # minutes. Its own minimum-interval timer runs it about once a
+        # second: the due-row scan is one indexed lookup on
+        # idx_email_outbox_claim that returns nothing when the outbox is
+        # idle, strictly cheaper than the INSERT + workspace-plane claim +
+        # hint write the deleted Job cost per email.
+        if (
+            time.monotonic() - last_user_deletion_sweep_monotonic
+            >= _USER_DELETION_SWEEP_INTERVAL_SECONDS
+        ):
+            _sweep_user_deletions(database_provider, blob_store_provider)
+            last_user_deletion_sweep_monotonic = time.monotonic()
+        if (
+            time.monotonic() - last_email_sweep_monotonic
+            >= _EMAIL_SWEEP_MIN_INTERVAL_SECONDS
+        ):
+            _sweep_email_outbox(database_provider, settings)
+            last_email_sweep_monotonic = time.monotonic()
+        bypass_hint = False
+        if time.monotonic() - last_full_sweep_monotonic >= full_sweep_interval_seconds:
+            bypass_hint = True
+            last_full_sweep_monotonic = time.monotonic()
+        # BIZ-H-4: use the two-phase dispatcher so a commit-time failure on the
+        # job status update cannot roll back already-applied business writes.
+        # Transient dispatch failures (e.g. a dropped DB connection during the
+        # claim transaction) must not kill the daemon: log, back off, retry.
+        try:
+            result = worker.dispatch_once_with_session_factory(
+                session_factory=factory,
+                workspace_id=workspace_id,
+                job_types=job_types,
+                bypass_hint=bypass_hint,
+            )
+        except Exception as exc:
+            consecutive_dispatch_errors += 1
+            logger.exception(
+                "worker dispatch failed (consecutive errors: %d); retrying",
+                consecutive_dispatch_errors,
+            )
+            typer.echo(
+                json.dumps({"error": str(exc), "status": "error"}, sort_keys=True)
+            )
+            shutdown.sleep(
+                min(
+                    max(poll_interval_seconds, 1.0) * consecutive_dispatch_errors,
+                    _DISPATCH_ERROR_BACKOFF_CAP_SECONDS,
+                )
+            )
+            continue
+
         consecutive_dispatch_errors = 0
-
-        while True:
-            if shutdown.requested:
+        if result is None:
+            idle_count += 1
+            if report_idle:
+                typer.echo(json.dumps({"status": "idle"}, sort_keys=True))
+            if idle_exit_after is not None and idle_count >= idle_exit_after:
                 return
-            if time.monotonic() - last_reclaim_monotonic >= reclaim_interval_seconds:
-                # A long-running worker re-proves the database on reclaim's
-                # cadence: an upgrade (or a restore) performed while it kept
-                # running must stop it instead of letting it write to a schema
-                # its code was not built for.
-                _verify_database(settings)
-                worker.reclaim_stale_jobs_with_session_factory(
-                    session_factory=factory,
-                    lease_timeout_seconds=lease_timeout_seconds,
-                )
-                _seed_due_jobs(database_provider, settings, history_state)
-                last_reclaim_monotonic = time.monotonic()
-            # The outbox sweep is NOT on reclaim's cadence any more. It used to
-            # be, because an email_delivery Job carried the latency and the sweep
-            # was only a backstop; with that path deleted (MAIL-02) this IS the
-            # delivery route, and reclaim_interval_seconds is
-            # worker_lease_timeout_seconds/2 -- 300 s at the default -- which
-            # would mean a password-reset mail sitting in the outbox for five
-            # minutes. Its own minimum-interval timer runs it about once a
-            # second: the due-row scan is one indexed lookup on
-            # idx_email_outbox_claim that returns nothing when the outbox is
-            # idle, strictly cheaper than the INSERT + workspace-plane claim +
-            # hint write the deleted Job cost per email.
-            if (
-                time.monotonic() - last_user_deletion_sweep_monotonic
-                >= _USER_DELETION_SWEEP_INTERVAL_SECONDS
-            ):
-                _sweep_user_deletions(database_provider, blob_store_provider)
-                last_user_deletion_sweep_monotonic = time.monotonic()
-            if (
-                time.monotonic() - last_email_sweep_monotonic
-                >= _EMAIL_SWEEP_MIN_INTERVAL_SECONDS
-            ):
-                _sweep_email_outbox(database_provider, settings)
-                last_email_sweep_monotonic = time.monotonic()
-            bypass_hint = False
-            if (
-                time.monotonic() - last_full_sweep_monotonic
-                >= full_sweep_interval_seconds
-            ):
-                bypass_hint = True
-                last_full_sweep_monotonic = time.monotonic()
-            # BIZ-H-4: use the two-phase dispatcher so a commit-time failure on the
-            # job status update cannot roll back already-applied business writes.
-            # Transient dispatch failures (e.g. a dropped DB connection during the
-            # claim transaction) must not kill the daemon: log, back off, retry.
-            try:
-                result = worker.dispatch_once_with_session_factory(
-                    session_factory=factory,
-                    workspace_id=workspace_id,
-                    job_types=job_types,
-                    bypass_hint=bypass_hint,
-                )
-            except Exception as exc:
-                consecutive_dispatch_errors += 1
-                logger.exception(
-                    "worker dispatch failed (consecutive errors: %d); retrying",
-                    consecutive_dispatch_errors,
-                )
-                typer.echo(
-                    json.dumps({"error": str(exc), "status": "error"}, sort_keys=True)
-                )
-                shutdown.sleep(
-                    min(
-                        max(poll_interval_seconds, 1.0) * consecutive_dispatch_errors,
-                        _DISPATCH_ERROR_BACKOFF_CAP_SECONDS,
-                    )
-                )
-                continue
+            shutdown.sleep(poll_interval_seconds)
+            continue
 
-            consecutive_dispatch_errors = 0
-            if result is None:
-                idle_count += 1
-                if report_idle:
-                    typer.echo(json.dumps({"status": "idle"}, sort_keys=True))
-                if idle_exit_after is not None and idle_count >= idle_exit_after:
-                    return
-                shutdown.sleep(poll_interval_seconds)
-                continue
-
-            idle_count = 0
-            processed_count += 1
-            typer.echo(json.dumps(result.to_payload(), sort_keys=True))
-            if max_jobs is not None and processed_count >= max_jobs:
-                return
-
-    finally:
-        llm_lane.stop()
+        idle_count = 0
+        processed_count += 1
+        typer.echo(json.dumps(result.to_payload(), sort_keys=True))
+        if max_jobs is not None and processed_count >= max_jobs:
+            return
 
 
 def main() -> None:

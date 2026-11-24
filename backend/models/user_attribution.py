@@ -29,10 +29,7 @@ from backend.models.inbox import (
     WorkspaceInboxEntry,
     WorkspaceInboxRecipient,
 )
-from backend.models.llm_connection import (
-    LLMVerificationOperation,
-    UserLLMConnection,
-)
+from backend.models.llm_connection import UserLLMConnection
 from backend.models.mail import EmailOutbox
 from backend.models.mcp_chat import McpChatSession
 from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
@@ -169,7 +166,6 @@ USER_ATTRIBUTIONS: tuple[UserAttribution, ...] = (
     UserAttribution((EmailOutbox.recipient_user_id,), "delete", False),
     UserAttribution((AccountInboxEntry.user_id,), "delete", False),
     UserAttribution((UserLLMConnection.user_id,), "delete", False),
-    UserAttribution((LLMVerificationOperation.user_id,), "delete", False),
     # External sign-in links, pending sign-ins and confirmations, and requests
     # to release this account's email leave with it.
     UserAttribution((UserIdentity.user_id,), "delete", False),

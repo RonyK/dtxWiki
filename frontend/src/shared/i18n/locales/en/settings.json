@@ -2207,9 +2207,8 @@
     "emptyTitle": "No LLM services yet",
     "emptyPersonal": "Add a service with your own API key. Only you can see or use it.",
     "emptyWorkspace": "Add a service the team can use with this workspace's API key.",
-    "verifyHint": "Verifying sends one small request per model, so the provider may charge a small amount.",
+    "verifyHint": "Verifying sends one small request per model right away and can take up to about 30 seconds. The provider may charge a small amount.",
     "verify": "Verify",
-    "cancelVerification": "Cancel verification",
     "enable": "Enable",
     "disable": "Disable",
     "enableNeedsVerification": "Verify the connection before enabling it.",
@@ -2223,7 +2222,7 @@
     "unsupportedConfig": "Some settings of this service cannot be edited here.",
     "keyHint": "The key is encrypted on the server and never shown again.",
     "replaceKey": "Replace key",
-    "replaceKeyHint": "Leave empty to keep the current key. A new key is used only after it passes verification; until then the current key stays in use.",
+    "replaceKeyHint": "Leave empty to keep the current key. A new key is checked first and saved only if the check succeeds.",
     "endpointNeedsKey": "Enter a key for the new endpoint. A stored key is never sent to a different endpoint.",
     "addModel": "Add model",
     "removeModel": "Remove model {{model}}",
@@ -2239,14 +2238,10 @@
       "unverified": "Needs verification",
       "failed": "Verification failed",
       "stale": "Verify again",
-      "verifying": "Verifying",
-      "running": "Verifying",
-      "candidateRunning": "Verifying new key",
-      "candidateKept": "The new key was not applied; the current key stays in use."
+      "running": "Verifying"
     },
     "result": {
       "failed": "Verification did not succeed.",
-      "cancelled": "Verification was cancelled.",
       "outcome_unknown": "The result could not be confirmed. The provider may have charged for the call.",
       "authentication_failed": "The provider rejected the key.",
       "permission_denied": "This key cannot use the model.",
@@ -2262,13 +2257,10 @@
       "unsupported_option": "The model does not support a configured option.",
       "config_schema_mismatch": "The settings do not match this service's format.",
       "unexpected_result": "The model answered in an unexpected way.",
-      "connection_changed": "The connection changed during verification, so the result was not applied.",
-      "connection_unavailable": "The connection no longer exists.",
       "endpoint_unavailable": "This endpoint is no longer allowed. Ask the server operator.",
       "adapter_unavailable": "This service type is not available on the server.",
       "adapter_version_unavailable": "This service type's version is not available on the server.",
-      "credential_unavailable": "The stored key could not be read. Enter the key again.",
-      "permission_revoked": "The requester's access changed, so verification stopped."
+      "credential_unavailable": "The stored key could not be read. Enter the key again."
     },
     "fields": {
       "name": "Name",
@@ -2289,7 +2281,6 @@
       "save": "Could not save the connection.",
       "connection_not_verified": "Verify the connection before enabling it.",
       "connection_revision_conflict": "This connection changed elsewhere. Reload and try again.",
-      "verification_in_progress": "A verification of this connection is already running.",
       "adapter_endpoint_required": "This service type needs an endpoint from the server operator.",
       "endpoint_profile_unavailable": "That endpoint is not available for this service type.",
       "config_schema_mismatch": "The settings or key do not match this service's format.",
@@ -2298,6 +2289,7 @@
       "llm_vault_unavailable": "The server cannot store keys right now. Ask the server operator.",
       "validation_failed": "Check the fields and try again."
     },
-    "ownerOnly": "Only owners of this workspace can manage its shared LLM connections."
+    "ownerOnly": "Only owners of this workspace can manage its shared LLM connections.",
+    "keyRejected": "The new key was not saved."
   }
 }

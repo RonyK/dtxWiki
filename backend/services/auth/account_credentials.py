@@ -101,7 +101,6 @@ def retire_user_llm_connections(
             or_(
                 connection.status != "disabled",
                 connection.active_credential.is_not(None),
-                connection.pending_credential.is_not(None),
             ),
         )
         .values(
@@ -109,7 +108,6 @@ def retire_user_llm_connections(
             revision=connection.revision + 1,
             secret_revision=connection.secret_revision + 1,
             active_credential=None,
-            pending_credential=None,
             verification_status="unverified",
             verified_at=None,
             updated_at=now,

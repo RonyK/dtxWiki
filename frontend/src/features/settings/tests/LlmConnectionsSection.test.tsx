@@ -10,9 +10,10 @@ beforeEach(() => {
   setLocale("en", { persist: false });
 });
 
-it("replaces only the key when nothing else was edited", async () => {
-  // The server echoes profiles with explicit nulls; a key-only edit must not
-  // look like a profile change, which would reset the verified setup.
+it("retries only the key replacement after the settings were saved", async () => {
+  // The server echoes profiles with explicit nulls; once the rename is saved,
+  // a retry must not look like a profile change (which would reset the
+  // verified setup) and must use the revision the rename returned.
   const connection = {
     id: "c1",
     name: "Team",
@@ -59,8 +60,20 @@ it("replaces only the key when nothing else was edited", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input.toString();
     if (init?.method && init.method !== "GET") {
-      writes.push([`${init.method} ${url.replace(/^.*\/api\/v1/, "")}`, JSON.parse(String(init.body))]);
-      return json({ data: { id: "op", connection_id: "c1", target: "candidate", status: "queued", error_code: null, results: [], created_at: "2026-11-24T00:00:00Z", finished_at: null } });
+      const body = JSON.parse(String(init.body));
+      writes.push([`${init.method} ${url.replace(/^.*\/api\/v1/, "")}`, body]);
+      if (init.method === "PATCH") {
+        return json({ data: { ...connection, name: body.name, revision: 5 } });
+      }
+      if (writes.length === 2) {
+        return json({ error_code: "internal_error", message: "boom" }, 500);
+      }
+      return json({
+        data: {
+          connection: { ...connection, revision: 6 },
+          verification: { status: "succeeded", error_code: null, results: [] },
+        },
+      });
     }
     if (url.endsWith("/api/v1/llm-adapters")) return json({ data: [adapter] });
     if (url.endsWith("/api/v1/me/llm-connections")) return json({ data: [connection] });
@@ -70,17 +83,27 @@ it("replaces only the key when nothing else was edited", async () => {
   render(<LlmConnectionsSection labelledBy="heading" scope={{ kind: "user" }} />);
   await user.click(await screen.findByRole("button", { name: "Edit" }));
   const dialog = screen.getByRole("dialog");
+  await user.clear(within(dialog).getByLabelText("Name"));
+  await user.type(within(dialog).getByLabelText("Name"), "Renamed");
   await user.type(within(dialog).getByLabelText("API key"), "sk-new");
   await user.click(within(dialog).getByRole("button", { name: "Save" }));
-  await vi.waitFor(() => expect(writes).toHaveLength(1));
+  await vi.waitFor(() => expect(writes).toHaveLength(2));
+  await user.click(within(dialog).getByRole("button", { name: "Save" }));
+  await vi.waitFor(() => expect(writes).toHaveLength(3));
+  const keyReplacement = (revision: number) => [
+    "PUT /me/llm-connections/c1/credential",
+    { expected_revision: revision, credential: { api_key: "sk-new" } },
+  ];
   expect(writes).toEqual([
-    [
-      "PUT /me/llm-connections/c1/credential",
-      { expected_revision: 4, credential: { api_key: "sk-new" } },
-    ],
+    ["PATCH /me/llm-connections/c1", expect.objectContaining({ expected_revision: 4, name: "Renamed" })],
+    keyReplacement(5),
+    keyReplacement(5),
   ]);
 });
 
-function json(body: unknown) {
-  return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }

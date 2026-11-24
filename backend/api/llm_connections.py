@@ -86,18 +86,6 @@ class ConnectionOwner:
     session_factory: sessionmaker[Session]
     control_session_factory: sessionmaker[Session] | None = None
 
-    @property
-    def control(self) -> sessionmaker[Session]:
-        """Where verifications and account checks live.
-
-        Personal connections are on the control plane already.
-        """
-        if self.scope == "user":
-            return self.session_factory
-        if self.control_session_factory is None:
-            raise RuntimeError("Workspace connection writes require a control session")
-        return self.control_session_factory
-
 
 def account_owner(
     actor: RestActorDep, session_factory: SessionFactoryDep
@@ -141,9 +129,11 @@ def add_connection_routes(
 ) -> None:
     OwnerDep = Annotated[ConnectionOwner, Depends(resolve_owner)]
 
-    def authorize(owner: ConnectionOwner, services) -> None:
+    def authorize(owner: ConnectionOwner, services, *, personal: bool = False) -> None:
         # Workspace writes check the account and role on the control plane
         # and close that session before the Workspace session writes.
+        # Personal writes check inside their own transaction, except before
+        # a provider call, which must not be paid for an unauthorized actor.
         if owner.scope == "workspace":
             if owner.control_session_factory is None:
                 raise RuntimeError(
@@ -156,25 +146,18 @@ def add_connection_routes(
                     owner_id=owner.owner_id,
                     actor=owner.actor,
                 )
-
-    def with_verifications(owner: ConnectionOwner, services, records: list[dict]):
-        with owner.control() as control:
-            latest = services.llm_verifications.latest(
-                control,
-                scope=owner.scope,
-                owner_id=owner.owner_id,
-                connection_ids=[record["id"] for record in records],
-            )
-        return [
-            {**record, "verification": latest.get(record["id"])} for record in records
-        ]
+        elif personal:
+            with owner.session_factory() as control:
+                services.llm_connections.authorize_write(
+                    control, scope="user", owner_id=owner.owner_id, actor=owner.actor
+                )
 
     def list_connections(owner: OwnerDep, services: ServicesDep):
         with owner.session_factory() as session:
             records = services.llm_connections.list(
                 session, scope=owner.scope, owner_id=owner.owner_id
             )
-        return {"data": with_verifications(owner, services, records)}
+        return {"data": records}
 
     def get_connection(connection_id: UUID, owner: OwnerDep, services: ServicesDep):
         with owner.session_factory() as session:
@@ -184,7 +167,7 @@ def add_connection_routes(
                 owner_id=owner.owner_id,
                 connection_id=connection_id,
             )
-        return {"data": with_verifications(owner, services, [record])[0]}
+        return {"data": record}
 
     def create_connection(
         request: LLMConnectionCreate,
@@ -218,7 +201,7 @@ def add_connection_routes(
                 connection_id=connection_id,
                 request=request,
             )
-        return {"data": with_verifications(owner, services, [record])[0]}
+        return {"data": record}
 
     def delete_connection(
         connection_id: UUID,
@@ -244,31 +227,21 @@ def add_connection_routes(
         owner: OwnerDep,
         services: ServicesDep,
     ):
-        """Queue a check of the stored setup; it never enables the connection."""
-        authorize(owner, services)
-        with owner.session_factory() as session:
-            config_hash = services.llm_connections.active_target(
-                session,
-                scope=owner.scope,
-                owner_id=owner.owner_id,
-                connection_id=connection_id,
-                expected_revision=request.expected_revision,
-            )
-        with owner.control.begin() as control:
-            if owner.scope == "user":
-                services.llm_connections.authorize_write(
-                    control, scope="user", owner_id=owner.owner_id, actor=owner.actor
-                )
-            operation = services.llm_verifications.request(
-                control,
-                scope=owner.scope,
-                owner_id=owner.owner_id,
-                user_id=owner.actor.user_id,
-                connection_id=connection_id,
-                target="active",
-                config_hash=config_hash,
-            )
-        return {"data": operation}
+        """Send one small request per model now and record whether it worked.
+
+        It never enables the connection. The provider may charge for it.
+        """
+        authorize(owner, services, personal=True)
+        connection, verification = services.llm_verifications.verify(
+            owner.session_factory,
+            scope=owner.scope,
+            owner_id=owner.owner_id,
+            actor=owner.actor,
+            connection_id=connection_id,
+            expected_revision=request.expected_revision,
+            before_write=lambda: authorize(owner, services, personal=True),
+        )
+        return {"data": {"connection": connection, "verification": verification}}
 
     def replace_credential(
         connection_id: UUID,
@@ -276,57 +249,20 @@ def add_connection_routes(
         owner: OwnerDep,
         services: ServicesDep,
     ):
-        """Verify a new credential; it replaces the active one only on success."""
-        authorize(owner, services)
-        with owner.control() as control:
-            services.llm_verifications.ensure_idle(control, connection_id=connection_id)
-        with owner.session_factory.begin() as session:
-            config_hash = services.llm_connections.stage_candidate(
-                session,
-                scope=owner.scope,
-                owner_id=owner.owner_id,
-                actor=owner.actor,
-                connection_id=connection_id,
-                request=request,
-            )
-        with owner.control.begin() as control:
-            operation = services.llm_verifications.request(
-                control,
-                scope=owner.scope,
-                owner_id=owner.owner_id,
-                user_id=owner.actor.user_id,
-                connection_id=connection_id,
-                target="candidate",
-                config_hash=config_hash,
-            )
-        return {"data": operation}
-
-    def get_verification(operation_id: UUID, owner: OwnerDep, services: ServicesDep):
-        with owner.control() as control:
-            operation = services.llm_verifications.get(
-                control,
-                scope=owner.scope,
-                owner_id=owner.owner_id,
-                operation_id=operation_id,
-            )
-        return {"data": operation}
-
-    def cancel_verification(operation_id: UUID, owner: OwnerDep, services: ServicesDep):
-        """Stop a verification; a provider call already sent may be billed."""
-        with owner.control.begin() as control:
-            services.llm_connections.authorize_write(
-                control, scope=owner.scope, owner_id=owner.owner_id, actor=owner.actor
-            )
-            operation = services.llm_verifications.cancel(
-                control,
-                scope=owner.scope,
-                owner_id=owner.owner_id,
-                operation_id=operation_id,
-            )
-        return {"data": operation}
+        """Verify a new credential first; it is stored only if it works."""
+        authorize(owner, services, personal=True)
+        connection, verification = services.llm_verifications.replace_credential(
+            owner.session_factory,
+            scope=owner.scope,
+            owner_id=owner.owner_id,
+            actor=owner.actor,
+            connection_id=connection_id,
+            request=request,
+            before_write=lambda: authorize(owner, services, personal=True),
+        )
+        return {"data": {"connection": connection, "verification": verification}}
 
     item_path = f"{path}/{{connection_id}}"
-    verification_path = f"{path.rsplit('/', 1)[0]}/llm-verifications/{{operation_id}}"
     router.add_api_route(
         path,
         list_connections,
@@ -350,30 +286,15 @@ def add_connection_routes(
             response_model=LLMConnectionResponse,
             responses=REST_ERROR_RESPONSES,
         )
-    for method, route_path, route_name, handler, status in (
-        ("POST", f"{item_path}/verify", "verify", verify_connection, 202),
-        (
-            "PUT",
-            f"{item_path}/credential",
-            "replace_credential",
-            replace_credential,
-            202,
-        ),
-        ("GET", verification_path, "get_verification", get_verification, 200),
-        (
-            "POST",
-            f"{verification_path}/cancel",
-            "cancel_verification",
-            cancel_verification,
-            200,
-        ),
+    for method, route_path, action, handler in (
+        ("POST", f"{item_path}/verify", "verify", verify_connection),
+        ("PUT", f"{item_path}/credential", "replace_credential", replace_credential),
     ):
         router.add_api_route(
             route_path,
             handler,
             methods=[method],
-            name=f"{route_name}_{name}_llm_connection",
-            status_code=status,
+            name=f"{action}_{name}_llm_connection",
             response_model=LLMVerificationResponse,
             responses=REST_ERROR_RESPONSES,
         )
