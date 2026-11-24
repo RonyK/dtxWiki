@@ -37,6 +37,10 @@
 - `DTXWIKI_LLM_ENDPOINT_PROFILES_JSON` lists the extra endpoints, such as an
   internal gateway or an OpenAI-compatible server, that connections may use.
   Users choose from that list and never enter a URL.
+- `dtxwiki rollback` stops before changing anything when the backed-up env
+  keeps its data, database, Library, JWT key or LLM keyring at other paths
+  than the live env. Restored keys are made readable by the data directory's
+  group instead of a fixed `dtxwiki` group.
 
 ## 0.3.2 — 2026-11-21
 

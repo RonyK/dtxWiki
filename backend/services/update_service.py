@@ -521,10 +521,14 @@ def run_rollback(
             operation="rollback",
         )
 
-    # Fail clean BEFORE touching anything if the backup is corrupt.
+    # Fail clean BEFORE touching anything if the backup is corrupt or keeps
+    # its data under paths the live configuration no longer uses.
     try:
         backup_service.verify_backup_integrity(backup_dir)
-    except backup_service.BackupIntegrityError as exc:
+        backup_service.check_restore_paths(
+            backup_dir, _effective_env_file(install, env_file)
+        )
+    except _BACKUP_IO_ERRORS as exc:
         return _fail(2, str(exc), backup_dir, current, echo, exc, operation="rollback")
 
     # Pre-includes_db manifests fall back to the snapshot file's presence; a
@@ -640,6 +644,7 @@ def run_rollback(
                 settings,
                 data_dir=data_dir,
                 env_file=_effective_env_file(install, env_file),
+                echo=echo,
             )
         except _BACKUP_IO_ERRORS as exc:
             if install.services:
