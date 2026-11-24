@@ -2293,6 +2293,7 @@
     "keyRejected": "The new key was not saved.",
     "endpointRetired": "Endpoint no longer allowed — choose another",
     "chooseOption": "Choose a value",
-    "endpointUnavailable": "The saved endpoint can no longer be used as saved. Choose an endpoint under Edit and save to connect again."
+    "endpointUnavailable": "The saved endpoint can no longer be used as saved. Choose an endpoint under Edit and save to connect again.",
+    "endpointReconnect": "The saved endpoint can no longer be used as saved. Saving reconnects to the endpoint selected above."
   }
 }

@@ -805,7 +805,7 @@ function ConnectionEditor({
               <span className="field-hint">{t("llm.endpointHint")}</span>
               {editing?.unavailable_reason === "endpoint_unavailable" ? (
                 <span className="field-hint" role="alert">
-                  {t("llm.endpointUnavailable")}
+                  {t("llm.endpointReconnect")}
                 </span>
               ) : null}
             </label>
