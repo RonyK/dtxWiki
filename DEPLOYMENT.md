@@ -905,13 +905,6 @@ sudo dtxwiki rollback --to-backup /var/lib/dtxwiki/backups/<id>
 `--yes`는 질문만 생략합니다. Alembic downgrade는 개발·migration 검증용이며 운영 복원
 절차로 사용하지 않습니다.
 
-env 파일을 함께 복원하는 롤백은 백업의 env와 지금 env의 저장 경로 설정
-(`DTXWIKI_DATA_DIR`, `DTXWIKI_DATABASE_URL`, `DTXWIKI_LIBRARY_BLOB_ROOT`,
-`DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH`, `DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE`)이 같을 때만
-진행합니다. 다르면 아무것도 바꾸지 않고 다른 설정 이름을 알려 주며 멈춥니다. 그 설정을
-백업 당시 값으로 되돌린 뒤 다시 실행하세요. 복원한 JWT 키와 LLM 키링에는 데이터 디렉터리의
-그룹을 읽기 권한으로 다시 부여합니다.
-
 > 자동 롤백은 index에 **구버전 wheel이 남아 있어야** 합니다. 사설 index는 과거 wheel을
 > 반드시 보존하세요. 백업은 `{DATA_DIR}/backups/<version>-<UTC>/`에 manifest와 함께 쌓이며
 > 자동 업데이트는 `DTXWIKI_UPDATE_KEEP_BACKUPS`(기본 5) 개수만 유지합니다.

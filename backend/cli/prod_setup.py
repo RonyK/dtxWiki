@@ -742,7 +742,7 @@ def generate_jwt_key(path: Path, *, key_size: int = 2048, force: bool = False) -
 
 def set_key_ownership(
     path: Path,
-    service_group: str | int,
+    service_group: str,
     *,
     echo: Callable[[str], None] = lambda _msg: None,
     geteuid: Callable[[], int] | None = None,
@@ -804,7 +804,7 @@ def set_env_file_ownership(
 
 def _set_root_group_readable(
     path: Path,
-    service_group: str | int,
+    service_group: str,
     *,
     label: str,
     echo: Callable[[str], None],
