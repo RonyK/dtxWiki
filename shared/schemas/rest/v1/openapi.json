@@ -12300,6 +12300,22 @@
             "title": "Status",
             "type": "string"
           },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "adapter_unavailable",
+                  "adapter_version_unavailable",
+                  "endpoint_unavailable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -12337,6 +12353,7 @@
           "config_schema_version",
           "api_profile",
           "endpoint_profile_id",
+          "unavailable_reason",
           "provider_options",
           "model_profiles",
           "status",

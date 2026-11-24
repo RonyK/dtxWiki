@@ -672,8 +672,10 @@ gateway나 OpenAI 호환 서버를 허용하려면 `DTXWIKI_LLM_ENDPOINT_PROFILE
 DTXWIKI_LLM_ENDPOINT_PROFILES_JSON='[{"id":"team-gateway","adapter_id":"builtin.openai_compatible.chat_completions","base_url":"https://llm-gateway.example.com/v1","label":"Team gateway"}]'
 ```
 
-API·worker에 같은 값을 전달하세요. 항목을 지우거나 주소를 바꾸면 그 endpoint를 쓰던 연결은
-검증하지 못하고, 사용자가 새 endpoint와 키를 다시 입력해야 합니다. 연결 검증은 요청을 받은
+API·worker에 같은 값을 전달하세요. 항목을 지우거나 주소를 바꾸면(업그레이드로 서비스 유형의
+기본 주소가 바뀐 경우 포함) 그 endpoint를 쓰던 연결은 검증하거나 사용하도록 켤 수 없습니다.
+저장된 키는 검증하지 않은 주소로 보내지 않으므로, 키가 있는 연결은 편집에서 endpoint를 고르고
+새 키를 입력해야 하고, 키 없는 연결은 endpoint를 고르고 저장하면 됩니다. 연결 검증은 요청을 받은
 API 서버가 바로 실행합니다. 모델마다 작은 요청을 한 번씩 보내며 모델당 최대 30초를 기다립니다.
 reverse proxy의 응답 시간 제한은 이보다 길게 두세요.
 

@@ -136,6 +136,17 @@ class LLMConnectionView(BaseModel):
     config_schema_version: int
     api_profile: str | None
     endpoint_profile_id: str | None
+    # Why the stored setup cannot be used now (the operator removed its
+    # adapter or version, or removed or moved its endpoint); None if it can.
+    # A moved endpoint is applied again only through a key replacement.
+    unavailable_reason: (
+        Literal[
+            "adapter_unavailable",
+            "adapter_version_unavailable",
+            "endpoint_unavailable",
+        ]
+        | None
+    )
     provider_options: dict[str, Any]
     model_profiles: list[LLMModelProfile]
     status: Literal["enabled", "disabled", "deleted"]

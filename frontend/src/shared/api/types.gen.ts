@@ -8214,6 +8214,8 @@ export interface components {
              * @enum {string}
              */
             status: "enabled" | "disabled" | "deleted";
+            /** Unavailable Reason */
+            unavailable_reason: ("adapter_unavailable" | "adapter_version_unavailable" | "endpoint_unavailable") | null;
             /**
              * Updated At
              * Format: date-time

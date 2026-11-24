@@ -69,9 +69,9 @@ function adapterLabel(adapter: LlmAdapter | undefined, language: string, fallbac
 }
 
 /**
- * A new connection's options as the form first shows them. A checkbox has no
- * "not chosen" state, so each boolean starts at the value it displays (the
- * schema default, else off) and is sent as shown.
+ * The boolean options as a checkbox shows them when unset: the schema
+ * default, else off. A checkbox has no "not chosen" state, so a new
+ * connection sends these as shown.
  */
 function initialConfig(adapter: LlmAdapter | undefined): FormDraft["config"] {
   const properties = schemaOf(adapter?.config_schema).properties ?? {};
@@ -88,12 +88,16 @@ function draftFor(adapters: LlmAdapter[], editing: LlmConnection | null): FormDr
       name: editing.name,
       adapterId: editing.adapter_id,
       endpointId: editing.endpoint_profile_id ?? null,
-      config: Object.fromEntries(
-        Object.entries(editing.provider_options).map(([key, value]) => [
-          key,
-          typeof value === "boolean" ? value : String(value ?? ""),
-        ]),
-      ),
+      // An unset checkbox shows the value the schema says applies.
+      config: {
+        ...initialConfig(adapters.find((item) => item.adapter_id === editing.adapter_id)),
+        ...Object.fromEntries(
+          Object.entries(editing.provider_options).map(([key, value]) => [
+            key,
+            typeof value === "boolean" ? value : String(value ?? ""),
+          ]),
+        ),
+      },
       credential: {},
       models: editing.model_profiles.map((profile) => ({ key: newKey(), profile })),
     };
@@ -135,6 +139,30 @@ function configPayload(
     }
   }
   return payload;
+}
+
+/** The choices an enum field shows; an empty field means "not set". */
+function enumOptions(property: SchemaProperty) {
+  return (property.enum ?? []).map(String).filter((option) => option !== "");
+}
+
+/**
+ * Whether the options can be saved as shown: every required field has a
+ * value, an enum holds one of the choices it shows, and an integer is typed
+ * as one that JSON carries exactly.
+ */
+function configComplete(schema: ObjectSchema, config: FormDraft["config"]) {
+  const required = new Set(schema.required ?? []);
+  return Object.entries(schema.properties ?? {}).every(([key, property]) => {
+    const value = config[key];
+    if (value === undefined || value === "") return !required.has(key);
+    if (property.enum && !enumOptions(property).includes(String(value))) return false;
+    if (property.type === "integer") {
+      return /^-?\d+$/.test(String(value)) && Number.isSafeInteger(Number(value));
+    }
+    if (property.type === "number") return Number.isFinite(Number(value));
+    return true;
+  });
 }
 
 /** One shape for drafts and server records, so only real edits compare unequal. */
@@ -405,6 +433,7 @@ function ConnectionCard({
   );
   const enabled = connection.status === "enabled";
   const ready = connection.verification_status === "ready";
+  const reason = connection.unavailable_reason;
   return (
     <li className="llm-connection-card" aria-busy={verifying}>
       <div className="llm-connection-head">
@@ -447,7 +476,9 @@ function ConnectionCard({
             {connection.endpoint_profile_id
               ? (endpoint?.label ?? connection.endpoint_profile_id)
               : t("llm.endpointDefault")}
-            {endpoint ? <code className="llm-connection-url">{endpoint.base_url}</code> : null}
+            {endpoint && reason === null ? (
+              <code className="llm-connection-url">{endpoint.base_url}</code>
+            ) : null}
           </dd>
         </div>
         <div>
@@ -465,6 +496,13 @@ function ConnectionCard({
           </div>
         ) : null}
       </dl>
+      {reason ? (
+        <p className="field-hint llm-connection-result" role="status">
+          {reason === "endpoint_unavailable"
+            ? t("llm.endpointUnavailable")
+            : t(`llm.errors.${reason}`)}
+        </p>
+      ) : null}
       {result && result.status !== "succeeded" && !verifying ? (
         <p className="field-hint llm-connection-result" role="status">
           {resultMessage(t, result)}
@@ -483,7 +521,7 @@ function ConnectionCard({
         <button
           className={enabled ? "icon-button warning" : "icon-button success"}
           type="button"
-          disabled={busy || (!enabled && !ready)}
+          disabled={busy || (!enabled && (!ready || reason !== null))}
           title={!enabled && !ready ? t("llm.enableNeedsVerification") : undefined}
           onClick={onToggle}
         >
@@ -545,11 +583,23 @@ function ConnectionEditor({
   const unsupportedConfig = configFields.some(
     ([, property]) => !["string", "integer", "number", "boolean"].includes(property.type ?? ""),
   );
+  // A stored endpoint the operator removed or moved is applied again only
+  // through a key replacement, like choosing another one.
   const endpointChanged =
-    editing !== null && (draft.endpointId ?? null) !== (editing.endpoint_profile_id ?? null);
+    editing !== null &&
+    (editing.unavailable_reason === "endpoint_unavailable" ||
+      (draft.endpointId ?? null) !== (editing.endpoint_profile_id ?? null));
+  const endpointListed =
+    adapter?.endpoints.some(
+      (endpoint) => (endpoint.id ?? null) === (draft.endpointId ?? null),
+    ) ?? false;
   const credentialEntered = Object.values(draft.credential).some((value) => value !== "");
   const required = new Set(credentialSchema.required ?? []);
-  const credentialComplete = [...required].every((name) => draft.credential[name]);
+  // A stored key is never sent to another endpoint, and an empty field keeps
+  // it, so a new endpoint needs a new key whenever one is stored.
+  const credentialComplete =
+    [...required].every((name) => draft.credential[name]) &&
+    (!endpointChanged || !editing?.has_credential || credentialEntered);
   const replaceCredential = editing === null || credentialEntered || endpointChanged;
   const valid =
     draft.name.trim() !== "" &&
@@ -557,7 +607,8 @@ function ConnectionEditor({
     adapter.endpoints.length > 0 &&
     draft.models.length > 0 &&
     draft.models.every(({ profile }) => profile.model_id.trim() !== "") &&
-    (!replaceCredential || credentialComplete);
+    configComplete(configSchema, draft.config) &&
+    (!replaceCredential || (credentialComplete && endpointListed));
 
   function setModel(key: string, patch: Partial<LlmModelProfile>) {
     setDraft((current) => ({
@@ -740,9 +791,7 @@ function ConnectionEditor({
               >
                 {/* A stored endpoint the operator no longer allows stays
                     selected as such, so choosing another one is a change. */}
-                {adapter.endpoints.some(
-                  (endpoint) => (endpoint.id ?? null) === (draft.endpointId ?? null),
-                ) ? null : (
+                {endpointListed ? null : (
                   <option disabled value={draft.endpointId ?? ""}>
                     {t("llm.endpointRetired")}
                   </option>
@@ -754,6 +803,11 @@ function ConnectionEditor({
                 ))}
               </select>
               <span className="field-hint">{t("llm.endpointHint")}</span>
+              {editing?.unavailable_reason === "endpoint_unavailable" ? (
+                <span className="field-hint" role="alert">
+                  {t("llm.endpointUnavailable")}
+                </span>
+              ) : null}
             </label>
           ) : null}
           {configFields.map(([name, property]) => (
@@ -878,7 +932,7 @@ function ConfigField({
 }) {
   const { t } = useTranslation("settings");
   const label = property.title ?? name;
-  const options = (property.enum ?? []).map(String).filter((option) => option !== "");
+  const options = enumOptions(property);
   const current = value === undefined ? "" : String(value);
   if (property.type === "boolean") {
     return (

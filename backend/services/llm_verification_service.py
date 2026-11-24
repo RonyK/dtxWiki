@@ -111,7 +111,7 @@ class LLMVerificationService:
                     409,
                 )
             endpoint = connection.endpoint_profile
-            code = self._unavailable(connection, endpoint)
+            code = self._connections.unavailable(connection, endpoint)
             credential: dict[str, str] = {}
             if code is None and connection.active_credential is not None:
                 try:
@@ -164,7 +164,7 @@ class LLMVerificationService:
                 request=request,
                 credential=credential,
             )
-            code = self._unavailable(connection, endpoint)
+            code = self._connections.unavailable(connection, endpoint)
             target = _target(connection, endpoint, credential)
         result = _failed(code) if code is not None else self._check(target)
         before_write()
@@ -194,17 +194,6 @@ class LLMVerificationService:
                 if view["revision"] != request.expected_revision:
                     raise _changed()
         return view, result
-
-    def _unavailable(self, connection, endpoint: dict) -> str | None:
-        try:
-            descriptor = self._registry.descriptor(connection.adapter_id)
-        except LLMAdapterRegistryError:
-            return "adapter_unavailable"
-        if descriptor.config_schema_version != connection.config_schema_version:
-            return "adapter_version_unavailable"
-        if not self._connections.endpoint_allowed(connection.adapter_id, endpoint):
-            return "endpoint_unavailable"
-        return None
 
     def _check(self, target: _Target) -> dict:
         results = asyncio.run(self._check_all(target))

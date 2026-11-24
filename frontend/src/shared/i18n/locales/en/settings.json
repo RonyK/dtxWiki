@@ -2222,7 +2222,7 @@
     "unsupportedConfig": "Some settings of this service cannot be edited here.",
     "keyHint": "The key is encrypted on the server and never shown again.",
     "replaceKey": "Replace key",
-    "replaceKeyHint": "Leave empty to keep the current key. A new key is checked first and saved only if the check succeeds.",
+    "replaceKeyHint": "Leave every field empty to keep the current key. Anything entered replaces the whole saved key; it is checked first and saved only if the check succeeds.",
     "endpointNeedsKey": "Enter a key for the new endpoint. A stored key is never sent to a different endpoint.",
     "addModel": "Add model",
     "removeModel": "Remove model {{model}}",
@@ -2292,6 +2292,7 @@
     "ownerOnly": "Only owners of this workspace can manage its shared LLM connections.",
     "keyRejected": "The new key was not saved.",
     "endpointRetired": "Endpoint no longer allowed — choose another",
-    "chooseOption": "Choose a value"
+    "chooseOption": "Choose a value",
+    "endpointUnavailable": "The saved endpoint can no longer be used as saved. Choose an endpoint under Edit and save to connect again."
   }
 }

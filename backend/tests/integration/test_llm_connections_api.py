@@ -256,13 +256,16 @@ def test_browser_connection_crud_preserves_ownership_and_secret_boundary(
             "kind": "adapter_default",
             "base_url": "https://old.example",
         }
+    # A settings edit never moves the stored key to another address: the
+    # retired default stays until a key replacement, and the view says so.
     upgraded = owner.patch(personal_item, json=config_change)
     assert upgraded.status_code == 200, upgraded.text
     assert upgraded.json()["data"]["adapter_implementation_version"] != "0.0.0"
     assert upgraded.json()["data"]["verification_status"] == "unverified"
+    assert upgraded.json()["data"]["unavailable_reason"] == "endpoint_unavailable"
     with page_service.session_factory() as session:
         stored = session.get(UserLLMConnection, UUID(personal_record["id"]))
-        assert stored.endpoint_profile["base_url"] != "https://old.example"
+        assert stored.endpoint_profile["base_url"] == "https://old.example"
 
     with page_service.session_factory.begin() as session:
         stored = session.get(UserLLMConnection, UUID(personal_record["id"]))
@@ -462,3 +465,21 @@ def test_verification_applies_only_to_the_setup_it_checked(
     assert {"llm.connection.verified", "llm.connection.credential_rotated"} <= set(
         actions
     )
+
+    # The operator moved the profile's address: the stored setup cannot be
+    # switched on again, and a key replacement naming the profile applies it.
+    with control.begin() as session:
+        stored = session.get(WorkspaceLLMConnection, UUID(record["id"]))
+        stored.endpoint_profile = {**stored.endpoint_profile, "base_url": "https://old"}
+        stored.status = "disabled"
+    moved = owner.get(path).json()["data"][0]
+    assert moved["unavailable_reason"] == "endpoint_unavailable"
+    enable = {"expected_revision": moved["revision"], "status": "enabled"}
+    assert owner.patch(item, json=enable).json()["error_code"] == "endpoint_unavailable"
+    replace = {
+        "expected_revision": moved["revision"],
+        "credential": {"api_key": "good-third"},
+        "endpoint_profile_id": "gateway",
+    }
+    rebound = owner.put(f"{item}/credential", json=replace).json()["data"]
+    assert rebound["connection"]["unavailable_reason"] is None

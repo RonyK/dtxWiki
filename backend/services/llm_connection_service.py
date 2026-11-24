@@ -89,13 +89,30 @@ class LLMConnectionService:
             for descriptor in self._registry.descriptors()
         ]
 
-    def endpoint_allowed(self, adapter_id: str, endpoint: dict) -> bool:
-        """Whether a stored endpoint is still one the adapter may use."""
+    def unavailable(self, connection: StoredConnection, endpoint: dict) -> str | None:
+        """Why a setup cannot be used as stored now, or None if it can.
+
+        The endpoint is compared as stored: an operator change to its address
+        (or a new adapter default) applies only through a key replacement, so
+        a stored key is never sent to an address it was not verified with.
+        """
         try:
-            descriptor = self._registry.descriptor(adapter_id)
+            descriptor = self._registry.descriptor(connection.adapter_id)
         except LLMAdapterRegistryError:
-            return False
-        return endpoint in self._allowed_endpoints(descriptor)
+            return "adapter_unavailable"
+        if descriptor.config_schema_version != connection.config_schema_version:
+            return "adapter_version_unavailable"
+        if endpoint not in self._allowed_endpoints(descriptor):
+            return "endpoint_unavailable"
+        return None
+
+    def _view(self, connection: StoredConnection, *, has_credential: bool) -> dict:
+        return {
+            **_view(connection, has_credential=has_credential),
+            "unavailable_reason": self.unavailable(
+                connection, connection.endpoint_profile
+            ),
+        }
 
     @property
     def vault(self) -> CredentialVault:
@@ -118,7 +135,7 @@ class LLMConnectionService:
         model = _connection_model(scope)
         statement = _select_owned(model, owner_id).order_by(model.created_at, model.id)
         return [
-            _view(connection, has_credential=has_credential)
+            self._view(connection, has_credential=has_credential)
             for connection, has_credential in session.execute(statement)
         ]
 
@@ -131,7 +148,7 @@ class LLMConnectionService:
         connection_id: UUID,
     ) -> dict:
         connection, has_credential = _get_owned(session, scope, owner_id, connection_id)
-        return _view(connection, has_credential=has_credential)
+        return self._view(connection, has_credential=has_credential)
 
     def create(
         self,
@@ -183,7 +200,7 @@ class LLMConnectionService:
         session.add(connection)
         session.flush()
         self._emit(session, scope, owner_id, actor, connection, "created")
-        return _view(connection, has_credential=bool(credential))
+        return self._view(connection, has_credential=bool(credential))
 
     def update(
         self,
@@ -226,38 +243,36 @@ class LLMConnectionService:
                     for profile in request.model_profiles
                 ]
             )
-            endpoint = connection.endpoint_profile
-            if endpoint.get("kind") == "adapter_default":
-                # The built-in endpoint follows the installed adapter version.
-                endpoint = self._endpoint(descriptor, None)
             self._validate(
                 connection.adapter_id,
                 config,
                 profiles,
                 None,
-                base_url=endpoint["base_url"],
+                base_url=connection.endpoint_profile["base_url"],
             )
-            connection.endpoint_profile = endpoint
             connection.adapter_implementation_version = descriptor.adapter_version
             connection.provider_options = config
             connection.model_profiles = profiles
             connection.verification_status = "unverified"
             connection.verified_at = None
-        if request.status is not None:
-            # Only a verified configuration can be switched on.
-            if (
-                request.status == "enabled"
-                and connection.verification_status != "ready"
-            ):
+        if request.status == "enabled":
+            # Only a verified setup that can still be used as stored.
+            if connection.verification_status != "ready":
                 raise LLMConnectionError(
                     "connection_not_verified",
                     "Verify the LLM connection before enabling it.",
                     409,
                 )
+            code = self.unavailable(connection, connection.endpoint_profile)
+            if code is not None:
+                raise LLMConnectionError(
+                    code, "The LLM connection cannot be used as stored.", 409
+                )
+        if request.status is not None:
             connection.status = request.status
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "updated")
-        return _view(connection, has_credential=has_credential)
+        return self._view(connection, has_credential=has_credential)
 
     def owned(
         self,
@@ -339,7 +354,7 @@ class LLMConnectionService:
             connection.verification_status = "ready" if succeeded else "failed"
             connection.verified_at = utc_now() if succeeded else None
             self._emit(session, scope, owner_id, actor, connection, "verified")
-        return _view(connection, has_credential=has_credential)
+        return self._view(connection, has_credential=has_credential)
 
     def swap_credential(
         self,
@@ -376,7 +391,7 @@ class LLMConnectionService:
         connection.verified_at = now
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "credential_rotated")
-        return _view(connection, has_credential=bool(credential))
+        return self._view(connection, has_credential=bool(credential))
 
     def _lock_for_write(
         self,
@@ -469,7 +484,7 @@ class LLMConnectionService:
         connection.active_credential = None
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "deleted")
-        return _view(connection, has_credential=False)
+        return self._view(connection, has_credential=False)
 
     def _descriptor(self, adapter_id: str):
         try:
