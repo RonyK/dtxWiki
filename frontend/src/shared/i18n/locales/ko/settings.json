@@ -2290,6 +2290,8 @@
       "validation_failed": "입력한 내용을 확인한 뒤 다시 시도하세요."
     },
     "ownerOnly": "이 워크스페이스의 소유자만 공용 LLM 연결을 관리할 수 있습니다.",
-    "keyRejected": "새 키를 저장하지 않았습니다."
+    "keyRejected": "새 키를 저장하지 않았습니다.",
+    "endpointRetired": "더 이상 허용되지 않는 엔드포인트 — 다른 엔드포인트를 고르세요",
+    "chooseOption": "값을 고르세요"
   }
 }

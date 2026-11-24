@@ -15,6 +15,7 @@ import {
   type LlmAdapter,
   type LlmConnection,
   type LlmConnectionScope,
+  type LlmConnectionUpdate,
   type LlmModelProfile,
   type LlmVerification,
 } from "../../shared/api/llmConnections";
@@ -579,18 +580,21 @@ function ConnectionEditor({
           baseline.provider_options,
           shownConfig,
         );
-        const changed =
-          draft.name.trim() !== baseline.name ||
+        // Only what changed: models or options in a request reset the
+        // verification, so a rename alone must not send them.
+        const patch: LlmConnectionUpdate = { expected_revision: revision };
+        if (draft.name.trim() !== baseline.name) patch.name = draft.name.trim();
+        if (
           JSON.stringify(models) !==
-            JSON.stringify(normalizedProfiles(baseline.model_profiles)) ||
-          JSON.stringify(config) !== JSON.stringify(baseline.provider_options);
-        if (changed) {
-          const updated = await updateLlmConnection(scope, baseline.id, {
-            expected_revision: revision,
-            name: draft.name.trim(),
-            model_profiles: models,
-            provider_options: config,
-          });
+          JSON.stringify(normalizedProfiles(baseline.model_profiles))
+        ) {
+          patch.model_profiles = models;
+        }
+        if (JSON.stringify(config) !== JSON.stringify(baseline.provider_options)) {
+          patch.provider_options = config;
+        }
+        if (Object.keys(patch).length > 1) {
+          const updated = await updateLlmConnection(scope, baseline.id, patch);
           setBaseline(updated);
           setShownConfig(draft.config);
           revision = updated.revision;
@@ -719,6 +723,15 @@ function ConnectionEditor({
                   setDraft({ ...draft, endpointId: event.target.value || null })
                 }
               >
+                {/* A stored endpoint the operator no longer allows stays
+                    selected as such, so choosing another one is a change. */}
+                {adapter.endpoints.some(
+                  (endpoint) => (endpoint.id ?? null) === (draft.endpointId ?? null),
+                ) ? null : (
+                  <option disabled value={draft.endpointId ?? ""}>
+                    {t("llm.endpointRetired")}
+                  </option>
+                )}
                 {adapter.endpoints.map((endpoint) => (
                   <option key={endpoint.id ?? ""} value={endpoint.id ?? ""}>
                     {endpoint.label ?? t("llm.endpointDefault")} · {endpoint.base_url}
@@ -848,7 +861,10 @@ function ConfigField({
   required: boolean;
   value: string | boolean | undefined;
 }) {
+  const { t } = useTranslation("settings");
   const label = property.title ?? name;
+  const options = (property.enum ?? []).map(String).filter((option) => option !== "");
+  const current = value === undefined ? "" : String(value);
   if (property.type === "boolean") {
     return (
       <label className="attachments-checkbox">
@@ -866,11 +882,19 @@ function ConfigField({
     <label className="field-stack">
       {label}
       {property.enum ? (
-        <select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>
-          {required ? null : <option value="" />}
-          {property.enum.map((option) => (
-            <option key={String(option)} value={String(option)}>
-              {String(option)}
+        // Nothing is chosen until the user picks: a required field (even with
+        // a single value) and a stored value the schema no longer lists both
+        // show the placeholder, so picking a real value is always a change.
+        <select
+          value={options.includes(current) ? current : ""}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option disabled={required} value="">
+            {required || current !== "" ? t("llm.chooseOption") : ""}
+          </option>
+          {options.map((option) => (
+            <option key={option} value={option}>
+              {option}
             </option>
           ))}
         </select>

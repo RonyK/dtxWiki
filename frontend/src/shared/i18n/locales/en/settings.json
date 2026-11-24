@@ -2290,6 +2290,8 @@
       "validation_failed": "Check the fields and try again."
     },
     "ownerOnly": "Only owners of this workspace can manage its shared LLM connections.",
-    "keyRejected": "The new key was not saved."
+    "keyRejected": "The new key was not saved.",
+    "endpointRetired": "Endpoint no longer allowed — choose another",
+    "chooseOption": "Choose a value"
   }
 }

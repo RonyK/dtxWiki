@@ -63,20 +63,17 @@ it("retries only the key replacement after the settings were saved", async () =>
     endpoints: [{ id: null, label: null, base_url: "https://api.anthropic.com/v1" }],
   };
   const writes: Array<[string, unknown]> = [];
+  let saved = connection;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input.toString();
     if (init?.method && init.method !== "GET") {
       const body = JSON.parse(String(init.body));
       writes.push([`${init.method} ${url.replace(/^.*\/api\/v1/, "")}`, body]);
       if (init.method === "PATCH") {
-        return json({
-          data: {
-            ...connection,
-            name: body.name,
-            provider_options: body.provider_options,
-            revision: body.expected_revision + 1,
-          },
-        });
+        // Like the server: fields left out of the patch keep their value.
+        const { expected_revision: revision, ...changes } = body;
+        saved = { ...saved, ...changes, revision: revision + 1 };
+        return json({ data: saved });
       }
       if (writes.length < 4) {
         return json({ error_code: "internal_error", message: "boom" }, 500);
@@ -120,19 +117,17 @@ it("retries only the key replacement after the settings were saved", async () =>
       endpoint_profile_id: null,
     },
   ];
-  const edit = (revision: number, value: string) => [
-    "PATCH /me/llm-connections/c1",
-    expect.objectContaining({
-      expected_revision: revision,
-      name: "Renamed",
-      provider_options: { region: value, routing: { pool: "a" } },
-    }),
-  ];
+  // Only changed fields are sent: models or options in a request reset the
+  // verification, so unchanged ones (and an unchanged name) stay out.
+  const options = (value: string) => ({ region: value, routing: { pool: "a" } });
   expect(writes).toEqual([
-    edit(4, "us"),
+    [
+      "PATCH /me/llm-connections/c1",
+      { expected_revision: 4, name: "Renamed", provider_options: options("us") },
+    ],
     keyReplacement(5),
     keyReplacement(5),
-    edit(5, "eu"),
+    ["PATCH /me/llm-connections/c1", { expected_revision: 5, provider_options: options("eu") }],
     keyReplacement(6),
   ]);
 });
