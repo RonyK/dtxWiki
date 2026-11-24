@@ -100,8 +100,13 @@ class LLMAdapterRegistry:
         config: Mapping[str, object],
         credential: Mapping[str, str] | None,
         model_options: Iterable[str],
+        base_url: str | None = None,
     ) -> str:
-        """Validate stored input and resolve the adapter's default endpoint."""
+        """Validate stored input and resolve its endpoint.
+
+        ``base_url`` is an operator-approved endpoint; without one the
+        adapter's default endpoint is used.
+        """
         registration = self._registration(adapter_id)
         descriptor = registration.descriptor
         # Provider options are returned as metadata. Credential fields must
@@ -113,11 +118,11 @@ class LLMAdapterRegistry:
                 f"LLM adapter {adapter_id!r} cannot expose secret configuration fields"
             )
         self._validate_fields(registration, config, credential, model_options)
-        if descriptor.default_base_url is None:
+        if base_url is None and descriptor.default_base_url is None:
             raise LLMAdapterEndpointRequiredError(
                 "LLM adapter requires an endpoint profile"
             )
-        return self._resolve_endpoint(registration, None).url
+        return self._resolve_endpoint(registration, base_url).url
 
     def create(
         self,
@@ -360,6 +365,12 @@ class _GuardedPort:
         return None
 
 
+def normalize_base_url(url: str) -> str | None:
+    """The form endpoints are stored and compared in, or None if unusable."""
+    endpoint = _Endpoint.parse(url.rstrip("/")) if isinstance(url, str) else None
+    return None if endpoint is None else endpoint.url
+
+
 def _binds_two_arguments(function: object, *, coroutine: bool) -> bool:
     if not callable(function) or inspect.iscoroutinefunction(function) != coroutine:
         return False
@@ -471,4 +482,9 @@ def _contains_write_only(schema: object) -> bool:
     return False
 
 
-__all__ = ["BUILTIN_NAMESPACE", "LLMAdapterRegistry", "LLMAdapterRegistryError"]
+__all__ = [
+    "BUILTIN_NAMESPACE",
+    "LLMAdapterRegistry",
+    "LLMAdapterRegistryError",
+    "normalize_base_url",
+]

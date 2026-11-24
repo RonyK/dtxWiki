@@ -1,4 +1,4 @@
-"""Add personal and Workspace LLM connection storage.
+"""Add personal and Workspace LLM connection storage and verification.
 
 Revision ID: dafc5339b3b1
 Revises: 002398e0fcdc
@@ -15,6 +15,8 @@ depends_on = None
 
 _PERSONAL = "user_llm_connection"
 _WORKSPACE = "workspace_llm_connection"
+_VERIFICATION = "llm_verification_operation"
+_IN_PROGRESS = "status IN ('queued', 'running')"
 
 
 def _connection_fields(table: str) -> tuple:
@@ -87,7 +89,61 @@ def upgrade() -> None:
         *_connection_fields(_WORKSPACE),
     )
 
+    op.create_table(
+        _VERIFICATION,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("scope", sa.Text(), nullable=False),
+        sa.Column(
+            "user_id",
+            sa.Uuid(),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("workspace_id", sa.Uuid()),
+        sa.Column("connection_id", sa.Uuid(), nullable=False),
+        sa.Column("target", sa.Text(), nullable=False),
+        sa.Column("config_hash", sa.Text(), nullable=False),
+        sa.Column("status", sa.Text(), nullable=False, server_default="queued"),
+        sa.Column("lease_token", sa.Uuid()),
+        sa.Column("lease_expires_at", sa.DateTime(timezone=True)),
+        sa.Column("error_code", sa.Text()),
+        sa.Column("results", sa.JSON(), nullable=False, server_default="[]"),
+        sa.Column("started_at", sa.DateTime(timezone=True)),
+        sa.Column("finished_at", sa.DateTime(timezone=True)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint(
+            "scope IN ('user', 'workspace')",
+            name="ck_llm_verification_operation_scope",
+        ),
+        sa.CheckConstraint(
+            "(scope = 'user') = (workspace_id IS NULL)",
+            name="ck_llm_verification_operation_workspace",
+        ),
+        sa.CheckConstraint(
+            "target IN ('active', 'candidate')",
+            name="ck_llm_verification_operation_target",
+        ),
+        sa.CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed', "
+            "'cancelled', 'outcome_unknown')",
+            name="ck_llm_verification_operation_status",
+        ),
+    )
+    op.create_index(
+        "uq_llm_verification_operation_in_progress",
+        _VERIFICATION,
+        ["connection_id"],
+        unique=True,
+        sqlite_where=sa.text(_IN_PROGRESS),
+        postgresql_where=sa.text(_IN_PROGRESS),
+    )
+    op.create_index(
+        "ix_llm_verification_operation_status", _VERIFICATION, ["status", "created_at"]
+    )
+    op.create_index("ix_llm_verification_operation_user_id", _VERIFICATION, ["user_id"])
+
 
 def downgrade() -> None:
+    op.drop_table(_VERIFICATION)
     op.drop_table(_WORKSPACE)
     op.drop_table(_PERSONAL)

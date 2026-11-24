@@ -661,6 +661,22 @@ sudo sha256sum "$BACKUP/dtxwiki.sqlite"
 SQLite 전체 백업에는 암호화된 자격 증명과 키가 함께 들어 있으므로 백업도 비밀과 동등하게
 보호해야 합니다. 설정을 기존 키가 없는 다른 키링으로 변경하면 저장한 자격 증명을 읽을 수 없습니다.
 
+### LLM 연결 endpoint와 검증
+
+사용자와 워크스페이스 소유자는 URL을 직접 입력하지 않습니다. 각 연결은 서비스 유형의 기본
+endpoint(Anthropic·OpenAI·Gemini)나 운영자가 허용한 endpoint 중 하나를 고릅니다. 사내
+gateway나 OpenAI 호환 서버를 허용하려면 `DTXWIKI_LLM_ENDPOINT_PROFILES_JSON`에 JSON 목록을
+지정합니다. 각 항목은 `id`(소문자), `adapter_id`, `base_url`(https), `label`을 가집니다.
+
+```bash
+DTXWIKI_LLM_ENDPOINT_PROFILES_JSON='[{"id":"team-gateway","adapter_id":"builtin.openai_compatible.chat_completions","base_url":"https://llm-gateway.example.com/v1","label":"Team gateway"}]'
+```
+
+API·worker에 같은 값을 전달하세요. 항목을 지우거나 주소를 바꾸면 그 endpoint를 쓰던 연결은
+검증하지 못하고, 사용자가 새 endpoint와 키를 다시 입력해야 합니다. 연결 검증은 worker가
+실행하므로 worker가 꺼져 있으면 검증이 대기 상태로 남습니다. worker가 검증 도중 멈추면 그
+검증은 `outcome_unknown`으로 끝나며 자동으로 다시 보내지 않습니다.
+
 ### Context Git 저장소 점검
 
 Context 게시 시 `<data_dir>/repositories/<workspace UUID>.git`에 snapshot을 함께 기록합니다.

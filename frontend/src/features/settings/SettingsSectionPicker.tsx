@@ -37,6 +37,7 @@ export function SettingsSectionPicker({
   showDeployment,
   showUsers,
   showLabs,
+  showWorkspaceLlm,
   tokenCount,
 }: {
   activeSection: SettingsSection;
@@ -61,9 +62,19 @@ export function SettingsSectionPicker({
         showDeployment,
         showUsers,
         showLabs,
+        showWorkspaceLlm,
         tokenCount,
       }),
-    [t, consentCount, showAttachments, showDeployment, showUsers, showLabs, tokenCount],
+    [
+      t,
+      consentCount,
+      showAttachments,
+      showDeployment,
+      showUsers,
+      showLabs,
+      showWorkspaceLlm,
+      tokenCount,
+    ],
   );
   const current = sections.find((section) => section.id === activeSection);
   const currentGroup = groups.find((group) => group.id === current?.group);

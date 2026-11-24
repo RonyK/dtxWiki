@@ -98,6 +98,14 @@
     "labs": {
       "label": "Labs",
       "description": "Manage experimental features for this workspace."
+    },
+    "llm": {
+      "label": "LLM connections",
+      "description": "Your own API keys for LLM services. Only you can see or use them."
+    },
+    "workspaceLlm": {
+      "label": "Shared LLM connections",
+      "description": "LLM services this workspace pays for. Owners manage them; the keys belong to the workspace."
     }
   },
   "crossLinks": {
@@ -2189,5 +2197,107 @@
     "heldReopened": "“{{title}}” has a new admin and is no longer deleted with the account.",
     "scheduledLabel": "Deletion",
     "cleanupFailedLabel": "Cleanup"
+  },
+  "llm": {
+    "add": "Add service",
+    "addTitle": "Add LLM service",
+    "editTitle": "Edit LLM service",
+    "close": "Close",
+    "loading": "Loading LLM connections…",
+    "emptyTitle": "No LLM services yet",
+    "emptyPersonal": "Add a service with your own API key. Only you can see or use it.",
+    "emptyWorkspace": "Add a service the team can use with this workspace's API key.",
+    "verifyHint": "Verifying sends one small request per model, so the provider may charge a small amount.",
+    "verify": "Verify",
+    "cancelVerification": "Cancel verification",
+    "enable": "Enable",
+    "disable": "Disable",
+    "enableNeedsVerification": "Verify the connection before enabling it.",
+    "edit": "Edit",
+    "deleteLabel": "Delete {{name}}",
+    "deleteTitle": "Delete {{name}}?",
+    "deleteBody": "The stored key is destroyed here. Revoke it in the provider's console as well if it may have leaked.",
+    "endpointDefault": "Provider endpoint",
+    "endpointHint": "The address dtxWiki's server connects to. Only endpoints the server operator allows are listed.",
+    "needsOperatorEndpoint": "needs an operator endpoint",
+    "unsupportedConfig": "Some settings of this service cannot be edited here.",
+    "keyHint": "The key is encrypted on the server and never shown again.",
+    "replaceKey": "Replace key",
+    "replaceKeyHint": "Leave empty to keep the current key. A new key is used only after it passes verification; until then the current key stays in use.",
+    "endpointNeedsKey": "Enter a key for the new endpoint. A stored key is never sent to a different endpoint.",
+    "addModel": "Add model",
+    "removeModel": "Remove model {{model}}",
+    "transferNotice": "When this service is used, the question and part of the evidence are sent to it, and the provider bills the account that owns the key.",
+    "conflict": "This connection changed elsewhere.",
+    "reloadLatest": "Load the latest version",
+    "status": {
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+    "verification": {
+      "ready": "Verified",
+      "unverified": "Needs verification",
+      "failed": "Verification failed",
+      "stale": "Verify again",
+      "verifying": "Verifying",
+      "running": "Verifying",
+      "candidateRunning": "Verifying new key",
+      "candidateKept": "The new key was not applied; the current key stays in use."
+    },
+    "result": {
+      "failed": "Verification did not succeed.",
+      "cancelled": "Verification was cancelled.",
+      "outcome_unknown": "The result could not be confirmed. The provider may have charged for the call.",
+      "authentication_failed": "The provider rejected the key.",
+      "permission_denied": "This key cannot use the model.",
+      "not_found": "The model or endpoint was not found. Check the model ID.",
+      "quota_exhausted": "The provider account is out of quota or credit.",
+      "rate_limited": "The provider is limiting requests. Try again shortly.",
+      "provider_unavailable": "The provider is unavailable. Try again shortly.",
+      "provider_error": "The provider returned an error. Try again shortly.",
+      "invalid_response": "The provider sent a response dtxWiki could not read.",
+      "timeout": "The provider did not answer in time.",
+      "network_error": "Could not reach the provider.",
+      "invalid_request": "The provider rejected the request. Check the model settings.",
+      "unsupported_option": "The model does not support a configured option.",
+      "config_schema_mismatch": "The settings do not match this service's format.",
+      "unexpected_result": "The model answered in an unexpected way.",
+      "connection_changed": "The connection changed during verification, so the result was not applied.",
+      "connection_unavailable": "The connection no longer exists.",
+      "endpoint_unavailable": "This endpoint is no longer allowed. Ask the server operator.",
+      "adapter_unavailable": "This service type is not available on the server.",
+      "adapter_version_unavailable": "This service type's version is not available on the server.",
+      "credential_unavailable": "The stored key could not be read. Enter the key again.",
+      "permission_revoked": "The requester's access changed, so verification stopped."
+    },
+    "fields": {
+      "name": "Name",
+      "provider": "Service type",
+      "endpoint": "Endpoint",
+      "credential": "Credentials",
+      "models": "Models",
+      "modelId": "Model ID",
+      "displayName": "Display name (optional)",
+      "verifiedAt": "Last verified"
+    },
+    "credentialFields": {
+      "api_key": "API key"
+    },
+    "errors": {
+      "load": "Could not load LLM connections.",
+      "action": "The request failed. Try again.",
+      "save": "Could not save the connection.",
+      "connection_not_verified": "Verify the connection before enabling it.",
+      "connection_revision_conflict": "This connection changed elsewhere. Reload and try again.",
+      "verification_in_progress": "A verification of this connection is already running.",
+      "adapter_endpoint_required": "This service type needs an endpoint from the server operator.",
+      "endpoint_profile_unavailable": "That endpoint is not available for this service type.",
+      "config_schema_mismatch": "The settings or key do not match this service's format.",
+      "adapter_unavailable": "This service type is not available on the server.",
+      "adapter_version_unavailable": "This service type's version is not available on the server.",
+      "llm_vault_unavailable": "The server cannot store keys right now. Ask the server operator.",
+      "validation_failed": "Check the fields and try again."
+    },
+    "ownerOnly": "Only owners of this workspace can manage its shared LLM connections."
   }
 }

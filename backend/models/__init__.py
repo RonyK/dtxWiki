@@ -98,7 +98,11 @@ from backend.models.library_discovery import (
 )
 from backend.models.library_semantic_overlay import LibrarySemanticOverlay
 from backend.models.lint import LintFinding, LintRun
-from backend.models.llm_connection import UserLLMConnection, WorkspaceLLMConnection
+from backend.models.llm_connection import (
+    LLMVerificationOperation,
+    UserLLMConnection,
+    WorkspaceLLMConnection,
+)
 from backend.models.mail import EmailOutbox, PasswordRecoveryRateLimitSlot
 from backend.models.mcp_chat import (
     McpChatArtifactKind,
@@ -255,6 +259,7 @@ __all__ = [
     "PAGE_NAME_TRGM_TABLE",
     "SEARCH_DOC_FTS_TABLE",
     "ServerAdmin",
+    "LLMVerificationOperation",
     "LibraryArtifact",
     "LibraryArtifactConversionDetail",
     "LibraryArtifactPreviewDetail",

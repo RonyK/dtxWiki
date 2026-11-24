@@ -2,6 +2,8 @@ import base64
 import json
 import logging
 from contextlib import ExitStack
+from datetime import UTC, datetime, timedelta
+from unittest.mock import ANY
 from uuid import UUID
 
 import pytest
@@ -14,22 +16,27 @@ from backend.api.deps import get_workspace_session_factory
 from backend.api.llm_connections import ConnectionOwner, workspace_owner
 from backend.app.main import create_app
 from backend.app.settings import Settings
+from backend.llm.adapter_registry import LLMAdapterRegistry
+from backend.llm.adapters import build_builtin_llm_adapters
+from backend.llm.credential_vault import CredentialBinding
 from backend.models.audit import AuditEvent
-from backend.models.llm_connection import UserLLMConnection, WorkspaceLLMConnection
+from backend.models.llm_connection import (
+    LLMVerificationOperation,
+    UserLLMConnection,
+    WorkspaceLLMConnection,
+)
 from backend.models.user import User
 from backend.policy.rbac import grant_workspace_membership
-from backend.services.llm_connection_service import LLMConnectionService
+from backend.services.llm_connection_service import (
+    LLMConnectionService,
+    build_llm_connection_service,
+)
+from backend.services.llm_verification_service import LLMVerificationService
+from backend.spi.llm import TransportResponse
 from backend.tests.conftest import authenticate_test_client, captured_log_records
 
 
-def test_browser_connection_crud_preserves_ownership_and_secret_boundary(
-    page_service, tmp_path, request, monkeypatch
-):
-    log_capture = ExitStack()
-    request.addfinalizer(log_capture.close)
-    records = log_capture.enter_context(
-        captured_log_records("dtxwiki.request", logging.INFO)
-    )
+def _settings(tmp_path, **values) -> Settings:
     keyring = tmp_path / "vault-keys.json"
     keyring.write_text(
         json.dumps(
@@ -41,11 +48,23 @@ def test_browser_connection_crud_preserves_ownership_and_secret_boundary(
         encoding="utf-8",
     )
     keyring.chmod(0o600)
-    settings = Settings(
+    return Settings(
         database_url="sqlite+pysqlite:///:memory:",
         session_secret="llm-connection-api-test",
         llm_credential_keyring_file=str(keyring),
+        **values,
     )
+
+
+def test_browser_connection_crud_preserves_ownership_and_secret_boundary(
+    page_service, tmp_path, request, monkeypatch
+):
+    log_capture = ExitStack()
+    request.addfinalizer(log_capture.close)
+    records = log_capture.enter_context(
+        captured_log_records("dtxwiki.request", logging.INFO)
+    )
+    settings = _settings(tmp_path)
     app = create_app(settings=settings, page_service=page_service)
     origin = f"http://127.0.0.1:{settings.backend_port}"
     owner = TestClient(app, base_url=origin)
@@ -92,16 +111,14 @@ def test_browser_connection_crud_preserves_ownership_and_secret_boundary(
 
     # The control read must finish before any Workspace session starts writing.
     authorized = []
-    original_authorize = LLMConnectionService.authorize_workspace_write
+    original_authorize = LLMConnectionService.authorize_write
 
     def record_authorization(self, session, **kwargs):
         result = original_authorize(self, session, **kwargs)
         authorized.append(session)
         return result
 
-    monkeypatch.setattr(
-        LLMConnectionService, "authorize_workspace_write", record_authorization
-    )
+    monkeypatch.setattr(LLMConnectionService, "authorize_write", record_authorization)
 
     # Simulate a shard that has no control-plane tables, including on writes.
     class WorkspaceOnlySession(Session):
@@ -320,3 +337,212 @@ def test_browser_connection_crud_preserves_ownership_and_secret_boundary(
     messages = [record.getMessage() for record in records]
     assert any(personal_path in message for message in messages)
     assert all(marker not in message for message in messages)
+
+
+def test_verification_applies_only_to_the_setup_it_checked(page_service, tmp_path):
+    adapter = "builtin.openai_compatible.chat_completions"
+    settings = _settings(
+        tmp_path,
+        llm_endpoint_profiles_json=json.dumps(
+            [
+                {
+                    "id": "gateway",
+                    "adapter_id": adapter,
+                    "base_url": "https://gateway.example/v1/",
+                    "label": "Team gateway",
+                }
+            ]
+        ),
+    )
+    app = create_app(settings=settings, page_service=page_service)
+    owner = TestClient(app, base_url=f"http://127.0.0.1:{settings.backend_port}")
+    authenticate_test_client(owner, "llm-verifier@example.com")
+    workspace_id = owner.get("/api/v1/workspaces").json()["data"][
+        "current_workspace_id"
+    ]
+    catalog = owner.get("/api/v1/llm-adapters").json()["data"]
+    assert next(item for item in catalog if item["adapter_id"] == adapter)[
+        "endpoints"
+    ] == [
+        {
+            "id": "gateway",
+            "label": "Team gateway",
+            "base_url": "https://gateway.example/v1",
+        }
+    ]
+
+    calls = []
+
+    class Provider:
+        """Accepts keys starting with "good"; any other key is refused."""
+
+        async def post_json(self, url, *, headers, payload, timeout_seconds):
+            calls.append((url, payload["model"]))
+            accepted = headers.get("authorization", "").startswith("Bearer good")
+            body = (
+                {"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}]}
+                if accepted
+                else {"error": {"message": "invalid key"}}
+            )
+            return TransportResponse(
+                status_code=200 if accepted else 401,
+                headers={},
+                body=json.dumps(body).encode(),
+            )
+
+    registry = LLMAdapterRegistry(build_builtin_llm_adapters())
+    connections = build_llm_connection_service(settings, registry)
+    worker = LLMVerificationService(
+        connections=connections,
+        registry=registry,
+        vault=connections.vault,
+        transport_factory=Provider,
+    )
+    control = page_service.session_factory
+
+    def run_worker():
+        for operation_id, token in worker.claim(control, limit=10):
+            worker.execute(control, lambda _workspace: control, operation_id, token)
+
+    path = f"/api/v1/workspaces/{workspace_id}/llm-connections"
+    verifications = f"/api/v1/workspaces/{workspace_id}/llm-verifications"
+    created = owner.post(
+        path,
+        json={
+            "name": "Gateway",
+            "adapter_id": adapter,
+            "endpoint_profile_id": "gateway",
+            "model_profiles": [{"id": "small", "model_id": "small-model"}],
+            "credential": {"api_key": "good-first"},
+        },
+    )
+    assert created.status_code == 201, created.text
+    record = created.json()["data"]
+    assert record["endpoint_profile_id"] == "gateway"
+    item = f"{path}/{record['id']}"
+
+    def current():
+        return owner.get(item).json()["data"]
+
+    def verification(response):
+        assert response.status_code == 202, response.text
+        return response.json()["data"]["id"]
+
+    enable = {"expected_revision": record["revision"], "status": "enabled"}
+    assert owner.patch(item, json=enable).json()["error_code"] == (
+        "connection_not_verified"
+    )
+
+    # Asking again while it waits returns the same verification, and no
+    # other verification of the connection starts meanwhile.
+    check = {"expected_revision": record["revision"]}
+    first = verification(owner.post(f"{item}/verify", json=check))
+    assert verification(owner.post(f"{item}/verify", json=check)) == first
+    replace = {"expected_revision": record["revision"], "credential": {"api_key": "x"}}
+    assert owner.put(f"{item}/credential", json=replace).json()["error_code"] == (
+        "verification_in_progress"
+    )
+    run_worker()
+    assert calls == [("https://gateway.example/v1/chat/completions", "small-model")]
+    record = current()
+    assert (record["verification_status"], record["verification"]["status"]) == (
+        "ready",
+        "succeeded",
+    )
+    record = owner.patch(
+        item, json={**enable, "expected_revision": record["revision"]}
+    ).json()["data"]
+    assert record["status"] == "enabled"
+
+    # A refused replacement is discarded; the working key stays in use.
+    refused = verification(
+        owner.put(
+            f"{item}/credential",
+            json={
+                "expected_revision": record["revision"],
+                "credential": {"api_key": "bad"},
+            },
+        )
+    )
+    run_worker()
+    assert owner.get(f"{verifications}/{refused}").json()["data"]["error_code"] == (
+        "authentication_failed"
+    )
+    after = current()
+    assert (after["status"], after["verification_status"]) == ("enabled", "ready")
+
+    # A result for a setup edited during the call is not applied.
+    stale = verification(
+        owner.post(f"{item}/verify", json={"expected_revision": after["revision"]})
+    )
+    edited = owner.patch(
+        item,
+        json={
+            "expected_revision": after["revision"],
+            "model_profiles": [{"id": "small", "model_id": "edited-model"}],
+        },
+    ).json()["data"]
+    run_worker()
+    assert owner.get(f"{verifications}/{stale}").json()["data"]["error_code"] == (
+        "connection_changed"
+    )
+    assert current()["verification_status"] == "unverified"
+
+    # A verified replacement swaps in, re-encrypted as the active key.
+    swapped = verification(
+        owner.put(
+            f"{item}/credential",
+            json={
+                "expected_revision": edited["revision"],
+                "credential": {"api_key": "good-second"},
+            },
+        )
+    )
+    run_worker()
+    assert owner.get(f"{verifications}/{swapped}").json()["data"]["status"] == (
+        "succeeded"
+    )
+    record = current()
+    assert record["verification_status"] == "ready"
+    assert record["revision"] == edited["revision"] + 1
+    with control() as session:
+        stored = session.get(WorkspaceLLMConnection, UUID(record["id"]))
+        assert stored.pending_credential is None
+        assert connections.vault.decrypt(
+            stored.active_credential,
+            binding=CredentialBinding(
+                "workspace", UUID(workspace_id), stored.id, stored.secret_revision
+            ),
+        ) == {"api_key": "good-second"}
+        actions = session.scalars(
+            select(AuditEvent.action).where(AuditEvent.target_id == stored.id)
+        ).all()
+    assert {"llm.connection.verified", "llm.connection.credential_rotated"} <= set(
+        actions
+    )
+
+    # Cancelled work is never sent; a worker that vanished mid-call leaves an
+    # unknown outcome instead of a second call.
+    calls.clear()
+    cancelled = verification(
+        owner.post(f"{item}/verify", json={"expected_revision": record["revision"]})
+    )
+    assert (
+        owner.post(f"{verifications}/{cancelled}/cancel").json()["data"]["status"]
+        == "cancelled"
+    )
+    run_worker()
+    assert calls == []
+    lost = verification(
+        owner.post(f"{item}/verify", json={"expected_revision": record["revision"]})
+    )
+    assert worker.claim(control, limit=10) == [(UUID(lost), ANY)]
+    with control.begin() as session:
+        session.get(LLMVerificationOperation, UUID(lost)).lease_expires_at = (
+            datetime.now(UTC) - timedelta(seconds=1)
+        )
+    worker.expire_stale(control)
+    assert owner.get(f"{verifications}/{lost}").json()["data"]["status"] == (
+        "outcome_unknown"
+    )
+    assert calls == []

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -12,19 +14,27 @@ from backend.llm.adapter_registry import (
     LLMAdapterEndpointRequiredError,
     LLMAdapterRegistry,
     LLMAdapterRegistryError,
+    normalize_base_url,
 )
 from backend.llm.credential_vault import (
     ConnectionScope,
     CredentialBinding,
     CredentialVault,
     CredentialVaultError,
+    EncryptedCredential,
+    FileCredentialVault,
 )
+from backend.llm.endpoint_profiles import EndpointProfile, parse_endpoint_profiles
 from backend.models.base import utc_now
 from backend.models.llm_connection import UserLLMConnection, WorkspaceLLMConnection
 from backend.models.user import User
 from backend.models.workspace import Workspace, WorkspaceMembership
 from backend.policy.rbac import normalize_role
-from backend.schemas.llm_connection import LLMConnectionCreate, LLMConnectionUpdate
+from backend.schemas.llm_connection import (
+    LLMConnectionCreate,
+    LLMConnectionUpdate,
+    LLMCredentialReplace,
+)
 from backend.services.audit_service import AuditService
 from backend.services.db_write_intent import (
     acquire_workspace_write_intent,
@@ -32,7 +42,11 @@ from backend.services.db_write_intent import (
 )
 from backend.spi.types import ActorContext
 
+if TYPE_CHECKING:
+    from backend.app.settings import Settings
+
 StoredConnection = UserLLMConnection | WorkspaceLLMConnection
+VerificationTarget = Literal["active", "candidate"]
 
 
 class LLMConnectionError(RuntimeError):
@@ -43,19 +57,62 @@ class LLMConnectionError(RuntimeError):
 
 
 class LLMConnectionService:
-    def __init__(self, *, registry: LLMAdapterRegistry, vault: CredentialVault) -> None:
+    def __init__(
+        self,
+        *,
+        registry: LLMAdapterRegistry,
+        vault: CredentialVault,
+        endpoint_profiles: tuple[EndpointProfile, ...] = (),
+    ) -> None:
         self._registry = registry
         self._vault = vault
+        self._endpoint_profiles = endpoint_profiles
         self._audit = AuditService()
 
-    def authorize_workspace_write(
+    def catalog(self) -> list[dict]:
+        """Installed adapters with the endpoints a connection may use."""
+        return [
+            {
+                "adapter_id": descriptor.adapter_id,
+                "adapter_version": descriptor.adapter_version,
+                "display_name": dict(descriptor.display_name),
+                "config_schema": dict(descriptor.config_schema),
+                "credential_schema": dict(descriptor.credential_schema),
+                "options": sorted(descriptor.options),
+                "endpoints": [
+                    {
+                        "id": endpoint.get("id"),
+                        "label": self._endpoint_label(endpoint),
+                        "base_url": endpoint["base_url"],
+                    }
+                    for endpoint in self._allowed_endpoints(descriptor)
+                ],
+            }
+            for descriptor in self._registry.descriptors()
+        ]
+
+    def endpoint_allowed(self, adapter_id: str, endpoint: dict) -> bool:
+        """Whether a stored endpoint is still one the adapter may use."""
+        try:
+            descriptor = self._registry.descriptor(adapter_id)
+        except LLMAdapterRegistryError:
+            return False
+        return endpoint in self._allowed_endpoints(descriptor)
+
+    @property
+    def vault(self) -> CredentialVault:
+        return self._vault
+
+    def authorize_write(
         self,
         session: Session,
         *,
+        scope: ConnectionScope,
         owner_id: UUID,
         actor: ActorContext,
     ) -> None:
-        _lock_owner(session, "workspace", owner_id, actor)
+        """Browser session of the owner (or a Workspace owner), on control."""
+        _lock_owner(session, scope, owner_id, actor)
 
     def list(
         self, session: Session, *, scope: ConnectionScope, owner_id: UUID
@@ -98,8 +155,13 @@ class LLMConnectionService:
         profiles = [
             profile.model_dump(mode="json") for profile in request.model_profiles
         ]
-        endpoint = self._validate(
-            descriptor.adapter_id, request.provider_options, profiles, credential
+        endpoint = self._endpoint(descriptor, request.endpoint_profile_id)
+        self._validate(
+            descriptor.adapter_id,
+            request.provider_options,
+            profiles,
+            credential,
+            base_url=endpoint["base_url"],
         )
         connection = (
             UserLLMConnection(user_id=owner_id)
@@ -112,21 +174,12 @@ class LLMConnectionService:
         connection.adapter_implementation_version = descriptor.adapter_version
         connection.config_schema_version = descriptor.config_schema_version
         connection.api_profile = descriptor.adapter_id
-        connection.endpoint_profile = {"kind": "adapter_default", "base_url": endpoint}
+        connection.endpoint_profile = endpoint
         connection.provider_options = request.provider_options
         connection.model_profiles = profiles
         if credential:
             binding = CredentialBinding(scope, owner_id, connection.id, 1)
-            try:
-                connection.active_credential = self._vault.encrypt(
-                    credential, binding=binding
-                )
-            except CredentialVaultError:
-                raise LLMConnectionError(
-                    "llm_vault_unavailable",
-                    "LLM credential storage is unavailable.",
-                    503,
-                ) from None
+            connection.active_credential = self._encrypt(credential, binding)
             connection.secret_revision = binding.secret_revision
             connection.credential_updated_at = utc_now()
         session.add(connection)
@@ -175,19 +228,163 @@ class LLMConnectionService:
                     for profile in request.model_profiles
                 ]
             )
-            endpoint = self._validate(connection.adapter_id, config, profiles, None)
-            connection.endpoint_profile = {
-                "kind": "adapter_default",
-                "base_url": endpoint,
-            }
+            endpoint = connection.endpoint_profile
+            if endpoint.get("kind") == "adapter_default":
+                # The built-in endpoint follows the installed adapter version.
+                endpoint = self._endpoint(descriptor, None)
+            self._validate(
+                connection.adapter_id,
+                config,
+                profiles,
+                None,
+                base_url=endpoint["base_url"],
+            )
+            connection.endpoint_profile = endpoint
             connection.adapter_implementation_version = descriptor.adapter_version
             connection.provider_options = config
             connection.model_profiles = profiles
             connection.verification_status = "unverified"
             connection.verified_at = None
+        if request.status is not None:
+            # Only a verified configuration can be switched on.
+            if (
+                request.status == "enabled"
+                and connection.verification_status != "ready"
+            ):
+                raise LLMConnectionError(
+                    "connection_not_verified",
+                    "Verify the LLM connection before enabling it.",
+                    409,
+                )
+            connection.status = request.status
         connection.revision += 1
         self._emit(session, scope, owner_id, actor, connection, "updated")
         return _view(connection, has_credential=has_credential)
+
+    def active_target(
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        connection_id: UUID,
+        expected_revision: int,
+    ) -> str:
+        """The configuration hash a verification of the stored setup checks."""
+        connection, _ = _get_owned(session, scope, owner_id, connection_id)
+        _require_revision(connection, expected_revision)
+        return verification_hash(connection, "active")
+
+    def stage_candidate(
+        self,
+        session: Session,
+        *,
+        scope: ConnectionScope,
+        owner_id: UUID,
+        actor: ActorContext,
+        connection_id: UUID,
+        request: LLMCredentialReplace,
+    ) -> str:
+        """Store a replacement credential (and endpoint) beside the active one.
+
+        The candidate is used only by its verification: success swaps it in,
+        failure discards it. Returns the hash that verification checks.
+        """
+        if scope == "user":
+            _lock_owner(session, scope, owner_id, actor)
+        else:
+            acquire_workspace_write_intent(session)
+        connection, _ = _get_owned(session, scope, owner_id, connection_id, lock=True)
+        _require_revision(connection, request.expected_revision)
+        descriptor = self._descriptor(connection.adapter_id)
+        if descriptor.config_schema_version != connection.config_schema_version:
+            raise LLMConnectionError(
+                "adapter_version_unavailable",
+                "The connection's adapter version is unavailable.",
+                409,
+            )
+        endpoint = (
+            self._endpoint(descriptor, request.endpoint_profile_id)
+            if "endpoint_profile_id" in request.model_fields_set
+            else connection.endpoint_profile
+        )
+        credential = {
+            name: value.get_secret_value() for name, value in request.credential.items()
+        }
+        self._validate(
+            connection.adapter_id,
+            connection.provider_options,
+            connection.model_profiles,
+            credential,
+            base_url=endpoint["base_url"],
+        )
+        binding = CredentialBinding(
+            scope,
+            owner_id,
+            connection.id,
+            connection.secret_revision + 1,
+            purpose="pending",
+        )
+        connection.pending_credential = {
+            "envelope": self._encrypt(credential, binding),
+            "endpoint_profile": endpoint,
+        }
+        return verification_hash(connection, "candidate")
+
+    def _encrypt(
+        self, credential: dict[str, str], binding: CredentialBinding
+    ) -> EncryptedCredential:
+        try:
+            return self._vault.encrypt(credential, binding=binding)
+        except CredentialVaultError:
+            raise LLMConnectionError(
+                "llm_vault_unavailable",
+                "LLM credential storage is unavailable.",
+                503,
+            ) from None
+
+    def _allowed_endpoints(self, descriptor) -> list[dict]:
+        endpoints: list[dict] = []
+        if descriptor.default_base_url is not None:
+            endpoints.append(
+                {
+                    "kind": "adapter_default",
+                    "base_url": normalize_base_url(descriptor.default_base_url),
+                }
+            )
+        endpoints.extend(
+            {"kind": "operator", "id": profile.id, "base_url": profile.base_url}
+            for profile in self._endpoint_profiles
+            if profile.adapter_id == descriptor.adapter_id
+        )
+        return endpoints
+
+    def _endpoint_label(self, endpoint: dict) -> str | None:
+        return next(
+            (
+                profile.label
+                for profile in self._endpoint_profiles
+                if profile.id == endpoint.get("id")
+            ),
+            None,
+        )
+
+    def _endpoint(self, descriptor, profile_id: str | None) -> dict:
+        wanted = "adapter_default" if profile_id is None else "operator"
+        for endpoint in self._allowed_endpoints(descriptor):
+            if endpoint["kind"] == wanted and endpoint.get("id") == profile_id:
+                return endpoint
+        if profile_id is None:
+            raise LLMConnectionError(
+                "adapter_endpoint_required",
+                "The adapter requires an endpoint profile.",
+                422,
+            )
+        raise LLMConnectionError(
+            "endpoint_profile_unavailable",
+            "The endpoint profile is not available for this adapter.",
+            422,
+        )
 
     def delete(
         self,
@@ -228,16 +425,19 @@ class LLMConnectionService:
         config: dict,
         profiles: list[dict],
         credential: dict | None,
-    ) -> str:
+        *,
+        base_url: str,
+    ) -> None:
         try:
             json.dumps(config, allow_nan=False)
-            return self._registry.validate_registration(
+            self._registry.validate_registration(
                 adapter_id,
                 config=config,
                 credential=credential,
                 model_options={
                     option for profile in profiles for option in profile["options"]
                 },
+                base_url=base_url,
             )
         except LLMAdapterEndpointRequiredError:
             raise LLMConnectionError(
@@ -271,6 +471,19 @@ class LLMConnectionService:
             target_id=connection.id,
             payload={"revision": connection.revision, "status": connection.status},
         )
+
+
+def build_llm_connection_service(
+    settings: Settings, registry: LLMAdapterRegistry
+) -> LLMConnectionService:
+    return LLMConnectionService(
+        registry=registry,
+        vault=FileCredentialVault(
+            keyring_file=settings.llm_credential_keyring_file,
+            solo_local=settings.app_mode == "solo_local",
+        ),
+        endpoint_profiles=parse_endpoint_profiles(settings.llm_endpoint_profiles_json),
+    )
 
 
 def _connection_model(scope: ConnectionScope) -> type[StoredConnection]:
@@ -361,6 +574,34 @@ def _lock_owner(
             )
 
 
+def verification_hash(connection: StoredConnection, target: VerificationTarget) -> str:
+    """Name what a verification checks: configuration, endpoint and secret.
+
+    A result is applied only while this is unchanged, so an edit or a newer
+    key made during the call is never marked as verified. The name is not
+    part of it.
+    """
+    if target == "active":
+        endpoint = connection.endpoint_profile
+        secret: object = connection.secret_revision
+    else:
+        pending = connection.pending_credential or {}
+        endpoint = pending.get("endpoint_profile")
+        secret = (pending.get("envelope") or {}).get("nonce")
+    state = {
+        "target": target,
+        "adapter_id": connection.adapter_id,
+        "adapter_implementation_version": connection.adapter_implementation_version,
+        "config_schema_version": connection.config_schema_version,
+        "provider_options": connection.provider_options,
+        "model_profiles": connection.model_profiles,
+        "endpoint_profile": endpoint,
+        "secret": secret,
+    }
+    encoded = json.dumps(state, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def _view(connection: StoredConnection, *, has_credential: bool) -> dict:
     # Keep the vault envelope, endpoint, and internal revision out of both
     # account and Workspace responses.
@@ -371,6 +612,7 @@ def _view(connection: StoredConnection, *, has_credential: bool) -> dict:
         "adapter_implementation_version": connection.adapter_implementation_version,
         "config_schema_version": connection.config_schema_version,
         "api_profile": connection.api_profile,
+        "endpoint_profile_id": connection.endpoint_profile.get("id"),
         "provider_options": connection.provider_options,
         "model_profiles": connection.model_profiles,
         "status": connection.status,

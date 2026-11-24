@@ -261,6 +261,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
     llm_credential_keyring_file: str | None = None
+    # Operator-approved LLM endpoints: a JSON list of
+    # {"id", "adapter_id", "base_url", "label"}. Connections can use an
+    # adapter's built-in endpoint or one of these; users never type a URL.
+    llm_endpoint_profiles_json: str = "[]"
     # Lease after which a 'running' job is considered abandoned by its worker
     # and reclaimed (requeued or terminally failed) by the worker loop.
     worker_lease_timeout_seconds: int = 600
@@ -400,6 +404,13 @@ class Settings(BaseSettings):
                 "External Library converters require "
                 "DTXWIKI_LIBRARY_CONVERTER_OS_SANDBOXED=true"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_llm_endpoint_profiles(self):
+        from backend.llm.endpoint_profiles import parse_endpoint_profiles
+
+        parse_endpoint_profiles(self.llm_endpoint_profiles_json)
         return self
 
     @field_validator("update_channel", mode="before")

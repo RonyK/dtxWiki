@@ -1,0 +1,822 @@
+import { Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { ApiError } from "../../shared/api/client";
+import {
+  cancelLlmVerification,
+  createLlmConnection,
+  deleteLlmConnection,
+  listLlmAdapters,
+  listLlmConnections,
+  replaceLlmCredential,
+  updateLlmConnection,
+  verificationInProgress,
+  verifyLlmConnection,
+  type LlmAdapter,
+  type LlmConnection,
+  type LlmConnectionScope,
+  type LlmModelProfile,
+  type LlmVerification,
+} from "../../shared/api/llmConnections";
+import { ConfirmDialog } from "../../shared/components/ConfirmDialog";
+import { Dialog } from "../../shared/components/Dialog";
+import { StatusBanner } from "../../shared/components/StatusBanner";
+import { StatusPill } from "../../shared/components/StatusPill";
+import { formatVersionTimestamp } from "../../shared/lib/datetime";
+import { SettingsEmptyState, SettingsLoadingRow } from "./SettingsPaneParts";
+
+const POLL_MS = 2000;
+
+type SchemaProperty = {
+  type?: string;
+  title?: string;
+  description?: string;
+  enum?: unknown[];
+};
+
+type ObjectSchema = {
+  properties?: Record<string, SchemaProperty>;
+  required?: string[];
+};
+
+type ModelDraft = { key: string; profile: LlmModelProfile };
+
+type FormDraft = {
+  name: string;
+  adapterId: string;
+  endpointId: string | null;
+  config: Record<string, string | boolean>;
+  credential: Record<string, string>;
+  models: ModelDraft[];
+};
+
+type EditorState =
+  | { mode: "create" }
+  | { mode: "edit"; connection: LlmConnection };
+
+function newKey() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function schemaOf(value: unknown): ObjectSchema {
+  return (value ?? {}) as ObjectSchema;
+}
+
+function adapterLabel(adapter: LlmAdapter | undefined, language: string, fallback: string) {
+  if (!adapter) return fallback;
+  const names = adapter.display_name;
+  return names[language.split("-")[0]] ?? names.en ?? adapter.adapter_id;
+}
+
+function draftFor(adapters: LlmAdapter[], editing: LlmConnection | null): FormDraft {
+  if (editing) {
+    return {
+      name: editing.name,
+      adapterId: editing.adapter_id,
+      endpointId: editing.endpoint_profile_id ?? null,
+      config: Object.fromEntries(
+        Object.entries(editing.provider_options).map(([key, value]) => [
+          key,
+          typeof value === "boolean" ? value : String(value ?? ""),
+        ]),
+      ),
+      credential: {},
+      models: editing.model_profiles.map((profile) => ({ key: newKey(), profile })),
+    };
+  }
+  const adapter = adapters.find((item) => item.endpoints.length > 0);
+  return {
+    name: "",
+    adapterId: adapter?.adapter_id ?? "",
+    endpointId: adapter?.endpoints[0]?.id ?? null,
+    config: {},
+    credential: {},
+    models: [{ key: newKey(), profile: { id: newKey(), model_id: "" } }],
+  };
+}
+
+function configPayload(adapter: LlmAdapter | undefined, config: FormDraft["config"]) {
+  const properties = schemaOf(adapter?.config_schema).properties ?? {};
+  const payload: Record<string, unknown> = {};
+  for (const [key, property] of Object.entries(properties)) {
+    const value = config[key];
+    if (value === undefined || value === "") continue;
+    if (property.type === "integer" || property.type === "number") {
+      payload[key] = Number(value);
+    } else {
+      payload[key] = value;
+    }
+  }
+  return payload;
+}
+
+/** One shape for drafts and server records, so only real edits compare unequal. */
+function normalizedProfiles(profiles: LlmModelProfile[]): LlmModelProfile[] {
+  return profiles.map((profile) => ({
+    id: profile.id,
+    model_id: profile.model_id.trim(),
+    display_name: profile.display_name?.trim() || null,
+    context_window: profile.context_window ?? null,
+    max_output_tokens: profile.max_output_tokens ?? null,
+    options: profile.options ?? [],
+  }));
+}
+
+function profilesPayload(models: ModelDraft[]): LlmModelProfile[] {
+  return normalizedProfiles(models.map(({ profile }) => profile));
+}
+
+export function LlmConnectionsSection({
+  labelledBy,
+  scope,
+}: {
+  labelledBy: string;
+  scope: LlmConnectionScope;
+}) {
+  const { t, i18n } = useTranslation("settings");
+  const dialogId = useId();
+  const hintId = useId();
+  const [adapters, setAdapters] = useState<LlmAdapter[] | null>(null);
+  const [connections, setConnections] = useState<LlmConnection[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [deleting, setDeleting] = useState<LlmConnection | null>(null);
+  const scopeKey = scope.kind === "user" ? "user" : `workspace:${scope.workspaceId}`;
+  const generation = useRef(0);
+
+  const reload = useCallback(async () => {
+    const current = generation.current;
+    try {
+      const [nextAdapters, nextConnections] = await Promise.all([
+        listLlmAdapters(),
+        listLlmConnections(scope),
+      ]);
+      if (generation.current !== current) return;
+      setAdapters(nextAdapters);
+      setConnections(nextConnections);
+    } catch {
+      if (generation.current !== current) return;
+      setError(t("llm.errors.load"));
+    }
+    // The scope object is rebuilt on every render; its key identifies it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey, t]);
+
+  useEffect(() => {
+    generation.current += 1;
+    setAdapters(null);
+    setConnections(null);
+    setError(null);
+    void reload();
+    return () => {
+      generation.current += 1;
+    };
+  }, [reload]);
+
+  // A verification finishes on the server; follow it while one is running.
+  const anyRunning = connections?.some((item) => verificationInProgress(item.verification));
+  useEffect(() => {
+    if (!anyRunning) return;
+    const timer = window.setTimeout(() => void reload(), POLL_MS);
+    return () => window.clearTimeout(timer);
+  }, [anyRunning, connections, reload]);
+
+  const adapterById = useMemo(
+    () => new Map((adapters ?? []).map((adapter) => [adapter.adapter_id, adapter])),
+    [adapters],
+  );
+
+  async function act(connection: LlmConnection, action: () => Promise<unknown>) {
+    setBusyId(connection.id);
+    setError(null);
+    try {
+      await action();
+    } catch (caught) {
+      setError(actionError(caught));
+    } finally {
+      setBusyId(null);
+      await reload();
+    }
+  }
+
+  function actionError(caught: unknown) {
+    if (caught instanceof ApiError) {
+      const code = caught.body.error_code;
+      return t(`llm.errors.${code}`, {
+        defaultValue: t("llm.errors.action"),
+      });
+    }
+    return t("llm.errors.action");
+  }
+
+  const workspaceScope = scope.kind === "workspace";
+
+  return (
+    <section aria-labelledby={labelledBy} className="settings-pane llm-connections">
+      <div className="llm-connections-toolbar">
+        <p className="field-hint" id={hintId}>
+          {t("llm.verifyHint")}
+        </p>
+        <button
+          className="icon-button primary"
+          type="button"
+          disabled={!adapters}
+          onClick={() => setEditor({ mode: "create" })}
+        >
+          <Plus aria-hidden="true" size={16} />
+          {t("llm.add")}
+        </button>
+      </div>
+      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+      {connections === null ? (
+        error ? null : <SettingsLoadingRow>{t("llm.loading")}</SettingsLoadingRow>
+      ) : connections.length === 0 ? (
+        <SettingsEmptyState
+          title={t("llm.emptyTitle")}
+          description={workspaceScope ? t("llm.emptyWorkspace") : t("llm.emptyPersonal")}
+        />
+      ) : (
+        <ul className="llm-connection-list">
+          {connections.map((connection) => (
+            <ConnectionCard
+              key={connection.id}
+              adapter={adapterById.get(connection.adapter_id)}
+              busy={busyId === connection.id}
+              connection={connection}
+              hintId={hintId}
+              language={i18n.language}
+              onCancelVerification={(verification) =>
+                void act(connection, () => cancelLlmVerification(scope, verification.id))
+              }
+              onDelete={() => setDeleting(connection)}
+              onEdit={() => setEditor({ mode: "edit", connection })}
+              onToggle={() =>
+                void act(connection, () =>
+                  updateLlmConnection(scope, connection.id, {
+                    expected_revision: connection.revision,
+                    status: connection.status === "enabled" ? "disabled" : "enabled",
+                  }),
+                )
+              }
+              onVerify={() =>
+                void act(connection, () =>
+                  verifyLlmConnection(scope, connection.id, connection.revision),
+                )
+              }
+            />
+          ))}
+        </ul>
+      )}
+      {editor && adapters ? (
+        <ConnectionEditor
+          adapters={adapters}
+          editing={editor.mode === "edit" ? editor.connection : null}
+          language={i18n.language}
+          onClose={() => setEditor(null)}
+          onSaved={() => {
+            setEditor(null);
+            void reload();
+          }}
+          onReload={reload}
+          scope={scope}
+        />
+      ) : null}
+      {deleting ? (
+        <ConfirmDialog
+          busy={busyId === deleting.id}
+          confirmLabel={t("shell:actions.delete")}
+          labelledBy={`${dialogId}-delete`}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => {
+            const target = deleting;
+            void act(target, () => deleteLlmConnection(scope, target.id, target.revision)).then(
+              () => setDeleting(null),
+            );
+          }}
+          title={t("llm.deleteTitle", { name: deleting.name })}
+          tone="danger"
+        >
+          <p>{t("llm.deleteBody")}</p>
+        </ConfirmDialog>
+      ) : null}
+    </section>
+  );
+}
+
+function ConnectionCard({
+  adapter,
+  busy,
+  connection,
+  hintId,
+  language,
+  onCancelVerification,
+  onDelete,
+  onEdit,
+  onToggle,
+  onVerify,
+}: {
+  adapter: LlmAdapter | undefined;
+  busy: boolean;
+  connection: LlmConnection;
+  hintId: string;
+  language: string;
+  onCancelVerification: (verification: LlmVerification) => void;
+  onDelete: () => void;
+  onEdit: () => void;
+  onToggle: () => void;
+  onVerify: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const verification = connection.verification ?? null;
+  const running = verificationInProgress(verification);
+  const endpoint = adapter?.endpoints.find(
+    (item) => (item.id ?? null) === (connection.endpoint_profile_id ?? null),
+  );
+  const enabled = connection.status === "enabled";
+  const ready = connection.verification_status === "ready";
+  return (
+    <li className="llm-connection-card">
+      <div className="llm-connection-head">
+        <strong className="llm-connection-name">{connection.name}</strong>
+        <span className="llm-connection-pills">
+          <StatusPill
+            compact
+            status={enabled ? "enabled" : "disabled"}
+            tone={enabled ? "ok" : "muted"}
+            label={enabled ? t("llm.status.enabled") : t("llm.status.disabled")}
+          />
+          <StatusPill
+            compact
+            status={running ? "running" : connection.verification_status}
+            tone={running ? "info" : ready ? "ok" : connection.verification_status === "failed" ? "danger" : "warn"}
+            label={
+              running
+                ? verification?.target === "candidate"
+                  ? t("llm.verification.candidateRunning")
+                  : t("llm.verification.running")
+                : t(`llm.verification.${connection.verification_status}`)
+            }
+          />
+        </span>
+      </div>
+      <dl className="llm-connection-facts">
+        <div>
+          <dt>{t("llm.fields.provider")}</dt>
+          <dd>{adapterLabel(adapter, language, connection.adapter_id)}</dd>
+        </div>
+        <div>
+          <dt>{t("llm.fields.endpoint")}</dt>
+          <dd>
+            {connection.endpoint_profile_id
+              ? (endpoint?.label ?? connection.endpoint_profile_id)
+              : t("llm.endpointDefault")}
+            {endpoint ? <code className="llm-connection-url">{endpoint.base_url}</code> : null}
+          </dd>
+        </div>
+        <div>
+          <dt>{t("llm.fields.models")}</dt>
+          <dd>
+            {connection.model_profiles
+              .map((profile) => profile.display_name || profile.model_id)
+              .join(", ")}
+          </dd>
+        </div>
+        {connection.verified_at ? (
+          <div>
+            <dt>{t("llm.fields.verifiedAt")}</dt>
+            <dd>{formatVersionTimestamp(connection.verified_at)}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {verification && !running && verification.status !== "succeeded" ? (
+        <p className="field-hint llm-connection-result" role="status">
+          {verification.target === "candidate" ? `${t("llm.verification.candidateKept")} ` : ""}
+          {t(`llm.result.${verification.error_code ?? verification.status}`, {
+            defaultValue: t("llm.result.failed"),
+          })}
+        </p>
+      ) : null}
+      <div className="llm-connection-actions">
+        {running && verification ? (
+          <button
+            className="icon-button warning"
+            type="button"
+            disabled={busy}
+            onClick={() => onCancelVerification(verification)}
+          >
+            {t("llm.cancelVerification")}
+          </button>
+        ) : (
+          <button
+            aria-describedby={hintId}
+            className="icon-button"
+            type="button"
+            disabled={busy}
+            onClick={onVerify}
+          >
+            {t("llm.verify")}
+          </button>
+        )}
+        <button
+          className={enabled ? "icon-button warning" : "icon-button success"}
+          type="button"
+          disabled={busy || (!enabled && !ready)}
+          title={!enabled && !ready ? t("llm.enableNeedsVerification") : undefined}
+          onClick={onToggle}
+        >
+          {enabled ? t("llm.disable") : t("llm.enable")}
+        </button>
+        <button className="icon-button" type="button" disabled={busy || running} onClick={onEdit}>
+          {t("llm.edit")}
+        </button>
+        <button
+          aria-label={t("llm.deleteLabel", { name: connection.name })}
+          className="icon-button danger"
+          type="button"
+          disabled={busy}
+          onClick={onDelete}
+        >
+          {t("shell:actions.delete")}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function ConnectionEditor({
+  adapters,
+  editing,
+  language,
+  onClose,
+  onReload,
+  onSaved,
+  scope,
+}: {
+  adapters: LlmAdapter[];
+  editing: LlmConnection | null;
+  language: string;
+  onClose: () => void;
+  onReload: () => Promise<void>;
+  onSaved: () => void;
+  scope: LlmConnectionScope;
+}) {
+  const { t } = useTranslation("settings");
+  const id = useId();
+  const [draft, setDraft] = useState<FormDraft>(() => draftFor(adapters, editing));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+  const adapter = adapters.find((item) => item.adapter_id === draft.adapterId);
+  const credentialSchema = schemaOf(adapter?.credential_schema);
+  const configSchema = schemaOf(adapter?.config_schema);
+  const credentialFields = Object.entries(credentialSchema.properties ?? {});
+  const configFields = Object.entries(configSchema.properties ?? {});
+  const unsupportedConfig = configFields.some(
+    ([, property]) => !["string", "integer", "number", "boolean"].includes(property.type ?? ""),
+  );
+  const endpointChanged =
+    editing !== null && (draft.endpointId ?? null) !== (editing.endpoint_profile_id ?? null);
+  const credentialEntered = Object.values(draft.credential).some((value) => value !== "");
+  const required = new Set(credentialSchema.required ?? []);
+  const credentialComplete = [...required].every((name) => draft.credential[name]);
+  const replaceCredential = editing === null || credentialEntered || endpointChanged;
+  const valid =
+    draft.name.trim() !== "" &&
+    adapter !== undefined &&
+    adapter.endpoints.length > 0 &&
+    draft.models.length > 0 &&
+    draft.models.every(({ profile }) => profile.model_id.trim() !== "") &&
+    (!replaceCredential || credentialComplete);
+
+  function setModel(key: string, patch: Partial<LlmModelProfile>) {
+    setDraft((current) => ({
+      ...current,
+      models: current.models.map((item) =>
+        item.key === key ? { ...item, profile: { ...item.profile, ...patch } } : item,
+      ),
+    }));
+  }
+
+  async function save() {
+    if (!valid || busy || !adapter) return;
+    setBusy(true);
+    setError(null);
+    setConflict(false);
+    const credential = Object.fromEntries(
+      Object.entries(draft.credential).filter(([, value]) => value !== ""),
+    );
+    try {
+      if (editing === null) {
+        await createLlmConnection(scope, {
+          name: draft.name.trim(),
+          adapter_id: adapter.adapter_id,
+          endpoint_profile_id: draft.endpointId,
+          provider_options: configPayload(adapter, draft.config),
+          model_profiles: profilesPayload(draft.models),
+          credential,
+        });
+      } else {
+        let revision = editing.revision;
+        const models = profilesPayload(draft.models);
+        const config = configPayload(adapter, draft.config);
+        const changed =
+          draft.name.trim() !== editing.name ||
+          JSON.stringify(models) !==
+            JSON.stringify(normalizedProfiles(editing.model_profiles)) ||
+          JSON.stringify(config) !== JSON.stringify(editing.provider_options);
+        if (changed) {
+          const updated = await updateLlmConnection(scope, editing.id, {
+            expected_revision: revision,
+            name: draft.name.trim(),
+            model_profiles: models,
+            provider_options: config,
+          });
+          revision = updated.revision;
+        }
+        if (replaceCredential) {
+          await replaceLlmCredential(scope, editing.id, {
+            expected_revision: revision,
+            credential,
+            ...(endpointChanged ? { endpoint_profile_id: draft.endpointId } : {}),
+          });
+        }
+      }
+      onSaved();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.body.error_code === "connection_revision_conflict") {
+        setConflict(true);
+      } else if (caught instanceof ApiError) {
+        setError(
+          t(`llm.errors.${caught.body.error_code}`, { defaultValue: t("llm.errors.save") }),
+        );
+      } else {
+        setError(t("llm.errors.save"));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const titleId = `${id}-title`;
+  return (
+    <Dialog
+      className="llm-connection-dialog"
+      closeLabel={t("llm.close")}
+      dismissible={!busy}
+      labelledBy={titleId}
+      onClose={onClose}
+      title={editing ? t("llm.editTitle") : t("llm.addTitle")}
+      footer={
+        <div className="llm-connection-dialog-actions">
+          <button className="icon-button" type="button" disabled={busy} onClick={onClose}>
+            {t("shell:actions.cancel")}
+          </button>
+          <button
+            className="icon-button primary"
+            type="button"
+            disabled={!valid || busy}
+            onClick={() => void save()}
+          >
+            {t("shell:actions.save")}
+          </button>
+        </div>
+      }
+    >
+      <form
+        className="llm-connection-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save();
+        }}
+      >
+        {conflict ? (
+          <StatusBanner tone="warning">
+            {t("llm.conflict")}{" "}
+            <button
+              className="icon-button text-button"
+              type="button"
+              onClick={() => void onReload().then(onClose)}
+            >
+              {t("llm.reloadLatest")}
+            </button>
+          </StatusBanner>
+        ) : null}
+        {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+        <fieldset disabled={busy}>
+          <label className="field-stack">
+            {t("llm.fields.name")}
+            <input
+              autoComplete="off"
+              maxLength={256}
+              required
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+            />
+          </label>
+          <label className="field-stack">
+            {t("llm.fields.provider")}
+            <select
+              disabled={editing !== null}
+              value={draft.adapterId}
+              onChange={(event) => {
+                const next = adapters.find((item) => item.adapter_id === event.target.value);
+                setDraft({
+                  ...draft,
+                  adapterId: event.target.value,
+                  endpointId: next?.endpoints[0]?.id ?? null,
+                  config: {},
+                  credential: {},
+                });
+              }}
+            >
+              {adapters.map((item) => (
+                <option
+                  key={item.adapter_id}
+                  value={item.adapter_id}
+                  disabled={item.endpoints.length === 0}
+                >
+                  {adapterLabel(item, language, item.adapter_id)}
+                  {item.endpoints.length === 0 ? ` (${t("llm.needsOperatorEndpoint")})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          {adapter && adapter.endpoints.length > 0 ? (
+            <label className="field-stack">
+              {t("llm.fields.endpoint")}
+              <select
+                value={draft.endpointId ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, endpointId: event.target.value || null })
+                }
+              >
+                {adapter.endpoints.map((endpoint) => (
+                  <option key={endpoint.id ?? ""} value={endpoint.id ?? ""}>
+                    {endpoint.label ?? t("llm.endpointDefault")} · {endpoint.base_url}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">{t("llm.endpointHint")}</span>
+            </label>
+          ) : null}
+          {configFields.map(([name, property]) => (
+            <ConfigField
+              key={name}
+              name={name}
+              property={property}
+              required={(configSchema.required ?? []).includes(name)}
+              value={draft.config[name]}
+              onChange={(value) =>
+                setDraft({ ...draft, config: { ...draft.config, [name]: value } })
+              }
+            />
+          ))}
+          {unsupportedConfig ? (
+            <p className="field-hint">{t("llm.unsupportedConfig")}</p>
+          ) : null}
+          <fieldset className="llm-connection-credential">
+            <legend>{editing ? t("llm.replaceKey") : t("llm.fields.credential")}</legend>
+            {credentialFields.map(([name, property]) => (
+              <label className="field-stack" key={name}>
+                {t(`llm.credentialFields.${name}`, { defaultValue: property.title ?? name })}
+                <input
+                  autoComplete="off"
+                  spellCheck={false}
+                  type="password"
+                  value={draft.credential[name] ?? ""}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      credential: { ...draft.credential, [name]: event.target.value },
+                    })
+                  }
+                />
+              </label>
+            ))}
+            <p className="field-hint">
+              {editing ? t("llm.replaceKeyHint") : t("llm.keyHint")}
+            </p>
+            {endpointChanged && !credentialComplete ? (
+              <p className="field-hint" role="alert">
+                {t("llm.endpointNeedsKey")}
+              </p>
+            ) : null}
+          </fieldset>
+          <fieldset className="llm-connection-models">
+            <legend>{t("llm.fields.models")}</legend>
+            {draft.models.map(({ key, profile }) => (
+              <div className="llm-connection-model" key={key}>
+                <label className="field-stack">
+                  {t("llm.fields.modelId")}
+                  <input
+                    autoComplete="off"
+                    spellCheck={false}
+                    maxLength={256}
+                    required
+                    value={profile.model_id}
+                    onChange={(event) => setModel(key, { model_id: event.target.value })}
+                  />
+                </label>
+                <label className="field-stack">
+                  {t("llm.fields.displayName")}
+                  <input
+                    autoComplete="off"
+                    maxLength={256}
+                    value={profile.display_name ?? ""}
+                    onChange={(event) => setModel(key, { display_name: event.target.value })}
+                  />
+                </label>
+                <button
+                  aria-label={t("llm.removeModel", { model: profile.model_id || "-" })}
+                  className="icon-button text-button danger"
+                  type="button"
+                  disabled={draft.models.length === 1}
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      models: draft.models.filter((item) => item.key !== key),
+                    })
+                  }
+                >
+                  <Trash2 aria-hidden="true" size={16} />
+                </button>
+              </div>
+            ))}
+            <button
+              className="icon-button text-button"
+              type="button"
+              onClick={() =>
+                setDraft({
+                  ...draft,
+                  models: [
+                    ...draft.models,
+                    { key: newKey(), profile: { id: newKey(), model_id: "" } },
+                  ],
+                })
+              }
+            >
+              <Plus aria-hidden="true" size={16} />
+              {t("llm.addModel")}
+            </button>
+          </fieldset>
+          <p className="field-hint">{t("llm.transferNotice")}</p>
+        </fieldset>
+      </form>
+    </Dialog>
+  );
+}
+
+function ConfigField({
+  name,
+  onChange,
+  property,
+  required,
+  value,
+}: {
+  name: string;
+  onChange: (value: string | boolean) => void;
+  property: SchemaProperty;
+  required: boolean;
+  value: string | boolean | undefined;
+}) {
+  const label = property.title ?? name;
+  if (property.type === "boolean") {
+    return (
+      <label className="attachments-checkbox">
+        <input
+          type="checkbox"
+          checked={value === true}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        {label}
+      </label>
+    );
+  }
+  if (!["string", "integer", "number"].includes(property.type ?? "")) return null;
+  return (
+    <label className="field-stack">
+      {label}
+      {property.enum ? (
+        <select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>
+          {required ? null : <option value="" />}
+          {property.enum.map((option) => (
+            <option key={String(option)} value={String(option)}>
+              {String(option)}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          autoComplete="off"
+          required={required}
+          type={property.type === "string" ? "text" : "number"}
+          value={String(value ?? "")}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+      {property.description ? <span className="field-hint">{property.description}</span> : null}
+    </label>
+  );
+}
