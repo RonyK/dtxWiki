@@ -39,6 +39,7 @@ MANIFEST_NAME = "manifest.json"
 MANIFEST_SCHEMA = 3
 DEFAULT_KEEP = 5
 BACKUPS_DIRNAME = "backups"
+SERVICE_GROUP = "dtxwiki"  # Group in the bundled backend and worker units.
 
 DB_BACKUP_NAME = "dtxwiki.sqlite"
 JWT_BACKUP_NAME = "jwt.pem"
@@ -339,6 +340,7 @@ def restore_backup(
     *,
     data_dir: Path | None = None,
     env_file: Path | None = None,
+    service_group: str | int | None = None,
     echo: Callable[[str], None] = lambda _message: None,
 ) -> dict:
     """Restore a verified checkpoint from a backup dir (or manifest path).
@@ -352,16 +354,13 @@ def restore_backup(
     DB together with reinstalling the matching code version, so the downversion
     fail-safe is never tripped.
     """
+    from backend.cli.prod_setup import set_key_ownership
 
     backup_dir = resolve_backup_dir(backup)
     manifest = read_manifest(backup_dir)
     verify_backup_integrity(backup_dir)  # refuse to restore a corrupt snapshot
     check_restore_paths(backup_dir, env_file)
     base = (data_dir or default_data_dir()).expanduser().resolve()
-    # Restored keys get the group of the data directory as it is now, the
-    # service account `dtxwiki setup production` and `dtxwiki update` hand
-    # it to -- read before the restore can create anything under it.
-    service_gid = _directory_gid(base)
     env_backup = backup_dir / ENV_BACKUP_NAME
     restored_env = env_backup if env_file is not None and env_backup.exists() else None
     jwt_dest, keyring_dest = _secret_restore_paths(settings, base, restored_env)
@@ -387,19 +386,15 @@ def restore_backup(
     elif db_path is not None and db_backup.exists():
         _restore_sqlite(db_backup, db_path, repository_target=base / "repositories")
 
-    jwt_backup = backup_dir / JWT_BACKUP_NAME
-    if jwt_backup.exists() and jwt_dest is not None:
-        _restore_secret(jwt_backup, jwt_dest)
-        # Restore runs as root, so the key would land root:root 0600 and the
-        # systemd service could not read it -> crash loop. Re-grant
-        # root:<service group> 0640 as `dtxwiki setup` does. No-op when not
-        # root (dev/pipx/Windows keep their own perms).
-        _grant_service_read(jwt_dest, service_gid, echo)
-
-    keyring_backup = backup_dir / LLM_KEYRING_BACKUP_NAME
-    if keyring_backup.exists():
-        _restore_secret(keyring_backup, keyring_dest)
-        _grant_service_read(keyring_dest, service_gid, echo)
+    group = SERVICE_GROUP if service_group is None else service_group
+    for filename, dest in (
+        (JWT_BACKUP_NAME, jwt_dest),
+        (LLM_KEYRING_BACKUP_NAME, keyring_dest),
+    ):
+        source = backup_dir / filename
+        if dest is not None and source.exists():
+            _restore_secret(source, dest)
+            set_key_ownership(dest, group, echo=echo)
 
     secret_backup = backup_dir / SESSION_SECRET_BACKUP_NAME
     if secret_backup.exists():
@@ -418,27 +413,6 @@ def restore_backup(
         _restore_user_files(backup_dir, base, include_library=schema < 2)
 
     return manifest
-
-
-def _directory_gid(path: Path) -> int | None:
-    try:
-        return path.stat().st_gid
-    except OSError:
-        return None
-
-
-def _grant_service_read(
-    path: Path, service_gid: int | None, echo: Callable[[str], None]
-) -> None:
-    if service_gid is None:
-        echo(
-            f"    WARN: the data directory's group is unknown; make sure the "
-            f"service account can read {path}"
-        )
-        return
-    from backend.cli.prod_setup import set_key_ownership
-
-    set_key_ownership(path, service_gid, echo=echo)
 
 
 def list_backups(data_dir: Path | None = None) -> list[BackupInfo]:

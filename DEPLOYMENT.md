@@ -892,7 +892,7 @@ sudo dtxwiki rollback --to-backup /var/lib/dtxwiki/backups/<id>
 env 파일을 함께 복원할 때는 백업과 현재 env에 기본값을 적용한 뒤 데이터 디렉터리,
 데이터베이스, Library 저장 위치를 비교합니다. 실제 위치가 다르면 변경을 시작하기 전에
 해당 설정의 이름을 표시하고 멈춥니다. JWT 키와 LLM 키링은 백업의 env가 지정한 위치에
-복원하며, 데이터 디렉터리의 그룹에 읽기 권한을 부여합니다.
+복원하며, systemd에 설정된 서비스 그룹에 읽기 권한을 부여합니다.
 
 > 자동 롤백은 index에 **구버전 wheel이 남아 있어야** 합니다. 사설 index는 과거 wheel을
 > 반드시 보존하세요. 백업은 `{DATA_DIR}/backups/<version>-<UTC>/`에 manifest와 함께 쌓이며

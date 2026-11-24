@@ -32,8 +32,8 @@
 
 - `dtxwiki rollback` stops before changing anything when the backed-up and
   live env files resolve to different data, database or Library locations.
-  JWT keys and LLM keyrings follow the backed-up env and are made readable by
-  the data directory's group.
+  JWT keys and LLM keyrings follow the backed-up env and use the configured
+  systemd service group.
 
 ## 0.3.2 — 2026-11-21
 

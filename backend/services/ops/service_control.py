@@ -19,6 +19,7 @@ __all__ = [
     "has_systemd",
     "systemctl_argv",
     "run_systemctl",
+    "service_group",
 ]
 
 
@@ -52,3 +53,21 @@ def run_systemctl(
         text=True,
         check=check,
     )
+
+
+def service_group(unit: str) -> str | int:
+    """Return the effective group of a systemd service."""
+    result = run_systemctl("show", (unit,), extra_flags=("--property=User,Group",))
+    properties = dict(
+        line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+    )
+    group = properties["Group"]
+    if group:
+        return int(group) if group.isdecimal() else group
+
+    # With no Group=, systemd uses the configured user's primary group.
+    import pwd
+
+    user = properties["User"] or "root"
+    account = pwd.getpwuid(int(user)) if user.isdecimal() else pwd.getpwnam(user)
+    return account.pw_gid

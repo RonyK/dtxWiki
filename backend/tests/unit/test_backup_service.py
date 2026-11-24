@@ -322,10 +322,9 @@ def test_backup_then_restore_recovers_db_and_secret(tmp_path, monkeypatch):
     assert moved_jwt.read_text(encoding="utf-8") == "CURRENT JWT"
     assert moved_keyring.read_text(encoding="utf-8") == "CURRENT KEYRING"
     assert env_file.read_text(encoding="utf-8") == original_env
-    # Keys take the data directory's group: the account it was handed to.
     assert ownership_calls == [
-        (jwt, base.stat().st_gid),
-        (keyring, base.stat().st_gid),
+        (jwt, "dtxwiki"),
+        (keyring, "dtxwiki"),
     ]
     assert not repositories.exists()
 
@@ -378,7 +377,7 @@ def test_restore_reapplies_jwt_key_ownership(tmp_path, monkeypatch):
     )
     backup_service.restore_backup(backup_dir, settings, data_dir=base)
 
-    assert calls == [(jwt, base.stat().st_gid)]
+    assert calls == [(jwt, "dtxwiki")]
 
 
 def test_restore_clears_stale_wal_sidecars(tmp_path):
