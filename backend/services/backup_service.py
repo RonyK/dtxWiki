@@ -28,8 +28,10 @@ from pathlib import Path, PurePosixPath
 from uuid import UUID, uuid4
 
 from sqlalchemy.engine import make_url
+from sqlalchemy.util import asbool
 
 from backend.app.data_dir import data_dir as default_data_dir
+from backend.app.data_dir import default_sqlite_path
 from backend.app.settings import Settings
 from backend.services.ops import db_lock
 
@@ -37,10 +39,7 @@ MANIFEST_NAME = "manifest.json"
 MANIFEST_SCHEMA = 3
 DEFAULT_KEEP = 5
 BACKUPS_DIRNAME = "backups"
-
-# systemd service account group (matches install.sh + dtxwiki.service); the
-# restored JWT key must stay group-readable by it.
-SERVICE_GROUP = "dtxwiki"
+SERVICE_GROUP = "dtxwiki"  # Group in the bundled backend and worker units.
 
 DB_BACKUP_NAME = "dtxwiki.sqlite"
 JWT_BACKUP_NAME = "jwt.pem"
@@ -74,6 +73,46 @@ _DEV_SESSION_SECRET = "dtxwiki-development-session-secret"
 
 class BackupIntegrityError(RuntimeError):
     """A backed-up file is missing or its sha256 does not match the manifest."""
+
+
+class BackupPathsChangedError(BackupIntegrityError):
+    """The backed-up env keeps its data somewhere the live env does not."""
+
+
+def check_restore_paths(backup: Path, env_file: Path | None) -> None:
+    """Check storage restored to live destinations before replacing the env."""
+    if env_file is None:
+        return
+    env_backup = resolve_backup_dir(backup) / ENV_BACKUP_NAME
+    if not env_backup.exists():
+        return
+    from backend.cli.prod_setup import read_env_file
+
+    restored = _storage_locations(read_env_file(env_backup))
+    live = _storage_locations(read_env_file(env_file))
+    changed = [key for key in restored if restored[key] != live[key]]
+    if changed:
+        # A database URL can carry a password. Report setting names only.
+        raise BackupPathsChangedError(
+            f"storage paths changed since this backup ({', '.join(changed)})"
+        )
+
+
+def _storage_locations(env: dict[str, str]) -> dict[str, Path | str]:
+    # Keys and keyrings have separate destinations derived from the restored env.
+    base = default_data_dir(env=env).resolve()
+    database_url = env.get("DTXWIKI_DATABASE_URL")
+    return {
+        "DTXWIKI_DATA_DIR": base,
+        "DTXWIKI_DATABASE_URL": (
+            default_sqlite_path(base=base).resolve()
+            if database_url is None
+            else _database_location(database_url)
+        ),
+        "DTXWIKI_LIBRARY_BLOB_ROOT": _library_root(
+            env.get("DTXWIKI_LIBRARY_BLOB_ROOT"), base
+        ).resolve(),
+    }
 
 
 @dataclass(frozen=True)
@@ -130,6 +169,23 @@ def db_path_from_url(database_url: str) -> Path | None:
     return Path(database)
 
 
+def _database_location(database_url: str) -> Path | str:
+    # Normalize ordinary SQLite files. Other URLs may carry connection
+    # options that select a different database.
+    try:
+        path = db_path_from_url(database_url)
+        if path is None or str(path).startswith(("file:", "~")):
+            return database_url
+        url = make_url(database_url)
+        if url.drivername not in {"sqlite", "sqlite+pysqlite"} or asbool(
+            url.query.get("uri", False)
+        ):
+            return database_url
+    except (TypeError, ValueError):
+        return database_url
+    return Path(os.path.abspath(path)).resolve()
+
+
 def create_backup(
     settings: Settings,
     *,
@@ -180,7 +236,7 @@ def create_backup(
         library_checkpoint = _omitted_library_checkpoint()
         repository_checkpoint = _omitted_library_checkpoint()
         if includes_db:
-            library_root = _library_root(settings, base)
+            library_root = _library_root(settings.library_blob_root, base)
             _validate_library_root_location(library_root, backups_root)
             library_entries, library_checkpoint = _copy_library_checkpoint(
                 library_root, backup_dir
@@ -284,6 +340,8 @@ def restore_backup(
     *,
     data_dir: Path | None = None,
     env_file: Path | None = None,
+    service_group: str | int | None = None,
+    echo: Callable[[str], None] = lambda _message: None,
 ) -> dict:
     """Restore a verified checkpoint from a backup dir (or manifest path).
 
@@ -296,10 +354,12 @@ def restore_backup(
     DB together with reinstalling the matching code version, so the downversion
     fail-safe is never tripped.
     """
+    from backend.cli.prod_setup import set_key_ownership
 
     backup_dir = resolve_backup_dir(backup)
     manifest = read_manifest(backup_dir)
     verify_backup_integrity(backup_dir)  # refuse to restore a corrupt snapshot
+    check_restore_paths(backup_dir, env_file)
     base = (data_dir or default_data_dir()).expanduser().resolve()
     env_backup = backup_dir / ENV_BACKUP_NAME
     restored_env = env_backup if env_file is not None and env_backup.exists() else None
@@ -313,7 +373,7 @@ def restore_backup(
         and manifest.get("checkpoint_kind") == "full"
         and db_path is not None
     ):
-        library_root = _library_root(settings, base)
+        library_root = _library_root(settings.library_blob_root, base)
         _validate_library_root_location(library_root, base / BACKUPS_DIRNAME)
         _restore_full_checkpoint(
             backup_dir,
@@ -326,23 +386,15 @@ def restore_backup(
     elif db_path is not None and db_backup.exists():
         _restore_sqlite(db_backup, db_path, repository_target=base / "repositories")
 
-    jwt_backup = backup_dir / JWT_BACKUP_NAME
-    if jwt_backup.exists() and jwt_dest is not None:
-        _restore_secret(jwt_backup, jwt_dest)
-        # Restore runs as root, so the key would land root:root 0600 and the
-        # dtxwiki systemd service (User=dtxwiki) could not read it -> crash loop.
-        # Re-grant root:dtxwiki 0640 exactly as `dtxwiki setup` does. No-op when
-        # not root (dev/pipx/Windows keep their own perms).
-        from backend.cli.prod_setup import set_key_ownership
-
-        set_key_ownership(jwt_dest, SERVICE_GROUP)
-
-    keyring_backup = backup_dir / LLM_KEYRING_BACKUP_NAME
-    if keyring_backup.exists():
-        _restore_secret(keyring_backup, keyring_dest)
-        from backend.cli.prod_setup import set_key_ownership
-
-        set_key_ownership(keyring_dest, SERVICE_GROUP)
+    group = SERVICE_GROUP if service_group is None else service_group
+    for filename, dest in (
+        (JWT_BACKUP_NAME, jwt_dest),
+        (LLM_KEYRING_BACKUP_NAME, keyring_dest),
+    ):
+        source = backup_dir / filename
+        if dest is not None and source.exists():
+            _restore_secret(source, dest)
+            set_key_ownership(dest, group, echo=echo)
 
     secret_backup = backup_dir / SESSION_SECRET_BACKUP_NAME
     if secret_backup.exists():
@@ -1508,8 +1560,7 @@ def _commit_restore_swaps(swaps: list[_RestoreSwap]) -> None:
                 pass
 
 
-def _library_root(settings: Settings, base: Path) -> Path:
-    configured = settings.library_blob_root
+def _library_root(configured: str | None, base: Path) -> Path:
     return _absolute_path(Path(configured) if configured else base / "library")
 
 

@@ -521,10 +521,14 @@ def run_rollback(
             operation="rollback",
         )
 
-    # Fail clean BEFORE touching anything if the backup is corrupt.
+    # Fail clean BEFORE touching anything if the backup is corrupt or keeps
+    # its data under paths the live configuration no longer uses.
     try:
         backup_service.verify_backup_integrity(backup_dir)
-    except backup_service.BackupIntegrityError as exc:
+        backup_service.check_restore_paths(
+            backup_dir, _effective_env_file(install, env_file)
+        )
+    except _BACKUP_IO_ERRORS as exc:
         return _fail(2, str(exc), backup_dir, current, echo, exc, operation="rollback")
 
     # Pre-includes_db manifests fall back to the snapshot file's presence; a
@@ -588,6 +592,27 @@ def run_rollback(
     if not yes and confirm is not None and not confirm("Continue?"):
         return UpdateResult(False, 2, current, None, backup_dir, "aborted by operator")
 
+    service_group = None
+    if install.services and any(
+        (backup_dir / filename).exists()
+        for filename in (
+            backup_service.JWT_BACKUP_NAME,
+            backup_service.LLM_KEYRING_BACKUP_NAME,
+        )
+    ):
+        try:
+            service_group = svc.service_group(install.services[0])
+        except (OSError, subprocess.SubprocessError, KeyError, ValueError) as exc:
+            return _fail(
+                2,
+                "could not resolve the systemd service group",
+                backup_dir,
+                current,
+                echo,
+                exc,
+                operation="rollback",
+            )
+
     if install.services:
         try:
             svc.run_systemctl("stop", install.services)
@@ -640,6 +665,8 @@ def run_rollback(
                 settings,
                 data_dir=data_dir,
                 env_file=_effective_env_file(install, env_file),
+                service_group=service_group,
+                echo=echo,
             )
         except _BACKUP_IO_ERRORS as exc:
             if install.services:

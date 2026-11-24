@@ -25,6 +25,15 @@
   cut-off or unusable reply, `llm_answer_refused` for a declined or filtered
   reply, or `llm_provider_unavailable` when an administrator needs to investigate.
   Saved turns with `llm_composer_failed` display a generic fallback message.
+- Provider options refuse a credential field's name at any depth, not only at
+  the top level, also when a plugin schema allows nested options.
+
+### Backup and rollback
+
+- `dtxwiki rollback` stops before changing anything when the backed-up and
+  live env files resolve to different data, database or Library locations.
+  JWT keys and LLM keyrings follow the backed-up env and use the configured
+  systemd service group.
 
 ## 0.3.2 — 2026-11-21
 

@@ -336,8 +336,8 @@ def test_run_check_delegates(monkeypatch):
 
 def _rollback_settings(tmp_path):
     base = tmp_path / "data"
-    base.mkdir()
-    db = base / "dtxwiki.sqlite"
+    db = base / "data" / "dtxwiki.sqlite"
+    db.parent.mkdir(parents=True)
     sqlite3.connect(str(db)).close()
     jwt = tmp_path / "jwt.pem"
     jwt.write_text("key", encoding="utf-8")
@@ -351,22 +351,68 @@ def _rollback_settings(tmp_path):
 
 
 def test_run_rollback_reinstalls_old_then_restores(monkeypatch, tmp_path):
+    from backend.cli import prod_setup
+
     settings, base = _rollback_settings(tmp_path)
-    backup_dir = backup_service.create_backup(settings, version="0.1.0", data_dir=base)
+    keyring = base / backup_service.LLM_KEYRING_BACKUP_NAME
+    keyring.write_text("BACKED UP KEYRING", encoding="utf-8")
+    env_file = tmp_path / "dtxwiki.env"
+    jwt = Path(settings.oauth_jwt_private_key_path)
+    backed_up_env = (
+        f"DTXWIKI_DATA_DIR={base}\nDTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH={jwt}\n"
+    )
+    env_file.write_text(backed_up_env, encoding="utf-8")
+    backup_dir = backup_service.create_backup(
+        settings, version="0.1.0", data_dir=base, env_file=env_file
+    )
+    database_url = f"sqlite:///{base.as_posix()}/data/./dtxwiki.sqlite?timeout=15"
+    library_root = base / "library"
+    env_file.write_text(
+        f"DTXWIKI_DATA_DIR={base}/\n"
+        f"DTXWIKI_DATABASE_URL={database_url}\n"
+        f"DTXWIKI_LIBRARY_BLOB_ROOT={library_root}\n",
+        encoding="utf-8",
+    )
+    settings = settings.model_copy(
+        update={"database_url": database_url, "library_blob_root": str(library_root)}
+    )
     calls = []
     monkeypatch.setattr(us, "_run_argv", lambda argv, echo, **_kw: calls.append(argv))
+
+    service_actions = []
+
+    def systemctl(action, units, **_kw):
+        service_actions.append(action)
+        if action == "show":
+            assert units == ("dtxwiki",)
+            return subprocess.CompletedProcess(
+                [], 0, stdout="User=wiki-runtime\nGroup=wiki-keys\n"
+            )
+
+    monkeypatch.setattr(us.svc, "run_systemctl", systemctl)
+    monkeypatch.setattr(us.healthcheck, "poll_health_ready", lambda _url: True)
+    grants = []
+    monkeypatch.setattr(
+        prod_setup,
+        "set_key_ownership",
+        lambda path, group, **_kw: grants.append((path, group)),
+    )
 
     lines = []
     result = us.run_rollback(
         settings,
-        method="venv",
+        method="systemd",
         yes=True,
         data_dir=base,
+        env_file=str(env_file),
         echo=lambda *a: lines.append(" ".join(str(x) for x in a)),
     )
     assert result.ok
     assert result.to_version == "0.1.0"
     assert result.backup_dir == backup_dir
+    assert env_file.read_text(encoding="utf-8") == backed_up_env
+    assert service_actions == ["show", "stop", "start"]
+    assert grants == [(jwt, "wiki-keys"), (keyring, "wiki-keys")]
     # the OLD version is pinned + force-reinstalled (anti-brick: code down first)
     assert any("dtxwiki==0.1.0" in argv for argv in calls)
     assert any("--force-reinstall" in argv for argv in calls)
@@ -500,6 +546,35 @@ def test_run_rollback_integrity_failure_aborts_before_reinstall(monkeypatch, tmp
     assert not result.ok and result.exit_code == 2
     assert calls == []  # aborted before touching code or DB
 
+    # So does a backup whose env file keeps its data where the live env
+    # no longer does. Budget exception: restore_backup refuses the same
+    # backup, but only after the old code is reinstalled; this checks that
+    # rollback refuses before reinstalling it.
+    env_file = tmp_path / "dtxwiki.env"
+    env_file.write_text(f"DTXWIKI_DATA_DIR={base}\n", encoding="utf-8")
+    moved = backup_service.create_backup(
+        settings, version="0.1.0", data_dir=base, env_file=env_file
+    )
+    database_url = f"sqlite:///{(tmp_path / 'moved.sqlite').as_posix()}"
+    env_file.write_text(
+        f"DTXWIKI_DATA_DIR={base}\nDTXWIKI_DATABASE_URL={database_url}\n",
+        encoding="utf-8",
+    )
+    result = us.run_rollback(
+        settings.model_copy(update={"database_url": database_url}),
+        method="venv",
+        yes=True,
+        data_dir=base,
+        env_file=str(env_file),
+        to_backup=str(moved),
+        echo=lambda *a: None,
+    )
+    assert not result.ok and result.exit_code == 2
+    assert "storage paths changed" in result.message
+    assert "DTXWIKI_DATABASE_URL" in result.message
+    assert database_url not in result.message
+    assert calls == []
+
 
 # --- Group A: failure-handling hardening (#4/#5/#7/#16) -------------------
 
@@ -547,6 +622,7 @@ def test_run_rollback_restore_failure_is_exit3_leaves_services_stopped(
     backup_dir = backup_service.create_backup(settings, version="0.1.0", data_dir=base)
     sysctl = []
     monkeypatch.setattr(us, "_run_argv", lambda argv, echo, **_kw: None)
+    monkeypatch.setattr(us.svc, "service_group", lambda _unit: "dtxwiki")
     monkeypatch.setattr(
         us.svc, "run_systemctl", lambda action, services: sysctl.append(action)
     )
@@ -579,6 +655,7 @@ def test_run_rollback_restore_value_error_is_handled(monkeypatch, tmp_path):
     backup_dir = backup_service.create_backup(settings, version="0.1.0", data_dir=base)
     sysctl = []
     monkeypatch.setattr(us, "_run_argv", lambda argv, echo, **_kw: None)
+    monkeypatch.setattr(us.svc, "service_group", lambda _unit: "dtxwiki")
     monkeypatch.setattr(
         us.svc, "run_systemctl", lambda action, services: sysctl.append(action)
     )
