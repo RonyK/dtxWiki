@@ -110,9 +110,11 @@ class LLMAdapterRegistry:
         registration = self._registration(adapter_id)
         descriptor = registration.descriptor
         # Provider options are returned as metadata. Credential fields must
-        # enter storage only through the write-only vault input.
-        if _contains_write_only(descriptor.config_schema) or (
-            config.keys() & descriptor.credential_schema["properties"].keys()
+        # enter storage only through the write-only vault input, so no option,
+        # however deeply nested, may carry a credential field's name. Names
+        # are all this can see: a secret under another name is not caught.
+        if _contains_write_only(descriptor.config_schema) or _uses_names(
+            config, descriptor.credential_schema["properties"].keys()
         ):
             raise LLMAdapterRegistryError(
                 f"LLM adapter {adapter_id!r} cannot expose secret configuration fields"
@@ -469,6 +471,17 @@ def _uses_references(schema: object) -> bool:
         )
     if isinstance(schema, list):
         return any(_uses_references(item) for item in schema)
+    return False
+
+
+def _uses_names(value: object, names: Iterable[str]) -> bool:
+    names = frozenset(names)
+    if isinstance(value, Mapping):
+        return any(
+            key in names or _uses_names(item, names) for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_uses_names(item, names) for item in value)
     return False
 
 

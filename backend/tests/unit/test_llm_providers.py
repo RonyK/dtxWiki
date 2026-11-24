@@ -752,14 +752,30 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
             ]
         }
     )
-    with pytest.raises(LLMAdapterRegistryError, match="secret configuration") as unsafe:
-        unsafe_registry.validate_registration(
-            "vendor.unsafe_options",
-            config={"api_key": KEY},
-            credential=None,
-            model_options=[],
-        )
-    assert KEY not in str(unsafe.value)
+    # A credential field's name is refused at any depth of the options.
+    for config in (
+        {"api_key": KEY},
+        {"auth": {"api_key": KEY}},
+        {"auth": [{"scheme": "bearer"}, {"api_key": KEY}]},
+    ):
+        with pytest.raises(
+            LLMAdapterRegistryError, match="secret configuration"
+        ) as unsafe:
+            unsafe_registry.validate_registration(
+                "vendor.unsafe_options",
+                config=config,
+                credential=None,
+                model_options=[],
+                base_url="https://llm.example/v1",
+            )
+        assert KEY not in str(unsafe.value)
+    assert unsafe_registry.validate_registration(
+        "vendor.unsafe_options",
+        config={"auth": [{"scheme": "bearer"}]},
+        credential=None,
+        model_options=[],
+        base_url="https://llm.example/v1",
+    )
 
     class WrongSignature:
         def __init__(self, connection, transport):
