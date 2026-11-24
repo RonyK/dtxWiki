@@ -6,7 +6,9 @@ outcome is recorded before the response returns. No database transaction is
 held while a provider answers. Two rules:
 
 * An outcome is recorded only while the connection is still the revision
-  that was checked; an edit, a key change or a deletion in between wins.
+  that was checked. An edit or a key change in between wins with a revision
+  conflict, whether or not the check passed; a deletion makes the connection
+  unavailable.
 * A replacement credential is checked before it is stored. Only one that
   verifies replaces the active credential; a refused one is never saved.
 
@@ -187,6 +189,10 @@ class LLMVerificationService:
                     owner_id=owner_id,
                     connection_id=connection_id,
                 )
+                # Nothing was stored, but a client retrying from this answer
+                # must not adopt an edit it has not seen.
+                if view["revision"] != request.expected_revision:
+                    raise _changed()
         return view, result
 
     def _unavailable(self, connection, endpoint: dict) -> str | None:

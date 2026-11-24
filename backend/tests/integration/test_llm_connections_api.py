@@ -430,23 +430,29 @@ def test_verification_applies_only_to_the_setup_it_checked(
     assert refused["connection"] == record
     assert stored_key() == "good-first"
 
-    # An edit made while the new key is being checked wins: nothing is saved.
+    # An edit made while the new key is being checked wins: nothing is saved,
+    # and a refused key reports the conflict too, so a client retrying from
+    # that answer cannot adopt an edit it has not seen. Budget exception (two
+    # rows): an accepted key is stopped by the write's revision check, a
+    # refused key by the check on the answer -- separate code, and neither
+    # row can fail for the other's defect.
     def rename():
         with control.begin() as session:
             session.get(WorkspaceLLMConnection, UUID(record["id"])).revision += 1
 
     during_call.append(rename)
-    replace = {"expected_revision": 2, "credential": {"api_key": "good-second"}}
-    raced = owner.put(f"{item}/credential", json=replace)
-    assert raced.json()["error_code"] == "connection_revision_conflict"
-    assert stored_key() == "good-first"
+    for revision, key in ((2, "good-second"), (3, "bad")):
+        replace = {"expected_revision": revision, "credential": {"api_key": key}}
+        raced = owner.put(f"{item}/credential", json=replace)
+        assert raced.json()["error_code"] == "connection_revision_conflict"
+        assert stored_key() == "good-first"
     during_call.clear()
 
     # A verified key replaces the active one.
-    replace["expected_revision"] = 3
+    replace = {"expected_revision": 4, "credential": {"api_key": "good-second"}}
     swapped = owner.put(f"{item}/credential", json=replace).json()["data"]
     assert swapped["verification"]["status"] == "succeeded"
-    assert swapped["connection"]["revision"] == 4
+    assert swapped["connection"]["revision"] == 5
     assert swapped["connection"]["verification_status"] == "ready"
     assert stored_key() == "good-second"
     with control() as session:

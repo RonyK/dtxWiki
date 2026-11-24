@@ -13,7 +13,9 @@ beforeEach(() => {
 it("retries only the key replacement after the settings were saved", async () => {
   // The server echoes profiles with explicit nulls; once the rename is saved,
   // a retry must not look like a profile change (which would reset the
-  // verified setup) and must use the revision the rename returned.
+  // verified setup) and must use the revision the rename returned. Options
+  // the form does not show keep their stored JSON, and a key replacement
+  // always names the endpoint chosen in the form.
   const connection = {
     id: "c1",
     name: "Team",
@@ -22,7 +24,7 @@ it("retries only the key replacement after the settings were saved", async () =>
     config_schema_version: 1,
     api_profile: "builtin.anthropic.messages",
     endpoint_profile_id: null,
-    provider_options: {},
+    provider_options: { region: "eu", routing: { pool: "a" } },
     model_profiles: [
       {
         id: "m",
@@ -47,7 +49,11 @@ it("retries only the key replacement after the settings were saved", async () =>
     adapter_id: "builtin.anthropic.messages",
     adapter_version: "1.0.0",
     display_name: { en: "Anthropic Messages API" },
-    config_schema: { type: "object", properties: {} },
+    config_schema: {
+      type: "object",
+      properties: { region: { type: "string" } },
+      additionalProperties: true,
+    },
     credential_schema: {
       type: "object",
       properties: { api_key: { type: "string", writeOnly: true } },
@@ -63,9 +69,16 @@ it("retries only the key replacement after the settings were saved", async () =>
       const body = JSON.parse(String(init.body));
       writes.push([`${init.method} ${url.replace(/^.*\/api\/v1/, "")}`, body]);
       if (init.method === "PATCH") {
-        return json({ data: { ...connection, name: body.name, revision: 5 } });
+        return json({
+          data: {
+            ...connection,
+            name: body.name,
+            provider_options: body.provider_options,
+            revision: body.expected_revision + 1,
+          },
+        });
       }
-      if (writes.length === 2) {
+      if (writes.length < 4) {
         return json({ error_code: "internal_error", message: "boom" }, 500);
       }
       return json({
@@ -85,19 +98,42 @@ it("retries only the key replacement after the settings were saved", async () =>
   const dialog = screen.getByRole("dialog");
   await user.clear(within(dialog).getByLabelText("Name"));
   await user.type(within(dialog).getByLabelText("Name"), "Renamed");
+  const region = within(dialog).getByLabelText("region");
+  await user.clear(region);
+  await user.type(region, "us");
   await user.type(within(dialog).getByLabelText("API key"), "sk-new");
-  await user.click(within(dialog).getByRole("button", { name: "Save" }));
+  const save = () => user.click(within(dialog).getByRole("button", { name: "Save" }));
+  await save();
   await vi.waitFor(() => expect(writes).toHaveLength(2));
-  await user.click(within(dialog).getByRole("button", { name: "Save" }));
+  await save();
   await vi.waitFor(() => expect(writes).toHaveLength(3));
+  // Changing a saved option back to its old value is still an edit.
+  await user.clear(region);
+  await user.type(region, "eu");
+  await save();
+  await vi.waitFor(() => expect(writes).toHaveLength(5));
   const keyReplacement = (revision: number) => [
     "PUT /me/llm-connections/c1/credential",
-    { expected_revision: revision, credential: { api_key: "sk-new" } },
+    {
+      expected_revision: revision,
+      credential: { api_key: "sk-new" },
+      endpoint_profile_id: null,
+    },
+  ];
+  const edit = (revision: number, value: string) => [
+    "PATCH /me/llm-connections/c1",
+    expect.objectContaining({
+      expected_revision: revision,
+      name: "Renamed",
+      provider_options: { region: value, routing: { pool: "a" } },
+    }),
   ];
   expect(writes).toEqual([
-    ["PATCH /me/llm-connections/c1", expect.objectContaining({ expected_revision: 4, name: "Renamed" })],
+    edit(4, "us"),
     keyReplacement(5),
     keyReplacement(5),
+    edit(5, "eu"),
+    keyReplacement(6),
   ]);
 });
 

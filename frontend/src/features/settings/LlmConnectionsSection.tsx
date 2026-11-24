@@ -93,13 +93,26 @@ function draftFor(adapters: LlmAdapter[], editing: LlmConnection | null): FormDr
   };
 }
 
-function configPayload(adapter: LlmAdapter | undefined, config: FormDraft["config"]) {
+/**
+ * The stored options with only the fields edited in this form applied.
+ *
+ * The form shows a schema's simple fields only; anything else a plugin's
+ * schema allows (extra keys, objects, lists) keeps its stored JSON value.
+ */
+function configPayload(
+  adapter: LlmAdapter | undefined,
+  config: FormDraft["config"],
+  stored: Record<string, unknown>,
+  shown: FormDraft["config"],
+) {
   const properties = schemaOf(adapter?.config_schema).properties ?? {};
-  const payload: Record<string, unknown> = {};
+  const payload: Record<string, unknown> = { ...stored };
   for (const [key, property] of Object.entries(properties)) {
     const value = config[key];
-    if (value === undefined || value === "") continue;
-    if (property.type === "integer" || property.type === "number") {
+    if (value === shown[key]) continue;
+    if (value === undefined || value === "") {
+      delete payload[key];
+    } else if (property.type === "integer" || property.type === "number") {
       payload[key] = Number(value);
     } else {
       payload[key] = value;
@@ -497,6 +510,10 @@ function ConnectionEditor({
   const { t } = useTranslation("settings");
   const id = useId();
   const [draft, setDraft] = useState<FormDraft>(() => draftFor(adapters, editing));
+  // What the stored options looked like in this form (options only, never
+  // the key being typed); a saved edit moves it, so a later change back to
+  // an old value is still sent.
+  const [shownConfig, setShownConfig] = useState(() => draft.config);
   // The server's copy this dialog edits. A save that stores the settings
   // but fails to start the key replacement moves it, so a retry sends only
   // what is still missing, against the current revision.
@@ -549,14 +566,19 @@ function ConnectionEditor({
           name: draft.name.trim(),
           adapter_id: adapter.adapter_id,
           endpoint_profile_id: draft.endpointId,
-          provider_options: configPayload(adapter, draft.config),
+          provider_options: configPayload(adapter, draft.config, {}, {}),
           model_profiles: profilesPayload(draft.models),
           credential,
         });
       } else if (baseline !== null) {
         let revision = baseline.revision;
         const models = profilesPayload(draft.models);
-        const config = configPayload(adapter, draft.config);
+        const config = configPayload(
+          adapter,
+          draft.config,
+          baseline.provider_options,
+          shownConfig,
+        );
         const changed =
           draft.name.trim() !== baseline.name ||
           JSON.stringify(models) !==
@@ -570,15 +592,17 @@ function ConnectionEditor({
             provider_options: config,
           });
           setBaseline(updated);
+          setShownConfig(draft.config);
           revision = updated.revision;
         }
         if (replaceCredential) {
           const data = await replaceLlmCredential(scope, baseline.id, {
             expected_revision: revision,
             credential,
-            ...(endpointChanged ? { endpoint_profile_id: draft.endpointId } : {}),
+            // Always the endpoint chosen here: an operator may have moved the
+            // profile's address while keeping its id.
+            endpoint_profile_id: draft.endpointId,
           });
-          setBaseline(data.connection);
           if (data.verification.status !== "succeeded") {
             // The key was checked and refused, so nothing was stored.
             setError(`${t("llm.keyRejected")} ${resultMessage(t, data.verification)}`);
