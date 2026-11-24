@@ -26,6 +26,13 @@
   reply, or `llm_provider_unavailable` when an administrator needs to investigate.
   Saved turns with `llm_composer_failed` display a generic fallback message.
 
+### Backup and rollback
+
+- `dtxwiki rollback` stops before changing anything when the backed-up env
+  keeps its data, database, Library, JWT key or LLM keyring at other paths
+  than the live env. Restored keys are made readable by the data directory's
+  group instead of a fixed `dtxwiki` group.
+
 ## 0.3.2 — 2026-11-21
 
 ### Important changes

@@ -500,6 +500,29 @@ def test_run_rollback_integrity_failure_aborts_before_reinstall(monkeypatch, tmp
     assert not result.ok and result.exit_code == 2
     assert calls == []  # aborted before touching code or DB
 
+    # So does a backup whose env file keeps its data where the live env
+    # no longer does. Budget exception: restore_backup refuses the same
+    # backup, but only after the old code is reinstalled; this checks that
+    # rollback refuses before reinstalling it.
+    env_file = tmp_path / "dtxwiki.env"
+    env_file.write_text(f"DTXWIKI_DATA_DIR={base}\n", encoding="utf-8")
+    moved = backup_service.create_backup(
+        settings, version="0.1.0", data_dir=base, env_file=env_file
+    )
+    env_file.write_text(f"DTXWIKI_DATA_DIR={tmp_path / 'moved'}\n", encoding="utf-8")
+    result = us.run_rollback(
+        settings,
+        method="venv",
+        yes=True,
+        data_dir=base,
+        env_file=str(env_file),
+        to_backup=str(moved),
+        echo=lambda *a: None,
+    )
+    assert not result.ok and result.exit_code == 2
+    assert "storage paths changed" in result.message
+    assert calls == []
+
 
 # --- Group A: failure-handling hardening (#4/#5/#7/#16) -------------------
 

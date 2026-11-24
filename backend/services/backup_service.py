@@ -38,15 +38,20 @@ MANIFEST_SCHEMA = 3
 DEFAULT_KEEP = 5
 BACKUPS_DIRNAME = "backups"
 
-# systemd service account group (matches install.sh + dtxwiki.service); the
-# restored JWT key must stay group-readable by it.
-SERVICE_GROUP = "dtxwiki"
-
 DB_BACKUP_NAME = "dtxwiki.sqlite"
 JWT_BACKUP_NAME = "jwt.pem"
 SESSION_SECRET_BACKUP_NAME = "session_secret"
 LLM_KEYRING_BACKUP_NAME = "llm-credential-keyring.json"
 ENV_BACKUP_NAME = "dtxwiki.env"
+# Where the restored env file looks for its data. A restore puts files where
+# the live configuration keeps them, so these must be the same in both.
+STORAGE_PATH_KEYS = (
+    "DTXWIKI_DATA_DIR",
+    "DTXWIKI_DATABASE_URL",
+    "DTXWIKI_LIBRARY_BLOB_ROOT",
+    "DTXWIKI_OAUTH_JWT_PRIVATE_KEY_PATH",
+    "DTXWIKI_LLM_CREDENTIAL_KEYRING_FILE",
+)
 USER_FILES_DIRNAME = "files"
 LIBRARY_CHECKPOINT_DIRNAME = "library"
 LIBRARY_CHECKPOINT_PREFIX = f"{USER_FILES_DIRNAME}/{LIBRARY_CHECKPOINT_DIRNAME}"
@@ -74,6 +79,39 @@ _DEV_SESSION_SECRET = "dtxwiki-development-session-secret"
 
 class BackupIntegrityError(RuntimeError):
     """A backed-up file is missing or its sha256 does not match the manifest."""
+
+
+class BackupPathsChangedError(BackupIntegrityError):
+    """The backed-up env keeps its data somewhere the live env does not."""
+
+
+def check_restore_paths(backup: Path, env_file: Path | None) -> None:
+    """Refuse a restore whose env file moved its storage since the backup.
+
+    Restoring the env file brings back its paths, while the data is restored
+    where the live configuration keeps it. If the two differ, the restore
+    would report success and the restarted service would read other files.
+    The error names the settings, never their values: a database URL can
+    carry a password.
+    """
+    if env_file is None:
+        return
+    env_backup = resolve_backup_dir(backup) / ENV_BACKUP_NAME
+    if not env_backup.exists():
+        return
+    from backend.cli.prod_setup import read_env_file
+
+    restored = read_env_file(env_backup)
+    # A missing live env file has none of the settings: any path the
+    # backed-up env names differs from it.
+    live = read_env_file(Path(env_file))
+    changed = [key for key in STORAGE_PATH_KEYS if restored.get(key) != live.get(key)]
+    if changed:
+        raise BackupPathsChangedError(
+            "storage paths changed since this backup ("
+            + ", ".join(changed)
+            + "); set them back to the backed-up values before restoring"
+        )
 
 
 @dataclass(frozen=True)
@@ -284,6 +322,7 @@ def restore_backup(
     *,
     data_dir: Path | None = None,
     env_file: Path | None = None,
+    echo: Callable[[str], None] = lambda _message: None,
 ) -> dict:
     """Restore a verified checkpoint from a backup dir (or manifest path).
 
@@ -300,7 +339,12 @@ def restore_backup(
     backup_dir = resolve_backup_dir(backup)
     manifest = read_manifest(backup_dir)
     verify_backup_integrity(backup_dir)  # refuse to restore a corrupt snapshot
+    check_restore_paths(backup_dir, env_file)
     base = (data_dir or default_data_dir()).expanduser().resolve()
+    # Restored keys get the group of the data directory as it is now, the
+    # service account `dtxwiki setup production` and `dtxwiki update` hand
+    # it to -- read before the restore can create anything under it.
+    service_gid = _directory_gid(base)
     env_backup = backup_dir / ENV_BACKUP_NAME
     restored_env = env_backup if env_file is not None and env_backup.exists() else None
     jwt_dest, keyring_dest = _secret_restore_paths(settings, base, restored_env)
@@ -330,19 +374,15 @@ def restore_backup(
     if jwt_backup.exists() and jwt_dest is not None:
         _restore_secret(jwt_backup, jwt_dest)
         # Restore runs as root, so the key would land root:root 0600 and the
-        # dtxwiki systemd service (User=dtxwiki) could not read it -> crash loop.
-        # Re-grant root:dtxwiki 0640 exactly as `dtxwiki setup` does. No-op when
-        # not root (dev/pipx/Windows keep their own perms).
-        from backend.cli.prod_setup import set_key_ownership
-
-        set_key_ownership(jwt_dest, SERVICE_GROUP)
+        # systemd service could not read it -> crash loop. Re-grant
+        # root:<service group> 0640 as `dtxwiki setup` does. No-op when not
+        # root (dev/pipx/Windows keep their own perms).
+        _grant_service_read(jwt_dest, service_gid, echo)
 
     keyring_backup = backup_dir / LLM_KEYRING_BACKUP_NAME
     if keyring_backup.exists():
         _restore_secret(keyring_backup, keyring_dest)
-        from backend.cli.prod_setup import set_key_ownership
-
-        set_key_ownership(keyring_dest, SERVICE_GROUP)
+        _grant_service_read(keyring_dest, service_gid, echo)
 
     secret_backup = backup_dir / SESSION_SECRET_BACKUP_NAME
     if secret_backup.exists():
@@ -361,6 +401,27 @@ def restore_backup(
         _restore_user_files(backup_dir, base, include_library=schema < 2)
 
     return manifest
+
+
+def _directory_gid(path: Path) -> int | None:
+    try:
+        return path.stat().st_gid
+    except OSError:
+        return None
+
+
+def _grant_service_read(
+    path: Path, service_gid: int | None, echo: Callable[[str], None]
+) -> None:
+    if service_gid is None:
+        echo(
+            f"    WARN: the data directory's group is unknown; make sure the "
+            f"service account can read {path}"
+        )
+        return
+    from backend.cli.prod_setup import set_key_ownership
+
+    set_key_ownership(path, service_gid, echo=echo)
 
 
 def list_backups(data_dir: Path | None = None) -> list[BackupInfo]:
