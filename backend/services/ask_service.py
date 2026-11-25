@@ -156,6 +156,8 @@ ASK_HISTORY_MAX_PAIRS = 4
 ASK_HISTORY_MAX_CHARS = 16_000
 # Rows read at a time while looking for the history.
 _HISTORY_BATCH = 20
+# Library sources checked per query, well under any database's bind limit.
+_VISIBILITY_BATCH = 500
 # Why a turn ended as failed. Only these codes reach clients.
 ASK_TURN_INTERNAL_ERROR = "internal_error"
 ASK_TURN_ACCESS_REVOKED = "access_revoked"
@@ -1030,6 +1032,7 @@ class AskService:
         picked: list[tuple[str, str, AskEvidence]] = []
         size = 0
         before = turn.turn_no
+        visibility_cache: dict[tuple[str, UUID, UUID | None], bool] = {}
         while True:
             rows = session.scalars(
                 select(AskTurn)
@@ -1054,6 +1057,7 @@ class AskService:
                     artifact_ids=evidence.library,
                     actor=actor,
                     workspace_id=workspace_id,
+                    cache=visibility_cache,
                 ):
                     continue
                 asked = row.user_message or ""
@@ -1452,6 +1456,8 @@ class AskService:
             citations_by_turn,
             actor,
         )
+        # Follow-ups repeat their history's sources; check each once.
+        visibility_cache: dict[tuple[str, UUID, UUID | None], bool] = {}
         return AskSessionDetail(
             **self._session_ref(session, ask_session).model_dump(),
             workspace_id=ask_session.workspace_id,
@@ -1477,6 +1483,7 @@ class AskService:
                         if citations_by_turn.get(turn.id, ([], []))[0]
                         else []
                     ),
+                    visibility_cache=visibility_cache,
                 )
                 for turn in turns
             ],
@@ -1492,6 +1499,7 @@ class AskService:
         actor: ActorContext | None = None,
         graph_context: list[GraphNeighborEntry] | None = None,
         revalidate_evidence: bool = True,
+        visibility_cache: dict[tuple[str, UUID, UUID | None], bool] | None = None,
     ) -> AskTurnDetail:
         node = get_in_workspace(
             session,
@@ -1523,7 +1531,12 @@ class AskService:
         # evidence, so re-validation is skipped (redundant, and a divergence there
         # would falsely blank the author's own just-created answer).
         evidence_visible = not revalidate_evidence or ask_turn_visible(
-            session, turn, citations, actor, ask_session.workspace_id
+            session,
+            turn,
+            citations,
+            actor,
+            ask_session.workspace_id,
+            cache=visibility_cache,
         )
         if evidence_visible:
             assistant_message = turn.assistant_message
@@ -1643,6 +1656,7 @@ def ask_turn_visible(
     citations: tuple[list[UUID], list[UUID]],
     actor: ActorContext | None,
     workspace_id: UUID,
+    cache: dict[tuple[str, UUID, UUID | None], bool] | None = None,
 ) -> bool:
     """Whether ``actor`` may see the answer of ``turn``.
 
@@ -1660,28 +1674,16 @@ def ask_turn_visible(
             artifact_ids=evidence.library,
             actor=actor,
             workspace_id=workspace_id,
+            cache=cache,
         )
     cited_page_ids, cited_artifact_ids = citations
-    return ask_turn_evidence_visible(
-        session, cited_page_ids, cited_artifact_ids, actor, workspace_id
-    )
-
-
-def ask_turn_evidence_visible(
-    session: Session,
-    cited_page_ids: list[UUID],
-    cited_artifact_ids: list[UUID],
-    actor: ActorContext | None,
-    workspace_id: UUID,
-) -> bool:
-    """Whether ``actor`` can see every document a turn's answer cites."""
-
     return ask_evidence_visible(
         session,
         context_refs=[(page_id, None) for page_id in cited_page_ids],
         artifact_ids=cited_artifact_ids,
         actor=actor,
         workspace_id=workspace_id,
+        cache=cache,
     )
 
 
@@ -1692,6 +1694,7 @@ def ask_evidence_visible(
     artifact_ids: Iterable[UUID],
     actor: ActorContext | None,
     workspace_id: UUID,
+    cache: dict[tuple[str, UUID, UUID | None], bool] | None = None,
 ) -> bool:
     """Whether ``actor`` can see every source an Ask answer was built from.
 
@@ -1703,74 +1706,109 @@ def ask_evidence_visible(
     redact rather than replay. Every cited document must also belong to the
     turn's own ``workspace_id`` — a malformed/migrated citation resolving to a
     visible entity in another workspace must not authorize replay (Codex R12).
+
+    ``cache`` lets one read of a session (one actor) check each source once:
+    later turns repeat their history's sources.
     """
 
+    cache = {} if cache is None else cache
     for page_id, version_id in context_refs:
-        page = get_in_workspace(
-            session,
-            ContextPage,
-            workspace_id=workspace_id,
-            resource_id=page_id,
+        key = ("context", page_id, version_id)
+        if key not in cache:
+            cache[key] = _context_ref_visible(
+                session, page_id, version_id, actor, workspace_id
+            )
+        if not cache[key]:
+            return False
+    unchecked = [
+        artifact_id
+        for artifact_id in set(artifact_ids)
+        if ("library", artifact_id, None) not in cache
+    ]
+    for start in range(0, len(unchecked), _VISIBILITY_BATCH):
+        batch = unchecked[start : start + _VISIBILITY_BATCH]
+        visible = _library_artifacts_visible(session, batch, actor, workspace_id)
+        for artifact_id in batch:
+            cache[("library", artifact_id, None)] = artifact_id in visible
+    return all(
+        cache[("library", artifact_id, None)] for artifact_id in set(artifact_ids)
+    )
+
+
+def _context_ref_visible(
+    session: Session,
+    page_id: UUID,
+    version_id: UUID | None,
+    actor: ActorContext | None,
+    workspace_id: UUID,
+) -> bool:
+    page = get_in_workspace(
+        session,
+        ContextPage,
+        workspace_id=workspace_id,
+        resource_id=page_id,
+    )
+    if not context_page_visible(page, actor, workspace_id=workspace_id):
+        return False
+    if version_id is None:
+        return True
+    # The answer used this version's text. A version later closed (an undone
+    # approval) is not readable just because the page still is.
+    version = get_in_workspace(
+        session,
+        ContextPageVersion,
+        workspace_id=workspace_id,
+        resource_id=version_id,
+    )
+    return (
+        version is not None
+        and version.page_id == page_id
+        and context_version_is_visible(version, actor)
+    )
+
+
+def _library_artifacts_visible(
+    session: Session,
+    artifact_ids: list[UUID],
+    actor: ActorContext | None,
+    workspace_id: UUID,
+) -> set[UUID]:
+    """The given artifacts ``actor`` may read; a missing one is not in it."""
+
+    if not artifact_ids:
+        return set()
+    rows = session.execute(
+        select(
+            LibraryArtifact.id,
+            LibraryItem,
         )
-        if not context_page_visible(page, actor, workspace_id=workspace_id):
-            return False
-        if version_id is None:
-            continue
-        # The answer used this version's text. A version later closed (an
-        # undone approval) is not readable just because the page still is.
-        version = get_in_workspace(
-            session,
-            ContextPageVersion,
-            workspace_id=workspace_id,
-            resource_id=version_id,
+        .join(
+            LibraryItemVersion,
+            LibraryItemVersion.library_item_id == LibraryItem.id,
         )
-        if (
-            version is None
-            or version.page_id != page_id
-            or not context_version_is_visible(version, actor)
-        ):
-            return False
-    unique_artifact_ids = set(artifact_ids)
-    if unique_artifact_ids:
-        rows = session.execute(
-            select(
-                LibraryArtifact.id,
-                LibraryItem,
-            )
-            .join(
-                LibraryItemVersion,
-                LibraryItemVersion.library_item_id == LibraryItem.id,
-            )
-            .join(
-                LibraryArtifact,
-                LibraryArtifact.library_item_version_id == LibraryItemVersion.id,
-            )
-            .where(
-                LibraryArtifact.id.in_(unique_artifact_ids),
-                LibraryItem.workspace_id == workspace_id,
-            )
-        ).all()
-        # A cited artifact that no longer resolves to a live item is dangling.
-        if len(rows) < len(unique_artifact_ids):
-            return False
-        for (
-            artifact_id,
-            item,
-        ) in rows:
-            # The stored answer paraphrases this evidence. If its source was
-            # archived/hidden or the artifact left the canonical ready attempt, the
-            # content must not replay — fail closed (Codex round-11).
-            if item.lifecycle_status in EXCLUDED_LIBRARY_LIFECYCLE_STATUSES:
-                return False
-            if not canonical_library_artifact_belongs_to_item(
-                session,
-                item=item,
-                artifact_id=artifact_id,
-            ):
-                return False
-            if not actor_can_read_library_trust_level(item.trust_level, actor):
-                return False
-    return True
+        .join(
+            LibraryArtifact,
+            LibraryArtifact.library_item_version_id == LibraryItemVersion.id,
+        )
+        .where(
+            LibraryArtifact.id.in_(artifact_ids),
+            LibraryItem.workspace_id == workspace_id,
+        )
+    ).all()
+    # The stored answer paraphrases this evidence. If its source was
+    # archived/hidden or the artifact left the canonical ready attempt, the
+    # content must not replay — fail closed (Codex round-11).
+    return {
+        artifact_id
+        for artifact_id, item in rows
+        if item.lifecycle_status not in EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
+        and canonical_library_artifact_belongs_to_item(
+            session,
+            item=item,
+            artifact_id=artifact_id,
+        )
+        and actor_can_read_library_trust_level(item.trust_level, actor)
+    }
 
 
 def _library_chunk_is_current(

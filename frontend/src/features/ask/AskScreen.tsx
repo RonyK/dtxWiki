@@ -19,6 +19,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { MarkdownView } from "../pages/MarkdownView";
 import { apiErrorMessage } from "../../shared/api/client";
+import { askQuestionError } from "../../shared/api/inputPolicy";
 import {
   acceptContextIngressProposal,
   createAskSession,
@@ -891,6 +892,12 @@ export function AskScreen() {
     if (state.workspaceId !== routeWorkspaceId) {
       return;
     }
+    // Refuse an invalid question before a new session is created for it.
+    const questionError = askQuestionError(message.trim());
+    if (questionError) {
+      setError(questionError);
+      return;
+    }
     setError(null);
     setLastTurnWarnings([]);
     setSendingTurn(true);
@@ -1093,7 +1100,6 @@ export function AskScreen() {
       : null;
   useEffect(() => {
     const workspaceId = state?.workspaceId;
-    const language = state?.workspaceLanguage ?? "en";
     if (!pendingSessionId || !workspaceId) return;
     const generation = loadGenerationRef.current;
     // Any newer state or load supersedes this read, even one already sent.
@@ -1119,8 +1125,14 @@ export function AskScreen() {
               ? exc.status
               : null;
           if (status === 401 || status === 403 || status === 404) {
-            // No access any more: say so instead of waiting.
-            setError(errorMessage(exc, ASK_COPY[language].errors.selectSession));
+            // No access any more: drop the stale session and let the route
+            // load show its access or not-found state.
+            setState((previous) =>
+              previous?.detail?.id === pendingSessionId
+                ? { ...previous, detail: null }
+                : previous,
+            );
+            setRouteRetryKey((key) => key + 1);
             return;
           }
           // A passing failure must not leave the screen waiting forever.

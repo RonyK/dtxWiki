@@ -8,7 +8,9 @@
   `llm_answer_incomplete` and `llm_answer_refused`. Refresh cached tool catalogs
   and result schemas.
 - DB schema: migration `916a6162b789` follows `dafc5339b3b1` and adds Ask turn
-  status columns. Existing turns become `completed`.
+  status columns. Existing turns become `completed`. Downgrading drops the
+  record of the evidence each answer was given; follow-up answers are then
+  checked against their own citations only.
 
 ### LLM adapters
 

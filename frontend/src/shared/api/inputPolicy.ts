@@ -1,6 +1,15 @@
 import { i18n } from "../i18n";
 import { inputTextError, markdownInputError, trimShortText } from "../lib/inputPolicy";
 
+/** The check `apiRequest` applies to an Ask question, for screens that must
+ * refuse it before creating the session it would be asked in. */
+export function askQuestionError(message: string) {
+  return outgoingContentError(
+    "/api/v1/workspaces/-/ask/sessions/-/turns",
+    JSON.stringify({ user_message: message }),
+  );
+}
+
 /** Validate only known content/metadata writes, before fetch. Authentication
  * and OAuth credentials have separate policies and never pass through here;
  * OAuth consent settings carry only workspace ids and TTL fields. */

@@ -1,5 +1,6 @@
 """A question is kept once it is accepted, whatever happens to its answer."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -100,13 +101,21 @@ def test_question_is_kept_when_its_answer_fails_or_the_server_restarts(
     assert busy.value.error_code == "ask_turn_in_progress"
 
     # A serving process that starts finds nothing still answering the pending
-    # question: it ends as an internal error.
-    def previous_build(**_kwargs):
-        container = SimpleNamespace(db=SimpleNamespace(session_factory=session_factory))
-        return SimpleNamespace(state=SimpleNamespace(container=container))
+    # question: it ends as an internal error. `make backend-dev` serves through
+    # the lazy app; `dtxwiki serve` and Desktop pass create_serving_app to the
+    # runtime, which their own tests pin.
+    class _PreviousServer:
+        state = SimpleNamespace(
+            container=SimpleNamespace(
+                db=SimpleNamespace(session_factory=session_factory)
+            )
+        )
 
-    monkeypatch.setattr(app_main, "create_app", previous_build)
-    app_main.create_serving_app()
+        async def __call__(self, scope, receive, send):
+            return None
+
+    monkeypatch.setattr(app_main, "create_app", lambda **_kwargs: _PreviousServer())
+    asyncio.run(app_main._LazyASGIApp()({"type": "lifespan"}, None, None))
 
     # A question asked after a turn the asker has not seen is refused.
     with pytest.raises(RejectedByPolicyError) as stale:

@@ -11,6 +11,7 @@ from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
     ExecutionContext,
+    LLMAdapterError,
     TextGenerationPort,
     TextMessage,
 )
@@ -40,6 +41,9 @@ class BlockingTextGenerator:
     model: str
     context: ExecutionContext
     temperature: float | None = None
+    # Bounds the whole call. ``context`` bounds each network operation only,
+    # so a provider that keeps sending could otherwise hold the caller.
+    deadline_seconds: float | None = None
 
     def generate(
         self,
@@ -55,7 +59,18 @@ class BlockingTextGenerator:
             system=system,
             temperature=self.temperature,
         )
-        return asyncio.run(self.port.generate(request, self.context))
+        return asyncio.run(self._generate(request))
+
+    async def _generate(self, request: CanonicalTextRequest) -> CanonicalTextResult:
+        if self.deadline_seconds is None:
+            return await self.port.generate(request, self.context)
+        try:
+            return await asyncio.wait_for(
+                self.port.generate(request, self.context), self.deadline_seconds
+            )
+        except TimeoutError:
+            # The request may have reached the provider; it is not resent.
+            raise LLMAdapterError("timeout", delivery="unknown") from None
 
 
 __all__ = ["BlockingTextGenerator", "TextGenerator"]

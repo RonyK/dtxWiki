@@ -49,6 +49,8 @@ _ANSWER_MODELS = MappingProxyType(
 _CAPABILITIES = LLMModelCapabilities(options=frozenset({"temperature"}))
 _TEMPERATURE = 0.0
 _TIMEOUT_SECONDS = 120.0
+# The whole answer, so a stalled stream cannot keep an Ask question pending.
+_DEADLINE_SECONDS = 180.0
 
 
 def build_llm_provider(
@@ -85,6 +87,7 @@ def build_llm_provider(
         model=answer_model.model,
         context=ExecutionContext(timeout_seconds=_TIMEOUT_SECONDS),
         temperature=_TEMPERATURE,
+        deadline_seconds=_DEADLINE_SECONDS,
     )
 
 

@@ -134,6 +134,25 @@ def test_registry_returns_none_by_default_and_builds_configured_providers():
         )
     assert (failure.value.status_code, len(transport.calls)) == (503, 1)
 
+    # A provider that never finishes is cut off by the whole-call deadline.
+    class StalledPort:
+        async def generate(self, request, context):
+            await asyncio.sleep(10)
+
+    stalled = BlockingTextGenerator(
+        port=StalledPort(),
+        model="model-x",
+        context=ExecutionContext(timeout_seconds=5),
+        deadline_seconds=0.01,
+    )
+    with pytest.raises(LLMAdapterError) as cut_off:
+        stalled.generate(
+            system=None,
+            messages=(TextMessage(role="user", text="q"),),
+            max_output_tokens=8,
+        )
+    assert (cut_off.value.code, cut_off.value.delivery) == ("timeout", "unknown")
+
     # An option the model cannot honor is refused before anything is sent.
     transport = RecordingTransport(_reply({}))
     unsupported = BlockingTextGenerator(
