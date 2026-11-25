@@ -645,9 +645,7 @@ def test_viewer_learns_of_unreadable_usage_and_lists_only_readable_versions(
     from backend.models.context_media import ContextMediaUsage
 
     owner = make_client(page_service, "attach-usage-owner@example.com", role="owner")
-    viewer = make_client(
-        page_service, "attach-usage-viewer@example.com", role="viewer"
-    )
+    viewer = make_client(page_service, "attach-usage-viewer@example.com", role="viewer")
     workspace_id = _workspace_id(owner)
     viewer_id = _user_id(page_service, "attach-usage-viewer@example.com")
     seeded = _seed_asset(

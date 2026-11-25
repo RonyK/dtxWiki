@@ -396,15 +396,19 @@ def test_list_my_workspaces_pat_stays_credential_scoped(page_service):
     user_id, (workspace_a, _workspace_b) = _seed_user_and_workspaces(
         page_service.session_factory
     )
-    token = ApiTokenService(
-        session_factory=page_service.session_factory,
-        credential_hasher=CredentialHasher(),
-    ).create_token(
-        user_id=user_id,
-        workspace_grants=[WorkspaceGrantRequest(workspace_id=workspace_a)],
-        name="pat-credential-scoped",
-        scopes=["mcp:read"],
-    ).plain_token
+    token = (
+        ApiTokenService(
+            session_factory=page_service.session_factory,
+            credential_hasher=CredentialHasher(),
+        )
+        .create_token(
+            user_id=user_id,
+            workspace_grants=[WorkspaceGrantRequest(workspace_id=workspace_a)],
+            name="pat-credential-scoped",
+            scopes=["mcp:read"],
+        )
+        .plain_token
+    )
 
     response = _list_my_workspaces(client, token)
 

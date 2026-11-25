@@ -1,4 +1,5 @@
 """Tests for dtxwiki keygen CLI command (Task 4.12)."""
+
 import sys
 
 import pytest

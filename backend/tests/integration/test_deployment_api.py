@@ -37,9 +37,7 @@ def make_client(
     if server_admin:
         user_id = UUID(client.get("/api/v1/auth/me").json()["data"]["user_id"])
         with page_service.session_factory.begin() as session:
-            server_admin_service.grant_server_admin(
-                session, user_id, granted_by="test"
-            )
+            server_admin_service.grant_server_admin(session, user_id, granted_by="test")
     return client
 
 
@@ -207,9 +205,7 @@ def test_deployment_status_requires_authentication(page_service):
 
 def test_deployment_status_forbidden_for_non_server_admin(page_service):
     # Authenticated but NOT granted server-admin → 403.
-    client = make_client(
-        page_service, email="member@example.com", server_admin=False
-    )
+    client = make_client(page_service, email="member@example.com", server_admin=False)
     response = client.get("/api/v1/admin/deployment")
     assert response.status_code == 403, response.text
     response = client.post(
@@ -241,9 +237,13 @@ def test_deployment_release_check_cache_only_get_and_explicit_post(
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data == {
-        "current_version": "0.1.0", "latest_version": "0.2.0",
-        "update_available": True, "check_status": "succeeded",
-        "checked_at": data["checked_at"], "stale": False, "source": "configured_index",
+        "current_version": "0.1.0",
+        "latest_version": "0.2.0",
+        "update_available": True,
+        "check_status": "succeeded",
+        "checked_at": data["checked_at"],
+        "stale": False,
+        "source": "configured_index",
     }
     assert data["checked_at"] is not None
     assert calls == [(private_url, "stable")]
@@ -251,17 +251,26 @@ def test_deployment_release_check_cache_only_get_and_explicit_post(
     cached = client.get("/api/v1/admin/deployment").json()["data"]
     assert {key: cached[key] for key in data} == data
     assert len(calls) == 1
-    assert client.post(
-        "/api/v1/admin/deployment/update-check", json={"force": False}
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/admin/deployment/update-check", json={"force": False}
+        ).status_code
+        == 200
+    )
     assert len(calls) == 1
-    assert client.post(
-        "/api/v1/admin/deployment/update-check", json={"force": True}
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/admin/deployment/update-check", json={"force": True}
+        ).status_code
+        == 200
+    )
     assert len(calls) == 2
-    assert client.post(
-        "/api/v1/admin/deployment/update-check", json={"unknown": True}
-    ).status_code == 422
+    assert (
+        client.post(
+            "/api/v1/admin/deployment/update-check", json={"unknown": True}
+        ).status_code
+        == 422
+    )
     # Keep the disabled response's HTTP/schema contract in this endpoint scenario;
     # detailed no-cache/no-network behavior belongs to the service unit test.
     monkeypatch.setattr(client.app.state.settings, "no_update_notifier", True)

@@ -111,8 +111,7 @@ def seed_viewer_target_with_restricted_library_item(page_service) -> UUID:
         slug="cross-transport-control",
         title="Cross Transport Control",
         body_md=(
-            "# Cross Transport Control\n\n"
-            "Needle cross transport positive control body."
+            "# Cross Transport Control\n\nNeedle cross transport positive control body."
         ),
         actor_kind="system",
         actor_id="fix6-cross-transport-control",

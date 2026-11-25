@@ -1,4 +1,3 @@
-
 """The line number an author is shown must be the line they are looking at.
 
 Findings carry ABSOLUTE line numbers on purpose -- the Lint screen renders the

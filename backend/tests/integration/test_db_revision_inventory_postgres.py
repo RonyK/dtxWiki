@@ -61,14 +61,16 @@ def test_postgres_probe_pins_one_repeatable_read_snapshot(monkeypatch):
 
     def inspect_across_commit(connection, **kwargs):
         observed.append(
-            connection.execute(sa.text("SELECT to_regclass(:name)"), {"name": table})
-            .scalar_one()
+            connection.execute(
+                sa.text("SELECT to_regclass(:name)"), {"name": table}
+            ).scalar_one()
         )
         with writer.begin() as write_connection:
             write_connection.exec_driver_sql(f"CREATE TABLE {table} (id integer)")
         observed.append(
-            connection.execute(sa.text("SELECT to_regclass(:name)"), {"name": table})
-            .scalar_one()
+            connection.execute(
+                sa.text("SELECT to_regclass(:name)"), {"name": table}
+            ).scalar_one()
         )
         return original(connection, **kwargs)
 

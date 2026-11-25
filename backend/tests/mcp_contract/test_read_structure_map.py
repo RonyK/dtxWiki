@@ -19,10 +19,7 @@ def test_read_structure_map_covers_every_block_kind_with_ids_and_hashes(
     page_service, actor
 ):
     workspace_id = _workspace_id(page_service)
-    body = (
-        "# Title\n\nIntro paragraph.\n\n"
-        "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n"
-    )
+    body = "# Title\n\nIntro paragraph.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n"
     page = page_service.write_page(
         workspace_slug="default",
         slug="structure-map-basic",

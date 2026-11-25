@@ -666,11 +666,9 @@ class AskService:
         """
 
         validate_request_inputs(request)
-        question = _validate_user_message(
-            f"{previous_user_message}\n\n{request.user_message}"
-            if previous_user_message
-            else request.user_message
-        )
+        question = _validate_user_message(request.user_message)
+        if previous_user_message:
+            question = _validate_user_message(f"{previous_user_message}\n\n{question}")
         # The session row lock orders every turn write in the session, so
         # turn_no allocation cannot collide. On SQLite the writer lock comes
         # first, before the guarded read.

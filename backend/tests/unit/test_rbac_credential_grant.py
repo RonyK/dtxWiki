@@ -376,9 +376,7 @@ def test_shrink_denies_immediately_even_before_fan_out_ever_runs(session_factory
     )
     with session_factory.begin() as session:
         user_id, workspace_id = _seed_user_with_workspace(session, slug="r11-shrink-ws")
-        kept_workspace = Workspace(
-            slug="r11-shrink-ws-kept", title="kept", name="kept"
-        )
+        kept_workspace = Workspace(slug="r11-shrink-ws-kept", title="kept", name="kept")
         session.add(kept_workspace)
         session.flush()
         grant_workspace_membership(
@@ -613,9 +611,7 @@ def test_narrow_replica_rechecks_the_required_workspace_action(session_factory):
         cursor_secret="r11-narrow-cursor-secret",
     )
     with session_factory.begin() as session:
-        user_id, workspace_id = _seed_user_with_workspace(
-            session, slug="r11-narrow-ws"
-        )
+        user_id, workspace_id = _seed_user_with_workspace(session, slug="r11-narrow-ws")
 
     issued = token_service.create_token(
         user_id=user_id,

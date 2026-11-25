@@ -1717,12 +1717,9 @@ def test_generated_preview_is_selected_by_cas_reauthorized_and_released_on_delet
         assert all(
             session.get(LibraryArtifact, value) is None for value in artifact_ids
         )
+        assert all(session.get(LibraryRun, value) is None for value in preview_run_ids)
         assert all(
-            session.get(LibraryRun, value) is None for value in preview_run_ids
-        )
-        assert all(
-            session.get(LibraryAttempt, value) is None
-            for value in preview_attempt_ids
+            session.get(LibraryAttempt, value) is None for value in preview_attempt_ids
         )
         usage = session.get(
             LibraryLogicalQuotaUsage,

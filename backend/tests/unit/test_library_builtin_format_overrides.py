@@ -50,9 +50,10 @@ def test_sparse_override_normalizes_aliases_and_preserves_descriptor_identity():
     registry = FormatRegistry()
     package = registry.descriptor("pdf")
 
-    assert service.coerce_builtin_format_overrides(
-        {"pdf": {"extensions": [" PDF "]}}
-    ) == {}
+    assert (
+        service.coerce_builtin_format_overrides({"pdf": {"extensions": [" PDF "]}})
+        == {}
+    )
     overrides = service.coerce_builtin_format_overrides(
         {"pdf": {"extensions": ["paper", ".PDFX"]}}
     )
@@ -65,9 +66,7 @@ def test_sparse_override_normalizes_aliases_and_preserves_descriptor_identity():
     assert effective.container_validator == package.container_validator
 
     with pytest.raises(ValueError) as unsafe:
-        service.coerce_builtin_format_overrides(
-            {"pdf": {"extensions": [".exe"]}}
-        )
+        service.coerce_builtin_format_overrides({"pdf": {"extensions": [".exe"]}})
     assert getattr(unsafe.value, "code", None) == (
         "library_builtin_format_extension_unsafe"
     )
@@ -109,9 +108,7 @@ def test_effective_alias_enables_upload_detection_and_removed_default_is_rejecte
 
 def test_capabilities_project_effective_and_package_aliases_with_preset_snapshot():
     policy = default_library_policy()
-    policy["builtin_format_overrides"] = {
-        "docx": {"extensions": [".word", ".docx2"]}
-    }
+    policy["builtin_format_overrides"] = {"docx": {"extensions": [".word", ".docx2"]}}
     policy["format_families"] = [
         {
             "family_id": "documents",
@@ -169,7 +166,7 @@ def test_same_cas_builtin_transfers_reject_and_two_revisions_release_then_claim(
         before = service.get_policies(
             control_session=session,
             workspace_session=session,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
         ).library
 
         with pytest.raises(SettingsPolicyUpdateRejected) as builtin_rejected:
@@ -200,9 +197,7 @@ def test_same_cas_builtin_transfers_reject_and_two_revisions_release_then_claim(
                 actor=_owner(workspace_id),
                 group="library",
                 changes={
-                    "builtin_format_overrides": {
-                        "pdf": {"extensions": [".paper"]}
-                    },
+                    "builtin_format_overrides": {"pdf": {"extensions": [".paper"]}},
                     "custom_formats": [
                         {
                             "format_id": "custom-pdf-alias",
@@ -293,7 +288,7 @@ def test_workspace_override_survives_family_removal_and_explicit_restore_clears_
         before = service.get_policies(
             control_session=session,
             workspace_session=session,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
         ).library
         configured = service.update_policy_batch(
             control_session=session,
@@ -302,9 +297,7 @@ def test_workspace_override_survives_family_removal_and_explicit_restore_clears_
             actor=_owner(workspace_id),
             group="library",
             changes={
-                "builtin_format_overrides": {
-                    "docx": {"extensions": [".word"]}
-                },
+                "builtin_format_overrides": {"docx": {"extensions": [".word"]}},
                 "format_families": [
                     {
                         "family_id": "documents",
@@ -382,9 +375,7 @@ def test_historical_preset_alias_snapshot_remains_an_explicit_override():
             }
         ],
         builtin_format_overrides={
-            "docx": {
-                "extensions": historical_baseline["format_extensions"]["docx"]
-            }
+            "docx": {"extensions": historical_baseline["format_extensions"]["docx"]}
         },
     )[0]
 

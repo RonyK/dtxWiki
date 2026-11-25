@@ -73,7 +73,7 @@ def test_rendered_markdown_links_ignore_bare_gfm_literals(body):
 def test_rendered_markdown_link_span_is_the_label_in_a_long_paragraph():
     target = "11111111-1111-1111-1111-111111111111"
     destination = f"/context?target={target}"
-    body = f"{'prefix ' * 1500}[target](<{destination}> \"Target\")"
+    body = f'{"prefix " * 1500}[target](<{destination}> "Target")'
 
     links = rendered_markdown_links(body)
 
@@ -302,7 +302,7 @@ def test_reader_non_text_boundaries_prevent_cross_node_highlights(
     links = rendered_wikilinks(body)
 
     assert [link.target for link in links] == ["Design"]
-    assert body[links[0].source_start:links[0].source_end] == "[[Design]]"
+    assert body[links[0].source_start : links[0].source_end] == "[[Design]]"
 
 
 @pytest.mark.parametrize("force_marker", (False, True))
@@ -405,7 +405,7 @@ def test_reader_raw_token_boundaries_are_not_reinterpreted_after_decoding(
 
     assert [link.target for link in links] == targets
     assert all(
-        body[link.source_start:link.source_end] == "[[Design]]" for link in links
+        body[link.source_start : link.source_end] == "[[Design]]" for link in links
     )
 
 
@@ -618,7 +618,7 @@ def test_highlight_visibility_keeps_exact_decoded_wikilink_source_spans():
     links = rendered_wikilinks(body)
 
     assert [link.target for link in links] == ["Visible"]
-    assert body[links[0].source_start:links[0].source_end] == visible
+    assert body[links[0].source_start : links[0].source_end] == visible
 
 
 def test_raw_html_tags_do_not_create_a_hidden_container_state_for_wikilinks():
@@ -705,11 +705,7 @@ def test_known_footnote_escaped_bracket_divergence_is_stable():
 def test_known_duplicate_footnote_definition_divergence_is_stable():
     first = "/context?target=11111111-1111-1111-1111-111111111111"
     second = "/context?target=22222222-2222-2222-2222-222222222222"
-    body = (
-        "note[^x]\n\n"
-        f"[^x]: [first]({first})\n\n"
-        f"[^x]: [second]({second})"
-    )
+    body = f"note[^x]\n\n[^x]: [first]({first})\n\n[^x]: [second]({second})"
 
     # remark-gfm uses the first definition; mdit-py-plugins 0.6.1 uses the last.
     assert [link.destination for link in rendered_markdown_links(body)] == [second]

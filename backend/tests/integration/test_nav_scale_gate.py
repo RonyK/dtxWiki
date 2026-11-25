@@ -203,9 +203,15 @@ def test_index_token_budget_per_node(session_factory_module, scale_workspace):
 
     def folder(node_id, title, slug, parent_id, summary="x"):
         return WorkspaceTreeNode(
-            id=node_id, workspace_id=workspace_id, section="context",
-            node_kind="folder", title=title, slug=slug, parent_id=parent_id,
-            sort_key=slug, nav_summary=summary,
+            id=node_id,
+            workspace_id=workspace_id,
+            section="context",
+            node_kind="folder",
+            title=title,
+            slug=slug,
+            parent_id=parent_id,
+            sort_key=slug,
+            nav_summary=summary,
         )
 
     root = folder(root_id, "Context", "context", None)
@@ -218,8 +224,12 @@ def test_index_token_budget_per_node(session_factory_module, scale_workspace):
     projection = TreeProjection(nodes, set(nodes))
     projection._children = {root_id: [target], folder_id: children}
     document = build_routing_index(
-        None, workspace_id, actor=None, workspace_slug="default",
-        node=format_index_ref("folder", folder_id), projection=projection,
+        None,
+        workspace_id,
+        actor=None,
+        workspace_slug="default",
+        node=format_index_ref("folder", folder_id),
+        projection=projection,
     )
     assert estimate_index_tokens(document.markdown) <= GET_INDEX_NODE_TOKEN_BUDGET
     assert document.overflow == len(children) - len(document.entries)

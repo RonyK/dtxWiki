@@ -327,6 +327,7 @@ def test_scoped_selection_accepts_composite_identity_without_resource_lookup():
     statement = select_projection_in_workspace(ContextMediaAsset, workspace_id=uuid4())
     assert "context_media_asset.workspace_id" in str(statement)
 
+
 def test_scoped_batch_and_statement_helpers_always_constrain_foreign_id_candidates():
     from sqlalchemy import or_, select
 

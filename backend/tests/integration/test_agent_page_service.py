@@ -78,25 +78,31 @@ def test_agent_body_heading_is_independent_and_invalid_legacy_activation_is_atom
 
         # Budget exception: restore reuses the ordinary draft writer but must
         # preserve historical bytes instead of running its new index-ref fixer.
-        root_id = session.scalar(select(WorkspaceTreeNode.id).where(
-            WorkspaceTreeNode.workspace_id == workspace_id,
-            WorkspaceTreeNode.section == "context",
-            WorkspaceTreeNode.parent_id.is_(None),
-        ))
-        historical_body = f"[Historical]({format_index_ref('folder', root_id)})\n"
-        session.get(AgentPageVersion, activation.active_version_id).body_markdown = (
-            historical_body
+        root_id = session.scalar(
+            select(WorkspaceTreeNode.id).where(
+                WorkspaceTreeNode.workspace_id == workspace_id,
+                WorkspaceTreeNode.section == "context",
+                WorkspaceTreeNode.parent_id.is_(None),
+            )
         )
+        historical_body = f"[Historical]({format_index_ref('folder', root_id)})\n"
+        session.get(
+            AgentPageVersion, activation.active_version_id
+        ).body_markdown = historical_body
         restored = service.restore_version(
-            session=session, workspace_id=workspace_id,
-            agent_page_id=draft.agent_page_id, version_id=activation.active_version_id,
-            actor_kind="human", actor_id=ACTOR_ID,
+            session=session,
+            workspace_id=workspace_id,
+            agent_page_id=draft.agent_page_id,
+            version_id=activation.active_version_id,
+            actor_kind="human",
+            actor_id=ACTOR_ID,
             actor_provenance="browser_session",
         )
         restored_version = session.get(AgentPageVersion, restored.draft_version_id)
         assert restored_version.body_markdown == historical_body
         assert restored.normalization_report.model_dump() == {
-            "applied": [], "unresolved": [],
+            "applied": [],
+            "unresolved": [],
         }
 
         # Historical bodies have no new CHECK. Restore must report a policy
@@ -156,14 +162,21 @@ def test_agent_page_draft_service_creates_non_sensitive_draft(session_factory):
             )
         )
         missing_ref = format_index_ref("library", uuid4())
-        guide_id = session.scalar(select(AgentPage.id).where(
-            AgentPage.workspace_id == workspace_id,
-            AgentPage.category == "agent_guide",
-        ))
+        guide_id = session.scalar(
+            select(AgentPage.id).where(
+                AgentPage.workspace_id == workspace_id,
+                AgentPage.category == "agent_guide",
+            )
+        )
         owner = ActorContext(
-            actor_kind="human", actor_id=ACTOR_ID, workspace_id=workspace_id,
-            workspace_role="owner", role="owner", token_kind="api_token",
-            token_workspace_ids=(workspace_id,), scopes=("mcp:write",),
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+            workspace_id=workspace_id,
+            workspace_role="owner",
+            role="owner",
+            token_kind="api_token",
+            token_workspace_ids=(workspace_id,),
+            scopes=("mcp:write",),
         )
         result = service.write_draft(
             session=session,

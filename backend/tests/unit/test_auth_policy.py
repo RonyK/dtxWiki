@@ -304,15 +304,19 @@ def test_workspace_pin_header_no_longer_has_any_effect(page_service):
     user_id, (workspace_a, _slug_a), (workspace_b, slug_b) = (
         _seed_user_and_two_workspaces(page_service.session_factory)
     )
-    token_a = ApiTokenService(
-        session_factory=page_service.session_factory,
-        credential_hasher=CredentialHasher(),
-    ).create_token(
-        user_id=user_id,
-        workspace_grants=[WorkspaceGrantRequest(workspace_id=workspace_a)],
-        name="a",
-        scopes=["mcp:read"],
-    ).plain_token
+    token_a = (
+        ApiTokenService(
+            session_factory=page_service.session_factory,
+            credential_hasher=CredentialHasher(),
+        )
+        .create_token(
+            user_id=user_id,
+            workspace_grants=[WorkspaceGrantRequest(workspace_id=workspace_a)],
+            name="a",
+            scopes=["mcp:read"],
+        )
+        .plain_token
+    )
 
     client = TestClient(
         create_app(

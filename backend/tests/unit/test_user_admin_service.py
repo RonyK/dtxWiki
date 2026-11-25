@@ -68,9 +68,10 @@ def test_cli_user_creation_rolls_back_when_personal_provisioning_fails(
         )
 
     with session_factory() as session:
-        assert session.scalar(
-            select(User).where(User.email == "cli-rollback@example.com")
-        ) is None
+        assert (
+            session.scalar(select(User).where(User.email == "cli-rollback@example.com"))
+            is None
+        )
 
 
 def test_admin_password_reset_rolls_back_when_audit_fails(session_factory):
@@ -98,9 +99,7 @@ def test_admin_password_reset_rolls_back_when_audit_fails(session_factory):
     with session_factory() as session:
         user = session.scalar(select(User).where(User.id == created.user_id))
         audits = session.scalars(
-            select(AuditEvent).where(
-                AuditEvent.action == "auth.password.admin_reset"
-            )
+            select(AuditEvent).where(AuditEvent.action == "auth.password.admin_reset")
         ).all()
         assert user is not None
         assert hasher.verify_password("original-password", user.password_hash)

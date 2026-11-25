@@ -160,6 +160,7 @@ def test_sort_key_never_collides_after_archive(session_factory):
         ).all()
         assert len(visible_keys) == len(set(visible_keys))
 
+
 @pytest.mark.parametrize(
     ("title", "slug", "expected_slug"),
     [

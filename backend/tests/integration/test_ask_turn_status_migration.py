@@ -67,6 +67,16 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
                 ).bindparams(sa.bindparam("id", old_turn_id, type_=sa.Uuid()))
             ).one()
 
+    def stored_nulls():
+        with engine.connect() as connection:
+            row = connection.execute(
+                sa.text(
+                    "SELECT input_evidence IS NULL, generation IS NULL FROM ask_turn "
+                    "WHERE id = :id"
+                ).bindparams(sa.bindparam("id", old_turn_id, type_=sa.Uuid()))
+            ).one()
+        return tuple(bool(value) for value in row)
+
     try:
         command.upgrade(config, _PARENT)
         parent_columns = ask_turn_columns()
@@ -117,7 +127,7 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
             # An existing turn is a complete answer with no evidence record:
             # NULL, not JSON null, so it reads as an older turn.
             assert (old.status, old.error_code) == ("completed", None)
-            assert (old.input_evidence, old.generation) == (None, None)
+            assert stored_nulls() == (True, True)
             assert stored_turn() == ("Old question", "Old answer")
             assert old.started_at is None
             assert old.steering_messages == [] and not old.steer_supported

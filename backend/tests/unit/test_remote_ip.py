@@ -33,17 +33,16 @@ def _resolve(
 
 
 def test_prefers_x_real_ip_when_opted_in():
-    assert _resolve(
-        "10.0.0.1", xff="9.9.9.9, 10.0.0.1", xri="203.0.113.5", trust_xri=True
-    ) == "203.0.113.5"
+    assert (
+        _resolve("10.0.0.1", xff="9.9.9.9, 10.0.0.1", xri="203.0.113.5", trust_xri=True)
+        == "203.0.113.5"
+    )
 
 
 def test_x_real_ip_ignored_without_opt_in():
     # A proxy that forwards (rather than overwrites) X-Real-IP must not let a
     # client spoof the identity used for rate limits / metrics allowlist.
-    assert _resolve(
-        "10.0.0.1", xff="9.9.9.9, 10.0.0.1", xri="127.0.0.1"
-    ) == "9.9.9.9"
+    assert _resolve("10.0.0.1", xff="9.9.9.9, 10.0.0.1", xri="127.0.0.1") == "9.9.9.9"
 
 
 def test_x_real_ip_ignored_without_opt_in_falls_back_to_peer():
@@ -51,16 +50,18 @@ def test_x_real_ip_ignored_without_opt_in_falls_back_to_peer():
 
 
 def test_x_real_ip_opt_in_does_not_apply_to_untrusted_peer():
-    assert _resolve(
-        "8.8.8.8", xri="127.0.0.1", allow="10.0.0.1", trust_xri=True
-    ) == "8.8.8.8"
+    assert (
+        _resolve("8.8.8.8", xri="127.0.0.1", allow="10.0.0.1", trust_xri=True)
+        == "8.8.8.8"
+    )
 
 
 def test_rightmost_untrusted_hop_through_trusted_chain():
     # client -> proxy 10.0.0.2 -> our peer 10.0.0.1 ; both proxies trusted.
-    assert _resolve(
-        "10.0.0.1", xff="203.0.113.42, 10.0.0.2", allow="10.0.0.1,10.0.0.2"
-    ) == "203.0.113.42"
+    assert (
+        _resolve("10.0.0.1", xff="203.0.113.42, 10.0.0.2", allow="10.0.0.1,10.0.0.2")
+        == "203.0.113.42"
+    )
 
 
 def test_spoofed_leftmost_is_not_trusted():

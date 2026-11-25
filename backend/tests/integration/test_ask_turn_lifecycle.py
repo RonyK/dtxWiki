@@ -180,7 +180,8 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
             assert steered.status_code == 200, steered.text
             assert steered.json()["data"]["steering_messages"][0]["status"] == "waiting"
             payload = stream.result(timeout=4).text
-            assert "event: delta" in payload and "Provisional answer" in payload
+            # A stream's first preview frame replaces whatever was shown.
+            assert '{"text": "Provisional answer. ", "reset": true}' in payload
             assert '"status":"applied"' in payload and "Continue briefly" in payload, (
                 payload
             )

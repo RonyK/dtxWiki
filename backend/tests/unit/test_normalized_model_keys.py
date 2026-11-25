@@ -34,14 +34,20 @@ def test_normalized_keys_cover_constructor_order_and_later_assignments():
 
 
 def test_core_insert_defaults_derive_keys_from_current_parameters():
-    assert workspace_directory_title_key_default(
-        _DefaultContext({"title": "  Ｔeam\tStraße  "})
-    ) == "team strasse"
-    assert user_member_search_key_default(
-        _DefaultContext(
-            {
-                "display_name": "  Ａlice\tSmith ",
-                "email": "Straße@example.com",
-            }
+    assert (
+        workspace_directory_title_key_default(
+            _DefaultContext({"title": "  Ｔeam\tStraße  "})
         )
-    ) == "alice smith strasse@example.com"
+        == "team strasse"
+    )
+    assert (
+        user_member_search_key_default(
+            _DefaultContext(
+                {
+                    "display_name": "  Ａlice\tSmith ",
+                    "email": "Straße@example.com",
+                }
+            )
+        )
+        == "alice smith strasse@example.com"
+    )

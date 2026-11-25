@@ -77,10 +77,13 @@ def test_custom_format_normalizes_multiple_aliases_and_family_owns_one_format():
 
     assert custom_formats[0]["extensions"] == [".dwg", ".dxf"]
     assert families[0]["format_ids"] == ["custom-cad"]
-    assert service.resolve_extension(
-        ".dxf",
-        custom_formats=custom_formats,
-    ) == "custom-cad"
+    assert (
+        service.resolve_extension(
+            ".dxf",
+            custom_formats=custom_formats,
+        )
+        == "custom-cad"
+    )
 
 
 @pytest.mark.parametrize(
@@ -284,9 +287,7 @@ def test_custom_capability_is_store_only_and_family_may_exceed_workspace():
     )
 
     projected = LibraryCapabilitiesPayload.model_validate(service.project(policy))
-    custom = next(
-        item for item in projected.formats if item.format_id == "custom-cad"
-    )
+    custom = next(item for item in projected.formats if item.format_id == "custom-cad")
     assert custom.display_name == "CAD drawing"
     assert custom.extensions == [".dwg", ".dxf"]
     assert custom.upload is True
@@ -332,10 +333,13 @@ def test_custom_removal_requires_reference_cleanup_in_same_cas_batch(
             },
             expected_revision=before.revision,
         ).library
-        assert library_upload_limit_bytes(
-            added.policy,
-            format_id="custom-cad",
-        ) == 42_000_000
+        assert (
+            library_upload_limit_bytes(
+                added.policy,
+                format_id="custom-cad",
+            )
+            == 42_000_000
+        )
 
     with session_factory.begin() as session:
         with pytest.raises(SettingsPolicyUpdateRejected) as rejected:

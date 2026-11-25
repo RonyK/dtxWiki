@@ -281,8 +281,7 @@ def plan_synthetic_corpus(
     workspace_suffix = "" if workspace_index == 0 else f"-workspace-{workspace_index}"
     if profile == "synthetic":
         resolved_corpus_key = (
-            corpus_key
-            or f"synthetic-{documents}-seed-{seed}{workspace_suffix}"
+            corpus_key or f"synthetic-{documents}-seed-{seed}{workspace_suffix}"
         )
         title = (
             f"Scale {documents}"

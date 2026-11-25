@@ -350,6 +350,7 @@ def test_admin_and_workspace_orphan_listings_return_the_seeded_orphan(
 
 def test_nonmember_server_admin_cannot_read_orphan_metadata(page_service):
     from uuid import UUID
+
     owner = make_client(page_service, "orphan-owner-boundary@example.com")
     workspace_id = _workspace_id(owner)
     _seed_page_bound_orphan(page_service, UUID(workspace_id))

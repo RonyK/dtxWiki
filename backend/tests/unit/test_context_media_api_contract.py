@@ -18,8 +18,7 @@ from backend.schemas.context_media import (
 def test_context_image_ingest_status_code_contract_reports_both_directions() -> None:
     original_error_codes = context_image_ingest.CONTEXT_IMAGE_INGEST_ERROR_CODES
     mismatched_error_codes = frozenset(
-        (set(original_error_codes) - {"media_state_changed"})
-        | {"only_in_error_codes"}
+        (set(original_error_codes) - {"media_state_changed"}) | {"only_in_error_codes"}
     )
     try:
         context_image_ingest.CONTEXT_IMAGE_INGEST_ERROR_CODES = mismatched_error_codes

@@ -42,10 +42,10 @@ def test_every_bearer_route_is_registered_or_exempt():
     for method, path in iter_app_bearer_routes(app):
         if _is_exempt(path):
             continue
-        if (
-            (method, path) not in REST_REQUIRED_SCOPES
-            and (method, path) not in REST_SESSION_ONLY_ROUTES
-        ):
+        if (method, path) not in REST_REQUIRED_SCOPES and (
+            method,
+            path,
+        ) not in REST_SESSION_ONLY_ROUTES:
             unknown.append((method, path))
     assert not unknown, (
         "REST routes missing from REST_REQUIRED_SCOPES (or exempt list): "
@@ -75,8 +75,7 @@ def test_session_only_routes_have_no_bearer_scope_entry():
     assert REST_SESSION_ONLY_ROUTES.issubset(app_routes)
     overlap = set(REST_REQUIRED_SCOPES).intersection(REST_SESSION_ONLY_ROUTES)
     assert not overlap, (
-        "Routes cannot be both bearer-scoped and session-only: "
-        f"{sorted(overlap)}"
+        f"Routes cannot be both bearer-scoped and session-only: {sorted(overlap)}"
     )
 
 

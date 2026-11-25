@@ -441,9 +441,7 @@ def test_preview_schedule_failure_does_not_rollback_conversion_job_or_source(
     assert version["processing_status"] == "queued"
     assert upload_api.client.get(version["original_url"]).status_code == 200
     with upload_api.session_factory() as session:
-        assert (
-            session.scalar(select(func.count()).select_from(LibraryRun)) == 1
-        )
+        assert session.scalar(select(func.count()).select_from(LibraryRun)) == 1
         assert (
             session.scalar(
                 select(func.count())

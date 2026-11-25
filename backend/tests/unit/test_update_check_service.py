@@ -24,18 +24,14 @@ class _Resp:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError(
-                "error", request=None, response=None
-            )
+            raise httpx.HTTPStatusError("error", request=None, response=None)
 
 
 def _index_html(*versions, yanked=()):
     parts = []
     for v in versions:
         attr = ' data-yanked="broken"' if v in yanked else ""
-        parts.append(
-            f'<a href="dtxwiki-{v}-py3-none-any.whl"{attr}>dtxwiki-{v}</a>'
-        )
+        parts.append(f'<a href="dtxwiki-{v}-py3-none-any.whl"{attr}>dtxwiki-{v}</a>')
     return "".join(parts)
 
 
@@ -105,9 +101,7 @@ def test_disabled_returns_none_without_network(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(ucs.httpx, "get", lambda *a, **k: calls.append(1) or _Resp())
     assert (
-        ucs.check_for_update(
-            _settings(no_update_notifier=True), data_dir=tmp_path
-        )
+        ucs.check_for_update(_settings(no_update_notifier=True), data_dir=tmp_path)
         is None
     )
     assert calls == []
@@ -278,7 +272,9 @@ def test_deployment_status_cache_refresh_and_failure_preserve_last_success(
     arguments = {"data_dir": tmp_path, "now": lambda: clock[0]}
     initial = ucs.get_update_status(settings, **arguments)
     assert (initial.check_status, initial.latest_version, initial.stale) == (
-        "not_checked", None, False
+        "not_checked",
+        None,
+        False,
     )
     assert calls == []
     success = ucs.get_update_status(settings, allow_network=True, **arguments)
@@ -342,7 +338,9 @@ def test_deployment_disabled_never_reads_or_fetches_cached_release(
     monkeypatch.setattr(ucs.httpx, "get", forbidden)
     status = ucs.get_update_status(
         _settings(no_update_notifier=True, update_index_url=None),
-        force=True, allow_network=True, data_dir=tmp_path,
+        force=True,
+        allow_network=True,
+        data_dir=tmp_path,
     )
     assert status.check_status == "disabled"
     assert status.source == "pypi"
@@ -359,17 +357,31 @@ def test_deployment_rejects_corrupt_foreign_and_future_caches(monkeypatch, tmp_p
 
     monkeypatch.setattr(ucs.httpx, "get", forbidden)
     valid = {
-        "latest": "0.2.0", "channel": "stable", "index_url": "https://idx/simple",
+        "latest": "0.2.0",
+        "channel": "stable",
+        "index_url": "https://idx/simple",
         "checked_epoch": 1000.0,
     }
     # One cache-consumer failure path: each untrusted shape must be a cache miss.
     bad_values = [
-        [], None, "not-a-cache", {},
+        [],
+        None,
+        "not-a-cache",
+        {},
         *({**valid, "latest": value} for value in ([], 3, "invalid", "0.3.0rc1")),
-        *({**valid, "checked_epoch": value} for value in (
-            True, "1000", float("nan"), float("inf"), 10**400, 1002,
-        )),
-        {**valid, "channel": []}, {**valid, "channel": "prerelease"},
+        *(
+            {**valid, "checked_epoch": value}
+            for value in (
+                True,
+                "1000",
+                float("nan"),
+                float("inf"),
+                10**400,
+                1002,
+            )
+        ),
+        {**valid, "channel": []},
+        {**valid, "channel": "prerelease"},
         {**valid, "index_url": "https://other/simple"},
         {**valid, "source_fingerprint": []},
         {**valid, "source_fingerprint": "0" * 64},
@@ -391,10 +403,17 @@ def test_legacy_cache_refresh_removes_private_url_and_preserves_source_isolation
     private_url = "https://operator:private-password@idx/simple"
     settings = _settings(update_index_url=private_url)
     cache = tmp_path / ucs.CACHE_NAME
-    cache.write_text(json.dumps({
-        "latest": "0.2.0", "channel": "stable", "index_url": private_url,
-        "checked_epoch": 1000,
-    }), encoding="utf-8")
+    cache.write_text(
+        json.dumps(
+            {
+                "latest": "0.2.0",
+                "channel": "stable",
+                "index_url": private_url,
+                "checked_epoch": 1000,
+            }
+        ),
+        encoding="utf-8",
+    )
     status = ucs.get_update_status(settings, data_dir=tmp_path, now=lambda: 1001)
     assert status.update_available is True
     monkeypatch.setattr(
@@ -407,9 +426,12 @@ def test_legacy_cache_refresh_removes_private_url_and_preserves_source_isolation
     assert "private-password" not in cache.read_text()
     assert "index_url" not in json.loads(cache.read_text())
     assert len(list(tmp_path.iterdir())) == 1  # Atomic save leaves no temporary file.
-    assert ucs.get_update_status(
-        settings, data_dir=tmp_path, now=lambda: 1003
-    ).latest_version == "0.3.0"
+    assert (
+        ucs.get_update_status(
+            settings, data_dir=tmp_path, now=lambda: 1003
+        ).latest_version
+        == "0.3.0"
+    )
     foreign = ucs.get_update_status(
         _settings(update_index_url=None), data_dir=tmp_path, now=lambda: 1003
     )
@@ -429,7 +451,10 @@ def test_deployment_version_comparison_and_cache_write_failure_are_conservative(
     for current in ("0.2.0", "0.3.0", "development-build"):
         status = ucs.get_update_status(
             _settings(app_version=current, update_index_url=None),
-            force=True, allow_network=True, data_dir=blocked, now=lambda: 1000,
+            force=True,
+            allow_network=True,
+            data_dir=blocked,
+            now=lambda: 1000,
         )
         assert status.check_status == "succeeded"
         assert status.latest_version == "0.2.0"

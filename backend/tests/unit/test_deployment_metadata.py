@@ -34,8 +34,7 @@ def test_valid_env_keys_cover_settings():
 def test_spec_blast_radius_defaults_to_restart():
     assert deployment.blast_radius_for("DTXWIKI_APP_NAME") == "restart"
     assert (
-        deployment.blast_radius_for("DTXWIKI_SESSION_SECRET")
-        == "session_invalidation"
+        deployment.blast_radius_for("DTXWIKI_SESSION_SECRET") == "session_invalidation"
     )
     assert deployment.spec_for("DTXWIKI_SESSION_SECRET").dangerous is True
     # Unknown-but-valid key has no tailored spec.
@@ -213,9 +212,7 @@ def test_render_production_env_passes_guard_shape():
 
 def test_render_caddyfile_substitutes_cert_and_key():
     rendered = prod_setup.render_caddyfile(
-        "wiki.example.com {\n"
-        "  tls /path/to/fullchain.pem /path/to/privkey.pem\n"
-        "}\n",
+        "wiki.example.com {\n  tls /path/to/fullchain.pem /path/to/privkey.pem\n}\n",
         "docs.acme.io",
         cert="/etc/ssl/acme.crt",
         key="/etc/ssl/acme.key",
@@ -299,9 +296,7 @@ def test_oauth_availability_requires_https_only_dcr_is_advisory():
     assert deployment.oauth_available(plain) is False
     assert "https" in (deployment.oauth_unavailable_reason(plain) or "")
 
-    no_dcr = Settings(
-        public_base_url="https://wiki.example.com", oauth_allow_dcr=False
-    )
+    no_dcr = Settings(public_base_url="https://wiki.example.com", oauth_allow_dcr=False)
     assert deployment.oauth_available(no_dcr) is True
     assert deployment.oauth_unavailable_reason(no_dcr) is None
     assert deployment.oauth_dcr_enabled(no_dcr) is False
@@ -422,7 +417,7 @@ def test_read_env_file_strips_surrounding_quotes_like_systemd():
 
 def test_read_env_file_keeps_unbalanced_or_inner_quotes():
     parsed = prod_setup.read_env_file_from_text(
-        "DTXWIKI_APP_NAME=\"unterminated\n"
+        'DTXWIKI_APP_NAME="unterminated\n'
         "DTXWIKI_SESSION_SECRET='a\"b'\n"
         'DTXWIKI_CORS_ORIGINS=ht"tps\n'
         "DTXWIKI_MCP_HTTP_MODE='\n"

@@ -14,7 +14,7 @@ def test_bundled_spa_served_when_static_assets_exist(tmp_path):
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
-    assert "<div id=\"root\">" in response.text
+    assert '<div id="root">' in response.text
 
 
 def test_bundled_assets_are_immutable(tmp_path):
@@ -23,10 +23,7 @@ def test_bundled_assets_are_immutable(tmp_path):
     response = client.get("/assets/app.js")
 
     assert response.status_code == 200
-    assert (
-        response.headers["cache-control"]
-        == "public, max-age=31536000, immutable"
-    )
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
 def test_spa_history_route_falls_back_to_index(tmp_path):
@@ -37,7 +34,7 @@ def test_spa_history_route_falls_back_to_index(tmp_path):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["cache-control"] == "no-store"
-    assert "<div id=\"root\">" in response.text
+    assert '<div id="root">' in response.text
 
 
 def test_public_page_spa_shell_does_not_blanket_noindex(tmp_path):

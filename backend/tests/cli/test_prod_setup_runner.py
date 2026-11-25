@@ -22,9 +22,7 @@ def _collecting_runner(*, dry_run: bool = False):
 def test_runner_shell_nonzero_exit_aborts_cleanly():
     r, lines = _collecting_runner()
     with pytest.raises(SystemExit) as excinfo:
-        r.shell(
-            "exit nonzero", [sys.executable, "-c", "import sys; sys.exit(7)"]
-        )
+        r.shell("exit nonzero", [sys.executable, "-c", "import sys; sys.exit(7)"])
     assert excinfo.value.code == 1
     assert any("ERROR: step failed — exit nonzero" in line for line in lines)
     assert any("Setup aborted" in line for line in lines)
@@ -82,13 +80,20 @@ def test_setup_production_step_failure_exits_clean(tmp_path: Path, monkeypatch):
     result = runner.invoke(
         cli_main.app,
         [
-            "setup", "production",
-            "--domain", "wiki.example.com",
-            "--env-file", str(tmp_path / "dtxwiki.env"),
-            "--jwt-key", str(tmp_path / "jwt.pem"),
+            "setup",
+            "production",
+            "--domain",
+            "wiki.example.com",
+            "--env-file",
+            str(tmp_path / "dtxwiki.env"),
+            "--jwt-key",
+            str(tmp_path / "jwt.pem"),
             "--skip-preflight",
-            "--no-systemd", "--no-caddy", "--no-smoke",
-            "--no-admin", "--no-bootstrap",
+            "--no-systemd",
+            "--no-caddy",
+            "--no-smoke",
+            "--no-admin",
+            "--no-bootstrap",
         ],
     )
     assert result.exit_code == 1

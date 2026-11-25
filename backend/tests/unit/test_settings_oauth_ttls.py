@@ -86,13 +86,8 @@ def test_startup_log_reports_effective_ttls_and_sources(monkeypatch):
 
     message = messages[-1]
     assert "access_token_ttl_seconds=7200 source=environment override" in message
-    assert (
-        "refresh_token_ttl_seconds=2592000 source=built-in default"
-        in message
-    )
-    assert (
-        "refresh_token_sliding_enabled=True source=built-in default" in message
-    )
+    assert "refresh_token_ttl_seconds=2592000 source=built-in default" in message
+    assert "refresh_token_sliding_enabled=True source=built-in default" in message
 
 
 def test_lifetime_report_includes_sliding_policy_source(monkeypatch):

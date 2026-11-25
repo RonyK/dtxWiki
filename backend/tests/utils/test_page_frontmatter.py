@@ -76,13 +76,7 @@ class TestParse:
         assert result.body == "Body."
 
     def test_unknown_page_type_collapses_to_none(self) -> None:
-        body = (
-            "---\n"
-            "title: T\n"
-            "slug: t\n"
-            "type: not-a-valid-type\n"
-            "---\n"
-        )
+        body = "---\ntitle: T\nslug: t\ntype: not-a-valid-type\n---\n"
 
         result = parse_page_frontmatter(body)
 
@@ -102,16 +96,7 @@ class TestUpsertManagedKeySweep:
     def test_malformed_block_payload_under_type_is_not_preserved_as_extra(
         self,
     ) -> None:
-        body = (
-            "---\n"
-            "title: T\n"
-            "slug: t\n"
-            "type:\n"
-            "  - bad\n"
-            "  - leftover\n"
-            "---\n"
-            "Body."
-        )
+        body = "---\ntitle: T\nslug: t\ntype:\n  - bad\n  - leftover\n---\nBody."
 
         result = upsert_page_frontmatter(
             body,

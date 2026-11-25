@@ -213,9 +213,7 @@ def test_folder_summary_gap_producer_at_reindex(session_factory, page_service):
         created = produce_folder_summary_tasks(session, workspace_id)
         assert created == 1
         task = session.scalar(
-            select(ClientDelegatedTask).where(
-                ClientDelegatedTask.target_id == big_id
-            )
+            select(ClientDelegatedTask).where(ClientDelegatedTask.target_id == big_id)
         )
         assert task is not None and task.task_type == "folder_nav_summary"
         assert (
@@ -357,9 +355,7 @@ def test_llms_txt_serves_single_public_workspace(page_service, session_factory):
     assert client.get("/llms.txt").status_code == 404
 
     with session_factory.begin() as session:
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         workspace.visibility = "public"
         page = session.get(ContextPage, payload.id)
         grant_public_page_exposure(
@@ -382,9 +378,7 @@ def test_llms_txt_serves_single_public_workspace(page_service, session_factory):
     assert "LLMS Private" not in body
 
 
-def test_llms_txt_404_when_multiple_public_workspaces(
-    page_service, session_factory
-):
+def test_llms_txt_404_when_multiple_public_workspaces(page_service, session_factory):
     with session_factory.begin() as session:
         session.scalar(
             select(Workspace).where(Workspace.slug == "default")
@@ -438,12 +432,8 @@ def test_index_preview_endpoint_renders_node(page_service, session_factory):
     client = _llms_client(page_service)
     authenticate_test_client(client, email="preview@example.com")
     with session_factory.begin() as session:
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
-        user = session.scalar(
-            select(User).where(User.email == "preview@example.com")
-        )
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        user = session.scalar(select(User).where(User.email == "preview@example.com"))
         grant_workspace_membership(
             session,
             user_id=user.id,
@@ -465,6 +455,7 @@ def test_index_preview_endpoint_renders_node(page_service, session_factory):
     )
     assert missing.status_code == 404
 
+
 def test_llms_txt_percent_encodes_korean_page_slug(page_service, session_factory):
     from backend.models.context import ContextPage
 
@@ -478,9 +469,7 @@ def test_llms_txt_percent_encodes_korean_page_slug(page_service, session_factory
         actor_provenance="browser_session",
     )
     with session_factory.begin() as session:
-        workspace = session.scalar(
-            select(Workspace).where(Workspace.slug == "default")
-        )
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
         workspace.visibility = "public"
         page = session.get(ContextPage, payload.id)
         grant_public_page_exposure(
@@ -491,7 +480,4 @@ def test_llms_txt_percent_encodes_korean_page_slug(page_service, session_factory
 
     body = _llms_client(page_service).get("/llms.txt").text
 
-    assert (
-        "/pages/%ED%95%9C%EA%B5%AD%EC%96%B4-%ED%8E%98%EC%9D%B4%EC%A7%80"
-        in body
-    )
+    assert "/pages/%ED%95%9C%EA%B5%AD%EC%96%B4-%ED%8E%98%EC%9D%B4%EC%A7%80" in body

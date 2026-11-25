@@ -1156,6 +1156,7 @@ export function AskScreen() {
       sendingTurn ||
       selectingSessionId ||
       turnActionId ||
+      modelChoicePending ||
       (action !== "queue" && !activeTurn)
     ) {
       return;
@@ -1447,6 +1448,8 @@ export function AskScreen() {
   const searchOnly = choice.connectionKey === SEARCH_ONLY;
   const connectionAvailable = profiles.length > 0 && (!choice.profileId || selectedModel !== undefined);
   const connectionKey = searchOnly || connectionAvailable ? choice.connectionKey : "";
+  // A remembered model is applied once the list of models arrives.
+  const modelChoicePending = catalog === null && choice.connectionKey !== "" && !searchOnly;
   const selection = searchOnly ? null : selectedModel && {
     scope: selectedModel.scope,
     connection_id: selectedModel.connection_id,
@@ -1588,7 +1591,8 @@ export function AskScreen() {
   const latestAnsweredTurn = displayedTurns.filter((turn) => turn.status === "completed").at(-1);
   const uiLanguage = normalizeAskLocale(resolveInitialLocale(state.workspaceLanguage));
   const copy = ASK_COPY[uiLanguage];
-  const composerBusy = startingSession || sendingTurn || Boolean(selectingSessionId) || Boolean(turnActionId);
+  const composerBusy =
+    startingSession || sendingTurn || Boolean(selectingSessionId) || Boolean(turnActionId) || modelChoicePending;
   const composerEmpty = !message.trim();
   // A7: on the empty state the composer is rendered non-sticky (it would
   // otherwise overlap the first-use checklist on mobile) and the redundant

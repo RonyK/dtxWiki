@@ -193,9 +193,7 @@ class _FakeHTTPClient:
 
 
 def test_oversized_document_is_rejected(monkeypatch):
-    _FakeHTTPClient.response = _StreamResponse(
-        [b"x" * (oauth_cimd.CIMD_MAX_BYTES + 1)]
-    )
+    _FakeHTTPClient.response = _StreamResponse([b"x" * (oauth_cimd.CIMD_MAX_BYTES + 1)])
     monkeypatch.setattr(oauth_cimd, "_PinnedHTTPTransport", lambda **kwargs: object())
     monkeypatch.setattr(oauth_cimd.httpx, "Client", _FakeHTTPClient)
 

@@ -119,9 +119,7 @@ def test_issue_stores_only_digest_and_reissue_revokes_previous(session_factory):
             )
         )
         audit_rows = session.scalars(
-            select(AuditEvent).where(
-                AuditEvent.action == "auth.password.reset.issued"
-            )
+            select(AuditEvent).where(AuditEvent.action == "auth.password.reset.issued")
         ).all()
         assert model_user is not None
         assert model_user.email_verified_at is None
@@ -368,10 +366,13 @@ def test_consume_is_single_use_revokes_sessions_and_keeps_api_tokens_for_cli_def
     }
     with pytest.raises(InvalidSessionError, match="session token has been revoked"):
         session_service.authenticate_session(existing_session.session_token)
-    assert session_service.login(
-        email=user.email,
-        password="new-pass",
-    ).user.user_id == user.user_id
+    assert (
+        session_service.login(
+            email=user.email,
+            password="new-pass",
+        ).user.user_id
+        == user.user_id
+    )
     assert api_service.authenticate_token(pat.plain_token).user.user_id == user.user_id
     with pytest.raises(UsedPasswordResetTokenError):
         service.consume_password_reset(
@@ -506,9 +507,7 @@ def test_concurrent_consume_has_exactly_one_winner(tmp_path):
         seed_default_workspace(session)
     user = _create_user(session_factory, "concurrent@example.com")
     service = _recovery_service(session_factory)
-    token = _token_from_url(
-        service.issue_password_reset(email=user.email).reset_url
-    )
+    token = _token_from_url(service.issue_password_reset(email=user.email).reset_url)
     barrier = Barrier(2, timeout=30)
 
     def attempt(password: str) -> str:

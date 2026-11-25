@@ -151,12 +151,12 @@ def test_disable_blocks_oauth_workspace_calls_without_revoking_the_grant(
     after_refresh_envelope = after_refresh.json()["result"]["structuredContent"][
         "envelope"
     ]
-    assert (
-        after_refresh_envelope["result_status"] == "rejected_by_policy"
-    ), after_refresh_envelope
-    assert (
-        after_refresh_envelope["error_code"] == "mcp_client_disabled"
-    ), after_refresh_envelope
+    assert after_refresh_envelope["result_status"] == "rejected_by_policy", (
+        after_refresh_envelope
+    )
+    assert after_refresh_envelope["error_code"] == "mcp_client_disabled", (
+        after_refresh_envelope
+    )
 
     # Re-enable restores access with the ORIGINAL access token -- proving the
     # credential itself was never touched.

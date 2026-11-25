@@ -76,6 +76,7 @@ class InMemoryBlobStore:
         self.quarantine_objects: dict[StorageKey, bytes] = {}
         self.trash_objects: dict[StorageKey, bytes] = {}
         self.generations: dict[BlobReference, int] = {}
+
     def stage(
         self,
         chunks: Iterable[bytes],
@@ -387,6 +388,7 @@ class InMemoryQuota:
             if owner == workspace_id
         )
 
+
 class InMemoryRepository:
     def __init__(self) -> None:
         self.values: dict[tuple[UUID, UUID], StoredBlob] = {}
@@ -394,9 +396,7 @@ class InMemoryRepository:
     def get_by_blob_id(self, workspace_id: UUID, blob_id: UUID) -> StoredBlob | None:
         return self.values.get((workspace_id, blob_id))
 
-    def find_by_identity(
-        self, identity: WorkspaceBlobIdentity
-    ) -> StoredBlob | None:
+    def find_by_identity(self, identity: WorkspaceBlobIdentity) -> StoredBlob | None:
         matches = [blob for blob in self.values.values() if blob.identity == identity]
         if len(matches) > 1:
             raise RuntimeError("duplicate_workspace_blob_identity")
@@ -426,22 +426,18 @@ class InMemoryUnitOfWork:
         self.physical_quota = physical_quota
         self.outbox = outbox
         self._snapshot: dict[tuple[UUID, UUID], StoredBlob] | None = None
-        self._quota_snapshot: dict[
-            tuple[UUID, UUID], tuple[PhysicalChargeTarget, StorageKey, int]
-        ] | None = None
+        self._quota_snapshot: (
+            dict[tuple[UUID, UUID], tuple[PhysicalChargeTarget, StorageKey, int]] | None
+        ) = None
         self._released_quota_snapshot: dict[tuple[UUID, UUID], UUID] | None = None
         self._deletion_receipt_snapshot: dict[UUID, DeletionReceipt] | None = None
-        self._outbox_snapshot: dict[
-            tuple[UUID, str, str], OutboxMessage
-        ] | None = None
+        self._outbox_snapshot: dict[tuple[UUID, str, str], OutboxMessage] | None = None
         self._committed = False
 
     def __enter__(self) -> InMemoryUnitOfWork:
         self._snapshot = deepcopy(self.repository.values)
         self._quota_snapshot = deepcopy(self.physical_quota.charges)
-        self._released_quota_snapshot = deepcopy(
-            self.physical_quota.released_charges
-        )
+        self._released_quota_snapshot = deepcopy(self.physical_quota.released_charges)
         self._deletion_receipt_snapshot = deepcopy(
             self.physical_quota.deletion_receipts
         )

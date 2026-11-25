@@ -81,9 +81,7 @@ def aggregate() -> StoredBlob:
 
 
 def publish(store: InMemoryBlobStore, content: bytes = b"12345") -> None:
-    staged = store.stage(
-        [content], target=staging_target(1), max_bytes=len(content)
-    )
+    staged = store.stage([content], target=staging_target(1), max_bytes=len(content))
     store.publish_no_overwrite(staged, target=KEY, fence=FENCE)
 
 
@@ -274,9 +272,7 @@ def test_physical_quota_rejects_foreign_or_stale_receipt(variant: str) -> None:
     quota, _, store = quota_with_deletion()
     blob = FOREIGN_BLOB if variant == "same-size-foreign-blob" else BLOB
     generation = (
-        FENCE.generation - 1
-        if variant == "stale-generation"
-        else FENCE.generation
+        FENCE.generation - 1 if variant == "stale-generation" else FENCE.generation
     )
     wrong = issue_blob_deletion(
         store,
@@ -288,9 +284,7 @@ def test_physical_quota_rejects_foreign_or_stale_receipt(variant: str) -> None:
             "charge-mismatch": 4,
         }[variant],
     )
-    release_charge_id = (
-        FOREIGN_CHARGE_ID if variant == "charge-mismatch" else CHARGE_ID
-    )
+    release_charge_id = FOREIGN_CHARGE_ID if variant == "charge-mismatch" else CHARGE_ID
     expected = "not_found" if variant == "charge-mismatch" else "binding_mismatch"
     with pytest.raises(ValueError, match=expected):
         quota.release_after_deletion(
@@ -309,9 +303,10 @@ def test_physical_charge_remains_until_exact_deletion_receipt() -> None:
     assert receipt.byte_size == 5
     replay = store.purge(KEY, fence=FENCE, target=BLOB_TARGET)
     assert replay.disposition is PhysicalDeleteDisposition.ALREADY_MISSING
-    assert quota.release_after_deletion(
-        WORKSPACE, charge_id=CHARGE_ID, deletion=replay
-    ) == receipt
+    assert (
+        quota.release_after_deletion(WORKSPACE, charge_id=CHARGE_ID, deletion=replay)
+        == receipt
+    )
     assert quota.deletion_receipts[receipt.receipt_id] == receipt
     assert quota.charged_bytes(WORKSPACE) == 0
 
@@ -510,9 +505,7 @@ def test_unit_of_work_rolls_back_uncommitted_and_failed_transactions() -> None:
     assert repository.get_by_blob_id(WORKSPACE, BLOB_ID) == aggregate()
     assert repository.find_by_identity(aggregate().identity) == aggregate()
     assert quota.charged_bytes(WORKSPACE) == 5
-    assert tuple(outbox.messages) == (
-        (WORKSPACE, "InstallRequested", "install:1"),
-    )
+    assert tuple(outbox.messages) == ((WORKSPACE, "InstallRequested", "install:1"),)
 
 
 def test_unit_of_work_atomically_rolls_back_quota_release_and_receipt() -> None:

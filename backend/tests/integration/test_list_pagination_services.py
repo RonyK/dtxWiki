@@ -49,9 +49,7 @@ def test_ask_list_sessions_keyset_paginates_to_older_rows(session_factory):
                 actor_id=ACTOR_ID,
             )
         # Spread updated_at so the keyset order is deterministic.
-        for offset, ask_session in enumerate(
-            session.scalars(select(AskSession)).all()
-        ):
+        for offset, ask_session in enumerate(session.scalars(select(AskSession)).all()):
             ask_session.updated_at = base + timedelta(minutes=offset)
 
     with session_factory() as session:
@@ -99,9 +97,7 @@ def test_ask_list_sessions_keyset_handles_tied_updated_at(session_factory):
         seeded = session.scalars(select(AskSession)).all()
         # Same updated_at for every row; started_at ordered opposite to the id
         # sort so a started_at-based ORDER BY would diverge from the cursor.
-        for rank, ask_session in enumerate(
-            sorted(seeded, key=lambda row: row.id)
-        ):
+        for rank, ask_session in enumerate(sorted(seeded, key=lambda row: row.id)):
             ask_session.updated_at = base
             ask_session.started_at = base + timedelta(minutes=len(seeded) - rank)
         all_ids = {ask_session.id for ask_session in seeded}

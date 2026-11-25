@@ -156,9 +156,7 @@ def test_oauth_refresh_can_recover_same_mcp_session_by_stable_grant():
     _record_mcp_session_owner(state, "session-1", actor_before, "old-bearer")
 
     assert (
-        _validate_mcp_session_owner(
-            state, "session-1", actor_after, "refreshed-bearer"
-        )
+        _validate_mcp_session_owner(state, "session-1", actor_after, "refreshed-bearer")
         is None
     )
 

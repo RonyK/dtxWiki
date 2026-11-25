@@ -34,9 +34,7 @@ def _client_pair(page_service) -> tuple[TestClient, TestClient]:
 def _users_and_owner_workspace(page_service):
     with page_service.session_factory() as session:
         owner = session.scalar(select(User).where(User.email == "owner@example.com"))
-        member = session.scalar(
-            select(User).where(User.email == "member@example.com")
-        )
+        member = session.scalar(select(User).where(User.email == "member@example.com"))
         assert owner is not None and owner.default_workspace_id is not None
         assert member is not None and member.default_workspace_id is not None
         workspace = session.get(Workspace, owner.default_workspace_id)
@@ -557,15 +555,17 @@ def test_self_remove_non_default_preserves_and_reports_accessible_default(
         persisted_member = session.get(User, member.id)
         assert persisted_member is not None
         assert persisted_member.default_workspace_id == default_workspace_id
-        assert session.get(
-            WorkspaceMembership, (member.id, starter_workspace_id)
-        ) is not None
-        assert session.get(
-            WorkspaceMembership, (member.id, default_workspace_id)
-        ) is not None
-        assert session.get(
-            WorkspaceMembership, (member.id, removed_workspace.id)
-        ) is None
+        assert (
+            session.get(WorkspaceMembership, (member.id, starter_workspace_id))
+            is not None
+        )
+        assert (
+            session.get(WorkspaceMembership, (member.id, default_workspace_id))
+            is not None
+        )
+        assert (
+            session.get(WorkspaceMembership, (member.id, removed_workspace.id)) is None
+        )
 
 
 def test_self_remove_returns_null_fallback_when_no_workspace_remains(page_service):

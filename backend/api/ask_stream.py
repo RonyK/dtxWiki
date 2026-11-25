@@ -148,7 +148,7 @@ async def read_ask_stream(
         return read_service_error_response(exc)
     return StreamingResponse(
         _server_sent_events(
-            runtime.events(session_factory, workspace_id, detail, actor)
+            runtime.events(session_factory, workspace_id, detail.id, actor)
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},

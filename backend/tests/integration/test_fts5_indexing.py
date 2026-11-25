@@ -77,14 +77,18 @@ def test_context_write_projects_contextual_header_and_stripped_body(
     )
 
     with session_factory() as session:
-        row = session.execute(
-            text(
-                "SELECT context_header, body, visibility_scope "
-                "FROM search_doc_fts "
-                "WHERE source_kind = 'context_page' AND entity_id = :page_id"
-            ),
-            {"page_id": str(payload.id)},
-        ).mappings().one()
+        row = (
+            session.execute(
+                text(
+                    "SELECT context_header, body, visibility_scope "
+                    "FROM search_doc_fts "
+                    "WHERE source_kind = 'context_page' AND entity_id = :page_id"
+                ),
+                {"page_id": str(payload.id)},
+            )
+            .mappings()
+            .one()
+        )
 
     assert "Title: Quasar Operations" in row["context_header"]
     assert "Aliases: QSR Runbook" in row["context_header"]
@@ -131,10 +135,7 @@ def test_projection_write_through_rolls_back_with_page_transaction(session_facto
     with session_factory() as session:
         assert session.get(ContextPage, page_id) is None
         projected = session.scalar(
-            text(
-                "SELECT count(*) FROM search_doc_fts "
-                "WHERE entity_id = :page_id"
-            ),
+            text("SELECT count(*) FROM search_doc_fts WHERE entity_id = :page_id"),
             {"page_id": str(page_id)},
         )
     assert projected == 0
@@ -711,35 +712,44 @@ def test_delete_projection_is_safe_after_source_of_truth_was_deleted(
             source_id=library_item_id,
         )
 
-        assert session.scalar(
-            text(
-                "SELECT count(*) FROM search_doc_fts "
-                "WHERE workspace_id = :workspace_id AND entity_id IN "
-                "(:page_id, :claim_id, :item_id, :artifact_id)"
-            ),
-            {
-                "workspace_id": str(workspace_id),
-                "page_id": str(context_page_id),
-                "claim_id": str(claim_id),
-                "item_id": str(library_item_id),
-                "artifact_id": str(artifact_id),
-            },
-        ) == 0
-        assert session.scalar(
-            text(
-                "SELECT count(*) FROM page_name_trgm "
-                "WHERE workspace_id = :workspace_id AND page_id = :page_id"
-            ),
-            {"workspace_id": str(workspace_id), "page_id": str(context_page_id)},
-        ) == 0
-        assert session.scalar(
-            text(
-                "SELECT count(*) FROM search_doc_fts "
-                "WHERE workspace_id = :workspace_id "
-                "AND source_kind = 'context_claim' AND entity_id = :claim_id"
-            ),
-            {"workspace_id": str(workspace_id), "claim_id": str(valid_claim.id)},
-        ) == 1
+        assert (
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM search_doc_fts "
+                    "WHERE workspace_id = :workspace_id AND entity_id IN "
+                    "(:page_id, :claim_id, :item_id, :artifact_id)"
+                ),
+                {
+                    "workspace_id": str(workspace_id),
+                    "page_id": str(context_page_id),
+                    "claim_id": str(claim_id),
+                    "item_id": str(library_item_id),
+                    "artifact_id": str(artifact_id),
+                },
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM page_name_trgm "
+                    "WHERE workspace_id = :workspace_id AND page_id = :page_id"
+                ),
+                {"workspace_id": str(workspace_id), "page_id": str(context_page_id)},
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM search_doc_fts "
+                    "WHERE workspace_id = :workspace_id "
+                    "AND source_kind = 'context_claim' AND entity_id = :claim_id"
+                ),
+                {"workspace_id": str(workspace_id), "claim_id": str(valid_claim.id)},
+            )
+            == 1
+        )
 
 
 def test_hydration_rejects_archived_page_even_when_fts_row_is_stale(

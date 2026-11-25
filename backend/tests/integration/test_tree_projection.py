@@ -301,11 +301,15 @@ def test_tree_payload_batches_target_metadata(session_factory, page_service):
 
     with session_factory() as session:
         workspace_id = _workspace_id(session)
-        nodes = TreeReadService().list_tree_data(
-            session=session,
-            workspace_id=workspace_id,
-            actor=_actor("owner"),
-        ).nodes
+        nodes = (
+            TreeReadService()
+            .list_tree_data(
+                session=session,
+                workspace_id=workspace_id,
+                actor=_actor("owner"),
+            )
+            .nodes
+        )
     by_target = {node.target_id: node for node in nodes if node.target_id}
     assert by_target[context.id].target_meta == {
         "page_type": "overview",

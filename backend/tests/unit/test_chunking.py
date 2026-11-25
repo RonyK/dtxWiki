@@ -22,8 +22,7 @@ _LEGACY_GOLDENS = [
         "name": "preamble_only_unicode_title",
         "title": "\ubb38\uc11c: Caf\u00e9 \u2014 v1!",
         "raw_body": (
-            "Opening caf\u00e9 paragraph.\n\n"
-            "Second line with trailing spaces.  \n"
+            "Opening caf\u00e9 paragraph.\n\nSecond line with trailing spaces.  \n"
         ),
         "output": [
             {
@@ -231,9 +230,7 @@ _LEGACY_GOLDENS = [
         "name": "frontmatter_and_preamble",
         "title": "Meta",
         "raw_body": (
-            "---\ntags:\n  - beta\n---\n"
-            "Preamble after metadata.\n\n"
-            "# Heading\nBody.\n"
+            "---\ntags:\n  - beta\n---\nPreamble after metadata.\n\n# Heading\nBody.\n"
         ),
         "output": [
             {
@@ -241,10 +238,7 @@ _LEGACY_GOLDENS = [
                 "heading_path": "Meta",
                 "char_start": 0,
                 "char_end": 49,
-                "text": (
-                    "---\ntags:\n  - beta\n---\n"
-                    "Preamble after metadata.\n\n"
-                ),
+                "text": ("---\ntags:\n  - beta\n---\nPreamble after metadata.\n\n"),
                 "token_count": 8,
             },
             {
@@ -312,9 +306,7 @@ def test_chunk_markdown_matches_captured_legacy_output_byte_for_byte(golden):
     ]
     # Gate 5-6: all embedding/indexing metadata and raw normalized offsets.
     assert actual == expected
-    assert [
-        (item["char_start"], item["char_end"]) for item in actual
-    ] == [
+    assert [(item["char_start"], item["char_end"]) for item in actual] == [
         (item["char_start"], item["char_end"]) for item in expected
     ]
     # Gate 7: the complete ordered serialized structure is byte-identical.
@@ -362,8 +354,7 @@ def test_oversize_section_windows_with_overlap_and_valid_offsets():
     # Consecutive chunks overlap (next starts before previous end).
     ordered = sorted(chunks, key=lambda c: c.char_start)
     assert any(
-        ordered[i + 1].char_start < ordered[i].char_end
-        for i in range(len(ordered) - 1)
+        ordered[i + 1].char_start < ordered[i].char_end for i in range(len(ordered) - 1)
     )
 
 

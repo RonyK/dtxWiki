@@ -99,6 +99,8 @@ def _jpeg_with_frame(**overrides: int) -> bytes:
     if "components" in overrides:
         payload[frame + 5] = overrides["components"]
     return bytes(payload)
+
+
 _CONTENT_TYPES = (
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
     '  <Override PartName="/word/document.xml" ContentType="application/vnd.'
@@ -436,9 +438,7 @@ def _minimal_mp4(codec: bytes = b"avc1") -> bytes:
     handler = _mp4_box(b"hdlr", b"\0" * 8 + b"vide" + b"\0" * 4)
     assert len(codec) == 4
     sample = (16).to_bytes(4, "big") + codec + b"\0" * 8
-    sample_table = _mp4_box(
-        b"stsd", b"\0" * 4 + (1).to_bytes(4, "big") + sample
-    )
+    sample_table = _mp4_box(b"stsd", b"\0" * 4 + (1).to_bytes(4, "big") + sample)
     track = _mp4_box(
         b"trak",
         _mp4_box(
@@ -1865,9 +1865,7 @@ def test_ooxml_admission_rejects_unreferenced_xml_structure_limits(
         )
 
     assert raised.value.code == "library_container_limit"
-    assert str(raised.value) == (
-        "A document XML component exceeds the safety limit."
-    )
+    assert str(raised.value) == ("A document XML component exceeds the safety limit.")
 
 
 def test_ooxml_admission_rejects_oversized_unreferenced_xml_part(
@@ -1893,9 +1891,7 @@ def test_ooxml_admission_rejects_oversized_unreferenced_xml_part(
         )
 
     assert raised.value.code == "library_container_limit"
-    assert str(raised.value) == (
-        "A document XML component exceeds the safety limit."
-    )
+    assert str(raised.value) == ("A document XML component exceeds the safety limit.")
 
 
 @pytest.mark.parametrize("budget", ["bytes", "nodes"])

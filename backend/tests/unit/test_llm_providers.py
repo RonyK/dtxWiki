@@ -1112,7 +1112,7 @@ def test_responses_websocket_steer_starts_a_new_response_and_keeps_unsent_input(
             frame("response.completed", "r2"),
         ]
     )
-    sent, deltas, updates = [], [], []
+    sent, timeline = [], []
     waiting = deque([SteerInput("s1", "be brief")])
     more = asyncio.Event()
 
@@ -1130,27 +1130,32 @@ def test_responses_websocket_steer_starts_a_new_response_and_keeps_unsent_input(
         return waiting[0]
 
     async def on_steer(update):
-        updates.append((update.id, update.status))
+        timeline.append((update.id, update.status))
         if update.status == "sent":
             waiting.popleft()
 
     async def on_delta(text):
-        deltas.append(text)
+        timeline.append(("delta", text))
         if text == "Revised.":
             # Ready in the same step as the response's terminal event.
             waiting.append(SteerInput("s2", "and cite"))
             more.set()
 
     def response_result(response, _response_id):
-        return CanonicalTextResult(text=deltas[-1], termination="completed")
+        return CanonicalTextResult(text=timeline[-1][1], termination="completed")
 
     run = _Run(5, response_result, on_delta, next_steer, on_steer)
     result = asyncio.run(run.receive(Socket(), {"model": "m"}))
 
     assert result.text == "Revised."
     assert sent == ["response.create", "response.steer"]
-    # The applied steer marks where the replacing response's text begins.
-    assert updates == [("s1", "sent"), ("s1", "accepted"), ("s1", "applied")]
-    assert deltas == ["Draft. ", "Revised."]
+    # The applied steer comes before the replacing response's text.
+    assert timeline == [
+        ("delta", "Draft. "),
+        ("s1", "sent"),
+        ("s1", "accepted"),
+        ("s1", "applied"),
+        ("delta", "Revised."),
+    ]
     # The terminal event won; the later instruction was never sent and stays.
     assert [steer.id for steer in waiting] == ["s2"]

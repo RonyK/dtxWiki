@@ -232,7 +232,7 @@ class AskRuntime:
         self,
         factory: SessionFactory,
         workspace_id: UUID,
-        initial: AskTurnDetail,
+        turn_id: UUID,
         actor: ActorContext,
     ) -> AsyncIterator[AskTurnEvent]:
         """Follow one turn for a subscriber authorized when the stream opened.
@@ -242,11 +242,15 @@ class AskRuntime:
         evidence it is written from.
         """
 
-        yield AskTurnState(initial)
-        job = self._jobs.get(initial.id)
-        if job is None or initial.status not in _LIVE:
+        # Taken before the first read, so a change after it is not missed.
+        job = self._jobs.get(turn_id)
+        seen_version = job.state_version if job is not None else 0
+        detail = await run_in_threadpool(
+            self.get_turn, factory, workspace_id, turn_id, actor
+        )
+        yield AskTurnState(detail)
+        if job is None or detail.status not in _LIVE:
             return
-        seen_version = job.state_version
         can_read: bool | None = None
         sent_epoch: int | None = None
         sent_length = 0
@@ -256,7 +260,7 @@ class AskRuntime:
             if finished or job.state_version != seen_version:
                 seen_version = job.state_version
                 detail = await run_in_threadpool(
-                    self.get_turn, factory, workspace_id, initial.id, actor
+                    self.get_turn, factory, workspace_id, turn_id, actor
                 )
                 yield AskTurnState(detail)
                 if finished or detail.status not in _LIVE:
@@ -321,9 +325,9 @@ class AskRuntime:
         replace_turn_id: UUID | None,
     ) -> tuple[AskTurnDetail, _Job | None]:
         async with self._write:
-            replaced = None
-            if replace_turn_id is not None:
-                replaced = self._running_job(replace_turn_id, actor)
+            replaced = (
+                self._jobs.get(replace_turn_id) if replace_turn_id is not None else None
+            )
             detail, created = await run_in_threadpool(
                 self._store_question,
                 factory,
@@ -331,6 +335,7 @@ class AskRuntime:
                 session_id,
                 request,
                 actor,
+                replace_turn_id,
                 replaced,
             )
             if not created:
@@ -360,8 +365,11 @@ class AskRuntime:
         session_id: UUID,
         request: AskQuestion,
         actor: ActorContext,
+        replace_turn_id: UUID | None,
         replaced: _Job | None,
     ) -> tuple[AskTurnDetail, bool]:
+        """Store a new question; a resubmission returns the stored one first."""
+
         with factory.begin() as session:
             acquire_workspace_write_intent(session)
             ask_session = session.scalar(
@@ -386,7 +394,8 @@ class AskRuntime:
                         False,
                     )
             earlier_text = None
-            if replaced is not None:
+            if replace_turn_id is not None:
+                replaced = _controllable(replaced, actor, running=True)
                 target = self._turn(session, workspace_id, replaced.turn_id)
                 if target.ask_session_id != session_id or not _running(target):
                     raise _turn_changed()
@@ -405,7 +414,7 @@ class AskRuntime:
                 actor_id=actor.actor_id,
                 previous_user_message=earlier_text,
             )
-            if replaced is not None:
+            if replace_turn_id is not None:
                 # Take the stopped turn's slot in the same transaction, before
                 # the worker picks the next queued question.
                 self._turn(session, workspace_id, turn_id).started_at = datetime.now(
@@ -422,7 +431,7 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         async with self._write:
-            job = self._owned_job(turn_id, actor)
+            job = _controllable(self._jobs.get(turn_id), actor, running=False)
             detail = await run_in_threadpool(
                 self._store_stop, factory, workspace_id, turn_id, actor
             )
@@ -437,7 +446,10 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         with factory.begin() as session:
-            self._mark_stopped(self._locked_turn(session, workspace_id, turn_id))
+            turn = self._locked_turn(session, workspace_id, turn_id)
+            if turn.status != ASK_TURN_PENDING:
+                raise _turn_changed()
+            self._mark_stopped(turn)
             session.flush()
             return self.service.get_turn(session, workspace_id, turn_id, actor)
 
@@ -450,7 +462,7 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         async with self._write:
-            job = self._running_job(turn_id, actor)
+            job = _controllable(self._jobs.get(turn_id), actor, running=True)
             detail, created = await run_in_threadpool(
                 self._store_steer, factory, workspace_id, turn_id, request, actor
             )
@@ -491,25 +503,6 @@ class AskRuntime:
             ]
             session.flush()
             return self.service.get_turn(session, workspace_id, turn_id, actor), True
-
-    def _owned_job(self, turn_id: UUID, actor: ActorContext) -> _Job:
-        """The queued or running job of ``turn_id``, if ``actor`` asked it."""
-
-        job = self._jobs.get(turn_id)
-        if job is None:
-            raise _turn_changed()
-        if not job.owned_by(actor):
-            raise RejectedByPolicyError(
-                "only the person who asked can change this Ask turn",
-                error_code="ask_turn_not_yours",
-            )
-        return job
-
-    def _running_job(self, turn_id: UUID, actor: ActorContext) -> _Job:
-        job = self._owned_job(turn_id, actor)
-        if job.task is None:
-            raise _turn_changed()
-        return job
 
     def _cancel(self, job: _Job) -> None:
         if job.task is not None:
@@ -721,14 +714,15 @@ class AskRuntime:
     async def _on_steer(self, job: _Job, update: SteerUpdate) -> None:
         if update.status == "sent" and job.steering and job.steering[0].id == update.id:
             job.steering.popleft()
+        if update.status not in _STORED_STEER_STATES:
+            return
+        await run_in_threadpool(self._store_steer_status, job, update)
         if update.status == "applied":
             # The model continues in a new response; its text replaces the
             # provisional answer shown so far.
             job.preview = ""
             job.preview_epoch += 1
-        if update.status in _STORED_STEER_STATES:
-            await run_in_threadpool(self._store_steer_status, job, update)
-            job.state_changed()
+        job.state_changed()
 
     def _store_steer_status(self, job: _Job, update: SteerUpdate) -> None:
         with job.factory.begin() as session:
@@ -794,6 +788,19 @@ def _person(actor: ActorContext) -> tuple[str, str]:
     if actor.user_id is not None:
         return ("user", str(actor.user_id))
     return (actor.actor_kind, actor.actor_id)
+
+
+def _controllable(job: _Job | None, actor: ActorContext, *, running: bool) -> _Job:
+    """The job ``actor`` may change: their own, queued or (``running``) started."""
+
+    if job is None or (running and job.task is None):
+        raise _turn_changed()
+    if not job.owned_by(actor):
+        raise RejectedByPolicyError(
+            "only the person who asked can change this Ask turn",
+            error_code="ask_turn_not_yours",
+        )
+    return job
 
 
 def _running(turn: AskTurn) -> bool:
