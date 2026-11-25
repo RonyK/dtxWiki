@@ -317,6 +317,7 @@ dependencies = [
     { name = "tomlkit" },
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -364,6 +365,7 @@ requires-dist = [
     { name = "tomlkit", specifier = ">=0.13" },
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "websockets", specifier = ">=16,<17" },
 ]
 provides-extras = ["dev", "desktop"]
 

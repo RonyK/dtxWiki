@@ -48,6 +48,7 @@ CONSTRAINED_REVISIONS = frozenset(
         "002398e0fcdc",
         "dafc5339b3b1",
         "916a6162b789",
+        "837a0fa25ed1",
     }
 )
 SUPPORTED = CONSTRAINED_REVISIONS | frozenset(
@@ -65,6 +66,7 @@ _OPTIONAL_NATIVE_EMAIL_REVISIONS = frozenset(
         "002398e0fcdc",
         "dafc5339b3b1",
         "916a6162b789",
+        "837a0fa25ed1",
     }
 )
 FIELDS = {

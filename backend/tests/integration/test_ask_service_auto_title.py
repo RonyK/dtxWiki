@@ -364,13 +364,14 @@ def test_ask_auto_title_preserves_user_supplied_title(session_factory, monkeypat
             actor_id=ACTOR_ID,
         )
         original_lock = service._lock_session_for_turn_insert
-        locked_session_ids = []
+        locked_sessions = []
 
-        def tracked_lock(*, session, ask_session_id):
-            locked_session_ids.append(ask_session_id)
+        def tracked_lock(*, session, ask_session_id, workspace_id):
+            locked_sessions.append((workspace_id, ask_session_id))
             return original_lock(
                 session=session,
                 ask_session_id=ask_session_id,
+                workspace_id=workspace_id,
             )
 
         monkeypatch.setattr(
@@ -392,7 +393,7 @@ def test_ask_auto_title_preserves_user_supplied_title(session_factory, monkeypat
         assert ask_session is not None
         assert ask_session.title == "Incident analysis"
         assert ask_session.title_user_edited is True
-        assert set(locked_session_ids) == {detail.id}
+        assert set(locked_sessions) == {(workspace.id, detail.id)}
 
 
 def test_ask_auto_title_uses_topic_anchor_when_context_anchor_absent(session_factory):

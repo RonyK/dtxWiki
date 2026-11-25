@@ -15,15 +15,18 @@ from typing import Any
 from backend.llm.adapters._shared import (
     NO_CONFIG_SCHEMA,
     BuiltinAdapterFactory,
+    _stream_error,
     api_key_schema,
     count,
     mapping,
+    open_json_events,
     post_json_object,
     sequence,
     termination,
     text_of,
 )
 from backend.llm.adapters.openai_errors import refine_openai_error
+from backend.llm.streaming import OnDelta
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
@@ -94,6 +97,75 @@ class ChatCompletionsAdapter:
             usage=_usage(mapping(body.get("usage"))),
             provider_request_id=reply.request_id,
         )
+
+    async def stream(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
+    ) -> CanonicalTextResult:
+        api_key = self._connection.credential.get("api_key")
+        payload = {**self._payload(request), "stream": True}
+        # Include final token counts on OpenAI proper. Compatible servers vary
+        # in whether they implement the optional stream_options field.
+        official = self._dialect.output_budget_field == "max_completion_tokens"
+        if official:
+            payload["stream_options"] = {"include_usage": True}
+        text: list[str] = []
+        reported: Termination = "unknown"
+        model = None
+        usage = TokenUsage()
+        refused = False
+        requested_tool = False
+        saw_done = False
+        async with open_json_events(
+            self._transport,
+            f"{self._connection.base_url}/chat/completions",
+            headers={"authorization": f"Bearer {api_key}"} if api_key else {},
+            payload=payload,
+            context=context,
+            request_id_header="x-request-id",
+            refine_error=refine_openai_error,
+        ) as (events, request_id):
+            async for event in events:
+                if event is None:
+                    saw_done = True
+                    break
+                if "error" in event:
+                    raise LLMAdapterError(
+                        refine_openai_error(mapping(event.get("error")))
+                        or "provider_error",
+                        delivery="sent",
+                        provider_request_id=request_id,
+                    )
+                model = text_of(event.get("model")) or model
+                if isinstance(event.get("usage"), Mapping):
+                    usage = _usage(mapping(event["usage"]))
+                choice = mapping(next(iter(sequence(event.get("choices"))), None))
+                delta = mapping(choice.get("delta"))
+                refused = refused or bool(text_of(delta.get("refusal")))
+                requested_tool = requested_tool or bool(
+                    delta.get("tool_calls") or delta.get("function_call")
+                )
+                piece = text_of(delta.get("content"))
+                if piece:
+                    text.append(piece)
+                    await on_delta(piece)
+                reported = _TERMINATIONS.get(
+                    text_of(choice.get("finish_reason")), reported
+                )
+            if reported == "unknown" or (official and not saw_done):
+                raise _stream_error(request_id)
+            return CanonicalTextResult(
+                text="".join(text),
+                termination=termination(
+                    reported, refused=refused, tool_request=requested_tool
+                ),
+                model=model,
+                usage=usage,
+                provider_request_id=request_id,
+            )
 
     def _payload(self, request: CanonicalTextRequest) -> dict[str, object]:
         messages = (

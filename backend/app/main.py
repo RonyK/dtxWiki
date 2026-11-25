@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.api.admin import router as admin_router
 from backend.api.agent_bundles import router as agent_bundles_router
+from backend.api.ask_stream import router as ask_stream_router
 from backend.api.auth import router as auth_router
 from backend.api.auth_sso import capabilities_router
 from backend.api.auth_sso import router as auth_sso_router
@@ -179,11 +180,15 @@ async def _mcp_lifespan(app: FastAPI):
     scoped manager is created and entered via ``manager.run()``.
     """
     manager = install_mcp_session_manager(app)
-    if manager is None:
-        yield
-        return
-    async with manager.run():
-        yield
+    async with AsyncExitStack() as stack:
+        if manager is not None:
+            await stack.enter_async_context(manager.run())
+        try:
+            yield
+        finally:
+            runtime = vars(app.state.container).get("ask_runtime")
+            if runtime is not None:
+                await runtime.close()
 
 
 def _compose_lifespan(extra_lifespan, plugin_registry=None):
@@ -405,6 +410,7 @@ def create_app(
     include_shared_router(app, library_preview_router, prefix="/api/v1")
     include_shared_router(app, library_semantic_router, prefix="/api/v1")
     include_shared_router(app, read_router, prefix="/api/v1")
+    include_shared_router(app, ask_stream_router, prefix="/api/v1")
     include_shared_router(app, mcp_apps_router, prefix="/api/v1")
     include_shared_router(app, graph_router, prefix="/api/v1")
     include_shared_router(app, link_preview_router, prefix="/api/v1")

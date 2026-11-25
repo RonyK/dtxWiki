@@ -1294,6 +1294,24 @@ class AppContainer:
             )
         return self.ask_service
 
+    @cached_property
+    def ask_connections(self):
+        from backend.services.ask_connection_service import AskConnectionService
+
+        return AskConnectionService(
+            self.services.llm_connections, self.services.llm_adapter_registry
+        )
+
+    @cached_property
+    def ask_runtime(self):
+        from backend.services.ask_runtime import AskRuntime
+
+        return AskRuntime(
+            self.get_ask_service(),
+            self.ask_connections,
+            self.db.control_session_factory,
+        )
+
     def get_services(self) -> ServiceRegistry:
         # Tool handlers receive the registry through ToolCallContext. Stamp the
         # exact assembled Settings instance so injected providers never fall

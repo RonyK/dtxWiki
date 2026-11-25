@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -15,9 +16,21 @@ from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
 _PARENT = "dafc5339b3b1"
-_REVISION = "916a6162b789"
-_NEW_COLUMNS = {"status", "error_code", "input_evidence", "generation"}
+_STATUS_REVISION = "916a6162b789"
+_REVISION = "837a0fa25ed1"
+_NEW_COLUMNS = {
+    "status",
+    "error_code",
+    "input_evidence",
+    "generation",
+    "started_at",
+    "request_id",
+    "selection",
+    "steering_messages",
+    "steer_supported",
+}
 _PENDING_INDEX = "uq_ask_turn_session_pending"
+_REQUEST_INDEX = "uq_ask_turn_request"
 
 
 @pytest.mark.release_migration
@@ -97,42 +110,83 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
                 )
             )
 
+        command.upgrade(config, _STATUS_REVISION)
+        active_id = uuid4()
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO ask_turn (id, created_at, workspace_id, "
+                    "ask_session_id, turn_no, user_message, topic_tags, "
+                    "promotion_state, status) "
+                    "VALUES (:id, CURRENT_TIMESTAMP, :workspace_id, :ask_session_id, "
+                    "2, 'Active question', '[]', 'not_promoted', 'pending')"
+                ).bindparams(
+                    sa.bindparam("id", active_id, type_=sa.Uuid()),
+                    sa.bindparam("workspace_id", workspace_id, type_=sa.Uuid()),
+                    sa.bindparam("ask_session_id", ask_session_id, type_=sa.Uuid()),
+                )
+            )
         command.upgrade(config, _REVISION)
         assert ask_turn_columns() == parent_columns | _NEW_COLUMNS
-        assert _PENDING_INDEX in ask_turn_indexes()
-        with Session(engine) as session:
+        assert {_PENDING_INDEX, _REQUEST_INDEX} <= ask_turn_indexes()
+        with Session(engine) as session, session.begin():
             old = session.get(AskTurn, old_turn_id)
             # An existing turn is a complete answer with no evidence record:
             # NULL, not JSON null, so it reads as an older turn.
             assert (old.status, old.error_code) == ("completed", None)
             assert (old.input_evidence, old.generation) == (None, None)
             assert stored_turn() == ("Old question", "Old answer")
+            active = session.get(AskTurn, active_id)
+            assert active.started_at == active.created_at
+            assert active.steering_messages == [] and not active.steer_supported
 
-            def add_turn(turn_no, status):
-                session.add(
-                    AskTurn(
-                        workspace_id=workspace_id,
-                        ask_session_id=ask_session_id,
-                        turn_no=turn_no,
-                        user_message=f"Question {turn_no}",
-                        status=status,
-                    )
+            def add_turn(turn_no, status, *, started_at=None, request_id=None):
+                turn = AskTurn(
+                    workspace_id=workspace_id,
+                    ask_session_id=ask_session_id,
+                    turn_no=turn_no,
+                    user_message=f"Question {turn_no}",
+                    status=status,
+                    started_at=started_at,
+                    request_id=request_id,
                 )
+                session.add(turn)
                 session.flush()
+                return turn.id
 
-            add_turn(2, "pending")
-            add_turn(3, "failed")
+            request_id = uuid4()
+            queued_id = add_turn(3, "pending", request_id=request_id)
+            add_turn(4, "pending")
             # SQLite names the column, PostgreSQL the index.
-            with pytest.raises(
-                sa.exc.DBAPIError,
-                match=rf"{_PENDING_INDEX}|ask_turn\.ask_session_id",
+            with (
+                pytest.raises(
+                    sa.exc.DBAPIError,
+                    match=rf"{_PENDING_INDEX}|ask_turn\.ask_session_id",
+                ),
+                session.begin_nested(),
             ):
-                add_turn(4, "pending")
-            session.rollback()
-            with pytest.raises(sa.exc.DBAPIError, match="ck_ask_turn_status"):
-                add_turn(4, "pendng")
-            session.rollback()
+                add_turn(5, "pending", started_at=datetime.now(UTC))
+            with (
+                pytest.raises(
+                    sa.exc.DBAPIError, match=rf"{_REQUEST_INDEX}|ask_turn\.request_id"
+                ),
+                session.begin_nested(),
+            ):
+                add_turn(5, "pending", request_id=request_id)
+            with (
+                pytest.raises(sa.exc.DBAPIError, match="ck_ask_turn_status"),
+                session.begin_nested(),
+            ):
+                add_turn(5, "pendng")
 
+        command.downgrade(config, _STATUS_REVISION)
+        with engine.connect() as connection:
+            assert connection.execute(
+                sa.text(
+                    "SELECT status, error_code FROM ask_turn WHERE id = :id"
+                ).bindparams(sa.bindparam("id", queued_id, type_=sa.Uuid()))
+            ).one() == ("failed", "server_restarted")
+        assert _REQUEST_INDEX not in ask_turn_indexes()
         command.downgrade(config, _PARENT)
         assert ask_turn_columns() == parent_columns
         assert _PENDING_INDEX not in ask_turn_indexes()

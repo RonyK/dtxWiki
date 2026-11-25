@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -19,6 +20,7 @@ from backend.domain.input_policy import (
     normalize_ask_user_message,
 )
 from backend.llm.generation import TextGenerator
+from backend.llm.streaming import SteerInput, SteerUpdate, generate_stream
 from backend.models.ask import (
     ASK_TURN_COMPLETED,
     ASK_TURN_FAILED,
@@ -34,7 +36,7 @@ from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVers
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
-from backend.repositories.workspace_scoped import get_in_workspace
+from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
 from backend.schemas.ask import (
     AskSessionCreate,
     AskSessionDetail,
@@ -50,6 +52,7 @@ from backend.services.actor_visible_read import (
     context_page_visible,
     context_version_is_visible,
 )
+from backend.services.ask_connection_service import AskGenerationBinding
 from backend.services.audit_service import AuditService
 from backend.services.context_link_targets import ask_context_link_targets
 from backend.services.coverage_service import record_coverage_gap, resolve_coverage_gap
@@ -77,7 +80,14 @@ from backend.services.tree_service import (
     create_tree_node,
     resolve_tree_parent,
 )
-from backend.spi.llm import LLMAdapterError, TextMessage, TokenUsage
+from backend.spi.llm import (
+    CanonicalTextRequest,
+    CanonicalTextResult,
+    ExecutionContext,
+    LLMAdapterError,
+    TextMessage,
+    TokenUsage,
+)
 from backend.utils.uuid import parse_uuid_or_none
 
 USER_MESSAGE_MAX_CHARS = 8000
@@ -163,6 +173,16 @@ ASK_TURN_INTERNAL_ERROR = "internal_error"
 ASK_TURN_ACCESS_REVOKED = "access_revoked"
 ASK_TURN_EVIDENCE_UNAVAILABLE = "evidence_unavailable"
 ASK_TURN_SERVER_RESTARTED = "server_restarted"
+ASK_MODEL_ERROR_CODES = frozenset(
+    {
+        LLM_PROVIDER_UNAVAILABLE_WARNING,
+        LLM_COMPOSER_RETRYABLE_WARNING,
+        LLM_ANSWER_INCOMPLETE_WARNING,
+        LLM_ANSWER_REFUSED_WARNING,
+    }
+)
+_MODEL_NETWORK_TIMEOUT_SECONDS = 120.0
+_MODEL_DEADLINE_SECONDS = 180.0
 logger = logging.getLogger(__name__)
 
 
@@ -274,6 +294,64 @@ def _evidence_pack_heading(language: str) -> str:
     )
 
 
+def _pack_text(retrieved: RetrievedEvidence) -> str:
+    return "\n".join((_evidence_pack_heading(retrieved.language), *retrieved.pack))
+
+
+def _composer_messages(
+    prepared: PreparedTurn, pack_text: str
+) -> tuple[TextMessage, ...]:
+    messages = [
+        message
+        for asked, answered in prepared.history
+        for message in (
+            TextMessage(role="user", text=asked),
+            TextMessage(role="assistant", text=answered),
+        )
+    ]
+    messages.append(
+        TextMessage(
+            role="user", text=f"{prepared.question}\n\n[Evidence pack]\n{pack_text}"
+        )
+    )
+    return tuple(messages)
+
+
+def _generation_record(
+    result: CanonicalTextResult, target: dict[str, str] | None, outcome: str
+) -> dict[str, Any]:
+    return {
+        "target": target,
+        "outcome": outcome,
+        "model": result.model,
+        "usage": _usage_record(result.usage),
+        "provider_request_id": result.provider_request_id,
+    }
+
+
+def _history_within_context(
+    history: tuple[tuple[str, str, AskEvidence], ...],
+    question: str,
+    retrieved: RetrievedEvidence,
+    binding: AskGenerationBinding,
+) -> tuple[tuple[str, str, AskEvidence], ...]:
+    """Use UTF-8 size as a conservative estimate for optional history."""
+    assert binding.context_window is not None
+    remaining = (
+        binding.context_window
+        - binding.max_output_tokens
+        - len((_COMPOSER_SYSTEM + question + _pack_text(retrieved)).encode("utf-8"))
+        - 128  # Message framing and provider-specific formatting.
+    )
+    start = len(history)
+    for asked, answered, _evidence in reversed(history):
+        remaining -= len(asked.encode("utf-8")) + len(answered.encode("utf-8")) + 16
+        if remaining < 0:
+            break
+        start -= 1
+    return history[start:]
+
+
 def _no_evidence_answer(language: str) -> str:
     return (
         "일치하는 Context 또는 Library 근거를 찾지 못했습니다."
@@ -293,21 +371,35 @@ def fail_interrupted_ask_turns(session_factory: sessionmaker[Session]) -> int:
 
     with session_factory.begin() as session:
         acquire_workspace_write_intent(session)
-        ended = session.execute(
+        pending = session.scalars(
             update(AskTurn)
             .where(AskTurn.status == ASK_TURN_PENDING)
             .values(status=ASK_TURN_FAILED, error_code=ASK_TURN_SERVER_RESTARTED)
-            .execution_options(synchronize_session=False)
-        ).rowcount
+            .returning(AskTurn)
+        ).all()
+        for turn in pending:
+            if any(
+                message["status"] == "waiting" for message in turn.steering_messages
+            ):
+                turn.steering_messages = [
+                    {**message, "status": "unknown"}
+                    if message["status"] == "waiting"
+                    else message
+                    for message in turn.steering_messages
+                ]
+        ended = len(pending)
     if ended:
         logger.warning("Ended %d Ask turns interrupted by a server restart", ended)
     return ended
 
 
-def ask_session_for_turn_insert_statement(ask_session_id: UUID):
+def ask_session_for_turn_insert_statement(ask_session_id: UUID, workspace_id: UUID):
     return (
-        select(AskSession)
-        .where(AskSession.id == ask_session_id)
+        select_in_workspace(
+            AskSession,
+            workspace_id=workspace_id,
+            criteria=(AskSession.id == ask_session_id,),
+        )
         .with_for_update()
         .execution_options(populate_existing=True)
     )
@@ -318,6 +410,15 @@ class AskAccessRevokedError(Exception):
 
     The cause is the original authentication or policy refusal.
     """
+
+
+class AskGenerationError(RuntimeError):
+    """A selected model failed. The original question may be searched again."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+        self.error_code = code
 
 
 class InvalidUserMessageError(ValueError):
@@ -608,11 +709,16 @@ class AskService:
         request: AskTurnCreate,
         actor_kind: str,
         actor_id: str,
+        queued: bool = False,
+        steer_supported: bool = False,
+        previous_user_message: str | None = None,
     ) -> UUID:
         """Store the question as a ``pending`` turn and return its id."""
 
         validate_request_inputs(request)
         question = _validate_user_message(request.user_message)
+        if previous_user_message:
+            question = f"{previous_user_message}\n\n{question}"
         # The session row lock orders every turn write in the session: one
         # question at a time, and turn_no allocation without collisions. On
         # SQLite the writer lock comes first, before the guarded read.
@@ -620,23 +726,25 @@ class AskService:
         ask_session = self._lock_session_for_turn_insert(
             session=session,
             ask_session_id=ask_session_id,
+            workspace_id=workspace_id,
         )
-        if ask_session is None or ask_session.workspace_id != workspace_id:
+        if ask_session is None:
             raise ReadNotFoundError("ask session not found")
-        pending = session.scalar(
-            select(AskTurn.id)
-            .where(
-                AskTurn.workspace_id == workspace_id,
-                AskTurn.ask_session_id == ask_session.id,
-                AskTurn.status == ASK_TURN_PENDING,
+        if not queued:
+            pending = session.scalar(
+                select(AskTurn.id)
+                .where(
+                    AskTurn.workspace_id == workspace_id,
+                    AskTurn.ask_session_id == ask_session.id,
+                    AskTurn.status == ASK_TURN_PENDING,
+                )
+                .limit(1)
             )
-            .limit(1)
-        )
-        if pending is not None:
-            raise RejectedByPolicyError(
-                "another question in this session is still being answered",
-                error_code="ask_turn_in_progress",
-            )
+            if pending is not None:
+                raise RejectedByPolicyError(
+                    "another question in this session is still being answered",
+                    error_code="ask_turn_in_progress",
+                )
         latest = session.execute(
             select(AskTurn.id, AskTurn.turn_no)
             .where(
@@ -646,8 +754,9 @@ class AskService:
             .order_by(AskTurn.turn_no.desc())
             .limit(1)
         ).first()
-        if "after_turn_id" in request.model_fields_set and request.after_turn_id != (
-            latest.id if latest is not None else None
+        if (
+            "after_turn_id" in request.model_fields_set
+            and request.after_turn_id != (latest.id if latest is not None else None)
         ):
             raise RejectedByPolicyError(
                 "the session has turns this question was not asked after",
@@ -660,6 +769,14 @@ class AskService:
             user_message=question,
             assistant_message=None,
             status=ASK_TURN_PENDING,
+            started_at=None if queued else datetime.now(UTC),
+            request_id=request.request_id,
+            selection=(
+                request.selection.model_dump(mode="json")
+                if request.selection is not None
+                else None
+            ),
+            steer_supported=steer_supported,
             topic_tags=ask_session.default_topic_tags,
             recommended_placement_tree_node_id=(
                 ask_session.default_context_parent_tree_node_id
@@ -687,6 +804,10 @@ class AskService:
         workspace_id: UUID,
         turn_id: UUID,
         actor: ActorContext | None = None,
+        *,
+        binding: AskGenerationBinding | None = None,
+        keyword_only: bool = False,
+        use_legacy_provider: bool = True,
     ) -> PreparedTurn:
         """Find this question's evidence and the earlier turns to show."""
 
@@ -696,13 +817,27 @@ class AskService:
         if turn is None:
             raise ReadNotFoundError("ask turn not found")
         question = turn.user_message or ""
-        retrieved = self._retrieve(session, workspace_id, question, actor)
+        retrieved = self._retrieve(
+            session, workspace_id, question, actor, keyword_only=keyword_only
+        )
         # Earlier turns only matter when a model is asked.
+        use_model = binding is not None or (
+            use_legacy_provider and self.provider is not None
+        )
         history = (
-            self._history(session, workspace_id, turn, actor)
-            if self.provider is not None and retrieved.pack
+            self._history(
+                session,
+                workspace_id,
+                turn,
+                actor,
+                target=binding.target if binding is not None else self.provider_target,
+                generated_only=binding is not None,
+            )
+            if use_model and retrieved.pack
             else ()
         )
+        if binding is not None and binding.context_window is not None:
+            history = _history_within_context(history, question, retrieved, binding)
         evidence = retrieved.evidence
         for _question, _answer, earlier in history:
             evidence = evidence.union(earlier)
@@ -713,6 +848,70 @@ class AskService:
             retrieved=retrieved,
             history=tuple((asked, answered) for asked, answered, _ in history),
             evidence=evidence,
+        )
+
+    @staticmethod
+    def compose_evidence(prepared: PreparedTurn) -> ComposedTurn:
+        """Compose a local search result without an LLM generation call."""
+        retrieved = prepared.retrieved
+        return ComposedTurn(
+            answer=(
+                _pack_text(retrieved)
+                if retrieved.pack
+                else _no_evidence_answer(retrieved.language)
+            ),
+            warnings=retrieved.warnings,
+            generation={
+                "target": None,
+                "outcome": "evidence_pack" if retrieved.pack else "no_evidence",
+            },
+        )
+
+    async def stream_turn(
+        self,
+        prepared: PreparedTurn,
+        binding: AskGenerationBinding | None,
+        *,
+        on_delta: Callable[[str], Awaitable[None]],
+        next_steer: Callable[[], Awaitable[SteerInput]] | None = None,
+        on_steer: Callable[[SteerUpdate], Awaitable[None]] | None = None,
+    ) -> ComposedTurn:
+        """Run the selected model, streaming only provisional text."""
+        retrieved = prepared.retrieved
+        if binding is None or not retrieved.pack:
+            return self.compose_evidence(prepared)
+        request = CanonicalTextRequest(
+            system=_COMPOSER_SYSTEM,
+            model=binding.model,
+            messages=_composer_messages(prepared, _pack_text(retrieved)),
+            max_output_tokens=binding.max_output_tokens,
+        )
+        try:
+            async with asyncio.timeout(_MODEL_DEADLINE_SECONDS):
+                result = await generate_stream(
+                    binding.port,
+                    request,
+                    ExecutionContext(timeout_seconds=_MODEL_NETWORK_TIMEOUT_SECONDS),
+                    on_delta=on_delta,
+                    next_steer=next_steer if binding.steer else None,
+                    on_steer=on_steer if binding.steer else None,
+                )
+        except TimeoutError:
+            raise AskGenerationError(LLM_COMPOSER_RETRYABLE_WARNING) from None
+        except LLMAdapterError as exc:
+            raise AskGenerationError(
+                _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING)
+            ) from None
+        if result.termination != "completed" or not result.text.strip():
+            raise AskGenerationError(
+                _TERMINATION_WARNINGS.get(
+                    result.termination, LLM_ANSWER_INCOMPLETE_WARNING
+                )
+            )
+        return ComposedTurn(
+            answer=result.text.strip(),
+            warnings=retrieved.warnings,
+            generation=_generation_record(result, binding.target, "completed"),
         )
 
     def compose_turn(self, prepared: PreparedTurn) -> ComposedTurn:
@@ -727,9 +926,7 @@ class AskService:
                 warnings=tuple(warnings),
                 generation={"target": target, "outcome": "no_evidence"},
             )
-        pack_text = "\n".join(
-            (_evidence_pack_heading(retrieved.language), *retrieved.pack)
-        )
+        pack_text = _pack_text(retrieved)
         if self.provider_unavailable_reason:
             # Configured but unbuildable provider: a persistent, operator-owned
             # condition. Disclose it instead of silently serving a different
@@ -741,24 +938,10 @@ class AskService:
                 warnings=tuple(warnings),
                 generation={"target": target, "outcome": "evidence_pack"},
             )
-        messages = [
-            message
-            for asked, answered in prepared.history
-            for message in (
-                TextMessage(role="user", text=asked),
-                TextMessage(role="assistant", text=answered),
-            )
-        ]
-        messages.append(
-            TextMessage(
-                role="user",
-                text=f"{prepared.question}\n\n[Evidence pack]\n{pack_text}",
-            )
-        )
         try:
             result = self.provider.generate(
                 system=_COMPOSER_SYSTEM,
-                messages=messages,
+                messages=_composer_messages(prepared, pack_text),
                 max_output_tokens=1024,
             )
         except LLMAdapterError as exc:
@@ -789,19 +972,13 @@ class AskService:
                 warnings=tuple(warnings),
                 generation={"target": target, "outcome": "evidence_pack"},
             )
-        record = {
-            "target": target,
-            "model": result.model,
-            "usage": _usage_record(result.usage),
-            "provider_request_id": result.provider_request_id,
-        }
         # Only a completed answer replaces the pack: truncated, refused or
         # filtered output is not an answer.
         if result.termination == "completed" and result.text.strip():
             return ComposedTurn(
                 answer=result.text.strip(),
                 warnings=tuple(warnings),
-                generation={**record, "outcome": "completed"},
+                generation=_generation_record(result, target, "completed"),
             )
         warnings.append(
             _TERMINATION_WARNINGS.get(result.termination, LLM_ANSWER_INCOMPLETE_WARNING)
@@ -809,7 +986,7 @@ class AskService:
         return ComposedTurn(
             answer=pack_text,
             warnings=tuple(warnings),
-            generation={**record, "outcome": "evidence_pack"},
+            generation=_generation_record(result, target, "evidence_pack"),
         )
 
     def finish_turn(
@@ -831,8 +1008,9 @@ class AskService:
         ask_session = self._lock_session_for_turn_insert(
             session=session,
             ask_session_id=prepared.ask_session_id,
+            workspace_id=workspace_id,
         )
-        if ask_session is None or ask_session.workspace_id != workspace_id:
+        if ask_session is None:
             raise ReadNotFoundError("ask session not found")
         if actor is not None and not ask_evidence_visible(
             session,
@@ -948,7 +1126,7 @@ class AskService:
         if ask_session_id is None:
             return False
         self._lock_session_for_turn_insert(
-            session=session, ask_session_id=ask_session_id
+            session=session, ask_session_id=ask_session_id, workspace_id=workspace_id
         )
         return self._end_pending_turn(
             session, workspace_id, turn_id, ASK_TURN_FAILED, error_code
@@ -1006,6 +1184,78 @@ class AskService:
             actor=actor,
         )
 
+    def get_turn(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        turn_id: UUID,
+        actor: ActorContext | None = None,
+    ) -> AskTurnDetail:
+        turn = get_in_workspace(
+            session, AskTurn, workspace_id=workspace_id, resource_id=turn_id
+        )
+        if turn is None:
+            raise ReadNotFoundError("ask turn not found")
+        ask_session = self._require_session(session, workspace_id, turn.ask_session_id)
+        return self._turn_detail(session, ask_session, turn, actor=actor)
+
+    def search_failed_turn(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        turn_id: UUID,
+        actor: ActorContext | None = None,
+    ) -> AskTurnDetail:
+        """Return a keyword-search preview without changing the failed turn."""
+        detail = self.get_turn(session, workspace_id, turn_id, actor)
+        if not detail.can_search:
+            raise RejectedByPolicyError(
+                "This Ask turn has no model failure to search again.",
+                error_code="ask_turn_not_completed",
+            )
+        prepared = self.prepare_turn(
+            session,
+            workspace_id,
+            turn_id,
+            actor,
+            keyword_only=True,
+            use_legacy_provider=False,
+        )
+        retrieved = prepared.retrieved
+        if not ask_evidence_visible(
+            session,
+            context_refs=retrieved.evidence.context,
+            artifact_ids=retrieved.evidence.library,
+            actor=actor,
+            workspace_id=workspace_id,
+        ):
+            raise RejectedByPolicyError(
+                "The search evidence is unavailable.",
+                error_code=ASK_TURN_EVIDENCE_UNAVAILABLE,
+            )
+        composed = self.compose_evidence(prepared)
+        warnings = [
+            code
+            for code in composed.warnings
+            if code in ASK_FORWARDABLE_WARNINGS or code in ASK_SELF_WARNINGS
+        ]
+        if retrieved.found and not retrieved.pack:
+            warnings.append("evidence_not_citable")
+        return detail.model_copy(
+            update={
+                "status": ASK_TURN_COMPLETED,
+                "assistant_message": composed.answer,
+                "cited_context_page_ids": list(retrieved.context_ids),
+                "cited_library_artifact_ids": list(retrieved.artifact_ids),
+                "retrieval_trace": list(retrieved.trace),
+                "tried_lanes": list(retrieved.tried_lanes),
+                "fallback_disclosure": retrieved.fallback,
+                "warning_codes": warnings,
+                "error_code": None,
+                "can_search": False,
+            }
+        )
+
     @staticmethod
     def _reload_turn(session: Session, workspace_id: UUID, turn_id: UUID) -> AskTurn:
         # The status was just changed by an UPDATE the identity map did not see.
@@ -1021,6 +1271,9 @@ class AskService:
         workspace_id: UUID,
         turn: AskTurn,
         actor: ActorContext | None,
+        *,
+        target: dict[str, str] | None,
+        generated_only: bool,
     ) -> tuple[tuple[str, str, AskEvidence], ...]:
         """Earlier answered turns to show the model, oldest first.
 
@@ -1031,24 +1284,36 @@ class AskService:
 
         picked: list[tuple[str, str, AskEvidence]] = []
         size = 0
-        before = turn.turn_no
+        # A replacement can run before previously reserved questions even
+        # though it was submitted later. History follows execution order.
+        executed_at = func.coalesce(AskTurn.started_at, AskTurn.created_at)
+        before = (turn.started_at or turn.created_at, turn.turn_no)
         visibility_cache: dict[tuple[str, UUID, UUID | None], bool] = {}
         while True:
             rows = session.scalars(
-                select(AskTurn)
-                .where(
-                    AskTurn.workspace_id == workspace_id,
-                    AskTurn.ask_session_id == turn.ask_session_id,
-                    AskTurn.turn_no < before,
-                    AskTurn.status == ASK_TURN_COMPLETED,
+                select_in_workspace(
+                    AskTurn,
+                    workspace_id=workspace_id,
+                    criteria=(
+                        AskTurn.ask_session_id == turn.ask_session_id,
+                        tuple_(executed_at, AskTurn.turn_no) < before,
+                        AskTurn.status == ASK_TURN_COMPLETED,
+                    ),
                 )
-                .order_by(AskTurn.turn_no.desc())
+                .order_by(executed_at.desc(), AskTurn.turn_no.desc())
                 .limit(_HISTORY_BATCH)
             ).all()
             for row in rows:
                 if row.input_evidence is None:
                     return tuple(reversed(picked))
-                if (row.generation or {}).get("target") != self.provider_target:
+                if not isinstance(row.generation, Mapping):
+                    return tuple(reversed(picked))
+                generation = row.generation
+                if generated_only and generation.get("outcome") != "completed":
+                    # A deliberate local search does not reset the conversation.
+                    # An actual answer from a different destination still does.
+                    continue
+                if generation.get("target") != target:
                     return tuple(reversed(picked))
                 evidence = AskEvidence.from_record(row.input_evidence)
                 if evidence is None or not ask_evidence_visible(
@@ -1060,7 +1325,16 @@ class AskService:
                     cache=visibility_cache,
                 ):
                     continue
-                asked = row.user_message or ""
+                asked = "\n\n".join(
+                    [
+                        row.user_message or "",
+                        *(
+                            message["user_message"]
+                            for message in (row.steering_messages or [])
+                            if message["status"] == "applied"
+                        ),
+                    ]
+                )
                 answered = row.assistant_message or ""
                 size += len(asked) + len(answered)
                 if size > ASK_HISTORY_MAX_CHARS:
@@ -1070,14 +1344,18 @@ class AskService:
                     return tuple(reversed(picked))
             if len(rows) < _HISTORY_BATCH:
                 return tuple(reversed(picked))
-            before = rows[-1].turn_no
+            last = rows[-1]
+            before = (last.started_at or last.created_at, last.turn_no)
 
     @staticmethod
     def _lock_session_for_turn_insert(
         session: Session,
         ask_session_id: UUID,
+        workspace_id: UUID,
     ) -> AskSession | None:
-        return session.scalar(ask_session_for_turn_insert_statement(ask_session_id))
+        return session.scalar(
+            ask_session_for_turn_insert_statement(ask_session_id, workspace_id)
+        )
 
     def _workspace_retrieval_mode(
         self, session: Session, workspace_id: UUID
@@ -1119,6 +1397,8 @@ class AskService:
         workspace_id: UUID,
         question: str,
         actor: ActorContext | None = None,
+        *,
+        keyword_only: bool = False,
     ) -> RetrievedEvidence:
         """Search for the question's evidence.
 
@@ -1127,9 +1407,14 @@ class AskService:
         could not be hidden later from readers who lose access to it.
         """
 
-        mode, honored = self._best_retrieval_mode(
-            self._workspace_retrieval_mode(session, workspace_id)
+        mode, honored = (
+            ("keyword", True)
+            if keyword_only
+            else self._best_retrieval_mode(
+                self._workspace_retrieval_mode(session, workspace_id)
+            )
         )
+        search_options = {"allow_rerank": False} if keyword_only else {}
         context_payload = self.search_service.search(
             session=session,
             workspace_id=workspace_id,
@@ -1139,6 +1424,7 @@ class AskService:
             limit=3,
             actor=actor,
             citable_only=True,
+            **search_options,
         )
         context = context_payload.ranked_results[:3]
         tried_lanes = list(context_payload.tried_lanes)
@@ -1161,6 +1447,7 @@ class AskService:
                 retrieval_mode=mode,
                 limit=3,
                 actor=actor,
+                **search_options,
             )
             results = library_payload.ranked_results
             nearest_candidates = [
@@ -1588,9 +1875,22 @@ class AskService:
             ),
             placement_confidence=turn.placement_confidence,
             promotion_state=turn.promotion_state,
-            status=turn.status,
+            status=(
+                "queued"
+                if turn.status == ASK_TURN_PENDING and turn.started_at is None
+                else turn.status
+            ),
             error_code=turn.error_code,
+            selection=turn.selection,
+            steer_supported=turn.steer_supported,
+            steering_messages=turn.steering_messages or [],
+            can_search=(
+                turn.status == ASK_TURN_FAILED
+                and turn.selection is not None
+                and turn.error_code in ASK_MODEL_ERROR_CODES
+            ),
             created_at=turn.created_at,
+            started_at=turn.started_at,
             tree_path=tree_path,
             retrieval_trace=retrieval_trace,
             tried_lanes=turn.tried_lanes or [],

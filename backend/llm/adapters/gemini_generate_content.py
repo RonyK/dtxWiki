@@ -9,15 +9,19 @@ from typing import Any
 from backend.llm.adapters._shared import (
     NO_CONFIG_SCHEMA,
     BuiltinAdapterFactory,
+    _error_code,
+    _stream_error,
     api_key_schema,
     count_or_zero,
     mapping,
+    open_json_events,
     post_json_object,
     sequence,
     termination,
     text_of,
     total,
 )
+from backend.llm.streaming import OnDelta
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
@@ -79,10 +83,7 @@ class GeminiGenerateContentAdapter:
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext
     ) -> CanonicalTextResult:
-        # Accept the resource name the Models API lists ("models/<id>") too.
-        model = request.model.removeprefix("models/")
-        if not _MODEL_ID.match(model):
-            raise LLMAdapterError("invalid_request", delivery="not_sent")
+        model = _model_segment(request.model)
         reply = await post_json_object(
             self._transport,
             f"{self._connection.base_url}/models/{model}:generateContent",
@@ -108,6 +109,82 @@ class GeminiGenerateContentAdapter:
             usage=_usage(body.get("usageMetadata")),
             provider_request_id=text_of(body.get("responseId")) or None,
         )
+
+    async def stream(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
+    ) -> CanonicalTextResult:
+        model = _model_segment(request.model)
+        text: list[str] = []
+        reported: Termination = "unknown"
+        model_version = None
+        response_id = None
+        usage = TokenUsage()
+        async with open_json_events(
+            self._transport,
+            f"{self._connection.base_url}/models/{model}:streamGenerateContent?alt=sse",
+            headers={"x-goog-api-key": self._connection.credential["api_key"]},
+            payload=_payload(request),
+            context=context,
+            refine_error=_refine_error,
+        ) as (events, _request_id):
+            async for event in events:
+                if event is None:
+                    break
+                response_id = text_of(event.get("responseId")) or response_id
+                if "error" in event:
+                    error = mapping(event.get("error"))
+                    code = error.get("code")
+                    raise LLMAdapterError(
+                        _error_code(
+                            code if type(code) is int else 0, error, _refine_error
+                        ),
+                        delivery="sent",
+                        provider_request_id=response_id,
+                    )
+                model_version = text_of(event.get("modelVersion")) or model_version
+                if "usageMetadata" in event:
+                    usage = _usage(event["usageMetadata"])
+                candidate = mapping(next(iter(sequence(event.get("candidates"))), None))
+                parts = list(
+                    map(
+                        mapping,
+                        sequence(mapping(candidate.get("content")).get("parts")),
+                    )
+                )
+                ending = _termination(event, candidate, parts)
+                if ending != "unknown" and reported != "blocked":
+                    reported = termination(
+                        ending, tool_request=reported == "tool_request"
+                    )
+                piece = "".join(
+                    text_of(part.get("text"))
+                    for part in parts
+                    if not part.get("thought")
+                )
+                if piece and reported != "blocked":
+                    text.append(piece)
+                    await on_delta(piece)
+            if reported == "unknown":
+                raise _stream_error(response_id)
+            return CanonicalTextResult(
+                text="".join(text),
+                termination=reported,
+                model=model_version,
+                usage=usage,
+                provider_request_id=response_id,
+            )
+
+
+def _model_segment(model: str) -> str:
+    # Accept the resource name the Models API lists ("models/<id>") too.
+    model = model.removeprefix("models/")
+    if not _MODEL_ID.fullmatch(model):
+        raise LLMAdapterError("invalid_request", delivery="not_sent")
+    return model
 
 
 def _payload(request: CanonicalTextRequest) -> dict[str, object]:

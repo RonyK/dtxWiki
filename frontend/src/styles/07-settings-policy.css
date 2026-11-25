@@ -2425,6 +2425,44 @@ button.history-card {
   width: 100%;
 }
 
+.ask-model-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.ask-model-help,
+.ask-generation-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ask-model-help {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.ask-stream-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-turn-instructions {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 20px;
+}
+
+.ask-turn-instructions small {
+  margin-inline-start: 8px;
+  color: var(--ink-muted);
+}
+
 .ask-composer input,
 .field-stack input:not([type="checkbox"]):not([type="radio"]),
 .field-stack select,

@@ -3195,6 +3195,115 @@
         "title": "AppCommandArtifact",
         "type": "object"
       },
+      "AskModelChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "connection_label": {
+            "title": "Connection Label",
+            "type": "string"
+          },
+          "model_label": {
+            "title": "Model Label",
+            "type": "string"
+          },
+          "model_profile_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model Profile Id",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "personal",
+              "workspace"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "steer": {
+            "title": "Steer",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scope",
+          "connection_id",
+          "model_profile_id",
+          "connection_label",
+          "model_label",
+          "steer"
+        ],
+        "title": "AskModelChoice",
+        "type": "object"
+      },
+      "AskModelChoices": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AskModelChoice"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AskModelChoices",
+        "type": "object"
+      },
+      "AskModelListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AskModelChoices"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/RESTResultEnvelope"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AskModelListResponse",
+        "type": "object"
+      },
+      "AskModelSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "model_profile_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model Profile Id",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "personal",
+              "workspace"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "connection_id",
+          "model_profile_id"
+        ],
+        "title": "AskModelSelection",
+        "type": "object"
+      },
       "AskSessionCreate": {
         "additionalProperties": false,
         "properties": {
@@ -3494,6 +3603,126 @@
         "title": "AskSessionRef",
         "type": "object"
       },
+      "AskSteerRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "user_message": {
+            "description": "Maximum 8000 Unicode code points after trimming surrounding whitespace.",
+            "title": "User Message",
+            "type": "string",
+            "x-normalized-maxLength": 8000
+          }
+        },
+        "required": [
+          "user_message",
+          "request_id"
+        ],
+        "title": "AskSteerRequest",
+        "type": "object"
+      },
+      "AskSteeringMessage": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "waiting",
+              "applied",
+              "failed",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "user_message": {
+            "title": "User Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_message",
+          "status"
+        ],
+        "title": "AskSteeringMessage",
+        "type": "object"
+      },
+      "AskStreamTurnCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "after_turn_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Turn Id"
+          },
+          "replace_turn_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replace Turn Id"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AskModelSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ttl_override_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Override Seconds"
+          },
+          "user_message": {
+            "description": "Maximum 8000 Unicode code points after trimming surrounding whitespace.",
+            "title": "User Message",
+            "type": "string",
+            "x-normalized-maxLength": 8000
+          }
+        },
+        "required": [
+          "user_message",
+          "selection",
+          "request_id"
+        ],
+        "title": "AskStreamTurnCreate",
+        "type": "object"
+      },
       "AskTurnCreate": {
         "additionalProperties": false,
         "properties": {
@@ -3508,6 +3737,28 @@
               }
             ],
             "title": "After Turn Id"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AskModelSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "ttl_override_seconds": {
             "anyOf": [
@@ -3551,6 +3802,11 @@
               }
             ],
             "title": "Assistant Message"
+          },
+          "can_search": {
+            "default": false,
+            "title": "Can Search",
+            "type": "boolean"
           },
           "cited_context_page_ids": {
             "items": {
@@ -3663,8 +3919,31 @@
             "title": "Retrieval Trace",
             "type": "array"
           },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AskModelSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
           "status": {
             "enum": [
+              "queued",
               "pending",
               "completed",
               "failed",
@@ -3672,6 +3951,18 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "steer_supported": {
+            "default": false,
+            "title": "Steer Supported",
+            "type": "boolean"
+          },
+          "steering_messages": {
+            "items": {
+              "$ref": "#/components/schemas/AskSteeringMessage"
+            },
+            "title": "Steering Messages",
+            "type": "array"
           },
           "topic_tags": {
             "items": {
@@ -38028,6 +38319,97 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/ask/models": {
+      "get": {
+        "operationId": "list_ask_models_api_v1_workspaces__workspace_id__ask_models_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskModelListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Ask Models",
+        "tags": [
+          "read"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/ask/sessions": {
       "get": {
         "operationId": "list_ask_sessions_api_v1_workspaces__workspace_id__ask_sessions_get",
@@ -38469,6 +38851,117 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/ask/sessions/{ask_session_id}/turns/stream": {
+      "post": {
+        "operationId": "submit_ask_stream_turn_api_v1_workspaces__workspace_id__ask_sessions__ask_session_id__turns_stream_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ask_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ask Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskStreamTurnCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskTurnDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Ask Stream Turn",
+        "tags": [
+          "read"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/promote": {
       "post": {
         "operationId": "promote_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__promote_post",
@@ -38575,6 +39068,416 @@
           }
         ],
         "summary": "Promote Ask Turn",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/search": {
+      "get": {
+        "operationId": "search_failed_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__search_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ask_turn_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ask Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskTurnDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Search Failed Ask Turn",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/steer": {
+      "post": {
+        "operationId": "steer_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__steer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ask_turn_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ask Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskSteerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskTurnDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Steer Ask Turn",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/stop": {
+      "post": {
+        "operationId": "stop_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ask_turn_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ask Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskTurnDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stop Ask Turn",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/stream": {
+      "get": {
+        "operationId": "read_ask_stream_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ask_turn_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ask Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Ask Stream",
         "tags": [
           "read"
         ]

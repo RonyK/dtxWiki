@@ -3121,32 +3121,30 @@ def get_ask_session(
         },
     },
 )
-def create_ask_turn(
+async def create_ask_turn(
+    request: Request,
     workspace_id: UUID,
     ask_session_id: UUID,
     request_body: AskTurnCreate,
     actor: RestActorDep,
     _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
-    ask_service: AskServiceDep,
     reauthorize: AskReauthorizeDep,
 ):
     """Answer a question. The question is stored first: if answering fails
     after that, the turn stays in the session as ``failed``."""
     try:
-        detail, warning_codes = ask_service.run_turn(
+        detail = await get_container_from_app(request).ask_runtime.answer(
             session_factory,
-            workspace_id=workspace_id,
-            ask_session_id=ask_session_id,
-            request=request_body,
-            actor_kind=actor.actor_kind,
-            actor_id=actor.actor_id,
-            actor=actor,
-            authorize=reauthorize,
+            workspace_id,
+            ask_session_id,
+            request_body,
+            actor,
+            reauthorize,
         )
         return {
             "data": detail,
-            "envelope": {"warnings": advisory_warnings(warning_codes)},
+            "envelope": {"warnings": advisory_warnings(detail.warning_codes)},
         }
     except AskAccessRevokedError as exc:
         # The turn is stored as failed; answer with the original refusal.
