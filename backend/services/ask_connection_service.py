@@ -22,6 +22,7 @@ from backend.services.llm_connection_service import (
     LLMConnectionError,
     LLMConnectionService,
 )
+from backend.services.settings_service import llm_custom_endpoints_enabled
 from backend.spi.llm import LLMModelCapabilities, LLMTransport, TextGenerationPort
 from backend.spi.types import ActorContext
 
@@ -60,6 +61,8 @@ class AskConnectionService:
         workspace_id: UUID,
         actor: ActorContext,
     ) -> list[dict]:
+        with control_factory() as control:
+            custom_endpoints = llm_custom_endpoints_enabled(control, workspace_id)
         choices = []
         scopes: list[tuple[str, ConnectionScope, UUID, sessionmaker[Session]]] = [
             ("workspace", "workspace", workspace_id, workspace_factory)
@@ -69,7 +72,10 @@ class AskConnectionService:
         for scope, stored_scope, owner_id, factory in scopes:
             with factory() as session:
                 views = self._connections.list(
-                    session, scope=stored_scope, owner_id=owner_id
+                    session,
+                    scope=stored_scope,
+                    owner_id=owner_id,
+                    custom_endpoints=custom_endpoints,
                 )
                 for view in views:
                     if (
@@ -85,6 +91,7 @@ class AskConnectionService:
                     base_url = (
                         self._registry.descriptor(adapter_id).default_base_url or ""
                         if view["endpoint_profile_id"] is None
+                        and view["endpoint_url"] is None
                         else ""
                     )
                     for profile in view["model_profiles"]:
@@ -117,6 +124,8 @@ class AskConnectionService:
             scope, owner_id, factory = "user", actor.user_id, control_factory
         else:
             scope, owner_id, factory = "workspace", workspace_id, workspace_factory
+        with control_factory() as control:
+            custom_endpoints = llm_custom_endpoints_enabled(control, workspace_id)
         with factory() as session:
             connection = self._connections.owned(
                 session,
@@ -131,7 +140,9 @@ class AskConnectionService:
             ):
                 raise _unavailable()
             endpoint = connection.endpoint_profile
-            if code := self._connections.unavailable(connection, endpoint):
+            if code := self._connections.unavailable(
+                connection, endpoint, custom_endpoints=custom_endpoints
+            ):
                 raise LLMConnectionError(code, "The Ask model is unavailable.", 409)
             profile = next(
                 (
