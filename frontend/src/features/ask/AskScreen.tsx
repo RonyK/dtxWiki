@@ -788,6 +788,7 @@ export function AskScreen() {
 
   useEffect(() => {
     let cancelled = false;
+    let generation = 0;
     async function initialLoad() {
       const submitted = submittedRouteRef.current === routeIdentity;
       submittedRouteRef.current = null;
@@ -797,10 +798,15 @@ export function AskScreen() {
         setLastTurnWarnings([]);
       }
       setSelectingSessionId(requestedSessionId);
-      try { await load(); } finally { if (!cancelled) setSelectingSessionId(null); }
+      const loading = load();
+      // load() takes its generation before its first await.
+      generation = loadGenerationRef.current;
+      try { await loading; } finally { if (!cancelled) setSelectingSessionId(null); }
     }
     initialLoad().catch((exc) => {
-      if (cancelled || !mountedRef.current) {
+      // A newer load (such as the one after a sent question) owns the screen,
+      // as it does when this load succeeds late.
+      if (cancelled || !mountedRef.current || loadGenerationRef.current !== generation) {
         return;
       }
       setNotFound(Boolean(requestedSessionId) && typeof exc === "object" && exc !== null && "status" in exc && exc.status === 404);
