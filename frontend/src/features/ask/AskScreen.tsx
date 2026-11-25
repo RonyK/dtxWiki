@@ -143,6 +143,10 @@ type AskCopy = {
     turnPrefix: string;
     noAnswer: string;
     saveAnswer: string;
+    pending: string;
+    failed: string;
+    accessChanged: string;
+    stopped: string;
   };
   evidence: {
     heading: string;
@@ -213,6 +217,10 @@ type AskCopy = {
   >;
 };
 
+// How often a screen re-reads a session whose question another request is
+// still answering.
+const PENDING_TURN_REFRESH_MS = 2000;
+
 const ASK_COPY = {
   en: {
     title: "Ask",
@@ -271,6 +279,10 @@ const ASK_COPY = {
       turnPrefix: "Turn",
       noAnswer: "No answer",
       saveAnswer: "Save answer",
+      pending: "Writing the answer…",
+      failed: "Internal server error. The answer was not saved.",
+      accessChanged: "Access changed while answering. The answer was not saved.",
+      stopped: "Stopped. The answer was not saved.",
     },
     evidence: {
       heading: "Cited evidence",
@@ -430,6 +442,10 @@ const ASK_COPY = {
       turnPrefix: "턴",
       noAnswer: "답변 없음",
       saveAnswer: "답변 저장",
+      pending: "답변을 만들고 있습니다…",
+      failed: "내부 서버 오류가 발생해 답변을 저장하지 못했습니다.",
+      accessChanged: "답변하는 동안 접근 권한이 바뀌어 답변을 저장하지 않았습니다.",
+      stopped: "중지되어 답변을 저장하지 않았습니다.",
     },
     evidence: {
       heading: "인용된 근거",
@@ -587,6 +603,8 @@ export function AskScreen() {
   const [routeRetryKey, setRouteRetryKey] = useState(0);
   const [selectingSessionId, setSelectingSessionId] = useState<string | null>(null);
   const [sendingTurn, setSendingTurn] = useState(false);
+  // Bumped when a pending-turn refresh fails, so the next one is scheduled.
+  const [pendingRefreshAttempt, setPendingRefreshAttempt] = useState(0);
   const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
   const consumedNewRequestRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
@@ -865,7 +883,8 @@ export function AskScreen() {
       !message.trim() ||
       startingSession ||
       sendingTurn ||
-      selectingSessionId
+      selectingSessionId ||
+      state.detail?.turns.some((turn) => turn.status === "pending")
     ) {
       return;
     }
@@ -875,7 +894,10 @@ export function AskScreen() {
     setError(null);
     setLastTurnWarnings([]);
     setSendingTurn(true);
-    const mutationRouteIdentity = routeIdentity;
+    // The route this submission belongs to. A new session moves it to that
+    // session's URL; any other navigation means the user went elsewhere.
+    let submissionRoute = routeIdentity;
+    let sessionId: string | null = null;
     try {
       // The overview deliberately has no selected session. During a route
       // transition `state.detail` can still contain the prior detail while
@@ -893,41 +915,44 @@ export function AskScreen() {
         detail = await createAskSession(state.workspaceId, {});
         if (
           !mountedRef.current ||
-          routeIdentityRef.current !== mutationRouteIdentity
+          routeIdentityRef.current !== submissionRoute
         ) {
           return;
         }
+        // Show the session's address before asking, so a reload finds the
+        // question once the server has stored it.
+        setSelectedSessionParams(detail.id);
+        submissionRoute = `${routeWorkspaceId ?? ""}\u0000${detail.id}`;
       }
+      sessionId = detail.id;
       const created = await createAskTurn(
         state.workspaceId,
         detail.id,
         message.trim(),
+        detail.turns.at(-1)?.id ?? null,
       );
       if (
         !mountedRef.current ||
-        routeIdentityRef.current !== mutationRouteIdentity
+        routeIdentityRef.current !== submissionRoute
       ) {
         return;
       }
       setLastTurnWarnings(created.warnings);
       setMessage("");
-      const applied = await load(detail.id);
-      if (
-        !mountedRef.current ||
-        routeIdentityRef.current !== mutationRouteIdentity ||
-        !applied
-      ) {
-        return;
-      }
-      setSelectedSessionParams(detail.id);
+      await load(detail.id);
     } catch (e) {
       if (
         !mountedRef.current ||
-        routeIdentityRef.current !== mutationRouteIdentity
+        routeIdentityRef.current !== submissionRoute
       ) {
         return;
       }
       setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.sendTurn));
+      // The question may be stored even though its answer failed; show the
+      // session as the server has it. This error stays the one reported.
+      if (sessionId) {
+        await load(sessionId).catch(() => undefined);
+      }
     } finally {
       if (mountedRef.current) {
         setSendingTurn(false);
@@ -1057,6 +1082,56 @@ export function AskScreen() {
         ? state.detail?.id === requestedSessionId
         : state.detail === null),
   );
+  // A question answered by a request this screen did not send (another tab,
+  // or one in flight when the page reloaded): follow the stored turn until
+  // it ends. Only this session's detail is read again.
+  const pendingSessionId =
+    detailMatchesRoute &&
+    !sendingTurn &&
+    state?.detail?.turns.some((turn) => turn.status === "pending")
+      ? state.detail.id
+      : null;
+  useEffect(() => {
+    const workspaceId = state?.workspaceId;
+    const language = state?.workspaceLanguage ?? "en";
+    if (!pendingSessionId || !workspaceId) return;
+    const generation = loadGenerationRef.current;
+    // Any newer state or load supersedes this read, even one already sent.
+    let superseded = false;
+    const current = () =>
+      !superseded &&
+      mountedRef.current &&
+      loadGenerationRef.current === generation;
+    const timer = window.setTimeout(() => {
+      void readAskSession(workspaceId, pendingSessionId)
+        .then((detail) => {
+          if (!current()) return;
+          setState((previous) =>
+            previous?.detail?.id === pendingSessionId
+              ? { ...previous, detail }
+              : previous,
+          );
+        })
+        .catch((exc) => {
+          if (!current()) return;
+          const status =
+            typeof exc === "object" && exc !== null && "status" in exc
+              ? exc.status
+              : null;
+          if (status === 401 || status === 403 || status === 404) {
+            // No access any more: say so instead of waiting.
+            setError(errorMessage(exc, ASK_COPY[language].errors.selectSession));
+            return;
+          }
+          // A passing failure must not leave the screen waiting forever.
+          setPendingRefreshAttempt((attempt) => attempt + 1);
+        });
+    }, PENDING_TURN_REFRESH_MS);
+    return () => {
+      superseded = true;
+      window.clearTimeout(timer);
+    };
+  }, [pendingSessionId, pendingRefreshAttempt, state]);
   if (notFound) return <NotFoundScreen />;
   if (requestedSessionId && !detailMatchesRoute) {
     if (error) {
@@ -1100,7 +1175,11 @@ export function AskScreen() {
   )
     ? savingTurn
     : null;
-  const latestTurn = visibleDetail?.turns.at(-1) ?? null;
+  // Only an answered turn can be saved, so a failed question after it does
+  // not take the save action away from the last answer.
+  const latestAnsweredTurn =
+    visibleDetail?.turns.filter((turn) => turn.status === "completed").at(-1) ??
+    null;
   const uiLanguage = normalizeAskLocale(resolveInitialLocale(state.workspaceLanguage));
   const copy = ASK_COPY[uiLanguage];
   // A7: on the empty state the composer is rendered non-sticky (it would
@@ -1190,7 +1269,7 @@ export function AskScreen() {
           ) : (
             <TurnList
               copy={copy}
-              latestTurnId={latestTurn?.id ?? null}
+              latestTurnId={latestAnsweredTurn?.id ?? null}
               locale={uiLanguage}
               onSave={canCompose ? setSavingTurn : undefined}
               turns={visibleDetail?.turns ?? []}
@@ -1202,7 +1281,10 @@ export function AskScreen() {
               <input
                 aria-label={copy.composerLabel}
                 disabled={
-                  startingSession || sendingTurn || Boolean(selectingSessionId)
+                  startingSession ||
+                  sendingTurn ||
+                  Boolean(selectingSessionId) ||
+                  Boolean(pendingSessionId)
                 }
                 placeholder={copy.composerPlaceholder}
                 value={message}
@@ -1213,7 +1295,7 @@ export function AskScreen() {
                 className="icon-button primary"
                 disabled={
                   sendingTurn || Boolean(selectingSessionId) || !message.trim()
-                  || startingSession
+                  || startingSession || Boolean(pendingSessionId)
                 }
                 type="submit"
               >
@@ -1483,6 +1565,20 @@ function TurnCard({
   const noEvidence = isNoEvidenceTurn(turn);
   const workspaceId = useRouteWorkspaceId();
   const recoveryDescriptionId = `no-evidence-recovery-${turn.id}`;
+  if (turn.status !== "completed") {
+    // The question is kept; there is no answer, evidence or save to show.
+    return (
+      <article className="turn-card">
+        <div className="turn-card-header">
+          <span>{copy.turns.turnPrefix} {turn.turn_no}</span>
+        </div>
+        <div className="turn-bubble user">{turn.user_message}</div>
+        <StatusBanner tone={turn.status === "failed" ? "warning" : "info"}>
+          {unansweredTurnLabel(turn, copy)}
+        </StatusBanner>
+      </article>
+    );
+  }
   return (
     <article className={`turn-card ${noEvidence ? "no-evidence-turn" : ""}`}>
       <div className="turn-card-header">
@@ -2128,7 +2224,16 @@ function AskWorkflowActions({
 }
 
 function isNoEvidenceTurn(turn: AskTurnDetail) {
-  return !hasCitations(turn);
+  return turn.status === "completed" && !hasCitations(turn);
+}
+
+function unansweredTurnLabel(turn: AskTurnDetail, copy: AskCopy) {
+  if (turn.status === "pending") return copy.turns.pending;
+  if (turn.status === "stopped") return copy.turns.stopped;
+  return turn.error_code === "access_revoked" ||
+    turn.error_code === "evidence_unavailable"
+    ? copy.turns.accessChanged
+    : copy.turns.failed;
 }
 
 function hasCitations(turn: AskTurnDetail) {

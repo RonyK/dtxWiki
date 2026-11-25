@@ -33,7 +33,7 @@ def test_desktop_engine_manages_worker_and_watches_parent(
     # A shell configured for a split systemd deployment must not disable the
     # local Desktop worker.
     monkeypatch.setenv("DTXWIKI_WORKER_MODE", "external")
-    monkeypatch.setattr(main, "create_app", lambda **kwargs: application)
+    monkeypatch.setattr(main, "create_serving_app", lambda *args, **kwargs: application)
 
     class Thread:
         def __init__(self, **kwargs):

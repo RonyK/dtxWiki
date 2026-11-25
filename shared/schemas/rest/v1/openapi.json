@@ -3497,6 +3497,18 @@
       "AskTurnCreate": {
         "additionalProperties": false,
         "properties": {
+          "after_turn_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Turn Id"
+          },
           "ttl_override_seconds": {
             "anyOf": [
               {
@@ -3567,6 +3579,17 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
           },
           "fallback_disclosure": {
             "title": "Fallback Disclosure",
@@ -3640,6 +3663,16 @@
             "title": "Retrieval Trace",
             "type": "array"
           },
+          "status": {
+            "enum": [
+              "pending",
+              "completed",
+              "failed",
+              "stopped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
           "topic_tags": {
             "items": {
               "type": "string"
@@ -3710,6 +3743,7 @@
           "recommended_placement_tree_node_id",
           "placement_confidence",
           "promotion_state",
+          "status",
           "created_at",
           "retrieval_trace",
           "fallback_disclosure"
@@ -38315,6 +38349,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/ask/sessions/{ask_session_id}/turns": {
       "post": {
+        "description": "Answer a question. The question is stored first: if answering fails\nafter that, the turn stays in the session as ``failed``.",
         "operationId": "create_ask_turn_api_v1_workspaces__workspace_id__ask_sessions__ask_session_id__turns_post",
         "parameters": [
           {
@@ -38408,6 +38443,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RESTErrorBody"
+                }
+              }
+            },
+            "description": "The question may have been stored before the failure; read the session to see whether it was, as a `failed` turn."
           }
         },
         "security": [

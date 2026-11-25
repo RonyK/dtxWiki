@@ -54,8 +54,8 @@ logger = logging.getLogger("dtxwiki.startup")
 _WILDCARD_BIND_HOSTS = {"0.0.0.0": "127.0.0.1", "::": "::1", "": "127.0.0.1"}
 
 
-def create_app(*args, **kwargs):
-    from backend.app.main import create_app as create_fastapi_app
+def create_serving_app(*args, **kwargs):
+    from backend.app.main import create_serving_app as create_fastapi_app
 
     return create_fastapi_app(*args, **kwargs)
 
@@ -162,7 +162,7 @@ def run_server(
                 on_started=(lambda: webbrowser.open(_browser_url(host, resolved_port)))
                 if open_browser
                 else None,
-                application_factory=lambda effective: create_app(settings=effective),
+                application_factory=lambda effective: create_serving_app(effective),
             ),
             loop_factory=loop_factory,
         )

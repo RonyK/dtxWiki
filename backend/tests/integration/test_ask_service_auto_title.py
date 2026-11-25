@@ -16,6 +16,7 @@ from backend.schemas.read import RankedResult, SearchPayload
 from backend.services.ask_service import AskService
 from backend.services.context_ingress_service import ContextIngressService
 from backend.services.read_errors import ReadNotFoundError
+from backend.tests.utils.ask import create_turn_in_session
 
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
 
@@ -41,6 +42,7 @@ class FakeSearchService:
                     snippet="Rollout guidance",
                     score=1.0,
                     citation_available=True,
+                    version_id=uuid4(),
                 )
             ],
             supported_retrieval_modes=["keyword"],
@@ -310,7 +312,8 @@ def test_ask_auto_title_uses_intent_then_repeated_context_anchor(session_factory
             actor_kind="human",
             actor_id=ACTOR_ID,
         )
-        first, warnings = service.create_turn(
+        first, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace.id,
             ask_session_id=detail.id,
@@ -330,7 +333,8 @@ def test_ask_auto_title_uses_intent_then_repeated_context_anchor(session_factory
             ask_session.title == "How should we roll out dashboard activity filters..."
         )
 
-        service.create_turn(
+        create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace.id,
             ask_session_id=detail.id,
@@ -374,7 +378,8 @@ def test_ask_auto_title_preserves_user_supplied_title(session_factory, monkeypat
             "_lock_session_for_turn_insert",
             tracked_lock,
         )
-        service.create_turn(
+        create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace.id,
             ask_session_id=detail.id,
@@ -387,7 +392,7 @@ def test_ask_auto_title_preserves_user_supplied_title(session_factory, monkeypat
         assert ask_session is not None
         assert ask_session.title == "Incident analysis"
         assert ask_session.title_user_edited is True
-        assert locked_session_ids == [detail.id]
+        assert set(locked_session_ids) == {detail.id}
 
 
 def test_ask_auto_title_uses_topic_anchor_when_context_anchor_absent(session_factory):
@@ -401,7 +406,8 @@ def test_ask_auto_title_uses_topic_anchor_when_context_anchor_absent(session_fac
             actor_kind="human",
             actor_id=ACTOR_ID,
         )
-        service.create_turn(
+        create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace.id,
             ask_session_id=detail.id,
@@ -431,7 +437,8 @@ def test_ask_auto_title_space_boundary_and_long_anchor_keep_intent(session_facto
                 actor_kind="human",
                 actor_id=ACTOR_ID,
             )
-            service.create_turn(
+            create_turn_in_session(
+                service,
                 session=session,
                 workspace_id=workspace.id,
                 ask_session_id=detail.id,
@@ -440,7 +447,8 @@ def test_ask_auto_title_space_boundary_and_long_anchor_keep_intent(session_facto
                 actor_id=ACTOR_ID,
             )
             if anchor_id is not None:
-                service.create_turn(
+                create_turn_in_session(
+                    service,
                     session=session,
                     workspace_id=workspace.id,
                     ask_session_id=detail.id,

@@ -1,13 +1,17 @@
+from __future__ import annotations
+
 import logging
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select, tuple_
-from sqlalchemy.orm import Session
+from sqlalchemy import exists, func, select, tuple_, update
+from sqlalchemy.orm import Session, sessionmaker
 
 from backend.domain.input_policy import (
     InputPolicyError,
@@ -16,12 +20,16 @@ from backend.domain.input_policy import (
 )
 from backend.llm.generation import TextGenerator
 from backend.models.ask import (
+    ASK_TURN_COMPLETED,
+    ASK_TURN_FAILED,
+    ASK_TURN_PENDING,
     AskSession,
     AskTurn,
     AskTurnCitation,
     ContextIngressProposal,
 )
-from backend.models.context import ContextPage
+from backend.models.chunk import ContentChunk
+from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.library import LibraryArtifact, LibraryItem, LibraryItemVersion
 from backend.models.tree import TreePolicy, WorkspaceTreeNode
 from backend.models.workspace import Workspace
@@ -40,23 +48,25 @@ from backend.schemas.read import GraphNeighborEntry, RankedResult
 from backend.services.actor_visible_read import (
     actor_can_read_library_trust_level,
     context_page_visible,
+    context_version_is_visible,
 )
 from backend.services.audit_service import AuditService
 from backend.services.context_link_targets import ask_context_link_targets
 from backend.services.coverage_service import record_coverage_gap, resolve_coverage_gap
-from backend.services.db_write_intent import acquire_write_intent
+from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.graph_service import GraphService
 from backend.services.library_canonical import (
     canonical_library_artifact_belongs_to_item,
     get_canonical_library_version,
     get_canonical_markdown_artifact,
+    get_effective_library_markdown,
 )
 from backend.services.list_pagination import (
     _decode_keyset_cursor,
     _encode_keyset_cursor,
 )
 from backend.services.okf import EXCLUDED_LIBRARY_LIFECYCLE_STATUSES
-from backend.services.read_errors import ReadNotFoundError
+from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyError
 from backend.services.retrieval.identity import ranked_result_document_id
 from backend.services.search_service import (
     KEYWORD_LANE_UNAVAILABLE_WARNING,
@@ -67,7 +77,7 @@ from backend.services.tree_service import (
     create_tree_node,
     resolve_tree_parent,
 )
-from backend.spi.llm import LLMAdapterError, TextMessage
+from backend.spi.llm import LLMAdapterError, TextMessage, TokenUsage
 from backend.utils.uuid import parse_uuid_or_none
 
 USER_MESSAGE_MAX_CHARS = 8000
@@ -132,10 +142,164 @@ PROMPT_INJECTION_PATTERNS = (
 _EOS_MARKER_RE = re.compile(r"</s>")
 _STRIKE_OPEN_RE = re.compile(r"<s(?:\s[^>]*)?>")
 _COMPOSER_SYSTEM = (
-    "Answer only from the supplied evidence pack. Cite evidence items by their "
-    "list number. If the pack does not support an answer, say that you do not know."
+    "Answer only from the supplied evidence pack and cite its items by their "
+    "list number. Earlier messages in this conversation only tell you what the "
+    "question refers to; numbers in them are not citations. If the pack does "
+    "not support an answer, say that you do not know. If the question could "
+    "mean more than one thing, ask which one is meant."
 )
+# Earlier turns shown to the model with a new question. Kept small: models
+# lose facts in long inputs, and each earlier answer already used its own pack.
+ASK_HISTORY_MAX_PAIRS = 4
+# The model's input limit is not known here, so earlier turns get a fixed,
+# conservative share.
+ASK_HISTORY_MAX_CHARS = 16_000
+# Rows read at a time while looking for the history.
+_HISTORY_BATCH = 20
+# Why a turn ended as failed. Only these codes reach clients.
+ASK_TURN_INTERNAL_ERROR = "internal_error"
+ASK_TURN_ACCESS_REVOKED = "access_revoked"
+ASK_TURN_EVIDENCE_UNAVAILABLE = "evidence_unavailable"
+ASK_TURN_SERVER_RESTARTED = "server_restarted"
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AskEvidence:
+    """Sources an answer was given, as stored in ``AskTurn.input_evidence``."""
+
+    # (page_id, version_id): the version whose text the model was given.
+    context: frozenset[tuple[UUID, UUID]] = frozenset()
+    library: frozenset[UUID] = frozenset()
+
+    def union(self, other: AskEvidence) -> AskEvidence:
+        return AskEvidence(self.context | other.context, self.library | other.library)
+
+    def to_record(self) -> dict[str, list[dict[str, str]]]:
+        return {
+            "context": [
+                {"page_id": str(page_id), "version_id": str(version_id)}
+                for page_id, version_id in sorted(
+                    self.context, key=lambda ref: (str(ref[0]), str(ref[1]))
+                )
+            ],
+            "library": [
+                {"artifact_id": str(artifact_id)}
+                for artifact_id in sorted(self.library, key=str)
+            ],
+        }
+
+    @classmethod
+    def from_record(cls, record: object) -> AskEvidence | None:
+        """Parse a stored record; None if it is malformed."""
+
+        if not isinstance(record, Mapping):
+            return None
+        context = record.get("context")
+        library = record.get("library")
+        if not isinstance(context, list) or not isinstance(library, list):
+            return None
+        refs: set[tuple[UUID, UUID]] = set()
+        for entry in context:
+            if not isinstance(entry, Mapping):
+                return None
+            page_id = parse_uuid_or_none(entry.get("page_id"))
+            version_id = parse_uuid_or_none(entry.get("version_id"))
+            if page_id is None or version_id is None:
+                return None
+            refs.add((page_id, version_id))
+        artifact_ids: set[UUID] = set()
+        for entry in library:
+            artifact_id = (
+                parse_uuid_or_none(entry.get("artifact_id"))
+                if isinstance(entry, Mapping)
+                else None
+            )
+            if artifact_id is None:
+                return None
+            artifact_ids.add(artifact_id)
+        return cls(frozenset(refs), frozenset(artifact_ids))
+
+
+@dataclass(frozen=True)
+class RetrievedEvidence:
+    language: str
+    # Numbered pack lines, proven sources only.
+    pack: tuple[str, ...]
+    context_ids: tuple[UUID, ...]
+    artifact_ids: tuple[UUID, ...]
+    evidence: AskEvidence
+    trace: tuple[dict[str, str], ...]
+    tried_lanes: tuple[str, ...]
+    fallback: bool
+    nearest_candidates: tuple[dict[str, str], ...]
+    warnings: tuple[str, ...]
+    # Search returned hits, proven or not.
+    found: bool
+
+
+@dataclass(frozen=True)
+class PreparedTurn:
+    turn_id: UUID
+    ask_session_id: UUID
+    question: str
+    retrieved: RetrievedEvidence
+    # Earlier (question, answer) pairs shown to the model, oldest first.
+    history: tuple[tuple[str, str], ...]
+    # This turn's evidence plus the evidence of every earlier turn shown.
+    evidence: AskEvidence
+
+
+@dataclass(frozen=True)
+class ComposedTurn:
+    answer: str
+    warnings: tuple[str, ...]
+    generation: dict[str, Any]
+
+
+def _usage_record(usage: TokenUsage) -> dict[str, int | None]:
+    return {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+    }
+
+
+def _evidence_pack_heading(language: str) -> str:
+    return (
+        "컨텍스트 우선 검색 요약:"
+        if language == "ko"
+        else "Context-first retrieval summary:"
+    )
+
+
+def _no_evidence_answer(language: str) -> str:
+    return (
+        "일치하는 Context 또는 Library 근거를 찾지 못했습니다."
+        if language == "ko"
+        else "No matching Context or Library evidence was found."
+    )
+
+
+def fail_interrupted_ask_turns(session_factory: sessionmaker[Session]) -> int:
+    """End every pending turn as failed; for server startup only.
+
+    The serving process answers turns in its own requests, so at startup no
+    pending turn has anything left to finish it: the questions stay, marked
+    as an internal error. Never call this while another server may be
+    answering on the same database.
+    """
+
+    with session_factory.begin() as session:
+        acquire_workspace_write_intent(session)
+        ended = session.execute(
+            update(AskTurn)
+            .where(AskTurn.status == ASK_TURN_PENDING)
+            .values(status=ASK_TURN_FAILED, error_code=ASK_TURN_SERVER_RESTARTED)
+            .execution_options(synchronize_session=False)
+        ).rowcount
+    if ended:
+        logger.warning("Ended %d Ask turns interrupted by a server restart", ended)
+    return ended
 
 
 def ask_session_for_turn_insert_statement(ask_session_id: UUID):
@@ -145,6 +309,13 @@ def ask_session_for_turn_insert_statement(ask_session_id: UUID):
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+
+
+class AskAccessRevokedError(Exception):
+    """The asker lost access while the answer was being written.
+
+    The cause is the original authentication or policy refusal.
+    """
 
 
 class InvalidUserMessageError(ValueError):
@@ -213,6 +384,7 @@ class AskService:
         provider: TextGenerator | None = None,
         graph_service: GraphService | None = None,
         provider_unavailable_reason: str | None = None,
+        provider_target: Mapping[str, str] | None = None,
     ) -> None:
         self.search_service = search_service or SearchService()
         self.audit_service = audit_service or AuditService()
@@ -224,6 +396,9 @@ class AskService:
         # so the operator (and the user) learn why the answer style changed
         # instead of the request failing.
         self.provider_unavailable_reason = provider_unavailable_reason
+        # Which model answers: an answer is shown later only to the same model,
+        # so the earlier conversation never goes to a different endpoint.
+        self.provider_target = dict(provider_target) if provider_target else None
 
     def list_sessions(
         self,
@@ -346,111 +521,373 @@ class AskService:
             actor=actor,
         )
 
-    def create_turn(
+    def run_turn(
         self,
-        session: Session,
+        session_factory: sessionmaker[Session],
         workspace_id: UUID,
         ask_session_id: UUID,
         request: AskTurnCreate,
         actor_kind: str,
         actor_id: str,
         actor: ActorContext | None = None,
+        authorize: Callable[[], ActorContext] | None = None,
     ) -> tuple[AskTurnDetail, list[str]]:
-        validate_request_inputs(request)
-        validated_message = _validate_user_message(request.user_message)
-        ask_session = self._require_session(session, workspace_id, ask_session_id)
-        (
-            answer,
-            context_ids,
-            artifact_ids,
-            trace,
-            tried_lanes,
-            fallback,
-            nearest_candidates,
-            search_warnings,
-        ) = self._answer(
-            session=session,
-            workspace_id=workspace_id,
-            question=validated_message,
-            actor=actor,
-        )
-        warning_codes = [
-            code
-            for code in search_warnings
-            if code in ASK_FORWARDABLE_WARNINGS or code in ASK_SELF_WARNINGS
-        ]
-        if not trace:
-            if KEYWORD_LANE_UNAVAILABLE_WARNING not in warning_codes:
-                gap = record_coverage_gap(
-                    session,
-                    workspace_id=workspace_id,
-                    query=validated_message,
-                    surface="ask",
-                    tried_lanes=tried_lanes,
-                    nearest_candidates=nearest_candidates,
-                )
-                if gap is not None:
-                    warning_codes.append("coverage_gap_recorded")
-        elif not context_ids and not artifact_ids:
-            warning_codes.append("evidence_not_citable")
-        else:
-            resolve_coverage_gap(
+        """Answer one question, storing the question before anything else.
+
+        Each step has its own short transaction and the provider call has
+        none. Once the question is stored, a failure ends the turn as
+        ``failed`` instead of losing the question. ``authorize`` re-checks the
+        asker's access before the provider call and before the answer is
+        stored, returning the current actor or raising
+        :class:`AskAccessRevokedError`; it runs outside every transaction
+        because authentication may write.
+        """
+
+        with session_factory.begin() as session:
+            turn_id = self.submit_turn(
                 session,
                 workspace_id=workspace_id,
-                query=validated_message,
+                ask_session_id=ask_session_id,
+                request=request,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
             )
-        # SQLite: FOR UPDATE is a no-op, so take write intent before the locked
-        # read and the turn_no allocation below -- the branches above do not all
-        # emit DML, and without it two turns in one session both allocate the
-        # same turn_no and collide on the (ask_session_id, turn_no) unique index.
-        # Deliberately here rather than at the top of the transaction: the
-        # retrieval and answer composition above can take seconds, and SQLite's
-        # writer lock is database-wide, so acquiring it earlier would stall every
-        # other writer for the length of an LLM call.
-        acquire_write_intent(session)
+        try:
+            with session_factory() as session:
+                prepared = self.prepare_turn(session, workspace_id, turn_id, actor)
+            if authorize is not None:
+                actor = authorize()
+            # Nothing goes to the provider that the asker cannot read now.
+            with session_factory() as session:
+                sendable = ask_evidence_visible(
+                    session,
+                    context_refs=prepared.evidence.context,
+                    artifact_ids=prepared.evidence.library,
+                    actor=actor,
+                    workspace_id=workspace_id,
+                )
+            if not sendable:
+                with session_factory.begin() as session:
+                    return self._end_unanswered(
+                        session,
+                        workspace_id,
+                        prepared,
+                        ASK_TURN_EVIDENCE_UNAVAILABLE,
+                        actor,
+                    )
+            composed = self.compose_turn(prepared)
+            if authorize is not None:
+                actor = authorize()
+            with session_factory.begin() as session:
+                return self.finish_turn(
+                    session,
+                    workspace_id,
+                    prepared,
+                    composed,
+                    actor=actor,
+                )
+        except BaseException as error:
+            self._fail_after_error(
+                session_factory,
+                workspace_id,
+                turn_id,
+                ASK_TURN_ACCESS_REVOKED
+                if isinstance(error, AskAccessRevokedError)
+                else ASK_TURN_INTERNAL_ERROR,
+            )
+            raise
+
+    def submit_turn(
+        self,
+        session: Session,
+        *,
+        workspace_id: UUID,
+        ask_session_id: UUID,
+        request: AskTurnCreate,
+        actor_kind: str,
+        actor_id: str,
+    ) -> UUID:
+        """Store the question as a ``pending`` turn and return its id."""
+
+        validate_request_inputs(request)
+        question = _validate_user_message(request.user_message)
+        # The session row lock orders every turn write in the session: one
+        # question at a time, and turn_no allocation without collisions. On
+        # SQLite the writer lock comes first, before the guarded read.
+        acquire_workspace_write_intent(session)
         ask_session = self._lock_session_for_turn_insert(
             session=session,
             ask_session_id=ask_session_id,
         )
         if ask_session is None or ask_session.workspace_id != workspace_id:
             raise ReadNotFoundError("ask session not found")
-        turn_no = (
-            int(
-                session.scalar(
-                    select(func.max(AskTurn.turn_no)).where(
-                        AskTurn.ask_session_id == ask_session.id
-                    )
-                )
-                or 0
+        pending = session.scalar(
+            select(AskTurn.id)
+            .where(
+                AskTurn.workspace_id == workspace_id,
+                AskTurn.ask_session_id == ask_session.id,
+                AskTurn.status == ASK_TURN_PENDING,
             )
-            + 1
+            .limit(1)
         )
+        if pending is not None:
+            raise RejectedByPolicyError(
+                "another question in this session is still being answered",
+                error_code="ask_turn_in_progress",
+            )
+        latest = session.execute(
+            select(AskTurn.id, AskTurn.turn_no)
+            .where(
+                AskTurn.workspace_id == workspace_id,
+                AskTurn.ask_session_id == ask_session.id,
+            )
+            .order_by(AskTurn.turn_no.desc())
+            .limit(1)
+        ).first()
+        if "after_turn_id" in request.model_fields_set and request.after_turn_id != (
+            latest.id if latest is not None else None
+        ):
+            raise RejectedByPolicyError(
+                "the session has turns this question was not asked after",
+                error_code="ask_session_changed",
+            )
         turn = AskTurn(
             workspace_id=ask_session.workspace_id,
             ask_session_id=ask_session.id,
-            turn_no=turn_no,
-            user_message=validated_message,
-            assistant_message=answer,
+            turn_no=(latest.turn_no if latest is not None else 0) + 1,
+            user_message=question,
+            assistant_message=None,
+            status=ASK_TURN_PENDING,
             topic_tags=ask_session.default_topic_tags,
             recommended_placement_tree_node_id=(
                 ask_session.default_context_parent_tree_node_id
             ),
-            placement_confidence="medium" if trace else "low",
-            retrieval_trace=trace,
-            tried_lanes=tried_lanes,
-            fallback_disclosure=fallback,
-            warning_codes=warning_codes,
         )
         session.add(turn)
         session.flush()
-        for kind, cited_ids in (
-            ("context_page", context_ids),
-            ("library_artifact", artifact_ids),
+        ask_session.updated_at = datetime.now(UTC)
+        self.audit_service.emit(
+            session=session,
+            workspace_id=workspace_id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            action="ask.turn.create",
+            target_kind="ask_turn",
+            target_id=turn.id,
+            payload={"ask_session_id": str(ask_session.id), "turn_no": turn.turn_no},
+            event_summary=f"Ask turn created in {ask_session.title}",
+        )
+        return turn.id
+
+    def prepare_turn(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        turn_id: UUID,
+        actor: ActorContext | None = None,
+    ) -> PreparedTurn:
+        """Find this question's evidence and the earlier turns to show."""
+
+        turn = get_in_workspace(
+            session, AskTurn, workspace_id=workspace_id, resource_id=turn_id
+        )
+        if turn is None:
+            raise ReadNotFoundError("ask turn not found")
+        question = turn.user_message or ""
+        retrieved = self._retrieve(session, workspace_id, question, actor)
+        # Earlier turns only matter when a model is asked.
+        history = (
+            self._history(session, workspace_id, turn, actor)
+            if self.provider is not None and retrieved.pack
+            else ()
+        )
+        evidence = retrieved.evidence
+        for _question, _answer, earlier in history:
+            evidence = evidence.union(earlier)
+        return PreparedTurn(
+            turn_id=turn.id,
+            ask_session_id=turn.ask_session_id,
+            question=question,
+            retrieved=retrieved,
+            history=tuple((asked, answered) for asked, answered, _ in history),
+            evidence=evidence,
+        )
+
+    def compose_turn(self, prepared: PreparedTurn) -> ComposedTurn:
+        """Write the answer. Uses no database session."""
+
+        retrieved = prepared.retrieved
+        warnings = list(retrieved.warnings)
+        target = self.provider_target
+        if not retrieved.pack:
+            return ComposedTurn(
+                answer=_no_evidence_answer(retrieved.language),
+                warnings=tuple(warnings),
+                generation={"target": target, "outcome": "no_evidence"},
+            )
+        pack_text = "\n".join(
+            (_evidence_pack_heading(retrieved.language), *retrieved.pack)
+        )
+        if self.provider_unavailable_reason:
+            # Configured but unbuildable provider: a persistent, operator-owned
+            # condition. Disclose it instead of silently serving a different
+            # answer style than the workspace is configured for.
+            warnings.append(LLM_PROVIDER_UNAVAILABLE_WARNING)
+        if self.provider is None:
+            return ComposedTurn(
+                answer=pack_text,
+                warnings=tuple(warnings),
+                generation={"target": target, "outcome": "evidence_pack"},
+            )
+        messages = [
+            message
+            for asked, answered in prepared.history
+            for message in (
+                TextMessage(role="user", text=asked),
+                TextMessage(role="assistant", text=answered),
+            )
+        ]
+        messages.append(
+            TextMessage(
+                role="user",
+                text=f"{prepared.question}\n\n[Evidence pack]\n{pack_text}",
+            )
+        )
+        try:
+            result = self.provider.generate(
+                system=_COMPOSER_SYSTEM,
+                messages=messages,
+                max_output_tokens=1024,
+            )
+        except LLMAdapterError as exc:
+            # The pack is a valid answer, but the user must know it is not
+            # the composed one, and whether retrying or an admin can help.
+            logger.warning(
+                "Ask composer call failed (%s); using deterministic pack",
+                exc.code,
+            )
+            warnings.append(
+                _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING)
+            )
+            return ComposedTurn(
+                answer=pack_text,
+                warnings=tuple(warnings),
+                generation={"target": target, "outcome": "evidence_pack"},
+            )
+        except Exception:
+            # Unexpected composer errors need an administrator to inspect
+            # the server log.
+            logger.warning(
+                "Ask composer failed unexpectedly; using deterministic pack",
+                exc_info=True,
+            )
+            warnings.append(LLM_PROVIDER_UNAVAILABLE_WARNING)
+            return ComposedTurn(
+                answer=pack_text,
+                warnings=tuple(warnings),
+                generation={"target": target, "outcome": "evidence_pack"},
+            )
+        record = {
+            "target": target,
+            "model": result.model,
+            "usage": _usage_record(result.usage),
+            "provider_request_id": result.provider_request_id,
+        }
+        # Only a completed answer replaces the pack: truncated, refused or
+        # filtered output is not an answer.
+        if result.termination == "completed" and result.text.strip():
+            return ComposedTurn(
+                answer=result.text.strip(),
+                warnings=tuple(warnings),
+                generation={**record, "outcome": "completed"},
+            )
+        warnings.append(
+            _TERMINATION_WARNINGS.get(result.termination, LLM_ANSWER_INCOMPLETE_WARNING)
+        )
+        return ComposedTurn(
+            answer=pack_text,
+            warnings=tuple(warnings),
+            generation={**record, "outcome": "evidence_pack"},
+        )
+
+    def finish_turn(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        prepared: PreparedTurn,
+        composed: ComposedTurn,
+        *,
+        actor: ActorContext | None = None,
+    ) -> tuple[AskTurnDetail, list[str]]:
+        """Store the answer if the turn is still pending.
+
+        Another ending (stop, startup recovery) may have been stored first;
+        then nothing is written and the stored turn is returned.
+        """
+
+        acquire_workspace_write_intent(session)
+        ask_session = self._lock_session_for_turn_insert(
+            session=session,
+            ask_session_id=prepared.ask_session_id,
+        )
+        if ask_session is None or ask_session.workspace_id != workspace_id:
+            raise ReadNotFoundError("ask session not found")
+        if actor is not None and not ask_evidence_visible(
+            session,
+            context_refs=prepared.evidence.context,
+            artifact_ids=prepared.evidence.library,
+            actor=actor,
+            workspace_id=workspace_id,
         ):
-            seen: set[UUID] = set()
-            for rank, item_id in enumerate(
-                item for item in cited_ids if not (item in seen or seen.add(item))
-            ):
+            # The asker lost access to evidence while the answer was being
+            # written: keep the question, store no answer.
+            return self._end_unanswered(
+                session, workspace_id, prepared, ASK_TURN_EVIDENCE_UNAVAILABLE, actor
+            )
+        if not self._end_pending_turn(
+            session, workspace_id, prepared.turn_id, ASK_TURN_COMPLETED
+        ):
+            return self._stored_turn(session, ask_session, prepared.turn_id, actor), []
+        turn = self._reload_turn(session, workspace_id, prepared.turn_id)
+        retrieved = prepared.retrieved
+        warning_codes = [
+            code
+            for code in composed.warnings
+            if code in ASK_FORWARDABLE_WARNINGS or code in ASK_SELF_WARNINGS
+        ]
+        if not retrieved.found:
+            if KEYWORD_LANE_UNAVAILABLE_WARNING not in warning_codes:
+                gap = record_coverage_gap(
+                    session,
+                    workspace_id=workspace_id,
+                    query=prepared.question,
+                    surface="ask",
+                    tried_lanes=list(retrieved.tried_lanes),
+                    nearest_candidates=list(retrieved.nearest_candidates),
+                )
+                if gap is not None:
+                    warning_codes.append("coverage_gap_recorded")
+        elif not retrieved.pack:
+            warning_codes.append("evidence_not_citable")
+        else:
+            resolve_coverage_gap(
+                session,
+                workspace_id=workspace_id,
+                query=prepared.question,
+            )
+        turn.assistant_message = composed.answer
+        turn.placement_confidence = "medium" if retrieved.found else "low"
+        turn.retrieval_trace = list(retrieved.trace)
+        turn.tried_lanes = list(retrieved.tried_lanes)
+        turn.fallback_disclosure = retrieved.fallback
+        turn.warning_codes = warning_codes
+        turn.input_evidence = prepared.evidence.to_record()
+        turn.generation = composed.generation
+        for kind, cited_ids in (
+            ("context_page", retrieved.context_ids),
+            ("library_artifact", retrieved.artifact_ids),
+        ):
+            for rank, item_id in enumerate(cited_ids):
                 session.add(
                     AskTurnCitation(
                         workspace_id=turn.workspace_id,
@@ -466,17 +903,6 @@ class AskService:
             ask_session=ask_session,
         )
         ask_session.updated_at = datetime.now(UTC)
-        self.audit_service.emit(
-            session=session,
-            workspace_id=workspace_id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            action="ask.turn.create",
-            target_kind="ask_turn",
-            target_id=turn.id,
-            payload={"ask_session_id": str(ask_session.id), "turn_no": turn.turn_no},
-            event_summary=f"Ask turn created in {ask_session.title}",
-        )
         return (
             self._turn_detail(
                 session=session,
@@ -487,6 +913,160 @@ class AskService:
             ),
             warning_codes,
         )
+
+    def _end_unanswered(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        prepared: PreparedTurn,
+        error_code: str,
+        actor: ActorContext | None,
+    ) -> tuple[AskTurnDetail, list[str]]:
+        self.fail_turn(session, workspace_id, prepared.turn_id, error_code)
+        ask_session = self._require_session(
+            session, workspace_id, prepared.ask_session_id
+        )
+        return self._stored_turn(session, ask_session, prepared.turn_id, actor), []
+
+    def fail_turn(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        turn_id: UUID,
+        error_code: str,
+    ) -> bool:
+        """End a pending turn as failed, keeping its question."""
+
+        acquire_workspace_write_intent(session)
+        ask_session_id = session.scalar(
+            select(AskTurn.ask_session_id).where(
+                AskTurn.id == turn_id, AskTurn.workspace_id == workspace_id
+            )
+        )
+        if ask_session_id is None:
+            return False
+        self._lock_session_for_turn_insert(
+            session=session, ask_session_id=ask_session_id
+        )
+        return self._end_pending_turn(
+            session, workspace_id, turn_id, ASK_TURN_FAILED, error_code
+        )
+
+    def _fail_after_error(
+        self,
+        session_factory: sessionmaker[Session],
+        workspace_id: UUID,
+        turn_id: UUID,
+        error_code: str,
+    ) -> None:
+        # Best effort: the original error is what the caller must see. If this
+        # cannot commit either, startup recovery ends the turn.
+        try:
+            with session_factory.begin() as session:
+                self.fail_turn(session, workspace_id, turn_id, error_code)
+        except Exception:
+            logger.exception("Could not end interrupted Ask turn %s", turn_id)
+
+    @staticmethod
+    def _end_pending_turn(
+        session: Session,
+        workspace_id: UUID,
+        turn_id: UUID,
+        status: str,
+        error_code: str | None = None,
+    ) -> bool:
+        """Move a pending turn to ``status``; False if it had already ended."""
+
+        result = session.execute(
+            update(AskTurn)
+            .where(
+                AskTurn.workspace_id == workspace_id,
+                AskTurn.id == turn_id,
+                AskTurn.status == ASK_TURN_PENDING,
+            )
+            .values(status=status, error_code=error_code)
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount == 1
+
+    def _stored_turn(
+        self,
+        session: Session,
+        ask_session: AskSession,
+        turn_id: UUID,
+        actor: ActorContext | None,
+    ) -> AskTurnDetail:
+        turn = self._reload_turn(session, ask_session.workspace_id, turn_id)
+        return self._turn_detail(
+            session=session,
+            ask_session=ask_session,
+            turn=turn,
+            actor=actor,
+        )
+
+    @staticmethod
+    def _reload_turn(session: Session, workspace_id: UUID, turn_id: UUID) -> AskTurn:
+        # The status was just changed by an UPDATE the identity map did not see.
+        return session.scalars(
+            select(AskTurn)
+            .where(AskTurn.workspace_id == workspace_id, AskTurn.id == turn_id)
+            .execution_options(populate_existing=True)
+        ).one()
+
+    def _history(
+        self,
+        session: Session,
+        workspace_id: UUID,
+        turn: AskTurn,
+        actor: ActorContext | None,
+    ) -> tuple[tuple[str, str, AskEvidence], ...]:
+        """Earlier answered turns to show the model, oldest first.
+
+        Only turns answered for the same model are used, so changing the model
+        starts a new history; a turn stored before evidence was recorded ends
+        it as well. Turns the asker can no longer see are left out.
+        """
+
+        picked: list[tuple[str, str, AskEvidence]] = []
+        size = 0
+        before = turn.turn_no
+        while True:
+            rows = session.scalars(
+                select(AskTurn)
+                .where(
+                    AskTurn.workspace_id == workspace_id,
+                    AskTurn.ask_session_id == turn.ask_session_id,
+                    AskTurn.turn_no < before,
+                    AskTurn.status == ASK_TURN_COMPLETED,
+                )
+                .order_by(AskTurn.turn_no.desc())
+                .limit(_HISTORY_BATCH)
+            ).all()
+            for row in rows:
+                if row.input_evidence is None:
+                    return tuple(reversed(picked))
+                if (row.generation or {}).get("target") != self.provider_target:
+                    return tuple(reversed(picked))
+                evidence = AskEvidence.from_record(row.input_evidence)
+                if evidence is None or not ask_evidence_visible(
+                    session,
+                    context_refs=evidence.context,
+                    artifact_ids=evidence.library,
+                    actor=actor,
+                    workspace_id=workspace_id,
+                ):
+                    continue
+                asked = row.user_message or ""
+                answered = row.assistant_message or ""
+                size += len(asked) + len(answered)
+                if size > ASK_HISTORY_MAX_CHARS:
+                    return tuple(reversed(picked))
+                picked.append((asked, answered, evidence))
+                if len(picked) == ASK_HISTORY_MAX_PAIRS:
+                    return tuple(reversed(picked))
+            if len(rows) < _HISTORY_BATCH:
+                return tuple(reversed(picked))
+            before = rows[-1].turn_no
 
     @staticmethod
     def _lock_session_for_turn_insert(
@@ -529,22 +1109,20 @@ class AskService:
                 return mode
         return "keyword"
 
-    def _answer(
+    def _retrieve(
         self,
         session: Session,
         workspace_id: UUID,
         question: str,
         actor: ActorContext | None = None,
-    ) -> tuple[
-        str,
-        list[UUID],
-        list[UUID],
-        list[dict[str, str]],
-        list[str],
-        bool,
-        list[dict[str, str]],
-        list[str],
-    ]:
+    ) -> RetrievedEvidence:
+        """Search for the question's evidence.
+
+        Only hits whose source is proven enter the pack, the trace and the
+        citations: a hit that cannot be tied to the document it came from
+        could not be hidden later from readers who lose access to it.
+        """
+
         mode, honored = self._best_retrieval_mode(
             self._workspace_retrieval_mode(session, workspace_id)
         )
@@ -591,48 +1169,30 @@ class AskService:
             search_warnings = _stable_unique(
                 [*search_warnings, *library_payload.warnings]
             )
-        language = _workspace_answer_language(session, workspace_id)
-        if not results:
-            return (
-                (
-                    "일치하는 Context 또는 Library 근거를 찾지 못했습니다."
-                    if language == "ko"
-                    else "No matching Context or Library evidence was found."
-                ),
-                [],
-                [],
-                [],
-                tried_lanes,
-                fallback,
-                nearest_candidates,
-                search_warnings,
-            )
-        lines = [
-            "컨텍스트 우선 검색 요약:"
-            if language == "ko"
-            else "Context-first retrieval summary:"
-        ]
-        context_ids: list[UUID] = []
+        pack: list[str] = []
+        context_refs: dict[UUID, UUID | None] = {}
         artifact_ids: list[UUID] = []
         trace: list[dict[str, str]] = []
-        for index, result in enumerate(results, start=1):
-            lines.append(f"{index}. {result.title}: {result.snippet}")
-            # All search lanes expose canonical document identity. Library item
-            # hits still map to the extracted artifact AskTurn cites.
+        for result in results:
             evidence_id = self._result_document_id(result) or result.id
             if result.type == "context_page":
-                page_id = evidence_id
-                if page_id is not None and page_id not in context_ids:
-                    context_ids.append(page_id)
+                # The answer is checked later against the version it read.
+                if result.version_id is None or evidence_id in context_refs:
+                    continue
+                context_refs[evidence_id] = result.version_id
             elif result.type in ("library_artifact", "library_item"):
                 artifact_id = self._library_artifact_id(
                     session,
                     workspace_id=workspace_id,
                     result=result,
                 )
-                if artifact_id is not None and artifact_id not in artifact_ids:
-                    artifact_ids.append(artifact_id)
-                    evidence_id = artifact_id
+                if artifact_id is None or artifact_id in artifact_ids:
+                    continue
+                artifact_ids.append(artifact_id)
+                evidence_id = artifact_id
+            else:
+                continue
+            pack.append(f"{len(pack) + 1}. {result.title}: {result.snippet}")
             evidence_trace = {
                 "id": str(evidence_id),
                 "type": result.type,
@@ -641,77 +1201,28 @@ class AskService:
                 "match_reason": result.match_reason or "",
                 "stable_url": result.stable_url or "",
             }
-            if (
-                result.type in {"context_page", "context_claim"}
-                and result.version_id is not None
-            ):
+            if result.type == "context_page" and result.version_id is not None:
                 evidence_trace["version_id"] = str(result.version_id)
                 evidence_trace["version_status"] = result.version_status or ""
                 evidence_trace["citation_available"] = str(
                     result.citation_available
                 ).lower()
             trace.append(evidence_trace)
-        pack_text = "\n".join(lines)
-        answer = pack_text
-        if self.provider_unavailable_reason:
-            # Configured but unbuildable provider: a persistent, operator-owned
-            # condition. Disclose it instead of silently serving a different
-            # answer style than the workspace is configured for.
-            search_warnings = [*search_warnings, LLM_PROVIDER_UNAVAILABLE_WARNING]
-        if self.provider is not None:
-            try:
-                result = self.provider.generate(
-                    system=_COMPOSER_SYSTEM,
-                    messages=(
-                        TextMessage(
-                            role="user",
-                            text=f"{question}\n\n[Evidence pack]\n{pack_text}",
-                        ),
-                    ),
-                    max_output_tokens=1024,
-                )
-                # Only a completed answer replaces the pack: truncated,
-                # refused or filtered output is not an answer.
-                if result.termination == "completed" and result.text.strip():
-                    answer = result.text.strip()
-                else:
-                    search_warnings = [
-                        *search_warnings,
-                        _TERMINATION_WARNINGS.get(
-                            result.termination, LLM_ANSWER_INCOMPLETE_WARNING
-                        ),
-                    ]
-            except LLMAdapterError as exc:
-                # The pack is a valid answer, but the user must know it is not
-                # the composed one, and whether retrying or an admin can help.
-                logger.warning(
-                    "Ask composer call failed (%s); using deterministic pack",
-                    exc.code,
-                )
-                search_warnings = [
-                    *search_warnings,
-                    _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING),
-                ]
-            except Exception:
-                # Unexpected composer errors need an administrator to inspect
-                # the server log.
-                logger.warning(
-                    "Ask composer failed unexpectedly; using deterministic pack",
-                    exc_info=True,
-                )
-                search_warnings = [
-                    *search_warnings,
-                    LLM_PROVIDER_UNAVAILABLE_WARNING,
-                ]
-        return (
-            answer,
-            context_ids,
-            artifact_ids,
-            trace,
-            tried_lanes,
-            fallback,
-            nearest_candidates,
-            search_warnings,
+        return RetrievedEvidence(
+            language=_workspace_answer_language(session, workspace_id),
+            pack=tuple(pack),
+            context_ids=tuple(context_refs),
+            artifact_ids=tuple(artifact_ids),
+            evidence=AskEvidence(
+                context=frozenset(context_refs.items()),
+                library=frozenset(artifact_ids),
+            ),
+            trace=tuple(trace),
+            tried_lanes=tuple(tried_lanes),
+            fallback=fallback,
+            nearest_candidates=tuple(nearest_candidates),
+            warnings=tuple(search_warnings),
+            found=bool(results),
         )
 
     @staticmethod
@@ -769,19 +1280,39 @@ class AskService:
         item_id = self._result_document_id(result)
         if item_id is None:
             return None
-        item = get_in_workspace(
-            session,
-            LibraryItem,
-            workspace_id=workspace_id,
-            resource_id=item_id,
+        # Read the canonical pointers fresh: the search may have loaded these
+        # rows before a newer conversion was promoted.
+        item = session.scalar(
+            select(LibraryItem)
+            .where(LibraryItem.id == item_id, LibraryItem.workspace_id == workspace_id)
+            .execution_options(populate_existing=True)
         )
         if item is None:
             return None
         version = get_canonical_library_version(session, item)
+        if version is None or version.id != result.version_id:
+            return None
+        version = session.scalar(
+            select(LibraryItemVersion)
+            .where(
+                LibraryItemVersion.id == version.id,
+                LibraryItemVersion.workspace_id == workspace_id,
+                LibraryItemVersion.library_item_id == item.id,
+            )
+            .execution_options(populate_existing=True)
+        )
         if version is None:
             return None
         artifact = get_canonical_markdown_artifact(session, version)
-        return artifact.id if artifact else None
+        if artifact is None or not _library_chunk_is_current(
+            session,
+            workspace_id=workspace_id,
+            item=item,
+            version=version,
+            result=result,
+        ):
+            return None
+        return artifact.id
 
     def _ensure_ask_day_node(
         self,
@@ -991,8 +1522,8 @@ class AskService:
         # return, the actor IS the author whose search already filtered the
         # evidence, so re-validation is skipped (redundant, and a divergence there
         # would falsely blank the author's own just-created answer).
-        evidence_visible = not revalidate_evidence or ask_turn_evidence_visible(
-            session, cited_page_ids, cited_artifact_ids, actor, ask_session.workspace_id
+        evidence_visible = not revalidate_evidence or ask_turn_visible(
+            session, turn, citations, actor, ask_session.workspace_id
         )
         if evidence_visible:
             assistant_message = turn.assistant_message
@@ -1044,6 +1575,8 @@ class AskService:
             ),
             placement_confidence=turn.placement_confidence,
             promotion_state=turn.promotion_state,
+            status=turn.status,
+            error_code=turn.error_code,
             created_at=turn.created_at,
             tree_path=tree_path,
             retrieval_trace=retrieval_trace,
@@ -1104,6 +1637,36 @@ class AskService:
             return []
 
 
+def ask_turn_visible(
+    session: Session,
+    turn: AskTurn,
+    citations: tuple[list[UUID], list[UUID]],
+    actor: ActorContext | None,
+    workspace_id: UUID,
+) -> bool:
+    """Whether ``actor`` may see the answer of ``turn``.
+
+    A turn with ``input_evidence`` is checked against everything its model was
+    given, earlier turns' evidence included: an answer that drew on a
+    restricted source through the conversation is hidden with it. A malformed
+    record is hidden. Older turns are checked against their citations.
+    """
+
+    if turn.input_evidence is not None:
+        evidence = AskEvidence.from_record(turn.input_evidence)
+        return evidence is not None and ask_evidence_visible(
+            session,
+            context_refs=evidence.context,
+            artifact_ids=evidence.library,
+            actor=actor,
+            workspace_id=workspace_id,
+        )
+    cited_page_ids, cited_artifact_ids = citations
+    return ask_turn_evidence_visible(
+        session, cited_page_ids, cited_artifact_ids, actor, workspace_id
+    )
+
+
 def ask_turn_evidence_visible(
     session: Session,
     cited_page_ids: list[UUID],
@@ -1111,7 +1674,26 @@ def ask_turn_evidence_visible(
     actor: ActorContext | None,
     workspace_id: UUID,
 ) -> bool:
-    """Whether ``actor`` can see every document a turn's answer cites.
+    """Whether ``actor`` can see every document a turn's answer cites."""
+
+    return ask_evidence_visible(
+        session,
+        context_refs=[(page_id, None) for page_id in cited_page_ids],
+        artifact_ids=cited_artifact_ids,
+        actor=actor,
+        workspace_id=workspace_id,
+    )
+
+
+def ask_evidence_visible(
+    session: Session,
+    *,
+    context_refs: Iterable[tuple[UUID, UUID | None]],
+    artifact_ids: Iterable[UUID],
+    actor: ActorContext | None,
+    workspace_id: UUID,
+) -> bool:
+    """Whether ``actor`` can see every source an Ask answer was built from.
 
     Used to re-validate an Ask turn's stored answer/citations/trace (and any
     ingress proposal cloned from it) against the CURRENT actor. A DANGLING
@@ -1123,7 +1705,7 @@ def ask_turn_evidence_visible(
     visible entity in another workspace must not authorize replay (Codex R12).
     """
 
-    for page_id in cited_page_ids:
+    for page_id, version_id in context_refs:
         page = get_in_workspace(
             session,
             ContextPage,
@@ -1132,8 +1714,24 @@ def ask_turn_evidence_visible(
         )
         if not context_page_visible(page, actor, workspace_id=workspace_id):
             return False
-    if cited_artifact_ids:
-        unique_artifact_ids = set(cited_artifact_ids)
+        if version_id is None:
+            continue
+        # The answer used this version's text. A version later closed (an
+        # undone approval) is not readable just because the page still is.
+        version = get_in_workspace(
+            session,
+            ContextPageVersion,
+            workspace_id=workspace_id,
+            resource_id=version_id,
+        )
+        if (
+            version is None
+            or version.page_id != page_id
+            or not context_version_is_visible(version, actor)
+        ):
+            return False
+    unique_artifact_ids = set(artifact_ids)
+    if unique_artifact_ids:
         rows = session.execute(
             select(
                 LibraryArtifact.id,
@@ -1173,6 +1771,53 @@ def ask_turn_evidence_visible(
             if not actor_can_read_library_trust_level(item.trust_level, actor):
                 return False
     return True
+
+
+def _library_chunk_is_current(
+    session: Session,
+    *,
+    workspace_id: UUID,
+    item: LibraryItem,
+    version: LibraryItemVersion,
+    result: RankedResult,
+) -> bool:
+    """Whether a semantic hit's chunk was cut from ``version``'s current text.
+
+    Chunks do not name the conversion attempt they came from. Promotion swaps
+    the canonical pointer and deletes the old attempt's chunks in one
+    transaction, and the indexer hashes the same text this selects, so a chunk
+    that still exists with this hash after the pointer read belongs to it. A
+    fresh query, not the identity map, so a chunk loaded earlier cannot answer.
+    """
+
+    source = result.source_ref or {}
+    chunk_id = (
+        parse_uuid_or_none(source.get("id"))
+        if source.get("kind") == "content_chunk"
+        else None
+    )
+    if chunk_id is None:
+        return False
+    effective = get_effective_library_markdown(session, version)
+    content_hash = (
+        effective.content_sha256
+        if effective is not None and effective.overlay is not None
+        else version.content_hash
+    )
+    return bool(
+        session.scalar(
+            select(
+                exists().where(
+                    ContentChunk.id == chunk_id,
+                    ContentChunk.workspace_id == workspace_id,
+                    ContentChunk.document_kind == "library_item",
+                    ContentChunk.document_id == item.id,
+                    ContentChunk.source_version_id == version.id,
+                    ContentChunk.source_content_hash == content_hash,
+                )
+            )
+        )
+    )
 
 
 def _restricted_answer_placeholder(language: str) -> str:

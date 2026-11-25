@@ -19,7 +19,9 @@ def test_uvicorn_proxy_headers_passed_cli(monkeypatch, tmp_path):
     with (
         mock.patch("backend.cli.main.serve_runtime", side_effect=fake_runtime),
         mock.patch("backend.cli.main.bootstrap_app"),
-        mock.patch("backend.cli.main.create_app", return_value=mock.MagicMock()),
+        mock.patch(
+            "backend.cli.main.create_serving_app", return_value=mock.MagicMock()
+        ),
         mock.patch("backend.cli.main.webbrowser.open"),
     ):
         from backend.cli.main import run_server
@@ -48,7 +50,9 @@ def test_default_proxy_headers_false_no_op(monkeypatch):
     with (
         mock.patch("backend.cli.main.serve_runtime", side_effect=fake_runtime),
         mock.patch("backend.cli.main.bootstrap_app"),
-        mock.patch("backend.cli.main.create_app", return_value=mock.MagicMock()),
+        mock.patch(
+            "backend.cli.main.create_serving_app", return_value=mock.MagicMock()
+        ),
         mock.patch("backend.cli.main.webbrowser.open"),
     ):
         from backend.cli.main import run_server
@@ -92,7 +96,9 @@ def test_uvicorn_proxy_headers_passed_module_main():
 
     with (
         mock.patch.object(main_module, "get_settings", return_value=settings),
-        mock.patch.object(main_module, "create_app", return_value=mock.MagicMock()),
+        mock.patch.object(
+            main_module, "create_serving_app", return_value=mock.MagicMock()
+        ),
         mock.patch.object(main_module.uvicorn, "run", side_effect=fake_uvicorn_run),
     ):
         main_module.main()

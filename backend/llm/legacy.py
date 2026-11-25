@@ -1,17 +1,13 @@
 """The server-wide answer model selected by ``DTXWIKI_LLM_PROVIDER``.
 
 This is the owner-only Ask's instance configuration. It maps each accepted
-value to a built-in adapter and keeps what that path has always done: a fixed
-model per value, temperature 0 and up to two retries of transient failures.
-The retries live here, around the adapter, because an adapter makes exactly
-one call per request.
+value to a built-in adapter with a fixed model and temperature 0. A failed call
+is not sent again: the provider may already have processed (and charged for)
+it, so Ask answers from the evidence pack and says so instead.
 """
 
 from __future__ import annotations
 
-import asyncio
-import random
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -19,13 +15,9 @@ from typing import TYPE_CHECKING
 from backend.llm.generation import BlockingTextGenerator, TextGenerator
 from backend.llm.transport import HttpxLLMTransport
 from backend.spi.llm import (
-    CanonicalTextRequest,
-    CanonicalTextResult,
     ExecutionContext,
-    LLMAdapterError,
     LLMModelCapabilities,
     LLMTransport,
-    TextGenerationPort,
 )
 
 if TYPE_CHECKING:
@@ -58,61 +50,6 @@ _CAPABILITIES = LLMModelCapabilities(options=frozenset({"temperature"}))
 _TEMPERATURE = 0.0
 _TIMEOUT_SECONDS = 120.0
 
-# HTTP error statuses this path has always retried.
-RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504, 529})
-DEFAULT_MAX_RETRIES = 2
-DEFAULT_RETRY_BASE_DELAY = 0.5
-DEFAULT_RETRY_MAX_DELAY = 8.0
-
-
-class RetryingTextGeneration:
-    """Retries a port on transient failures with jittered backoff."""
-
-    def __init__(
-        self,
-        port: TextGenerationPort,
-        *,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-        base_delay: float = DEFAULT_RETRY_BASE_DELAY,
-        max_delay: float = DEFAULT_RETRY_MAX_DELAY,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-        jitter: Callable[[], float] = random.random,
-    ) -> None:
-        self._port = port
-        self._max_retries = max_retries
-        self._base_delay = base_delay
-        self._max_delay = max_delay
-        self._sleep = sleep
-        self._jitter = jitter
-
-    async def generate(
-        self, request: CanonicalTextRequest, context: ExecutionContext
-    ) -> CanonicalTextResult:
-        attempt = 0
-        while True:
-            try:
-                return await self._port.generate(request, context)
-            except LLMAdapterError as exc:
-                if attempt >= self._max_retries or not _retryable(exc):
-                    raise
-                await self._sleep(self._delay(attempt, exc.retry_after_seconds))
-                attempt += 1
-
-    def _delay(self, attempt: int, retry_after: float | None) -> float:
-        delay = min(self._max_delay, self._base_delay * (2**attempt))
-        delay *= 0.5 + self._jitter() / 2
-        if retry_after is not None:
-            delay = max(delay, min(retry_after, self._max_delay))
-        return delay
-
-
-def _retryable(error: LLMAdapterError) -> bool:
-    status_code = error.status_code
-    # A successful status confirms delivery even if the body read failed.
-    if status_code is None or 200 <= status_code < 300:
-        return error.code in ("timeout", "network_error")
-    return status_code in RETRYABLE_STATUS_CODES
-
 
 def build_llm_provider(
     settings: Settings,
@@ -144,7 +81,7 @@ def build_llm_provider(
         transport=transport or HttpxLLMTransport(),
     )
     return BlockingTextGenerator(
-        port=RetryingTextGeneration(port),
+        port=port,
         model=answer_model.model,
         context=ExecutionContext(timeout_seconds=_TIMEOUT_SECONDS),
         temperature=_TEMPERATURE,
@@ -169,9 +106,29 @@ def resolve_llm_provider(
         return None, str(exc)
 
 
+def llm_provider_target(
+    settings: Settings, adapters: LLMAdapterRegistry
+) -> dict[str, str] | None:
+    """Identify the server's answer model for Ask's conversation history.
+
+    An earlier answer is shown only to the same adapter, model and endpoint,
+    so changing the server's model starts a new history instead of sending
+    the conversation somewhere else.
+    """
+
+    answer_model = _ANSWER_MODELS.get(settings.llm_provider.strip().lower())
+    if answer_model is None:
+        return None
+    return {
+        "kind": "server",
+        "adapter_id": answer_model.adapter_id,
+        "model": answer_model.model,
+        "endpoint": adapters.descriptor(answer_model.adapter_id).default_base_url or "",
+    }
+
+
 __all__ = [
-    "RETRYABLE_STATUS_CODES",
-    "RetryingTextGeneration",
     "build_llm_provider",
+    "llm_provider_target",
     "resolve_llm_provider",
 ]

@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.exc import OperationalError
 
 from backend.api.deps import (
+    AskReauthorizeDep,
     AskServiceDep,
     RestActorDep,
     SearchServiceDep,
@@ -185,7 +186,7 @@ from backend.services.activity_feed_service import (
     InvalidActivityTokenError,
 )
 from backend.services.actor_visible_read import context_page_id_visible
-from backend.services.ask_service import InvalidUserMessageError
+from backend.services.ask_service import AskAccessRevokedError, InvalidUserMessageError
 from backend.services.context_link_targets import markdown_link_targets
 from backend.services.context_media_attachments import (
     asset_usage_read_projection,
@@ -3109,7 +3110,16 @@ def get_ask_session(
 @router.post(
     "/{workspace_id}/ask/sessions/{ask_session_id}/turns",
     response_model=AskTurnDetailResponse,
-    responses=REST_ERROR_RESPONSES,
+    responses={
+        **REST_ERROR_RESPONSES,
+        500: {
+            "model": RESTErrorBody,
+            "description": (
+                "The question may have been stored before the failure; read "
+                "the session to see whether it was, as a `failed` turn."
+            ),
+        },
+    },
 )
 def create_ask_turn(
     workspace_id: UUID,
@@ -3119,22 +3129,28 @@ def create_ask_turn(
     _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
     ask_service: AskServiceDep,
+    reauthorize: AskReauthorizeDep,
 ):
+    """Answer a question. The question is stored first: if answering fails
+    after that, the turn stays in the session as ``failed``."""
     try:
-        with session_factory.begin() as session:
-            detail, warning_codes = ask_service.create_turn(
-                session=session,
-                workspace_id=workspace_id,
-                ask_session_id=ask_session_id,
-                request=request_body,
-                actor_kind=actor.actor_kind,
-                actor_id=actor.actor_id,
-                actor=actor,
-            )
-            return {
-                "data": detail,
-                "envelope": {"warnings": advisory_warnings(warning_codes)},
-            }
+        detail, warning_codes = ask_service.run_turn(
+            session_factory,
+            workspace_id=workspace_id,
+            ask_session_id=ask_session_id,
+            request=request_body,
+            actor_kind=actor.actor_kind,
+            actor_id=actor.actor_id,
+            actor=actor,
+            authorize=reauthorize,
+        )
+        return {
+            "data": detail,
+            "envelope": {"warnings": advisory_warnings(warning_codes)},
+        }
+    except AskAccessRevokedError as exc:
+        # The turn is stored as failed; answer with the original refusal.
+        raise exc.__cause__ from None
     except InvalidUserMessageError as exc:
         return build_rest_error_response(
             error_code="invalid_user_message",

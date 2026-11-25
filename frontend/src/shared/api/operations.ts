@@ -667,6 +667,8 @@ export async function createAskTurn(
   workspaceId: string,
   sessionId: string,
   user_message: string,
+  // The latest turn the asker saw; null for an empty session.
+  afterTurnId: string | null,
 ) {
   const response = await apiRequest<{
     data: AskTurnDetail;
@@ -675,7 +677,7 @@ export async function createAskTurn(
     `/api/v1/workspaces/${workspaceId}/ask/sessions/${sessionId}/turns`,
     {
       method: "POST",
-      body: JSON.stringify({ user_message }),
+      body: JSON.stringify({ user_message, after_turn_id: afterTurnId }),
     },
   );
   return {

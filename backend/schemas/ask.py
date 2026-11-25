@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,9 +17,16 @@ class AskSessionCreate(InputRequest):
     model_config = ConfigDict(extra="forbid")
 
 
+AskTurnStatus = Literal["pending", "completed", "failed", "stopped"]
+
+
 class AskTurnCreate(InputRequest):
     user_message: str
     ttl_override_seconds: int | None = None
+    # The latest turn the asker saw: null for an empty session. A different
+    # latest turn means the session moved on (409). Leave it out to skip the
+    # check.
+    after_turn_id: UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,6 +61,8 @@ class AskTurnDetail(BaseModel):
     recommended_placement_tree_node_id: UUID | None
     placement_confidence: str | None
     promotion_state: str
+    status: AskTurnStatus
+    error_code: str | None = None
     created_at: datetime
     # Backend-only field (not surfaced in the frontend operations type); keep a
     # default so it stays optional in the generated schema.

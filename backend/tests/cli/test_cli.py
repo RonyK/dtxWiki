@@ -127,7 +127,7 @@ def test_root_invocation_uses_env_backed_default_port(monkeypatch):
 
     monkeypatch.setenv("DTXWIKI_BACKEND_PORT", "22080")
     monkeypatch.setattr(cli_main, "bootstrap_app", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(cli_main, "create_app", lambda settings: object())
+    monkeypatch.setattr(cli_main, "create_serving_app", lambda settings: object())
     monkeypatch.setattr(cli_main, "serve_runtime", fake_runtime)
 
     result = CliRunner().invoke(cli_main.app, ["--no-open"])

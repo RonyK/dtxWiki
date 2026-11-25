@@ -316,7 +316,10 @@
     "email_conflict_ticket_invalid": "This request expired. Sign in with the provider again, then send the request.",
     "email_conflict_already_decided": "This request was already decided. Refresh the list.",
     "email_conflict_not_found": "This request no longer exists. Refresh the list.",
-    "invalid_email_conflict_decision": "Enter a reason of up to 1,000 characters."
+    "invalid_email_conflict_decision": "Enter a reason of up to 1,000 characters.",
+    "ask_turn_in_progress": "This Ask is still answering a question. Wait for it to finish, then ask again.",
+    "ask_session_changed": "This Ask has new turns. Read them, then ask again.",
+    "ask_turn_not_completed": "Only a completed answer can be saved."
   },
   "preview": {
     "badge": "Preview",

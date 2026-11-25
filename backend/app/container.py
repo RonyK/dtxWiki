@@ -1261,7 +1261,7 @@ class AppContainer:
 
     def get_ask_service(self):
         if self.ask_service is None:
-            from backend.llm.legacy import resolve_llm_provider
+            from backend.llm.legacy import llm_provider_target, resolve_llm_provider
             from backend.services.ask_service import AskService
 
             # A bad DTXWIKI_LLM_PROVIDER setting must not 500 the Ask surface:
@@ -1284,6 +1284,13 @@ class AppContainer:
                 provider=provider,
                 graph_service=self.services.graph_service,
                 provider_unavailable_reason=reason,
+                provider_target=(
+                    llm_provider_target(
+                        self.settings, self.services.llm_adapter_registry
+                    )
+                    if provider is not None
+                    else None
+                ),
             )
         return self.ask_service
 

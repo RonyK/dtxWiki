@@ -30,6 +30,7 @@ from backend.tests.conftest import (
     authenticate_test_client_in_workspace,
     captured_log_messages,
 )
+from backend.tests.utils.ask import create_turn_in_session
 
 pytestmark = pytest.mark.integration
 
@@ -216,7 +217,8 @@ def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
             actor_kind="human",
             actor_id=str(uuid4()),
         )
-        detail, warnings = service.create_turn(
+        detail, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace_id,
             ask_session_id=ask_session.id,
@@ -275,7 +277,8 @@ def test_an_unexpected_composer_exception_does_not_promise_a_retry(
             actor_kind="human",
             actor_id=str(uuid4()),
         )
-        _detail, warnings = service.create_turn(
+        _detail, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace_id,
             ask_session_id=ask_session.id,

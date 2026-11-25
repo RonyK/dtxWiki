@@ -1564,7 +1564,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Ask Turn */
+        /**
+         * Create Ask Turn
+         * @description Answer a question. The question is stored first: if answering fails
+         *     after that, the turn stays in the session as ``failed``.
+         */
         post: operations["create_ask_turn_api_v1_workspaces__workspace_id__ask_sessions__ask_session_id__turns_post"];
         delete?: never;
         options?: never;
@@ -4948,6 +4952,8 @@ export interface components {
         };
         /** AskTurnCreate */
         AskTurnCreate: {
+            /** After Turn Id */
+            after_turn_id?: string | null;
             /** Ttl Override Seconds */
             ttl_override_seconds?: number | null;
             /**
@@ -4976,6 +4982,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Error Code */
+            error_code?: string | null;
             /** Fallback Disclosure */
             fallback_disclosure: boolean;
             /** Graph Context */
@@ -4999,6 +5007,11 @@ export interface components {
             retrieval_trace: {
                 [key: string]: string;
             }[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "completed" | "failed" | "stopped";
             /** Topic Tags */
             topic_tags: string[];
             /** Tree Path */
@@ -20547,6 +20560,15 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description The question may have been stored before the failure; read the session to see whether it was, as a `failed` turn. */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createContext, useContext } from "react";
 import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
@@ -488,6 +488,74 @@ describe("AskScreen", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Title")).toHaveValue("Follow up question");
     });
+  });
+
+  it("asks after the turn it shows and keeps a question whose answer failed", async () => {
+    let turns = [askTurn()];
+    let sentBody: unknown = null;
+    mockFetch((url, init) => {
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
+        return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return { data: [] };
+      }
+      if (
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns` &&
+        init?.method === "POST"
+      ) {
+        sentBody = JSON.parse(String(init.body));
+        // The server stored the question, then failed to answer it.
+        turns = [
+          askTurn(),
+          askTurn({
+            id: "turn-2",
+            turn_no: 2,
+            user_message: "Second question",
+            assistant_message: null,
+            cited_context_page_ids: [],
+            status: "failed",
+            error_code: "internal_error",
+          }),
+        ];
+        return jsonResponse(
+          { error_code: "internal_error", message: "boom", request_id: "r" },
+          500,
+        );
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
+        return { data: sessionDetail(turns) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText(/Context-first retrieval summary/);
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Second question");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(
+      await screen.findByText("Internal server error. The answer was not saved."),
+    ).toBeInTheDocument();
+    expect(sentBody).toEqual({ user_message: "Second question", after_turn_id: TURN_ID });
+    expect(screen.getByText("Second question")).toBeInTheDocument();
+    // The send error stays. The failed turn has nothing to save, but the
+    // answer before it still can be saved.
+    expect(
+      screen.getByText("The server could not complete the request. Please try again."),
+    ).toBeInTheDocument();
+    const failedCard = screen.getByText("Second question").closest("article");
+    expect(failedCard).not.toBeNull();
+    expect(within(failedCard!).queryByRole("button", { name: "Save answer" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Save answer" })).toHaveLength(1);
   });
 
   it("appends an older keyset page when Load more is pressed", async () => {
@@ -2270,6 +2338,7 @@ function askTurn(overrides: Partial<AskTurnDetail> = {}): AskTurnDetail {
     recommended_placement_tree_node_id: PARENT_ID,
     placement_confidence: "medium",
     promotion_state: "not_promoted",
+    status: "completed",
     created_at: "2026-05-09T00:00:00Z",
     retrieval_trace: [],
     tried_lanes: [],

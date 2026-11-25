@@ -18,10 +18,10 @@ from backend.llm.adapters import (
 from backend.llm.adapters._shared import BuiltinAdapterFactory
 from backend.llm.base import EmbeddingProvider
 from backend.llm.generation import BlockingTextGenerator
-from backend.llm.legacy import RetryingTextGeneration, build_llm_provider
+from backend.llm.legacy import build_llm_provider
 from backend.llm.transport import HttpxLLMTransport
 from backend.schemas.read import RankedResult, SearchPayload
-from backend.services.ask_service import AskService
+from backend.services.ask_service import AskService, PreparedTurn
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
@@ -35,6 +35,7 @@ from backend.spi.llm import (
 from backend.testing.spi_conformance import WireCase, assert_llm_adapter_contract
 
 KEY = "secret-test-key"
+VERSION_ID = uuid4()
 REQUEST = CanonicalTextRequest(
     model="model-x",
     messages=(TextMessage(role="user", text="Needle?"),),
@@ -118,6 +119,21 @@ def test_registry_returns_none_by_default_and_builds_configured_providers():
         assert call["payload"]["temperature"] == 0.0
         assert call["payload"][budget_field] == 1024
 
+    # A failed call is not sent again: the provider may already have charged.
+    transport = RecordingTransport(_reply({"error": {"message": "busy"}}, status=503))
+    generator = build_llm_provider(
+        Settings(_env_file=None, llm_provider="openai", openai_api_key=KEY),
+        registry,
+        transport=transport,
+    )
+    with pytest.raises(LLMAdapterError) as failure:
+        generator.generate(
+            system=None,
+            messages=(TextMessage(role="user", text="q"),),
+            max_output_tokens=8,
+        )
+    assert (failure.value.status_code, len(transport.calls)) == (503, 1)
+
     # An option the model cannot honor is refused before anything is sent.
     transport = RecordingTransport(_reply({}))
     unsupported = BlockingTextGenerator(
@@ -157,78 +173,6 @@ def test_registry_rejects_missing_keys_and_unknown_provider():
 
     with pytest.raises(RuntimeError, match="DTXWIKI_LLM_PROVIDER"):
         build_llm_provider(Settings(_env_file=None, llm_provider="local"), registry)
-
-
-class ScriptedPort:
-    def __init__(self, outcomes) -> None:
-        self.outcomes = list(outcomes)
-        self.calls = 0
-
-    async def generate(self, request, context):
-        outcome = self.outcomes[self.calls]
-        self.calls += 1
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-
-def test_legacy_retry_policy_keeps_its_statuses_and_backoff():
-    """The server-wide model keeps its two retries; adapters never retry."""
-
-    def failure(code, status=None, retry_after=None):
-        return LLMAdapterError(
-            code,
-            delivery="sent" if status else "unknown",
-            status_code=status,
-            retry_after_seconds=retry_after,
-        )
-
-    async def run(port):
-        try:
-            return await port.generate(REQUEST, ExecutionContext(5))
-        except LLMAdapterError as exc:
-            return exc
-
-    ok = CanonicalTextResult(text="ok", termination="completed")
-    for outcomes, expected_calls, expected_sleeps, expected in (
-        # Retries follow the old statuses, not the normalized code: a 429 is
-        # retried even as quota_exhausted, honoring Retry-After (capped at
-        # 8 s); a 503 backs off; then success.
-        (
-            [
-                failure("quota_exhausted", 429, 30.0),
-                failure("provider_unavailable", 503),
-                ok,
-            ],
-            3,
-            [8.0, 1.0],
-            ok,
-        ),
-        # A 401 is not transient, and neither was a 501.
-        ([failure("authentication_failed", 401)], 1, [], "authentication_failed"),
-        ([failure("provider_unavailable", 501)], 1, [], "provider_unavailable"),
-        # A status-less transport timeout is retried until the budget runs out.
-        ([failure("timeout")] * 3, 3, [0.5, 1.0], "timeout"),
-        # A successful HTTP status only proves headers arrived. Legacy Ask
-        # retries interrupted body reads within the same budget.
-        (
-            [failure("timeout", 200), failure("network_error", 200), ok],
-            3,
-            [0.5, 1.0],
-            ok,
-        ),
-    ):
-        port = ScriptedPort(outcomes)
-        sleeps: list[float] = []
-
-        async def sleep(seconds, sleeps=sleeps):
-            sleeps.append(seconds)
-
-        outcome = asyncio.run(
-            run(RetryingTextGeneration(port, sleep=sleep, jitter=lambda: 1.0))
-        )
-        assert getattr(outcome, "code", outcome) == expected
-        assert (port.calls, sleeps) == (expected_calls, expected_sleeps)
 
 
 def _anthropic_cases():
@@ -979,6 +923,7 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
                     snippet="Needle evidence body.",
                     score=1.0,
                     citation_available=True,
+                    version_id=VERSION_ID,
                 )
             ],
             supported_retrieval_modes=["keyword"],
@@ -991,23 +936,13 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
         provider=FixedProvider("Composed answer [1]."),
     )
 
-    (
-        answer,
-        context_ids,
-        artifact_ids,
-        trace,
-        lanes,
-        fallback,
-        nearest,
-        warnings,
-    ) = service._answer(
-        session=_NoPolicySession(), workspace_id=uuid4(), question="Needle"
-    )
+    retrieved = service._retrieve(_NoPolicySession(), uuid4(), "Needle")
+    composed = service.compose_turn(_prepared(retrieved))
 
-    assert answer == "Composed answer [1]."
-    assert context_ids == [result_id]
-    assert artifact_ids == []
-    assert trace == [
+    assert composed.answer == "Composed answer [1]."
+    assert retrieved.context_ids == (result_id,)
+    assert retrieved.artifact_ids == ()
+    assert retrieved.trace == (
         {
             "id": str(result_id),
             "type": "context_page",
@@ -1015,12 +950,15 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
             "score": "1.00",
             "match_reason": "",
             "stable_url": "",
-        }
-    ]
-    assert lanes == []
-    assert fallback is False
-    assert nearest == []
-    assert warnings == []
+            "version_id": str(VERSION_ID),
+            "version_status": "",
+            "citation_available": "true",
+        },
+    )
+    assert retrieved.tried_lanes == ()
+    assert retrieved.fallback is False
+    assert retrieved.nearest_candidates == ()
+    assert composed.warnings == ()
 
 
 # Each case is one thing the reader can do about the fallback: try again
@@ -1057,6 +995,7 @@ def test_ask_service_falls_back_to_deterministic_pack_on_provider_failure(
                         snippet="Needle evidence body.",
                         score=1.0,
                         citation_available=True,
+                        version_id=VERSION_ID,
                     )
                 ],
                 supported_retrieval_modes=["keyword"],
@@ -1067,22 +1006,31 @@ def test_ask_service_falls_back_to_deterministic_pack_on_provider_failure(
         provider=provider(),
     )
 
-    answer, *_, warnings = service._answer(
-        session=_NoPolicySession(),
-        workspace_id=uuid4(),
-        question="Needle",
+    composed = service.compose_turn(
+        _prepared(service._retrieve(_NoPolicySession(), uuid4(), "Needle"))
     )
 
-    assert answer == (
+    assert composed.answer == (
         "Context-first retrieval summary:\n1. Needle Context: Needle evidence body."
     )
-    assert warnings == [warning]
+    assert composed.warnings == (warning,)
+
+
+def _prepared(retrieved) -> PreparedTurn:
+    return PreparedTurn(
+        turn_id=uuid4(),
+        ask_session_id=uuid4(),
+        question="Needle",
+        retrieved=retrieved,
+        history=(),
+        evidence=retrieved.evidence,
+    )
 
 
 class _NoPolicySession:
-    """The only thing `_answer` asks a session for: this workspace's retrieval
-    policy. These tests are about the composer, so there is none and Ask falls
-    back to the ladder it has always used."""
+    """All the retrieval asks a session for: this workspace's retrieval policy
+    and answer language. These tests are about the composer, so there are none
+    and Ask uses its defaults."""
 
     def scalar(self, *_args, **_kwargs):
         return None

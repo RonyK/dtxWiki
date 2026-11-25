@@ -15,6 +15,7 @@ from sqlalchemy import (
     Uuid,
     false,
 )
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql.elements import conv
 
@@ -25,6 +26,12 @@ from backend.models.base import (
     UuidPrimaryKeyMixin,
     utc_now,
 )
+
+ASK_TURN_PENDING = "pending"
+ASK_TURN_COMPLETED = "completed"
+ASK_TURN_FAILED = "failed"
+ASK_TURN_STOPPED = "stopped"
+_PENDING_TURN = sql_text("status = 'pending'")
 
 
 class AskSession(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -97,6 +104,15 @@ class AskTurn(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
             name="ask_turn_session_no_uq",
         ),
         UniqueConstraint("workspace_id", "id", name="uq_ask_turn_workspace_id"),
+        # One question at a time per session; the service checks this under
+        # the session lock first, so the index is the last line of defence.
+        Index(
+            "uq_ask_turn_session_pending",
+            "ask_session_id",
+            unique=True,
+            sqlite_where=_PENDING_TURN,
+            postgresql_where=_PENDING_TURN,
+        ),
         # Epic-3 D-3 final schema: workspace-scoped, not just page-scoped.
         ForeignKeyConstraint(
             ["workspace_id", "promoted_context_page_id"],
@@ -177,6 +193,27 @@ class AskTurn(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         default=list,
         server_default="[]",
     )
+    # A question is stored as ``pending`` when it is accepted and ends as
+    # ``completed``, ``failed`` (``error_code`` says why) or ``stopped``.
+    status: Mapped[str] = mapped_column(
+        Text,
+        CheckConstraint(
+            "status IN ('pending', 'completed', 'failed', 'stopped')",
+            name="ck_ask_turn_status",
+        ),
+        nullable=False,
+        default=ASK_TURN_COMPLETED,
+        server_default=ASK_TURN_COMPLETED,
+    )
+    error_code: Mapped[str | None] = mapped_column(Text)
+    # Every source the model was given for this turn, including the evidence
+    # of the earlier turns it was shown. NULL for turns stored before this
+    # record existed: their citations are their evidence.
+    input_evidence: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True)
+    )
+    # Which model produced the answer and how the call ended.
+    generation: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
 
 
 class AskTurnCitation(UuidPrimaryKeyMixin, CreatedAtMixin, Base):

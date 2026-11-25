@@ -7,6 +7,8 @@
 - The MCP tool contract adds the Ask warnings `llm_composer_retryable`,
   `llm_answer_incomplete` and `llm_answer_refused`. Refresh cached tool catalogs
   and result schemas.
+- DB schema: migration `916a6162b789` follows `dafc5339b3b1` and adds Ask turn
+  status columns. Existing turns become `completed`.
 
 ### LLM adapters
 
@@ -17,7 +19,8 @@
   Completions (and compatible servers) and the Gemini API register the same
   way plugin adapters do. Each makes at most one provider call per request and
   reports a normalized result, token usage and error.
-- `DTXWIKI_LLM_PROVIDER` keeps its models, temperature and two retries.
+- `DTXWIKI_LLM_PROVIDER` keeps its models and temperature. A failed call is
+  no longer sent again, because the provider may already have charged for it.
   `openai` sends `max_completion_tokens` instead of the deprecated
   `max_tokens`.
 - Ask uses only a completed answer. It shows an evidence summary with
@@ -27,6 +30,26 @@
   Saved turns with `llm_composer_failed` display a generic fallback message.
 - Provider options refuse a credential field's name at any depth, not only at
   the top level, also when a plugin schema allows nested options.
+
+### Ask
+
+- A follow-up question sees the session's earlier answers (up to four, from
+  the same answer model). Evidence is still searched for the new question
+  only, and only its own evidence is cited. When an earlier answer drew on
+  evidence a reader cannot see, that reader sees the follow-up's question but
+  not its answer, citations or search path, and cannot save it.
+- A question is stored as soon as it is accepted. A provider failure still
+  answers with the evidence summary and a warning, as before. If the turn
+  cannot be finished at all, it stays with `status` `failed` and an
+  `error_code`: `internal_error`, `access_revoked` (the asker lost access
+  meanwhile), `evidence_unavailable` (its evidence became unreadable), or
+  `server_restarted`. Only `completed` turns can be saved to Context.
+- `POST …/ask/sessions/{ask_session_id}/turns` takes an optional
+  `after_turn_id`, the latest turn the asker saw (`null` for an empty session),
+  and answers `409 ask_session_changed` when it is not the latest. A second
+  question while one is being answered gets `409 ask_turn_in_progress`.
+- A search hit whose source cannot be confirmed is left out of the answer and
+  its search path.
 
 ### Backup and rollback
 

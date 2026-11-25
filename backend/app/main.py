@@ -74,6 +74,7 @@ from backend.catalog.library_family_presets import (
 )
 from backend.catalog.mcp_apps import get_mcp_app_catalog_repository
 from backend.domain.input_policy import InputPolicyError
+from backend.services.ask_service import fail_interrupted_ask_turns
 from backend.services.auth.provider_registry import ProviderRegistry
 from backend.services.context_version_storage import ContextStorageServiceError
 
@@ -541,6 +542,23 @@ def mount_spa(app: FastAPI, static_root: Path | None = None) -> None:
         )
 
 
+def create_serving_app(
+    settings: Settings | None = None, *, bootstrap_on_startup: bool = False
+) -> FastAPI:
+    """Build the app a serving process answers requests with.
+
+    Every way of serving dtxWiki builds its app here, once it owns the data
+    directory. Ask turns still pending then belong to a process that is gone:
+    their questions stay, marked as an internal error. ``create_app`` itself
+    does not do this, because other apps (tests, embedders) may share the
+    database with a server that is still answering.
+    """
+
+    app = create_app(settings=settings, bootstrap_on_startup=bootstrap_on_startup)
+    fail_interrupted_ask_turns(app.state.container.db.session_factory)
+    return app
+
+
 class _LazyASGIApp:
     """Defer ASGI app construction until an ASGI host actually serves it."""
 
@@ -549,7 +567,7 @@ class _LazyASGIApp:
 
     async def __call__(self, scope, receive, send) -> None:
         if self._app is None:
-            self._app = create_app(bootstrap_on_startup=True)
+            self._app = create_serving_app(bootstrap_on_startup=True)
         await self._app(scope, receive, send)
 
 
@@ -559,7 +577,7 @@ app = _LazyASGIApp()
 def main() -> None:
     """DEPRECATED: prefer 'dtxwiki serve' CLI. Retained for asgi-host hosting only."""
     settings = get_settings()
-    app_instance = create_app(settings=settings, bootstrap_on_startup=True)
+    app_instance = create_serving_app(settings, bootstrap_on_startup=True)
     uvicorn.run(
         app_instance,
         host="127.0.0.1",
