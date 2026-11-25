@@ -43,16 +43,13 @@ def test_co_read_source_reads_the_window_through_its_index(tmp_path) -> None:
 
         event.listen(engine, "before_cursor_execute", capture)
         with Session(engine) as session:
-            assert (
-                list(
-                    co_read_source(
-                        session,
-                        uuid4(),
-                        since=datetime.now(UTC) - timedelta(days=30),
-                    )
+            assert list(
+                co_read_source(
+                    session,
+                    uuid4(),
+                    since=datetime.now(UTC) - timedelta(days=30),
                 )
-                == []
-            )
+            ) == []
         event.remove(engine, "before_cursor_execute", capture)
 
         assert len(captured) == 1

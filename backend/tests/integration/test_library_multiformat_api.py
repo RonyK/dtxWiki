@@ -151,7 +151,9 @@ def _valid_mp4() -> bytes:
     ftyp = _mp4_box(b"ftyp", b"isom" + b"\0" * 4 + b"isom")
     handler = _mp4_box(b"hdlr", b"\0" * 8 + b"vide" + b"\0" * 4)
     sample = (16).to_bytes(4, "big") + b"avc1" + b"\0" * 8
-    sample_table = _mp4_box(b"stsd", b"\0" * 4 + (1).to_bytes(4, "big") + sample)
+    sample_table = _mp4_box(
+        b"stsd", b"\0" * 4 + (1).to_bytes(4, "big") + sample
+    )
     track = _mp4_box(
         b"trak",
         _mp4_box(
@@ -524,7 +526,10 @@ def test_custom_format_is_store_only_and_existing_version_survives_catalog_chang
         media_type="application/octet-stream",
     )
     assert second.status_code == 201, second.text
-    assert second.json()["data"]["current_version"]["format_id"] == "custom-drawing-v2"
+    assert (
+        second.json()["data"]["current_version"]["format_id"]
+        == "custom-drawing-v2"
+    )
     with library_api.session_factory() as session:
         persisted_first = session.get(
             LibraryItemVersion,
@@ -1033,7 +1038,9 @@ def test_reuploaded_bytes_are_a_new_item_but_dedupe_at_the_blob_layer(
     first_data = first.json()["data"]
     second_data = second.json()["data"]
     assert second_data["id"] != first_data["id"]
-    assert second_data["current_version"]["id"] != first_data["current_version"]["id"]
+    assert (
+        second_data["current_version"]["id"] != first_data["current_version"]["id"]
+    )
     assert (
         second_data["current_version"]["content_hash"]
         == first_data["current_version"]["content_hash"]

@@ -248,8 +248,12 @@ def test_capability_catalog_separates_policy_intent_from_runtime_readiness() -> 
     assert formats["mp4"]["render_state"] == "available"
     for format_id in ("pdf", "jpeg", "png"):
         assert formats[format_id]["preview_state"] == "ready"
-        detector_id = "pdf" if format_id == "pdf" else formats[format_id]["category"]
-        assert formats[format_id]["provider_ids"] == [f"core.detector.{detector_id}"]
+        detector_id = (
+            "pdf" if format_id == "pdf" else formats[format_id]["category"]
+        )
+        assert formats[format_id]["provider_ids"] == [
+            f"core.detector.{detector_id}"
+        ]
     for format_id in ("mp3", "ogg", "wav", "mp4", "webm"):
         assert formats[format_id]["preview_state"] == "ready"
         assert formats[format_id]["provider_ids"] == [f"core.detector.{format_id}"]
@@ -376,9 +380,9 @@ def test_nondeterministic_provider_is_visible_but_never_ready_or_selected() -> N
     assert deterministic.healthcheck_calls == 1
     assert registry.available_formats() == {"test-format"}
     assert registry.ready_formats() == {"test-format"}
-    assert [item.converter_id for item in registry.select_chain("test-format")] == [
-        "vendor.deterministic"
-    ]
+    assert [
+        item.converter_id for item in registry.select_chain("test-format")
+    ] == ["vendor.deterministic"]
     assert [
         item["converter_id"]
         for item in registry.provider_chain_snapshot(
@@ -517,7 +521,9 @@ def test_provider_chain_snapshot_pins_protocol_schema_and_digest() -> None:
 
 
 def test_ready_input_limit_is_fail_closed_across_provider_chain() -> None:
-    high_priority_unbounded = _Plugin(_descriptor("vendor.unbounded", priority=300))
+    high_priority_unbounded = _Plugin(
+        _descriptor("vendor.unbounded", priority=300)
+    )
     medium = _Plugin(
         replace(
             _descriptor("vendor.medium", priority=200),

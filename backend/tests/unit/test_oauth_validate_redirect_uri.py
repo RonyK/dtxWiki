@@ -35,14 +35,18 @@ def test_loopback_127_accepted() -> None:
 
 
 def test_loopback_ipv6_accepted() -> None:
-    assert validate_redirect_uri("http://[::1]:60000/cb") == ("http://[::1]:60000/cb")
+    assert validate_redirect_uri("http://[::1]:60000/cb") == (
+        "http://[::1]:60000/cb"
+    )
 
 
 def test_canonical_set_shared_with_is_loopback_host() -> None:
     """Both DCR-time validation and runtime matching must agree on the
     canonical loopback host whitelist (Sprint_4 H4 finding)."""
 
-    assert _LOOPBACK_CANONICAL_HOSTS == frozenset({"localhost", "127.0.0.1", "::1"})
+    assert _LOOPBACK_CANONICAL_HOSTS == frozenset(
+        {"localhost", "127.0.0.1", "::1"}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +160,10 @@ def test_runtime_port_match_accepts_same_query() -> None:
     registered query string remains part of the redirect URI contract."""
 
     registered = ["http://127.0.0.1:5000/cb?fixed=1"]
-    assert redirect_uri_matches("http://127.0.0.1:62345/cb?fixed=1", registered) is True
+    assert (
+        redirect_uri_matches("http://127.0.0.1:62345/cb?fixed=1", registered)
+        is True
+    )
 
 
 def test_runtime_port_match_rejects_query_mismatch() -> None:
@@ -164,7 +171,10 @@ def test_runtime_port_match_rejects_query_mismatch() -> None:
     mismatch as merely another runtime-port variation."""
 
     registered = ["http://127.0.0.1:5000/cb?fixed=1"]
-    assert redirect_uri_matches("http://127.0.0.1:62345/cb?evil=1", registered) is False
+    assert (
+        redirect_uri_matches("http://127.0.0.1:62345/cb?evil=1", registered)
+        is False
+    )
 
 
 def test_runtime_port_match_rejects_requested_fragment() -> None:

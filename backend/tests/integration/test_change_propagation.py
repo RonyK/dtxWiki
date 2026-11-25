@@ -102,7 +102,9 @@ def test_publish_propagation_marks_only_direct_dependents_and_stages_review(
             reason="policy changed",
         )
         finding = session.scalar(
-            select(LintFinding).where(LintFinding.rule_id == "kb.dependent_maybe_stale")
+            select(LintFinding).where(
+                LintFinding.rule_id == "kb.dependent_maybe_stale"
+            )
         )
         task = session.scalar(
             select(ClientDelegatedTask).where(
@@ -136,16 +138,13 @@ def test_publish_propagation_marks_only_direct_dependents_and_stages_review(
             )
         ).all()
         assert created_again == 0
-        assert (
-            len(
-                session.scalars(
-                    select(LintFinding).where(
-                        LintFinding.rule_id == "kb.dependent_maybe_stale"
-                    )
-                ).all()
-            )
-            == 1
-        )
+        assert len(
+            session.scalars(
+                select(LintFinding).where(
+                    LintFinding.rule_id == "kb.dependent_maybe_stale"
+                )
+            ).all()
+        ) == 1
         assert action["reason"] == "newer policy text"
         assert "client_llm_verdict" not in action
         assert len(live_tasks) == 1
@@ -230,7 +229,9 @@ def test_direct_publish_paths_share_propagation_and_dependent_publish_resolves(
             select(Workspace.id).where(Workspace.slug == "default")
         )
         source, source_version = _page(session, workspace_id, "rest-source")
-        dependent, dependent_version = _page(session, workspace_id, "rest-dependent")
+        dependent, dependent_version = _page(
+            session, workspace_id, "rest-dependent"
+        )
         _edge(session, workspace_id, dependent, source)
         session.add(
             PageLink(

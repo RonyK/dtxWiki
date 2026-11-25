@@ -121,10 +121,13 @@ def test_public_request_is_uniform_and_only_verified_active_user_gets_token(
     assert {response.status_code for response in responses} == {202}
     assert len({str(response.json()["data"]) for response in responses}) == 1
     assert all(
-        response.headers["cache-control"] == "no-store" for response in responses
+        response.headers["cache-control"] == "no-store"
+        for response in responses
     )
     with page_service.session_factory() as session:
-        assert session.scalar(select(func.count()).select_from(PasswordResetToken)) == 1
+        assert session.scalar(
+            select(func.count()).select_from(PasswordResetToken)
+        ) == 1
 
 
 def test_public_request_forces_credential_revocation_regardless_of_confirm_body(
@@ -170,7 +173,9 @@ def test_public_request_forces_credential_revocation_regardless_of_confirm_body(
         assert token_row is not None
         assert token_row.revoke_api_tokens is True
         outbox = session.scalar(
-            select(EmailOutbox).where(EmailOutbox.message_kind == "password_reset")
+            select(EmailOutbox).where(
+                EmailOutbox.message_kind == "password_reset"
+            )
         )
         assert outbox is not None
         raw_token = delivery.cipher.decrypt(
@@ -235,7 +240,9 @@ def test_public_request_ignores_host_header_when_rendering_reset_link(
     assert requested.status_code == 202
     with page_service.session_factory() as session:
         outbox = session.scalar(
-            select(EmailOutbox).where(EmailOutbox.message_kind == "password_reset")
+            select(EmailOutbox).where(
+                EmailOutbox.message_kind == "password_reset"
+            )
         )
         assert outbox is not None
         outbox_id = outbox.id
@@ -246,7 +253,9 @@ def test_public_request_ignores_host_header_when_rendering_reset_link(
         )
     # deliver() owns its own transactions now (MAIL-01): the provider send
     # must not happen inside one.
-    delivery.deliver(session_factory=page_service.session_factory, outbox_id=outbox_id)
+    delivery.deliver(
+        session_factory=page_service.session_factory, outbox_id=outbox_id
+    )
 
     assert len(provider.messages) == 1
     body = provider.messages[0].text_body
@@ -526,7 +535,9 @@ def test_reset_status_is_post_only_and_never_reads_a_query_token(page_service):
     assert legacy_get.status_code in {404, 405}
     assert "valid" not in legacy_get.json().get("data", {})
 
-    _assert_query_token_refused(client.post(status_path, params={"token": reset_token}))
+    _assert_query_token_refused(
+        client.post(status_path, params={"token": reset_token})
+    )
     # Not even alongside a valid body: a client that leaks the token into the
     # URL must fail, not work.
     _assert_query_token_refused(
@@ -583,34 +594,25 @@ def test_recovery_submissions_refuse_a_token_in_the_query_string(page_service):
     with page_service.session_factory() as session:
         user = session.get(User, user_id)
         assert user is not None and user.email_verified_at is None
-        assert (
-            session.scalar(
-                select(func.count())
-                .select_from(PasswordResetToken)
-                .where(
-                    PasswordResetToken.user_id == user_id,
-                    PasswordResetToken.used_at.is_not(None),
-                )
+        assert session.scalar(
+            select(func.count())
+            .select_from(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.used_at.is_not(None),
             )
-            == 0
-        )
+        ) == 0
 
     # Both tokens still redeem through the body, so nothing above was a
     # rejection of the token itself.
-    assert (
-        client.post(
-            "/api/v1/auth/email-verification/confirm",
-            json={"token": verification_token},
-        ).status_code
-        == 200
-    )
-    assert (
-        client.post(
-            "/api/v1/auth/password-reset/confirm",
-            json={"token": reset_token, "new_password": "replacement-password"},
-        ).status_code
-        == 200
-    )
+    assert client.post(
+        "/api/v1/auth/email-verification/confirm",
+        json={"token": verification_token},
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": reset_token, "new_password": "replacement-password"},
+    ).status_code == 200
 
 
 def test_emailed_verification_link_carries_the_token_only_in_the_fragment(

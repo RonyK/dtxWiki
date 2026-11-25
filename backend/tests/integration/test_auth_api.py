@@ -455,7 +455,8 @@ def test_me_refreshes_remembered_cookie_only_in_window_and_stops_at_cap(
     event = renewals[0]
     assert event.workspace_id is None
     assert (
-        event.payload["previous_expires_at"] == initial_verified.expires_at.isoformat()
+        event.payload["previous_expires_at"]
+        == initial_verified.expires_at.isoformat()
     )
     assert event.payload["expires_at"] == refreshed_verified.expires_at.isoformat()
     assert (

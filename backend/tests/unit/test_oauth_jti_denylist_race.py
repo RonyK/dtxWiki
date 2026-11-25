@@ -104,7 +104,8 @@ def test_jti_denylist_epoch_guard_rejects_read_that_raced_a_commit():
     # A fresh read with no race in flight legitimately observes -- and may
     # now cache -- the committed revocation.
     assert (
-        is_access_jti_revoked(jti=jti, session_factory=factory, time_bucket=0) is True
+        is_access_jti_revoked(jti=jti, session_factory=factory, time_bucket=0)
+        is True
     )
     assert _JTI_DENYLIST_CACHE[cache_key] is True
 

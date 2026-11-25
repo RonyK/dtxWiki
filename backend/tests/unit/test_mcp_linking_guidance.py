@@ -23,9 +23,9 @@ def test_mcp_write_surfaces_explain_context_linking() -> None:
     ):
         description = tools[tool_name].description
         assert "link_markdown" in description, tool_name
-        assert "authored context-to-context link relations" in description.lower(), (
-            tool_name
-        )
+        assert (
+            "authored context-to-context link relations" in description.lower()
+        ), tool_name
         assert "appear after publication" in description, tool_name
 
     submit_description = tools["submit_context_edit_for_review"].description
@@ -55,7 +55,8 @@ def test_guide_returns_typed_machine_readable_linking_guidance(page_service) -> 
     ]
     assert all(syntax.target_source for syntax in guide.linking.syntaxes)
     sources = {
-        syntax.link_syntax: syntax.target_source for syntax in guide.linking.syntaxes
+        syntax.link_syntax: syntax.target_source
+        for syntax in guide.linking.syntaxes
     }
     assert "known page slug" in sources["wikilink"]
     assert "link_markdown" in sources["wikilink"]
@@ -63,6 +64,7 @@ def test_guide_returns_typed_machine_readable_linking_guidance(page_service) -> 
     assert "stable_url unchanged" in sources["context_url"]
     assert guide.linking.graph_visibility == "published_head_only"
     assert (
-        guide.linking.missing_links_warning == "context_page_has_no_graph_visible_links"
+        guide.linking.missing_links_warning
+        == "context_page_has_no_graph_visible_links"
     )
     assert "published" in guide.linking.note.lower()

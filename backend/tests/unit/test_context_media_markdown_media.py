@@ -354,15 +354,19 @@ def test_service_scan_rejects_raw_html_but_not_raw_html_in_code() -> None:
     [
         (
             '<img src="'
-            f"{LEGACY_URL.replace('/api/v1/uploads/', '/api%2Fv1%2Fuploads%2F')}"
+            f'{LEGACY_URL.replace("/api/v1/uploads/", "/api%2Fv1%2Fuploads%2F")}'
             '">'
         ),
         (
             '<video poster="'
-            f"{LEGACY_URL.replace('/api/v1/uploads/', '/discard/../api/v1/uploads/')}"
+            f'{LEGACY_URL.replace("/api/v1/uploads/", "/discard/../api/v1/uploads/")}'
             '"></video>'
         ),
-        (f'<video src="{LEGACY_URL.replace("/api/v1/", "/api/\nv1/")}"></video>'),
+        (
+            '<video src="'
+            f'{LEGACY_URL.replace("/api/v1/", "/api/\nv1/")}'
+            '"></video>'
+        ),
         f'<video src="{LEGACY_URL.replace("/", "\\")}"></video>',
         (
             '<source srcset="data:image/png;base64,AAAA 1x, '
@@ -370,7 +374,7 @@ def test_service_scan_rejects_raw_html_but_not_raw_html_in_code() -> None:
         ),
         (
             '<img src="'
-            f"{LEGACY_URL.replace('/api/', '/discard/%2e%2e/api/')}"
+            f'{LEGACY_URL.replace("/api/", "/discard/%2e%2e/api/")}'
             '?download=1#preview">'
         ),
         f'<a href="{LEGACY_URL}">download</a>',
@@ -417,15 +421,12 @@ def test_raw_html_urls_strip_browser_c0_controls_at_the_edges(
 
     assert raised.value.reason_code == "unsupported_legacy_media_syntax"
     assert browser_reachable_legacy_upload_identities(raw_html)
-    assert (
-        len(
-            source_mapped_local_legacy_upload_references(
-                raw_html,
-                trusted_http_origins=frozenset({"https://wiki.example"}),
-            )
+    assert len(
+        source_mapped_local_legacy_upload_references(
+            raw_html,
+            trusted_http_origins=frozenset({"https://wiki.example"}),
         )
-        == 1
-    )
+    ) == 1
 
 
 @pytest.mark.parametrize("padding", ["\ufeff", "\u00a0"])
@@ -434,7 +435,11 @@ def test_raw_image_source_uses_ecmascript_trim_policy(
     padding: str,
     side: str,
 ) -> None:
-    source = f"{padding}{LEGACY_URL}" if side == "prefix" else f"{LEGACY_URL}{padding}"
+    source = (
+        f"{padding}{LEGACY_URL}"
+        if side == "prefix"
+        else f"{LEGACY_URL}{padding}"
+    )
     raw_html = f'<img src="{source}">'
 
     with pytest.raises(LegacyMarkdownMediaError) as raised:
@@ -536,7 +541,9 @@ def test_external_srcset_candidate_cannot_hide_local_legacy_alias() -> None:
         "/api%2Fv1%2Fuploads%2F",
     )
     raw_html = (
-        f'<source srcset="https://cdn.example.test{LEGACY_URL} 1x, {encoded_local} 2x">'
+        '<source srcset="'
+        f"https://cdn.example.test{LEGACY_URL} 1x, {encoded_local} 2x"
+        '">'
     )
 
     with pytest.raises(LegacyMarkdownMediaError) as raised:
@@ -586,7 +593,7 @@ def test_service_scan_rejects_rendered_nonrewritable_legacy_destinations(
         f"[scheme-relative](//wiki.example{LEGACY_URL})",
         (
             "![encoded absolute](https://wiki.example"
-            f"{LEGACY_URL.replace('/api/v1/uploads/', '/api%2Fv1%2Fuploads%2F')})"
+            f'{LEGACY_URL.replace("/api/v1/uploads/", "/api%2Fv1%2Fuploads%2F")})'
         ),
     ],
 )
@@ -605,7 +612,10 @@ def test_service_scan_rejects_authority_urls_that_may_be_same_origin_markdown(
         f"![scheme-relative](//wiki.example{LEGACY_URL})",
         f"![scheme-relative extra slash](///wiki.example{LEGACY_URL})",
         f"![same-scheme single slash](https:{LEGACY_URL})",
-        (f"![same-scheme relative](https:api/v1/uploads/{WORKSPACE_ID}/{DIGEST}.png)"),
+        (
+            "![same-scheme relative]"
+            f"(https:api/v1/uploads/{WORKSPACE_ID}/{DIGEST}.png)"
+        ),
         (
             "![same-scheme dot relative]"
             f"(https:../../../api/v1/uploads/{WORKSPACE_ID}/{DIGEST}.png)"
@@ -637,10 +647,17 @@ def test_service_scan_rejects_legacy_routes_after_url_normalization(
     assert raised.value.reason_code == "unsupported_legacy_media_syntax"
 
 
-def test_service_scan_does_not_normalize_dot_segments_created_by_asgi_decode() -> None:
-    destination = f"/discard%2F..%2Fapi%2Fv1%2Fuploads%2F{WORKSPACE_ID}%2F{DIGEST}.png"
+def test_service_scan_does_not_normalize_dot_segments_created_by_asgi_decode(
+) -> None:
+    destination = (
+        "/discard%2F..%2Fapi%2Fv1%2Fuploads%2F"
+        f"{WORKSPACE_ID}%2F{DIGEST}.png"
+    )
 
-    assert scan_legacy_upload_references(f"![image]({destination})", WORKSPACE_ID) == ()
+    assert (
+        scan_legacy_upload_references(f"![image]({destination})", WORKSPACE_ID)
+        == ()
+    )
 
 
 @pytest.mark.parametrize(
@@ -652,7 +669,7 @@ def test_service_scan_does_not_normalize_dot_segments_created_by_asgi_decode() -
         f"Prose www.wiki.example{LEGACY_URL}",
         (
             "Prose https://wiki.example"
-            f"{LEGACY_URL.replace('/api/v1/uploads/', '/api%2Fv1%2Fuploads%2F')}"
+            f'{LEGACY_URL.replace("/api/v1/uploads/", "/api%2Fv1%2Fuploads%2F")}'
         ),
     ],
 )
@@ -817,7 +834,10 @@ def test_service_scan_preserves_gfm_literal_suffixes_kept_in_href(
         f"Prose https://wiki.example{LEGACY_URL.replace('.png', r'\.png')}",
         f"Prose https://wiki.example{LEGACY_URL.replace('.png', '&#46;png')}",
         f"Prose https://wiki.example{LEGACY_URL.replace('.png', '&period;png')}",
-        (f"Prose https://wiki.example{LEGACY_URL.replace('/api/v1/', '/api&#47;v1/')}"),
+        (
+            "Prose https://wiki.example"
+            f"{LEGACY_URL.replace('/api/v1/', '/api&#47;v1/')}"
+        ),
     ],
 )
 def test_service_scan_preserves_raw_gfm_url_spelling(markdown: str) -> None:
@@ -913,7 +933,8 @@ def test_gfm_detection_keeps_raw_occurrences_position_bound() -> None:
 def test_gfm_visibility_probe_cannot_collide_with_authored_text() -> None:
     absolute = f"https://wiki.example{LEGACY_URL}"
     markdown = (
-        f'[safe](/safe "{absolute}")\n\nhttps://gfm-source-probe.invalid/visible-1'
+        f'[safe](/safe "{absolute}")\n\n'
+        "https://gfm-source-probe.invalid/visible-1"
     )
 
     assert scan_legacy_upload_references(markdown, WORKSPACE_ID) == ()
@@ -923,7 +944,8 @@ def test_gfm_visibility_probe_cannot_collide_with_authored_text() -> None:
 def test_gfm_visibility_probe_cannot_collide_after_entity_decoding() -> None:
     absolute = f"https://wiki.example{LEGACY_URL}"
     markdown = (
-        f'[safe](/safe "{absolute}")\n\nhttps://gfm-source-probe.invalid/visible&#45;1'
+        f'[safe](/safe "{absolute}")\n\n'
+        "https://gfm-source-probe.invalid/visible&#45;1"
     )
 
     assert scan_legacy_upload_references(markdown, WORKSPACE_ID) == ()
@@ -1068,7 +1090,7 @@ def test_longer_dollar_run_does_not_hide_visible_gfm_legacy_link(
     [
         f"$$\n![image]({LEGACY_URL})\n$",
         f"$$\n[download]({LEGACY_URL})\n$$$",
-        f'$$$\n<img src="{LEGACY_URL}">\n$$',
+        f"$$$\n<img src=\"{LEGACY_URL}\">\n$$",
         f"$$meta\nhttps://wiki.example{LEGACY_URL}\n$$$",
         f"> $$\n> ![image]({LEGACY_URL})\n> $$$",
         f"- $$\n  [download]({LEGACY_URL})\n  $$",
@@ -1083,11 +1105,21 @@ def test_remark_flow_math_fence_variants_hide_legacy_syntax(markdown: str) -> No
 @pytest.mark.parametrize(
     "markdown",
     [
-        (f"- $$\n- https://wiki.example{LEGACY_URL}\n- $$"),
-        (f"1. $$\n2. https://wiki.example{LEGACY_URL}\n3. $$"),
-        (f"> - $$\n> - https://wiki.example{LEGACY_URL}\n> - $$"),
-        (f"prefix $\n\nhttps://wiki.example{LEGACY_URL}\n\nsuffix $"),
-        (f"<div>\n$\n</div>\n\nhttps://wiki.example{LEGACY_URL}\n\n$"),
+        (
+            f"- $$\n- https://wiki.example{LEGACY_URL}\n- $$"
+        ),
+        (
+            f"1. $$\n2. https://wiki.example{LEGACY_URL}\n3. $$"
+        ),
+        (
+            f"> - $$\n> - https://wiki.example{LEGACY_URL}\n> - $$"
+        ),
+        (
+            f"prefix $\n\nhttps://wiki.example{LEGACY_URL}\n\nsuffix $"
+        ),
+        (
+            f"<div>\n$\n</div>\n\nhttps://wiki.example{LEGACY_URL}\n\n$"
+        ),
     ],
 )
 def test_math_delimiters_cannot_cross_visible_markdown_blocks(markdown: str) -> None:
@@ -1106,7 +1138,11 @@ def test_math_delimiters_cannot_cross_visible_markdown_blocks(markdown: str) -> 
             f'<a href="https://wiki.example{LEGACY_URL}">download</a>\n'
             "$$\n</div>"
         ),
-        (f'<details>\n$$\n<img src="{LEGACY_URL}">\n$$\n</details>'),
+        (
+            "<details>\n$$\n"
+            f'<img src="{LEGACY_URL}">\n'
+            "$$\n</details>"
+        ),
     ],
 )
 def test_dollars_inside_raw_html_block_do_not_hide_live_destinations(
@@ -1122,7 +1158,10 @@ def test_dollars_inside_raw_html_block_do_not_hide_live_destinations(
 @pytest.mark.parametrize(
     "markdown",
     [
-        (f'<a title="$" href="https://wiki.example{LEGACY_URL}">x</a> tail $'),
+        (
+            '<a title="$" href="'
+            f'https://wiki.example{LEGACY_URL}">x</a> tail $'
+        ),
         f'[safe](/safe "$") https://wiki.example{LEGACY_URL} $',
         f"[safe](/safe?x=$) https://wiki.example{LEGACY_URL} $",
         f'![safe](/safe.png "$") https://wiki.example{LEGACY_URL} $',
@@ -1141,7 +1180,11 @@ def test_non_text_dollars_cannot_hide_visible_legacy_link(markdown: str) -> None
 @pytest.mark.parametrize(
     "markdown",
     [
-        (f"| first $ | x |\n| --- | --- |\n| https://wiki.example{LEGACY_URL} | $ |"),
+        (
+            "| first $ | x |\n"
+            "| --- | --- |\n"
+            f"| https://wiki.example{LEGACY_URL} | $ |"
+        ),
         (
             "| first $ | second | third |\n"
             "| --- | --- | --- |\n"
@@ -1167,8 +1210,16 @@ def test_math_delimiters_cannot_cross_gfm_table_cells(markdown: str) -> None:
     [
         f"prefix `\n\nhttps://wiki.example{LEGACY_URL}\n\nsuffix `",
         f'[safe](/safe "`") https://wiki.example{LEGACY_URL} `',
-        (f'<div>\n`\n<a href="https://wiki.example{LEGACY_URL}">x</a>\n`\n</div>'),
-        (f"| first ` | x |\n| --- | --- |\n| https://wiki.example{LEGACY_URL} | ` |"),
+        (
+            "<div>\n`\n"
+            f'<a href="https://wiki.example{LEGACY_URL}">x</a>\n'
+            "`\n</div>"
+        ),
+        (
+            "| first ` | x |\n"
+            "| --- | --- |\n"
+            f"| https://wiki.example{LEGACY_URL} | ` |"
+        ),
     ],
 )
 def test_code_delimiters_cannot_cross_live_markdown_contexts(markdown: str) -> None:
@@ -1201,15 +1252,30 @@ def test_flow_math_content_container_markers_are_not_closing_fences(
     [
         f"- $$\n\tinside\n\t$$\n  https://wiki.example{LEGACY_URL}",
         f"-\t$$\n\tinside\n\t$$\nhttps://wiki.example{LEGACY_URL}",
-        (f"123. $$\n     inside\n     $$\n     https://wiki.example{LEGACY_URL}"),
+        (
+            "123. $$\n     inside\n     $$\n"
+            f"     https://wiki.example{LEGACY_URL}"
+        ),
         (
             "123456789. $$\n           inside\n           $$\n"
             f"           https://wiki.example{LEGACY_URL}"
         ),
-        (f"-    $$\n     inside\n     $$\n     https://wiki.example{LEGACY_URL}"),
-        (f"  - $$\n    inside\n    $$\n    https://wiki.example{LEGACY_URL}"),
-        (f"> - $$\n> \tinside\n> \t$$\n>   https://wiki.example{LEGACY_URL}"),
-        (f"- > $$\n  > inside\n  > $$\n  > https://wiki.example{LEGACY_URL}"),
+        (
+            "-    $$\n     inside\n     $$\n"
+            f"     https://wiki.example{LEGACY_URL}"
+        ),
+        (
+            "  - $$\n    inside\n    $$\n"
+            f"    https://wiki.example{LEGACY_URL}"
+        ),
+        (
+            "> - $$\n> \tinside\n> \t$$\n"
+            f">   https://wiki.example{LEGACY_URL}"
+        ),
+        (
+            "- > $$\n  > inside\n  > $$\n"
+            f"  > https://wiki.example{LEGACY_URL}"
+        ),
     ],
 )
 def test_flow_math_uses_commonmark_container_indentation(markdown: str) -> None:
@@ -1227,9 +1293,8 @@ def test_escaped_dollar_before_inline_math_close_remains_math_content() -> None:
     assert browser_reachable_legacy_upload_identities(markdown) == frozenset()
 
 
-def test_local_source_mapping_returns_only_rendered_root_relative_destinations() -> (
-    None
-):
+def test_local_source_mapping_returns_only_rendered_root_relative_destinations(
+) -> None:
     absolute = f"https://external.example{LEGACY_URL}"
     markdown = (
         f"![image]({LEGACY_URL})\n"
@@ -1265,7 +1330,9 @@ def test_local_source_mapping_batches_one_megabyte_without_candidate_cap(
     assert len(markdown.encode("utf-8")) >= 1_000_000
 
     browser_scan_calls = 0
-    real_browser_scan = markdown_media_module.browser_reachable_legacy_upload_identities
+    real_browser_scan = (
+        markdown_media_module.browser_reachable_legacy_upload_identities
+    )
 
     def counted_browser_scan(*args: object, **kwargs: object):
         nonlocal browser_scan_calls
@@ -1278,9 +1345,11 @@ def test_local_source_mapping_batches_one_megabyte_without_candidate_cap(
         counted_browser_scan,
     )
 
-    references = markdown_media_module.source_mapped_local_legacy_upload_references(
-        markdown,
-        trusted_http_origins=frozenset({"https://wiki.example"}),
+    references = (
+        markdown_media_module.source_mapped_local_legacy_upload_references(
+            markdown,
+            trusted_http_origins=frozenset({"https://wiki.example"}),
+        )
     )
 
     assert browser_scan_calls == 2
@@ -1293,7 +1362,9 @@ def test_local_source_mapping_batches_one_megabyte_without_candidate_cap(
         references
     )
     last_span = references[-1].destination_span
-    assert last_span.byte_start == len(markdown[: last_span.char_start].encode("utf-8"))
+    assert last_span.byte_start == len(
+        markdown[: last_span.char_start].encode("utf-8")
+    )
 
 
 def test_authorization_mode_does_not_trust_unknown_absolute_authorities() -> None:
@@ -1667,7 +1738,10 @@ def test_omitted_relative_base_path_does_not_guess_a_route(markdown: str) -> Non
 def test_local_source_probe_identity_cannot_collide_with_existing_alias() -> None:
     probe_workspace = UUID(int=1)
     probe_digest = f"{1:064x}"
-    encoded_probe = f"/api%2Fv1%2Fuploads%2F{probe_workspace}%2F{probe_digest}.png"
+    encoded_probe = (
+        "/api%2Fv1%2Fuploads%2F"
+        f"{probe_workspace}%2F{probe_digest}.png"
+    )
     markdown = f"`{LEGACY_URL}`\n\n[existing alias]({encoded_probe})"
 
     references = source_mapped_local_legacy_upload_references(markdown)
@@ -1678,7 +1752,10 @@ def test_local_source_probe_identity_cannot_collide_with_existing_alias() -> Non
 def test_batched_source_probes_stay_unique_after_identity_collision() -> None:
     probe_workspace = UUID(int=1)
     probe_digest = f"{1:064x}"
-    encoded_probe = f"/api%2Fv1%2Fuploads%2F{probe_workspace}%2F{probe_digest}.png"
+    encoded_probe = (
+        "/api%2Fv1%2Fuploads%2F"
+        f"{probe_workspace}%2F{probe_digest}.png"
+    )
     markdown = (
         f"[existing alias]({encoded_probe})\n\n"
         f"`{LEGACY_URL}`\n\n"
@@ -1692,7 +1769,12 @@ def test_batched_source_probes_stay_unique_after_identity_collision() -> None:
 
 
 def test_bom_prefixed_known_frontmatter_is_hidden_like_the_page_renderer() -> None:
-    markdown = f'\ufeff---\ntitle: "![hidden]({LEGACY_URL})"\n---\n\nVisible body'
+    markdown = (
+        "\ufeff---\n"
+        f'title: "![hidden]({LEGACY_URL})"\n'
+        "---\n\n"
+        "Visible body"
+    )
 
     assert scan_legacy_upload_references(markdown, WORKSPACE_ID) == ()
     assert browser_reachable_legacy_upload_identities(markdown) == frozenset()
@@ -1700,7 +1782,12 @@ def test_bom_prefixed_known_frontmatter_is_hidden_like_the_page_renderer() -> No
 
 
 def test_bom_frontmatter_rebase_preserves_original_source_offsets() -> None:
-    markdown = f"\ufeff---\ntitle: Visible legacy\n---\n\n![visible]({LEGACY_URL})"
+    markdown = (
+        "\ufeff---\n"
+        "title: Visible legacy\n"
+        "---\n\n"
+        f"![visible]({LEGACY_URL})"
+    )
 
     occurrences = scan_legacy_upload_references(markdown, WORKSPACE_ID)
 
@@ -1810,7 +1897,8 @@ def test_lone_cr_line_endings_keep_code_and_math_hidden(markdown: str) -> None:
     assert source_mapped_local_legacy_upload_references(markdown) == ()
 
 
-def test_service_scan_ignores_gfm_autolinks_in_code_and_safe_url_components() -> None:
+def test_service_scan_ignores_gfm_autolinks_in_code_and_safe_url_components(
+) -> None:
     absolute = f"https://wiki.example{LEGACY_URL}"
     markdown = (
         f"`{absolute}`\n\n"
@@ -1827,7 +1915,8 @@ def test_service_scan_ignores_gfm_autolinks_in_code_and_safe_url_components() ->
 
 def test_service_scan_allows_prose_only_legacy_url() -> None:
     assert (
-        scan_legacy_upload_references(f"Prose only: {LEGACY_URL}", WORKSPACE_ID) == ()
+        scan_legacy_upload_references(f"Prose only: {LEGACY_URL}", WORKSPACE_ID)
+        == ()
     )
 
 
@@ -1853,7 +1942,7 @@ def test_service_scan_error_codes_are_pinned() -> None:
     [
         f"title: https://wiki.example{LEGACY_URL}",
         f'note: "![image]({LEGACY_URL})"',
-        f"note: '<img src=\"{LEGACY_URL}\">'",
+        f'note: \'<img src="{LEGACY_URL}">\'',
     ],
 )
 def test_page_frontmatter_is_not_scanned_as_rendered_content(

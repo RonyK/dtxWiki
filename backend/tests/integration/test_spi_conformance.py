@@ -88,7 +88,9 @@ def test_spi_1_2_preserves_original_public_surface_and_signatures():
     )
     assert _public_properties(ToolCallContext) == {"session_factory"}
     assert isinstance(vars(ToolCallContext)["session_factory"], property)
-    assert str(inspect.signature(Retriever.supported_modes)) == ("(self) -> 'set[str]'")
+    assert str(inspect.signature(Retriever.supported_modes)) == (
+        "(self) -> 'set[str]'"
+    )
     assert str(inspect.signature(Retriever.retrieve)) == (
         "(self, *, session: 'Session', workspace_id: 'UUID', query: 'str', "
         "scope: 'str', filters: 'SearchFilters', limit: 'int', "
@@ -115,10 +117,9 @@ def test_spi_1_2_preserves_original_public_surface_and_signatures():
     assert str(inspect.signature(DatabaseProvider.control_session_factory)) == (
         "(self) -> 'sessionmaker[Session]'"
     )
-    assert (
-        str(inspect.signature(vars(ToolCallContext)["session_factory"].fget))
-        == "(self) -> 'sessionmaker[Session]'"
-    )
+    assert str(
+        inspect.signature(vars(ToolCallContext)["session_factory"].fget)
+    ) == "(self) -> 'sessionmaker[Session]'"
 
 
 def test_keyword_backend_enforces_workspace_and_visibility_contracts(

@@ -36,7 +36,9 @@ def make_client(
 
 
 def _workspace_id(client: TestClient) -> str:
-    return client.get("/api/v1/workspaces").json()["data"]["current_workspace_id"]
+    return client.get("/api/v1/workspaces").json()["data"][
+        "current_workspace_id"
+    ]
 
 
 def test_agent_api_creates_places_and_reads_agent_page_draft(page_service):
@@ -65,7 +67,8 @@ def test_agent_api_creates_places_and_reads_agent_page_draft(page_service):
     )
     assert draft.status_code == 200
     assert (
-        draft.json()["data"]["body_markdown"] == "# API Persona\n\nUse concise answers."
+        draft.json()["data"]["body_markdown"]
+        == "# API Persona\n\nUse concise answers."
     )
     assert draft.json()["data"]["current_active_version_id"] is None
 
@@ -403,7 +406,8 @@ def _create_system_prompt_draft(client: TestClient, workspace_id: str) -> dict:
     ).json()["data"]
     agent_page = listed[0]
     draft = client.post(
-        f"/api/v1/workspaces/{workspace_id}/agent/pages/{agent_page['id']}/draft",
+        f"/api/v1/workspaces/{workspace_id}/agent/pages/"
+        f"{agent_page['id']}/draft",
         json={
             "category": "agent_guide",
             "title": "Default System Prompt",

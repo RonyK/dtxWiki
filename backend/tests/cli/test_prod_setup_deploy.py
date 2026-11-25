@@ -30,8 +30,6 @@ runner = CliRunner()
 @pytest.fixture(autouse=True)
 def isolated_production_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(prod_setup, "DEFAULT_DATA_DIR", str(tmp_path / "data-dir"))
-
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_TEMPLATE = REPO_ROOT / "infra" / "prod" / prod_setup.BACKEND_UNIT
 
@@ -201,12 +199,8 @@ def test_setup_bootstraps_and_hands_over_data_before_units_start(
     result = runner.invoke(
         cli_main.app,
         _setup_args(
-            paths,
-            "--reconfigure",
-            "--no-caddy",
-            "--no-systemd",
-            "--no-bootstrap",
-            "--no-admin",
+            paths, "--reconfigure", "--no-caddy", "--no-systemd",
+            "--no-bootstrap", "--no-admin",
         ),
     )
     assert result.exit_code == 0, _out(result)

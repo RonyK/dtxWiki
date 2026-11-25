@@ -88,36 +88,22 @@ def test_link_preview_checks_source_before_projection_and_never_saves(page_servi
             }
         ],
         "link_targets": [
-            {
-                "locator": ref,
-                "href": f"/p/{workspace_id}/{source['id']}?view=source#section",
-                "state": "ok",
-                "target_page_id": source["id"],
-            },
-            {
-                "locator": edit_href,
-                "href": f"/workspaces/{workspace_id}/context/pages/{source['id']}"
-                "/edit?view=source#section",
-                "state": "ok",
-                "target_page_id": source["id"],
-            },
-            {
-                "locator": landing_href,
-                "href": landing_href,
-                "state": "ok",
-                "target_page_id": None,
-            },
+            {"locator": ref,
+             "href": f"/p/{workspace_id}/{source['id']}?view=source#section",
+             "state": "ok", "target_page_id": source["id"]},
+            {"locator": edit_href,
+             "href": f"/workspaces/{workspace_id}/context/pages/{source['id']}"
+                     "/edit?view=source#section",
+             "state": "ok", "target_page_id": source["id"]},
+            {"locator": landing_href, "href": landing_href,
+             "state": "ok", "target_page_id": None},
         ],
     }
     # An address the save would make permanent previews as that document.
-    converted = client.post(
-        url,
-        json={
-            **request,
-            "body_md": f"@cite{{/p/{source['id']}}}",
-            "request_id": "convert",
-        },
-    )
+    converted = client.post(url, json={
+        **request, "body_md": f"@cite{{/p/{source['id']}}}",
+        "request_id": "convert",
+    })
     assert converted.status_code == 200, converted.text
     assert [
         (item["target_id"], item["occurrences"][0]["href"])

@@ -196,7 +196,8 @@ def test_single_process_invariant_documented():
         line for line in text.splitlines() if line.strip().startswith("Type=")
     ]
     exec_start_lines = [
-        line for line in text.splitlines() if line.strip().startswith("ExecStart=")
+        line for line in text.splitlines()
+        if line.strip().startswith("ExecStart=")
     ]
     assert type_lines == ["Type=simple"], (
         f"systemd unit must declare Type=simple, got {type_lines!r}"

@@ -254,16 +254,13 @@ def test_network_path_is_not_retargeted_to_a_workspace_landing():
     origins = frozenset({"https://wiki.example"})
     for href in ("///context", "https://wiki.example///context"):
         assert not is_app_link(href, origins)
-        assert (
-            markdown_link_targets(
-                object(),
-                body=f"[External]({href})",
-                workspace_id=UUID("11111111-1111-4111-8111-111111111111"),
-                actor=None,
-                self_origins=origins,
-            )
-            == []
-        )
+        assert markdown_link_targets(
+            object(),
+            body=f"[External]({href})",
+            workspace_id=UUID("11111111-1111-4111-8111-111111111111"),
+            actor=None,
+            self_origins=origins,
+        ) == []
 
 
 def test_registered_browser_routes_accept_router_variants_and_project_full_links():

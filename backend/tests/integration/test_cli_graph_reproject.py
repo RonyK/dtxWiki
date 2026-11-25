@@ -101,25 +101,25 @@ def test_graph_reproject_repairs_one_workspace_once_and_is_repeatable(
     _assert_authored_link_projection(session_factory, selected)
     assert _page_link_snapshot(session_factory, untouched.id) == []
     assert _wikilink_edge_snapshot(session_factory, untouched.id) == []
-    assert (
-        _edge_projection_version(
-            session_factory,
-            selected.id,
-        )
-        == selected_version_before + 1
-    )
+    assert _edge_projection_version(
+        session_factory,
+        selected.id,
+    ) == selected_version_before + 1
     assert (
         _edge_projection_version(session_factory, untouched.id)
         == untouched_version_before
     )
     assert (
-        _observation_ids(session_factory, selected.id) == selected_observations_before
+        _observation_ids(session_factory, selected.id)
+        == selected_observations_before
     )
     assert (
-        _observation_ids(session_factory, untouched.id) == untouched_observations_before
+        _observation_ids(session_factory, untouched.id)
+        == untouched_observations_before
     )
     assert (
-        _non_wikilink_edge_snapshot(session_factory, selected.id) == non_wikilink_before
+        _non_wikilink_edge_snapshot(session_factory, selected.id)
+        == non_wikilink_before
     )
 
     page_links_after_first = _page_link_semantic_snapshot(
@@ -157,20 +157,20 @@ def test_graph_reproject_repairs_one_workspace_once_and_is_repeatable(
         == page_link_rows_after_first
     )
     assert (
-        _wikilink_edge_snapshot(session_factory, selected.id) == wikilinks_after_first
+        _wikilink_edge_snapshot(session_factory, selected.id)
+        == wikilinks_after_first
+    )
+    assert _edge_projection_version(
+        session_factory,
+        selected.id,
+    ) == version_after_first
+    assert (
+        _observation_ids(session_factory, selected.id)
+        == selected_observations_before
     )
     assert (
-        _edge_projection_version(
-            session_factory,
-            selected.id,
-        )
-        == version_after_first
-    )
-    assert (
-        _observation_ids(session_factory, selected.id) == selected_observations_before
-    )
-    assert (
-        _non_wikilink_edge_snapshot(session_factory, selected.id) == non_wikilink_before
+        _non_wikilink_edge_snapshot(session_factory, selected.id)
+        == non_wikilink_before
     )
 
 
@@ -309,13 +309,10 @@ def test_graph_reproject_rolls_back_only_the_failing_workspace(
     assert "error_type=RuntimeError" in result.output
     assert "injected graph reprojection failure" not in result.output
     _assert_authored_link_projection(session_factory, successful)
-    assert (
-        _edge_projection_version(
-            session_factory,
-            successful.id,
-        )
-        == successful_version_before + 1
-    )
+    assert _edge_projection_version(
+        session_factory,
+        successful.id,
+    ) == successful_version_before + 1
     assert _workspace_projection_snapshot(session_factory, failing.id) == failing_before
 
     verbose_result = CliRunner().invoke(
@@ -467,7 +464,10 @@ def test_graph_reproject_retries_one_pg8000_retryable_error(
     assert attempts == 2
     assert f"code={postgres_code} attempt=2/2" in result.output
     _assert_authored_link_projection(session_factory, fixture)
-    assert _edge_projection_version(session_factory, fixture.id) == revision_before + 1
+    assert (
+        _edge_projection_version(session_factory, fixture.id)
+        == revision_before + 1
+    )
 
 
 def test_graph_reproject_stops_after_second_postgres_deadlock(
@@ -822,7 +822,8 @@ def test_graph_reproject_demotes_only_changed_source_history_coverage(
     assert after_first[affected_partial_id] == before[affected_partial_id]
     assert after_first[unaffected_complete.id] == before[unaffected_complete.id]
     assert (
-        after_first[unaffected_reconstructed.id] == before[unaffected_reconstructed.id]
+        after_first[unaffected_reconstructed.id]
+        == before[unaffected_reconstructed.id]
     )
     assert no_coverage_source.id not in after_first
 
@@ -999,7 +1000,8 @@ def _assert_authored_link_projection(session_factory, fixture: _WorkspaceFixture
     )
     edge_rows = _wikilink_edge_snapshot(session_factory, fixture.id)
     assert [row[:3] for row in edge_rows] == sorted(
-        (source_id, target_id, 2.0) for source_id, target_id in fixture.expected_targets
+        (source_id, target_id, 2.0)
+        for source_id, target_id in fixture.expected_targets
     )
 
 

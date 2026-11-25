@@ -94,5 +94,10 @@ def test_redact_masks_password_containing_at_sign():
 def test_redact_masks_empty_username_password():
     # #5: a credential URL with an empty username (scheme://:pw@host, e.g. the
     # redis://:pw@host form) must still have its password masked.
-    assert redact_url("redis://:p@ss@host:6379/0") == "redis://:****@host:6379/0"
-    assert redact_url("redis://:simplepw@host:6379/0") == "redis://:****@host:6379/0"
+    assert (
+        redact_url("redis://:p@ss@host:6379/0") == "redis://:****@host:6379/0"
+    )
+    assert (
+        redact_url("redis://:simplepw@host:6379/0")
+        == "redis://:****@host:6379/0"
+    )

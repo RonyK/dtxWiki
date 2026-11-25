@@ -1,5 +1,4 @@
 """nav_description write-time derivation (Sprint-3 C1-T2, fixes A-1)."""
-
 import pytest
 from markdown_it import MarkdownIt
 from sqlalchemy import select

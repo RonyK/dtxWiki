@@ -1,4 +1,5 @@
-"""Workspace and server-admin job visibility and retry authorization."""
+"""Workspace and server-admin job visibility and retry authorization.
+"""
 
 import base64
 import inspect
@@ -373,7 +374,9 @@ def test_admin_job_list_restarts_on_pre_phase_6a_or_foreign_prefix_cursor(
     )
 
     stale_offset_cursor = base64.urlsafe_b64encode(b"job-offset:0").decode()
-    response = client.get("/api/v1/admin/jobs", params={"cursor": stale_offset_cursor})
+    response = client.get(
+        "/api/v1/admin/jobs", params={"cursor": stale_offset_cursor}
+    )
 
     assert response.status_code == 200, response.text
     assert len(response.json()["data"]["items"]) == 1

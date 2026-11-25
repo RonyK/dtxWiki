@@ -1,5 +1,4 @@
 """Tests for proxy-related Settings fields (Task 4.1)."""
-
 from backend.app.settings import Settings
 
 

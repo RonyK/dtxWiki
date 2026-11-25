@@ -496,7 +496,9 @@ def test_reclaim_stale_jobs_only_touches_the_named_workspace():
             idempotency_key="scoped-reclaim-other",
         )
         for job in (target_job, other_job):
-            claimed = queue.claim_next(session=session, workspace_id=job.workspace_id)
+            claimed = queue.claim_next(
+                session=session, workspace_id=job.workspace_id
+            )
             assert claimed.id == job.id
             claimed.started_at = utc_now() - timedelta(seconds=1200)
             session.add(claimed)

@@ -137,7 +137,9 @@ def test_direct_path_slug_and_uuid_short_circuit_fallback(session_factory):
     assert by_path.ranked_results[0].match_reason == "exact_id"
     assert by_slug.ranked_results[0].match_reason == "exact_slug"
     assert by_id.ranked_results[0].match_reason == "exact_id"
-    assert by_path.tried_lanes == by_slug.tried_lanes == by_id.tried_lanes == ["direct"]
+    assert by_path.tried_lanes == by_slug.tried_lanes == by_id.tried_lanes == [
+        "direct"
+    ]
 
 
 def test_bare_slug_collision_returns_ranked_matches_but_explicit_path_stays_direct(
@@ -191,8 +193,7 @@ def test_bare_slug_collision_returns_ranked_matches_but_explicit_path_stays_dire
     assert ambiguous.total_count == quoted.total_count == 2
     assert ambiguous.warnings == quoted.warnings == explicit.warnings
     assert [result.match_reason for result in ambiguous.ranked_results] == [
-        "exact_slug",
-        "exact_title",
+        "exact_slug", "exact_title"
     ]
     assert [result.id for result in explicit.ranked_results] == [slug_page.id]
     assert explicit.ranked_results[0].match_reason == "exact_id"
@@ -322,15 +323,11 @@ def test_trigram_finds_typo_and_partial_but_two_chars_stay_exact_only(
     assert partial.ranked_results[0].id == target.id
     assert typo.ranked_results[0].match_reason == "trigram"
     assert partial.ranked_results[0].match_reason == "trigram"
-    assert (
-        typo.tried_lanes
-        == partial.tried_lanes
-        == [
-            "entity",
-            "trigram",
-            "keyword",
-        ]
-    )
+    assert typo.tried_lanes == partial.tried_lanes == [
+        "entity",
+        "trigram",
+        "keyword",
+    ]
     assert exact_short.ranked_results[0].id == short.id
     assert exact_short.ranked_results[0].match_reason == "exact_title"
     assert exact_short.tried_lanes == ["entity"]

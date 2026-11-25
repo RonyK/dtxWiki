@@ -78,25 +78,14 @@ def _build_service(session_factory, tmp_path):
             select(Workspace.id).where(Workspace.slug == "default")
         )
         assert workspace_id is not None
-        page = ContextPage(
-            workspace_id=workspace_id,
-            slug=f"replay-{uuid4().hex}",
-            title="Replay",
-            page_type="overview",
-        )
+        page = ContextPage(workspace_id=workspace_id, slug=f"replay-{uuid4().hex}",
+            title="Replay", page_type="overview")
         session.add(page)
         session.flush()
-        version = ContextPageVersion(
-            workspace_id=workspace_id,
-            page_id=page.id,
-            version_no=1,
-            body_md="",
-            content_hash="0" * 64,
-            actor_type="human",
-            created_by_actor_kind="human",
-            created_by_actor_id=ACTOR_ID,
-            version_status="draft",
-        )
+        version = ContextPageVersion(workspace_id=workspace_id, page_id=page.id,
+            version_no=1, body_md="", content_hash="0" * 64, actor_type="human",
+            created_by_actor_kind="human", created_by_actor_id=ACTOR_ID,
+            version_status="draft")
         session.add(version)
         session.flush()
     return services, service, workspace_id, page.id, version.id
@@ -539,9 +528,7 @@ def test_context_upload_replay_fingerprint_mismatch_rejects_without_residue(
 
 @pytest.mark.parametrize("missing", ["page_id", "editing_version_id"])
 def test_upload_requires_explicit_page_and_editing_version_even_on_replay(
-    session_factory,
-    tmp_path,
-    missing,
+    session_factory, tmp_path, missing,
 ) -> None:
     # Implicit media-session allocation is gone. Neither first call nor
     # replay may omit either component of the explicit upload target.
@@ -563,14 +550,11 @@ def test_upload_requires_explicit_page_and_editing_version_even_on_replay(
     )
     with pytest.raises(TypeError, match=missing):
         service.register(**incomplete)
-    assert (
-        _residue_snapshot(
-            session_factory,
-            workspace_id=workspace_id,
-            storage_root=tmp_path / "library",
-        )
-        == before
-    )
+    assert _residue_snapshot(
+        session_factory,
+        workspace_id=workspace_id,
+        storage_root=tmp_path / "library",
+    ) == before
     first = service.register(**arguments)
     before = _residue_snapshot(
         session_factory,
@@ -579,14 +563,11 @@ def test_upload_requires_explicit_page_and_editing_version_even_on_replay(
     )
     with pytest.raises(TypeError, match=missing):
         service.register(**incomplete)
-    assert (
-        _residue_snapshot(
-            session_factory,
-            workspace_id=workspace_id,
-            storage_root=tmp_path / "library",
-        )
-        == before
-    )
+    assert _residue_snapshot(
+        session_factory,
+        workspace_id=workspace_id,
+        storage_root=tmp_path / "library",
+    ) == before
     replay = service.register(**arguments)
     assert replay.asset == first.asset
     assert replay.reused is True
@@ -1129,9 +1110,8 @@ def test_partial_install_old_revision_exact_marker_replay_converges_after_transi
     assert recovered.asset.legacy_upload_asset_id is None
     assert recovered.asset.created_for_version_id is not None
     assert recovered.reused is False
-    assert (
-        counts_after_replay[ContextPageVersion.__tablename__]
-        == (counts_before[ContextPageVersion.__tablename__])
+    assert counts_after_replay[ContextPageVersion.__tablename__] == (
+        counts_before[ContextPageVersion.__tablename__]
     )
     assert (
         counts_after_replay[StoredBlobRow.__tablename__]

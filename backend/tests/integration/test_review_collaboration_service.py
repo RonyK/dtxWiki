@@ -547,12 +547,8 @@ def test_review_detail_capabilities_follow_status_role_and_audience(session_fact
             actor=_actor(requester, ws.id, "editor"),
         )
         pending_detail = service.get_review(
-            session,
-            ws.id,
-            review.id,
-            actor_user_id=requester.id,
-            actor_role="editor",
-            actor=_actor(requester, ws.id, "editor"),
+            session, ws.id, review.id, actor_user_id=requester.id,
+            actor_role="editor", actor=_actor(requester, ws.id, "editor"),
         )
         _request_changes(
             service,
@@ -578,20 +574,12 @@ def test_review_detail_capabilities_follow_status_role_and_audience(session_fact
             actor=_actor(outsider, ws.id, "editor"),
         )
         routed_detail = service.get_review(
-            session,
-            ws.id,
-            review.id,
-            actor_user_id=requester.id,
-            actor_role="editor",
-            actor=_actor(requester, ws.id, "editor"),
+            session, ws.id, review.id, actor_user_id=requester.id,
+            actor_role="editor", actor=_actor(requester, ws.id, "editor"),
         )
         outsider_detail = service.get_review(
-            session,
-            ws.id,
-            review.id,
-            actor_user_id=outsider.id,
-            actor_role="editor",
-            actor=_actor(outsider, ws.id, "editor"),
+            session, ws.id, review.id, actor_user_id=outsider.id,
+            actor_role="editor", actor=_actor(outsider, ws.id, "editor"),
         )
 
     assert pending.items[0].can_decide is True
@@ -643,41 +631,29 @@ def test_decision_receipt_replay_preserves_later_round_and_rejects_reuse(
 
         first = decide(request)
         assert first.decisions[0].decision_id == request.decision_id
-        later = decide(
-            ReviewDecisionRequest(
-                decision_id=uuid4(),
-                decision_type="request_changes",
-                decision_reason="A later routing round.",
-                audience_kind="workspace_editors",
-            )
-        )
+        later = decide(ReviewDecisionRequest(
+            decision_id=uuid4(),
+            decision_type="request_changes",
+            decision_reason="A later routing round.",
+            audience_kind="workspace_editors",
+        ))
         service.claim_review(
-            session,
-            workspace.id,
-            review.id,
-            actor_kind="human",
-            actor_id=str(other.id),
-            actor_role="editor",
+            session, workspace.id, review.id,
+            actor_kind="human", actor_id=str(other.id), actor_role="editor",
         )
         replay = decide(request)
         assert replay.current_audience_kind == later.current_audience_kind
         assert replay.claimed_by == other.id
         assert len(replay.decisions) == 2
         assert session.scalar(select(func.count(ReviewDecision.id))) == 2
-        assert (
-            session.scalar(
-                select(func.count(AuditEvent.id)).where(
-                    AuditEvent.action == "review.decision"
-                )
-            )
-            == 2
-        )
+        assert session.scalar(select(func.count(AuditEvent.id)).where(
+            AuditEvent.action == "review.decision"
+        )) == 2
 
         for changed, target, acting in [
             (
                 request.model_copy(update={"decision_reason": "Different payload"}),
-                review,
-                owner,
+                review, owner,
             ),
             (request, unrelated, owner),
             (request, review, other),
@@ -1358,11 +1334,8 @@ def test_resolution_clears_claim(session_factory):
             actor_role="editor",
         )
         detail = service.get_review(
-            session,
-            ws.id,
-            review.id,
-            actor_user_id=reviewer.id,
-            actor_role="editor",
+            session, ws.id, review.id,
+            actor_user_id=reviewer.id, actor_role="editor",
             actor=_actor(reviewer, ws.id, "editor"),
         )
         assert detail.actions.approve.allowed is False

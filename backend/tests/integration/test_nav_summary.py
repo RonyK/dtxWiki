@@ -69,7 +69,9 @@ def test_patch_sets_returns_and_clears_nav_summary(session_factory):
             session=session,
             workspace_id=workspace_id,
             node_id=folder.id,
-            request=TreeNodeUpdate(display_name="Payments", nav_summary="다시 저장"),
+            request=TreeNodeUpdate(
+                display_name="Payments", nav_summary="다시 저장"
+            ),
             actor_kind="human",
             actor_id="tester",
         )

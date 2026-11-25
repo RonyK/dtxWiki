@@ -126,7 +126,9 @@ def _family_policy_with_catalog(tmp_path, *, document_revision: int | None):
             {
                 "schema_version": 1,
                 "catalog_revision": (
-                    "2026-08-10.1" if document_revision == 1 else "2026-08-10.2"
+                    "2026-08-10.1"
+                    if document_revision == 1
+                    else "2026-08-10.2"
                 ),
                 "presets": presets,
             }
@@ -427,13 +429,10 @@ def test_saved_preset_membership_customization_round_trips_and_restores(
 
 def test_family_limit_is_optional_and_workspace_is_the_default():
     policy = default_library_policy()
-    assert (
-        library_upload_limit_bytes(
-            policy,
-            format_id="markdown",
-        )
-        == 20_000_000
-    )
+    assert library_upload_limit_bytes(
+        policy,
+        format_id="markdown",
+    ) == 20_000_000
 
     policy["format_families"] = [
         {
@@ -743,17 +742,14 @@ def test_family_limit_above_workspace_is_a_valid_override(
                         "family_id": "office",
                         "name": "Office",
                         "extensions": [".docx", ".xlsx"],
-                        "max_upload_bytes": 80_000_000,
+                "max_upload_bytes": 80_000_000,
                     }
                 ],
             },
             expected_revision=before.revision,
         ).library
         assert updated.policy["max_upload_bytes"] == 7_000_000
-        assert (
-            library_upload_limit_bytes(
-                updated.policy,
-                format_id="docx",
-            )
-            == 80_000_000
-        )
+        assert library_upload_limit_bytes(
+            updated.policy,
+            format_id="docx",
+        ) == 80_000_000

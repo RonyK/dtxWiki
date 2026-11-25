@@ -67,11 +67,7 @@ def _fast_hasher() -> CredentialHasher:
 
     return CredentialHasher(
         PasswordHasher(
-            time_cost=1,
-            memory_cost=1024,
-            parallelism=1,
-            hash_len=16,
-            salt_len=16,
+            time_cost=1, memory_cost=1024, parallelism=1, hash_len=16, salt_len=16,
             type=Type.ID,
         )
     )
@@ -546,7 +542,9 @@ def test_replace_workspace_grants_wiring_fans_out_add_and_remove(session_factory
         cursor_secret="wiring-test-cursor-secret-2",
     )
     with session_factory.begin() as session:
-        user, first_workspace_id = _seed_user_with_default_workspace_membership(session)
+        user, first_workspace_id = _seed_user_with_default_workspace_membership(
+            session
+        )
         second_workspace = Workspace(
             slug="wiring-second-workspace",
             title="Wiring Second Workspace",

@@ -208,7 +208,9 @@ def test_ready_mcp_na_in_json_stateless_200(tmp_path):
 
 
 def test_ready_oauth_jwk_ephemeral_unhealthy(tmp_path):
-    app = create_app(settings=_settings(tmp_path, oauth_jwt_private_key_pem=None))
+    app = create_app(
+        settings=_settings(tmp_path, oauth_jwt_private_key_pem=None)
+    )
     app.state.app_version_synced = True
     client = TestClient(app)
 
@@ -229,11 +231,7 @@ def test_ready_response_shape_matches_adr_a7(tmp_path):
 
     assert set(body) == {"status", "components"}
     assert set(body["components"]) == {
-        "db",
-        "app_version",
-        "mcp",
-        "oauth_jwk",
-        "worker",
+        "db", "app_version", "mcp", "oauth_jwk", "worker"
     }
 
 

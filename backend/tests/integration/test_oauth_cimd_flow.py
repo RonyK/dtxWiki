@@ -225,7 +225,9 @@ def test_cimd_change_cannot_widen_existing_grant_and_outage_does_not_revoke_it(
         "fetch_client_metadata_document",
         unavailable,
     )
-    _, existing_params = _authorize_params(state="cimd-existing-0123456789abcdef")
+    _, existing_params = _authorize_params(
+        state="cimd-existing-0123456789abcdef"
+    )
     existing = client.get(
         "/oauth/authorize",
         params=existing_params,
@@ -283,21 +285,27 @@ def test_established_cimd_scope_expansion_requires_fresh_consent(
     challenge = client.head("/mcp")
     assert challenge.status_code == 401
     requested_scope = (
-        challenge.headers["www-authenticate"].split('scope="', 1)[1].split('"', 1)[0]
+        challenge.headers["www-authenticate"]
+        .split('scope="', 1)[1]
+        .split('"', 1)[0]
     )
     assert "mcp:agent" in requested_scope.split()
     _, params = _authorize_params(
         scope=requested_scope,
         state="cimd-expansion-deny-0123456789abcdef",
     )
-    consent_page = client.get("/oauth/authorize", params=params, follow_redirects=False)
+    consent_page = client.get(
+        "/oauth/authorize", params=params, follow_redirects=False
+    )
     assert consent_page.status_code == 200, consent_page.text
     assert "Authorize dtxWiki MCP access" in consent_page.text
     # Skipping the UI cannot turn the prior read-only consent into approval.
     with pytest.raises(
         oauth_service.InvalidOAuthRequestError, match="consent is required"
     ):
-        service.issue_authorization_code(user_id=user_id, grant_consent=False, **params)
+        service.issue_authorization_code(
+            user_id=user_id, grant_consent=False, **params
+        )
 
     denied = client.post(
         "/oauth/authorize",
@@ -309,12 +317,9 @@ def test_established_cimd_scope_expansion_requires_fresh_consent(
     assert denied_params["error"] == ["access_denied"]
     assert "code" not in denied_params
     with page_service.session_factory() as session:
-        assert (
-            session.scalar(
-                select(OAuthConsent.scope).where(OAuthConsent.client_id == CLIENT_ID)
-            )
-            == "mcp:read"
-        )
+        assert session.scalar(
+            select(OAuthConsent.scope).where(OAuthConsent.client_id == CLIENT_ID)
+        ) == "mcp:read"
 
     expanded_tokens = _issue_cimd_tokens(
         client,

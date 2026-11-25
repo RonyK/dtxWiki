@@ -2583,7 +2583,9 @@ def test_oauth_bearer_cannot_revoke_another_clients_access_token(page_service):
 
     client = make_client(page_service)
     revoker_tokens = _seed_oauth_tokens(client, state="revoke-otherclient-PPP")
-    other_client_tokens = _seed_oauth_tokens(client, state="revoke-otherclient-QQQ")
+    other_client_tokens = _seed_oauth_tokens(
+        client, state="revoke-otherclient-QQQ"
+    )
     assert other_client_tokens["client_id"] != revoker_tokens["client_id"]
     target_jti = _decode_access_jti(other_client_tokens["access_token"])
     client.cookies.clear()

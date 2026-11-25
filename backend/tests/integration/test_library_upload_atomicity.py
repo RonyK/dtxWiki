@@ -136,14 +136,16 @@ def test_concurrent_distinct_digest_quota_race_has_one_atomic_winner(
                 ) -> None:
                     nonlocal locked_policy
                     start_capacity_decision.wait()
-                    locked_policy = services.library_binary_registration.ensure_source_quota_capacity(
-                        session=session,
-                        workspace_id=workspace_id,
-                        existing_item_id=None,
-                        upload_operation_id=operation_id,
-                        sha256=digest,
-                        byte_size=byte_size,
-                        expected_policy_revision=policy_revision,
+                    locked_policy = (
+                        services.library_binary_registration.ensure_source_quota_capacity(
+                            session=session,
+                            workspace_id=workspace_id,
+                            existing_item_id=None,
+                            upload_operation_id=operation_id,
+                            sha256=digest,
+                            byte_size=byte_size,
+                            expected_policy_revision=policy_revision,
+                        )
                     )
 
                 accepted = asyncio.run(
@@ -169,7 +171,9 @@ def test_concurrent_distinct_digest_quota_race_has_one_atomic_winner(
                 )
                 assert locked_policy is not None
                 detected_limit = format_limits[accepted.descriptor.format_id]
-                converter_limit = converter_max_bytes.get(accepted.descriptor.format_id)
+                converter_limit = converter_max_bytes.get(
+                    accepted.descriptor.format_id
+                )
                 limits = ConversionLimits(
                     max_input_bytes=(
                         min(detected_limit, converter_limit)

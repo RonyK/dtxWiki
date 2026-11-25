@@ -61,14 +61,16 @@ class SyntheticCorpusMaterializer:
         key = plan.corpus_key
         self.workspace_id = fixture_uuid(key, "workspace")
         self.context_ids = tuple(
-            fixture_uuid(key, "context", index) for index in range(plan.context_count)
+            fixture_uuid(key, "context", index)
+            for index in range(plan.context_count)
         )
         self.context_version_ids = tuple(
             fixture_uuid(key, "context-version", index)
             for index in range(plan.context_count)
         )
         self.library_ids = tuple(
-            fixture_uuid(key, "library", index) for index in range(plan.library_count)
+            fixture_uuid(key, "library", index)
+            for index in range(plan.library_count)
         )
         self.library_version_ids = tuple(
             fixture_uuid(key, "library-version", index)
@@ -106,12 +108,16 @@ class SyntheticCorpusMaterializer:
             f"Sources {index:04d}" for index in range(self.plan.library_folder_count)
         )
         primary_folder_labels = {
-            page_id: context_folder_labels[self.plan.context_folder_indices[index]]
+            page_id: context_folder_labels[
+                self.plan.context_folder_indices[index]
+            ]
             for index, page_id in enumerate(self.context_ids)
         }
         primary_folder_labels.update(
             {
-                item_id: library_folder_labels[index % self.plan.library_folder_count]
+                item_id: library_folder_labels[
+                    index % self.plan.library_folder_count
+                ]
                 for index, item_id in enumerate(self.library_ids)
             }
         )
@@ -473,7 +479,9 @@ class SyntheticCorpusMaterializer:
                 "id": fixture_uuid(key, "page-link", index),
                 "workspace_id": self.workspace_id,
                 "source_page_id": self.context_ids[relation.source_index],
-                "source_version_id": self.context_version_ids[relation.source_index],
+                "source_version_id": self.context_version_ids[
+                    relation.source_index
+                ],
                 "link_syntax": relation.link_syntax or "wikilink",
                 "locator_key": (
                     f"page_id:{self.context_ids[relation.target_index]}"
@@ -560,7 +568,10 @@ class SyntheticCorpusMaterializer:
     def _library_uri(self, index: int) -> str:
         if self.plan.workspace_index == 0:
             return f"https://example.test/source/{index}"
-        return f"https://example.test/source/{self.plan.workspace_index}/{index}"
+        return (
+            "https://example.test/source/"
+            f"{self.plan.workspace_index}/{index}"
+        )
 
 
 def _execute_in_chunks(

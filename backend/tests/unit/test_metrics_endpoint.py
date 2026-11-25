@@ -199,7 +199,8 @@ def test_tls_cert_expiry_omits_sample_for_http_deployment(monkeypatch):
     assert response.status_code == 200
     assert "# TYPE tls_cert_expiry gauge" in response.text
     assert not any(
-        line.startswith("tls_cert_expiry ") for line in response.text.splitlines()
+        line.startswith("tls_cert_expiry ")
+        for line in response.text.splitlines()
     )
 
 
@@ -252,26 +253,20 @@ def test_refresh_refusal_metric_reason_is_closed_set():
     )
 
     snapshot = metrics._counter_snapshot()["oauth_token_grants_total"]
-    assert (
-        snapshot[
-            (
-                ("grant_type", "refresh_token"),
-                ("result", "invalid_grant"),
-                ("refusal_reason", "consent_missing"),
-            )
-        ]
-        == 1
-    )
-    assert (
-        snapshot[
-            (
-                ("grant_type", "refresh_token"),
-                ("result", "invalid_grant"),
-                ("refusal_reason", ""),
-            )
-        ]
-        == 2
-    )
+    assert snapshot[
+        (
+            ("grant_type", "refresh_token"),
+            ("result", "invalid_grant"),
+            ("refusal_reason", "consent_missing"),
+        )
+    ] == 1
+    assert snapshot[
+        (
+            ("grant_type", "refresh_token"),
+            ("result", "invalid_grant"),
+            ("refusal_reason", ""),
+        )
+    ] == 2
 
 
 def test_does_not_return_index_html():

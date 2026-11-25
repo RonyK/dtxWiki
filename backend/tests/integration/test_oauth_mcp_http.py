@@ -168,9 +168,14 @@ def _install_oauth_authorize_csrf_priming(client: TestClient) -> None:
                     if k != "decision" and v != ""
                 }
                 get_resp = client.get("/oauth/authorize", params=get_params)
-                if get_resp.status_code != 200 and "workspace_id" in get_params:
+                if (
+                    get_resp.status_code != 200
+                    and "workspace_id" in get_params
+                ):
                     fallback = {
-                        k: v for k, v in get_params.items() if k != "workspace_id"
+                        k: v
+                        for k, v in get_params.items()
+                        if k != "workspace_id"
                     }
                     client.get("/oauth/authorize", params=fallback)
         return original_post(url, *args, **kwargs)
@@ -346,7 +351,9 @@ def test_oauth_authorize_get_records_account_scoped_activity(page_service):
     )
     assert activity.status_code == 200
     items = activity.json()["data"]["items"]
-    assert not any(item["body"] == "oauth.authorization.requested" for item in items)
+    assert not any(
+        item["body"] == "oauth.authorization.requested" for item in items
+    )
 
 
 @pytest.mark.parametrize(
@@ -662,7 +669,10 @@ def test_oauth_dcr_pkce_token_and_mcp_call(page_service):
     assert structured["envelope"]["result_status"] == "succeeded"
     assert structured["data"]["workspaces"][0]["slug"] == "default"
     with page_service.session_factory() as session:
-        actions = {event.action for event in session.scalars(select(AuditEvent)).all()}
+        actions = {
+            event.action
+            for event in session.scalars(select(AuditEvent)).all()
+        }
     assert {
         "oauth.code.issued",
         "oauth.token.issued",
@@ -796,7 +806,9 @@ def test_oauth_rejects_invalid_pkce_and_state_parameters(page_service):
     ]
 
     for label, override, keyword in cases:
-        params = {key: value for key, value in {**valid, **override}.items() if value}
+        params = {
+            key: value for key, value in {**valid, **override}.items() if value
+        }
         authorize = client.get("/oauth/authorize", params=params)
         assert authorize.status_code == 400, label
         body = authorize.json()
@@ -965,7 +977,9 @@ def test_oauth_token_endpoint_rate_limit_returns_429(page_service, monkeypatch):
     client = make_client(page_service)
     # Use a single client_id so the per-client bucket hits first.
     last_response = None
-    for index in range(oauth_service_module.TOKEN_RATE_LIMIT_PER_CLIENT + 1):
+    for index in range(
+        oauth_service_module.TOKEN_RATE_LIMIT_PER_CLIENT + 1
+    ):
         last_response = client.post(
             "/oauth/token",
             data={
@@ -1534,7 +1548,9 @@ def test_url_shaped_cimd_consent_can_be_updated_and_revoked(page_service):
     client_id = "https://client.example/oauth/client.json"
     with page_service.session_factory.begin() as session:
         user = session.scalar(select(User))
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        )
         assert user is not None and workspace is not None
         session.add(
             OAuthClient(
@@ -2087,7 +2103,8 @@ def test_oauth_jwt_uses_target_workspace_role_for_restricted_search(
             title="Target Restricted Source",
             trust_level="restricted",
             raw_text=(
-                "# Target Restricted Source\n\nNeedle target restricted artifact body"
+                "# Target Restricted Source\n\n"
+                "Needle target restricted artifact body"
             ),
         )
         ExtractionService(

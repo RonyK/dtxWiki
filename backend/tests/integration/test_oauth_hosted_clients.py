@@ -148,7 +148,9 @@ def authorize_and_exchange(
         scope=scope,
     )
     authorization = submit_authorization(client, params)
-    authorization_query = parse_qs(urlparse(authorization.headers["location"]).query)
+    authorization_query = parse_qs(
+        urlparse(authorization.headers["location"]).query
+    )
     code = authorization_query["code"][0]
     response = client.post(
         "/oauth/token",
@@ -296,13 +298,10 @@ def test_runtime_loopback_port_relaxation_cannot_bypass_userinfo_rejection(
 
     assert response.status_code == 400, response.text
     assert response.json()["error_code"] == "invalid_request"
-    assert (
-        redirect_uri_matches(
-            requested,
-            ["http://127.0.0.1:49152/callback"],
-        )
-        is False
-    )
+    assert redirect_uri_matches(
+        requested,
+        ["http://127.0.0.1:49152/callback"],
+    ) is False
 
 
 def test_runtime_https_redirect_port_must_match_exactly(shared_client):
@@ -461,8 +460,12 @@ def test_refresh_token_is_issued_without_offline_access_while_scope_is_advertise
         state="refresh-before-o3",
         scope="mcp:read",
     )
-    protected_resource = client.get("/.well-known/oauth-protected-resource").json()
-    authorization_server = client.get("/.well-known/oauth-authorization-server").json()
+    protected_resource = client.get(
+        "/.well-known/oauth-protected-resource"
+    ).json()
+    authorization_server = client.get(
+        "/.well-known/oauth-authorization-server"
+    ).json()
 
     assert "offline_access" not in registration["scope"].split()
     assert tokens["scope"] == "mcp:read"

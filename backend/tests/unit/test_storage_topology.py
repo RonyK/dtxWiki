@@ -106,7 +106,9 @@ def test_a_provider_that_declares_nothing_reports_undeclared() -> None:
     assert declared_storage_topology(_Foreign()) == "undeclared"
     # Nothing was claimed, so there is nothing to refuse.
     check_storage_topology(_Foreign())
-    assert storage_topology_report(_Foreign())["storage_topology"] == "undeclared"
+    assert (
+        storage_topology_report(_Foreign())["storage_topology"] == "undeclared"
+    )
 
 
 # --- 2. the census and the refusal it is keyed on ----------------------
@@ -127,9 +129,11 @@ def test_the_gate_consumes_the_shared_census_including_its_mixed_plane_edge() ->
 
     assert gate["workspace_to_control_fk_edges"] == len(edges)
     assert gate["blocking_parent_tables"] == sorted({e.parent for e in edges})
-    assert [edge.label for edge in edges if edge.child == "audit_event"] == [
-        "audit_event.workspace_id -> workspace"
-    ]
+    assert [
+        edge.label
+        for edge in edges
+        if edge.child == "audit_event"
+    ] == ["audit_event.workspace_id -> workspace"]
 
 
 def test_the_compatibility_gate_is_red_and_names_both_blocking_parents() -> None:
@@ -214,7 +218,9 @@ def test_health_endpoint_states_per_workspace_databases_are_unsupported() -> Non
     # Reported, not asserted at a literal: the count is whatever the mapped
     # metadata currently says, and it must be non-zero for the verdict above
     # to be the honest one.
-    assert body["workspace_to_control_fk_edges"] == len(workspace_to_control_fk_edges())
+    assert body["workspace_to_control_fk_edges"] == len(
+        workspace_to_control_fk_edges()
+    )
     assert body["workspace_to_control_fk_edges"] > 0
 
 

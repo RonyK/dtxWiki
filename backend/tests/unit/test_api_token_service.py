@@ -341,7 +341,9 @@ def test_token_mutation_queries_lock_rows_for_update():
     token_id = UUID("00000000-0000-0000-0000-000000000001")
     dialect = postgresql.dialect()
 
-    by_id = str(api_token_by_id_for_update_statement(token_id).compile(dialect=dialect))
+    by_id = str(
+        api_token_by_id_for_update_statement(token_id).compile(dialect=dialect)
+    )
     by_lookup = str(
         api_token_by_lookup_hash_for_update_statement("sha256:test").compile(
             dialect=dialect
@@ -477,7 +479,11 @@ def test_synthetic_catalog_app_can_be_associated_without_service_branch(
         variant["recipeIds"] = [new_recipe_id]
         recipe = json.loads(
             json.dumps(
-                next(item for item in payload["recipes"] if item["id"] == old_recipe_id)
+                next(
+                    item
+                    for item in payload["recipes"]
+                    if item["id"] == old_recipe_id
+                )
             )
         )
         recipe["id"] = new_recipe_id
@@ -801,7 +807,9 @@ def test_update_token_replaces_workspace_grants_and_audits_added_removed(
         workspace_grants=[WorkspaceGrantRequest(workspace_id=second_workspace_id)],
     )
 
-    assert [grant.workspace_id for grant in updated.workspaces] == [second_workspace_id]
+    assert [grant.workspace_id for grant in updated.workspaces] == [
+        second_workspace_id
+    ]
 
     with session_factory() as session:
         removed = session.get(
@@ -1118,7 +1126,9 @@ def test_token_workspace_grant_shows_null_role_after_membership_is_lost(
 
     listed = token_service.list_tokens(signed_up_user.user_id)
     row = next(item for item in listed if item.id == issued.api_token.id)
-    assert [grant.workspace_id for grant in row.workspaces] == [signed_up_workspace_id]
+    assert [grant.workspace_id for grant in row.workspaces] == [
+        signed_up_workspace_id
+    ]
     assert row.workspaces[0].membership_role is None
 
 

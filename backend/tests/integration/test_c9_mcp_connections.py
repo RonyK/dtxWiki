@@ -416,7 +416,9 @@ def test_legacy_oauth_consent_cursor_is_rejected_and_restarts_from_page_one(
         params={"limit": 1, "cursor": response.json()["next_cursor"]},
     )
     assert continuation.status_code == 200, continuation.text
-    assert [item["client_id"] for item in continuation.json()["data"]] == [rows[1][0]]
+    assert [item["client_id"] for item in continuation.json()["data"]] == [
+        rows[1][0]
+    ]
 
 
 def test_connection_listing_query_count_is_constant_per_page(page_service):
@@ -631,7 +633,9 @@ def test_mcp_client_cursor_traverses_more_than_one_default_page_exactly_once(
     client = _client(page_service)
     now = utc_now()
     with page_service.session_factory.begin() as session:
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        )
         assert workspace is not None
         rows = []
         for index in range(23):
@@ -908,7 +912,9 @@ def test_mcp_client_delete_rejects_bearer_pat_even_for_owner(page_service):
     owner = _client(page_service)
     with page_service.session_factory.begin() as session:
         user = session.scalar(select(User).where(User.email == "test@example.com"))
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        )
         assert user is not None and workspace is not None
         target = MCPClient(
             workspace_id=workspace.id,
@@ -1412,7 +1418,9 @@ def test_postgres_mcp_client_listing_facets_split_on_the_pushed_down_keys():
             "PG live holder",
             "PG PAT holder",
         }
-        assert {row.name for row in listing("disabled").data} == {"PG tokenless holder"}
+        assert {row.name for row in listing("disabled").data} == {
+            "PG tokenless holder"
+        }
         # The client_name search arm, which is the other pushed-down key set.
         assert {row.name for row in listing("all", "postgres shared").data} == {
             "PG live holder",

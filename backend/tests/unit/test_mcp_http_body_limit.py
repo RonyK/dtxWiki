@@ -42,7 +42,9 @@ def test_mcp_body_limit_is_derived_from_the_canonical_decoded_image_limit():
 
 def test_mcp_body_limit_rejects_oversized_content_length_without_reading():
     request = _request(
-        headers=[(b"content-length", str(MCP_MAX_REQUEST_BODY_BYTES + 1).encode())]
+        headers=[
+            (b"content-length", str(MCP_MAX_REQUEST_BODY_BYTES + 1).encode())
+        ]
     )
 
     response = anyio.run(_read_bounded_mcp_body, request)

@@ -60,7 +60,9 @@ def test_http_pat_disable_reactivate_and_tombstone_has_no_runtime_side_effects(
 
     with page_service.session_factory.begin() as session:
         runtime_client = session.scalar(
-            select(MCPClient).where(MCPClient.runtime_binding_key.like("api_token:%"))
+            select(MCPClient).where(
+                MCPClient.runtime_binding_key.like("api_token:%")
+            )
         )
         assert runtime_client is not None
         runtime_client.status = "disabled"

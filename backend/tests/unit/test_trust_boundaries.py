@@ -197,7 +197,9 @@ def test_restricted_library_allowed_for_restricted_scope():
 
 
 def test_restricted_library_allowed_for_system_actor():
-    check_restricted_library_allowed(_actor(None, actor_kind="system"), restricted=True)
+    check_restricted_library_allowed(
+        _actor(None, actor_kind="system"), restricted=True
+    )
 
 
 def test_restricted_library_unrestricted_target_always_allowed():
@@ -211,13 +213,8 @@ def test_restricted_library_role_alias_normalization():
     from backend.policy.trust_boundaries import actor_can_read_restricted_library
 
     allowed = {"owner": True, "admin": True}
-    denied = {
-        "editor": False,
-        "member": False,
-        "reviewer": False,
-        "viewer": False,
-        "none": False,
-    }
+    denied = {"editor": False, "member": False, "reviewer": False,
+              "viewer": False, "none": False}
     for role, expected in {**allowed, **denied}.items():
         assert (
             actor_can_read_restricted_library(_actor(uuid4(), workspace_role=role))
@@ -410,7 +407,9 @@ def test_oauth_live_consent_narrows_scope_for_its_own_bound_workspace(
             workspace_id=workspace.id,
             token_workspace_ids=(workspace.id,),
         )
-        scoped = actor_with_target_workspace_scope(actor, workspace.id, session=session)
+        scoped = actor_with_target_workspace_scope(
+            actor, workspace.id, session=session
+        )
         assert scoped.scopes == ("mcp:read",)
 
 
@@ -493,7 +492,9 @@ def test_pat_scope_is_independent_of_any_oauth_consent_row(session_factory):
             workspace_id=workspace.id,
             token_workspace_ids=(workspace.id,),
         )
-        scoped = actor_with_target_workspace_scope(actor, workspace.id, session=session)
+        scoped = actor_with_target_workspace_scope(
+            actor, workspace.id, session=session
+        )
         assert scoped.scopes == ("mcp:read", "mcp:write")
 
 

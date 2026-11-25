@@ -88,7 +88,9 @@ def _make_shard(tmp_path, name: str) -> sessionmaker[Session]:
     return make_session_factory(engine)
 
 
-def _register_workspace(factory, *, workspace_id: UUID, slug: str) -> None:
+def _register_workspace(
+    factory, *, workspace_id: UUID, slug: str
+) -> None:
     """Insert a Workspace row into ``factory``'s DB.
 
     Job.workspace_id carries a real FK to ``workspace.id`` (backend/models/
@@ -98,7 +100,9 @@ def _register_workspace(factory, *, workspace_id: UUID, slug: str) -> None:
     test_cloud_composition.py's split-provider fixtures already use.
     """
     with factory.begin() as session:
-        session.add(Workspace(id=workspace_id, slug=slug, title=slug, name=slug))
+        session.add(
+            Workspace(id=workspace_id, slug=slug, title=slug, name=slug)
+        )
 
 
 def _register_reachable_workspace(
@@ -384,7 +388,9 @@ def test_admin_list_jobs_flags_unreachable_workspace_not_500_or_short_list(
     # Poisoned shard: no shard DB of its own, only the control-plane roster
     # row -- session_for(workspace_broken) raises before anything would try
     # to read a Job table that does not exist for it.
-    _register_workspace(control_factory, workspace_id=workspace_broken, slug="broken")
+    _register_workspace(
+        control_factory, workspace_id=workspace_broken, slug="broken"
+    )
     job_a = _insert_job(
         shard_a,
         workspace_id=workspace_a,
@@ -423,7 +429,9 @@ def test_admin_jobs_summary_flags_unreachable_workspace_not_500_or_short_count(
     _register_reachable_workspace(
         control_factory, shard_a, workspace_id=workspace_a, slug="alpha"
     )
-    _register_workspace(control_factory, workspace_id=workspace_broken, slug="broken")
+    _register_workspace(
+        control_factory, workspace_id=workspace_broken, slug="broken"
+    )
     _insert_job(
         shard_a,
         workspace_id=workspace_a,

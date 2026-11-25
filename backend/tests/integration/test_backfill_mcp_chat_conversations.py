@@ -117,7 +117,8 @@ def test_chat_backfill_is_dry_run_by_default_and_audits_each_applied_session(
         events = list(
             session.scalars(
                 select(AuditEvent).where(
-                    AuditEvent.action == "mcp_chat.conversation_group_backfilled"
+                    AuditEvent.action
+                    == "mcp_chat.conversation_group_backfilled"
                 )
             ).all()
         )

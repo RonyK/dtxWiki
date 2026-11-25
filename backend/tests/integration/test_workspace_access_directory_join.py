@@ -177,9 +177,9 @@ def test_directory_is_normalized_cursor_bound_and_membership_neutral(page_servic
         params={"q": "STRASSE FI ALPHA"},
     )
     assert exact_unicode.status_code == 200
-    assert [item["workspace_id"] for item in exact_unicode.json()["data"]["items"]] == [
-        str(workspace.id)
-    ]
+    assert [
+        item["workspace_id"] for item in exact_unicode.json()["data"]["items"]
+    ] == [str(workspace.id)]
 
     # A cursor is query-bound, and directory discovery never creates access.
     second_workspace = None
@@ -269,7 +269,9 @@ def test_directory_uses_binary_normalized_order_with_equal_key_cursors(page_serv
         )
         assert response.status_code == 200
         data = response.json()["data"]
-        observed.extend((item["workspace_id"], item["title"]) for item in data["items"])
+        observed.extend(
+            (item["workspace_id"], item["title"]) for item in data["items"]
+        )
         cursor = data["next_cursor"]
         if cursor is None:
             break
@@ -282,15 +284,12 @@ def test_directory_uses_binary_normalized_order_with_equal_key_cursors(page_serv
 def test_join_attempts_are_idempotent_stale_safe_and_viewer_only(page_service):
     owner_client, requester_client = _clients(page_service)
     owner, requester, workspace = _actors(page_service)
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="team",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="team",
+        join_policy="request",
+    ).status_code == 200
     endpoint = f"/api/v1/workspaces/{workspace.id}/join-requests"
 
     first = requester_client.post(endpoint, json={"role": "owner"})
@@ -299,9 +298,8 @@ def test_join_attempts_are_idempotent_stale_safe_and_viewer_only(page_service):
     assert duplicate.status_code == 200
     first_data = first.json()["data"]
     assert first_data["request"]["attempt_no"] == 1
-    assert (
-        duplicate.json()["data"]["request"]["request_id"]
-        == (first_data["request"]["request_id"])
+    assert duplicate.json()["data"]["request"]["request_id"] == (
+        first_data["request"]["request_id"]
     )
     assert duplicate.json()["data"]["new_attempt"] is False
 
@@ -321,9 +319,9 @@ def test_join_attempts_are_idempotent_stale_safe_and_viewer_only(page_service):
         params={"pending_only": True},
     )
     assert pending_only.status_code == 200
-    assert [item["workspace_id"] for item in pending_only.json()["data"]["items"]] == [
-        str(workspace.id)
-    ]
+    assert [
+        item["workspace_id"] for item in pending_only.json()["data"]["items"]
+    ] == [str(workspace.id)]
 
     request_id = first_data["request"]["request_id"]
     stale = owner_client.patch(
@@ -399,15 +397,12 @@ def test_join_request_activity_title_is_owner_only(page_service):
     # name just because it started riding the audit payload.
     owner_client, requester_client = _clients(page_service)
     owner, requester, workspace = _actors(page_service)
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="team",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="team",
+        join_policy="request",
+    ).status_code == 200
     endpoint = f"/api/v1/workspaces/{workspace.id}/join-requests"
 
     created = requester_client.post(endpoint)
@@ -455,15 +450,12 @@ def test_join_request_activity_title_is_owner_only(page_service):
 def test_requester_can_cancel_and_terminal_rerequest_increments_attempt(page_service):
     owner_client, requester_client = _clients(page_service)
     _, _, workspace = _actors(page_service)
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="team",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="team",
+        join_policy="request",
+    ).status_code == 200
     endpoint = f"/api/v1/workspaces/{workspace.id}/join-requests"
     first = requester_client.post(endpoint).json()["data"]["request"]
     cancelled = requester_client.delete(f"{endpoint}/me")
@@ -476,15 +468,12 @@ def test_requester_can_cancel_and_terminal_rerequest_increments_attempt(page_ser
     assert retried.json()["data"]["request"]["request_id"] == first["request_id"]
     assert retried.json()["data"]["request"]["attempt_no"] == 2
 
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="private",
-            join_policy="invite_only",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="private",
+        join_policy="invite_only",
+    ).status_code == 200
     hidden_cancel = requester_client.delete(f"{endpoint}/me")
     missing_cancel = requester_client.delete(
         f"/api/v1/workspaces/{UUID(int=0)}/join-requests/me"
@@ -498,15 +487,12 @@ def test_approval_closes_pending_request_when_invitation_already_created_members
 ):
     owner_client, requester_client = _clients(page_service)
     owner, requester, workspace = _actors(page_service)
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="team",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="team",
+        join_policy="request",
+    ).status_code == 200
     endpoint = f"/api/v1/workspaces/{workspace.id}/join-requests"
     requested = requester_client.post(endpoint)
     assert requested.status_code == 201
@@ -562,15 +548,12 @@ def test_direct_add_closes_a_pending_join_request(page_service):
     # queue view would keep counting a request nothing can ever resolve.
     owner_client, requester_client = _clients(page_service)
     owner, requester, workspace = _actors(page_service)
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="team",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="team",
+        join_policy="request",
+    ).status_code == 200
     endpoint = f"/api/v1/workspaces/{workspace.id}/join-requests"
     requested = requester_client.post(endpoint)
     assert requested.status_code == 201
@@ -621,22 +604,21 @@ def test_direct_add_closes_a_pending_join_request(page_service):
 def test_inactive_requester_and_policy_fail_with_stable_codes(page_service):
     owner_client, requester_client = _clients(page_service)
     owner, requester, workspace = _actors(page_service)
-    private = requester_client.post(f"/api/v1/workspaces/{workspace.id}/join-requests")
+    private = requester_client.post(
+        f"/api/v1/workspaces/{workspace.id}/join-requests"
+    )
     assert private.status_code == 404
     assert private.json()["error_code"] == "not_found"
     private_exact = requester_client.get(f"/api/v1/workspaces/{workspace.id}")
     assert private_exact.status_code == 404
     assert private_exact.json()["error_code"] == "not_found"
 
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="public",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="public",
+        join_policy="request",
+    ).status_code == 200
     endpoint = f"/api/v1/workspaces/{workspace.id}/join-requests"
     requested = requester_client.post(endpoint)
     request = requested.json()["data"]["request"]
@@ -684,15 +666,12 @@ def test_stale_pending_count_blocks_access_save_around_a_late_arriving_request(
     # it despite the dialog having promised "0 requests closed".
     owner_client, requester_client = _clients(page_service)
     _, _, workspace = _actors(page_service)
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="team",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="team",
+        join_policy="request",
+    ).status_code == 200
 
     # The dialog's snapshot: read once, matching what confirmAccessChange
     # sends as expected_updated_at / expected_pending_join_request_count.
@@ -723,7 +702,9 @@ def test_stale_pending_count_blocks_access_save_around_a_late_arriving_request(
         },
     )
     assert saved_with_stale_snapshot.status_code == 409
-    assert saved_with_stale_snapshot.json()["error_code"] == "stale_base_version"
+    assert (
+        saved_with_stale_snapshot.json()["error_code"] == "stale_base_version"
+    )
 
     with page_service.session_factory() as session:
         still_pending = session.get(WorkspaceJoinRequest, UUID(request_id))
@@ -761,15 +742,12 @@ def test_visibility_downgrade_closes_requests_and_revokes_every_public_page(
     with page_service.session_factory.begin() as session:
         session.get(Workspace, workspace.id).slug = "public-downgrade"
     workspace.slug = "public-downgrade"
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="public",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="public",
+        join_policy="request",
+    ).status_code == 200
     requested = requester_client.post(
         f"/api/v1/workspaces/{workspace.id}/join-requests"
     )
@@ -790,7 +768,9 @@ def test_visibility_downgrade_closes_requests_and_revokes_every_public_page(
     )
     assert published.status_code == 200
     anonymous = TestClient(owner_client.app)
-    public_path = "/api/v1/public/w/public-downgrade/pages/public-before-downgrade"
+    public_path = (
+        "/api/v1/public/w/public-downgrade/pages/public-before-downgrade"
+    )
     assert anonymous.get(public_path).status_code == 200
 
     downgraded = _set_access(
@@ -849,15 +829,12 @@ def test_visibility_downgrade_closes_requests_and_revokes_every_public_page(
 def test_every_workspace_visibility_change_revokes_unlisted_grants(page_service):
     owner_client, _ = _clients(page_service)
     owner, _, workspace = _actors(page_service)
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="team",
-            join_policy="invite_only",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="team",
+        join_policy="invite_only",
+    ).status_code == 200
 
     def create_and_share(slug: str):
         page = page_service.write_page(
@@ -894,15 +871,12 @@ def test_every_workspace_visibility_change_revokes_unlisted_grants(page_service)
     assert changed_private.status_code == 200
     assert changed_private.json()["data"]["cleared_public_page_count"] == 1
 
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="team",
-            join_policy="invite_only",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="team",
+        join_policy="invite_only",
+    ).status_code == 200
     team_to_public = create_and_share("team-to-public")
     changed_public = _set_access(
         owner_client,
@@ -923,7 +897,9 @@ def test_every_workspace_visibility_change_revokes_unlisted_grants(page_service)
     anonymous = TestClient(owner_client.app)
     for slug in ("team-to-private", "team-to-public"):
         assert (
-            anonymous.get(f"/api/v1/public/w/{workspace.slug}/pages/{slug}").status_code
+            anonymous.get(
+                f"/api/v1/public/w/{workspace.slug}/pages/{slug}"
+            ).status_code
             == 404
         )
 
@@ -931,18 +907,15 @@ def test_every_workspace_visibility_change_revokes_unlisted_grants(page_service)
 def test_late_public_grant_makes_visibility_confirmation_stale(page_service):
     owner_client, _ = _clients(page_service)
     owner, _, workspace = _actors(page_service)
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="public",
-            join_policy="invite_only",
-        ).status_code
-        == 200
-    )
-    snapshot = owner_client.get(f"/api/v1/workspaces/{workspace.id}/access").json()[
-        "data"
-    ]
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="public",
+        join_policy="invite_only",
+    ).status_code == 200
+    snapshot = owner_client.get(
+        f"/api/v1/workspaces/{workspace.id}/access"
+    ).json()["data"]
     assert snapshot["public_page_count"] == 0
 
     page = page_service.write_page(
@@ -1000,15 +973,12 @@ def test_settings_policy_path_rejects_visibility_instead_of_bypassing_access_inv
     with page_service.session_factory.begin() as session:
         session.get(Workspace, workspace.id).slug = "settings-visibility-guard"
     workspace.slug = "settings-visibility-guard"
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="public",
-            join_policy="request",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="public",
+        join_policy="request",
+    ).status_code == 200
     page = page_service.write_page(
         workspace_slug="settings-visibility-guard",
         slug="settings-guard-page",
@@ -1095,38 +1065,38 @@ def test_public_sharing_profile_scoped_index_and_mcp_matrix(page_service):
 
     anonymous = TestClient(owner_client.app)
     assert (
-        anonymous.get("/api/v1/public/w/profile-public/pages/index-page").status_code
+        anonymous.get(
+            "/api/v1/public/w/profile-public/pages/index-page"
+        ).status_code
         == 200
     )
     hidden_profile = anonymous.get("/api/v1/public/w/profile-public")
-    hidden_scoped_index = anonymous.get("/api/v1/public/w/profile-public/llms.txt")
+    hidden_scoped_index = anonymous.get(
+        "/api/v1/public/w/profile-public/llms.txt"
+    )
     for hidden_response in (hidden_profile, hidden_scoped_index):
         assert hidden_response.status_code == 404
         assert hidden_response.headers["X-Robots-Tag"] == "noindex, nofollow"
         assert hidden_response.headers["Cache-Control"] == "no-store"
 
-    assert (
-        _set_access(
-            owner_client,
-            workspace.id,
-            visibility="public",
-            join_policy="invite_only",
-        ).status_code
-        == 200
-    )
+    assert _set_access(
+        owner_client,
+        workspace.id,
+        visibility="public",
+        join_policy="invite_only",
+    ).status_code == 200
     # The visibility change revokes rather than reinterpreting the unlisted
     # grant as indexed. A fresh explicit share is required.
     assert (
-        anonymous.get("/api/v1/public/w/profile-public/pages/index-page").status_code
+        anonymous.get(
+            "/api/v1/public/w/profile-public/pages/index-page"
+        ).status_code
         == 404
     )
-    assert (
-        owner_client.post(
-            f"/api/v1/workspaces/{page.workspace_id}/context/pages/{page.id}/publish",
-            json={"is_public": True},
-        ).status_code
-        == 200
-    )
+    assert owner_client.post(
+        f"/api/v1/workspaces/{page.workspace_id}/context/pages/{page.id}/publish",
+        json={"is_public": True},
+    ).status_code == 200
 
     profile = anonymous.get("/api/v1/public/w/profile-public")
     scoped = anonymous.get("/api/v1/public/w/profile-public/llms.txt")
@@ -1170,7 +1140,9 @@ def test_public_sharing_profile_scoped_index_and_mcp_matrix(page_service):
     token = requester_client.post(
         "/api/v1/auth/tokens",
         json={
-            "workspace_grants": [{"workspace_id": str(requester.default_workspace_id)}],
+            "workspace_grants": [
+                {"workspace_id": str(requester.default_workspace_id)}
+            ],
             "name": "directory-denied",
             "scopes": ["mcp:read"],
         },

@@ -123,10 +123,9 @@ def test_extraction_creates_text_artifact_and_completes_job(media_installer_fact
     assert stored_artifact.role == "markdown"
     assert stored_artifact.attempt_id is not None
     assert stored_artifact.blob_id is not None
-    assert (
-        stored_artifact.content_sha256
-        == hashlib.sha256(b"# Extract\n\nBody").hexdigest()
-    )
+    assert stored_artifact.content_sha256 == hashlib.sha256(
+        b"# Extract\n\nBody"
+    ).hexdigest()
     assert extraction_method == "text/markdown"
     assert index_text == "# Extract\n\nBody"
     assert location_model == {

@@ -53,10 +53,7 @@ def _extra_workspace(page_service, *, slug: str) -> str:
         assert user is not None
         workspace = seed_default_workspace(session, slug=slug, title=slug)
         grant_workspace_membership(
-            session,
-            user_id=user.id,
-            workspace_id=workspace.id,
-            role="viewer",
+            session, user_id=user.id, workspace_id=workspace.id, role="viewer",
         )
         return str(workspace.id)
 

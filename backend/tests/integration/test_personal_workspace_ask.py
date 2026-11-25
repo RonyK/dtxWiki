@@ -68,11 +68,8 @@ def test_ask_sessions_create_a_missing_ask_root_once(page_service):
         assert policy.allow_user_folder_create is False
         assert policy.allow_page_as_parent is False
         assert policy.fixed_root_node_ids == [str(root.id)]
-        assert (
-            session.scalar(
-                select(func.count())
-                .select_from(AskSession)
-                .where(AskSession.workspace_id == workspace_id)
-            )
-            == 2
-        )
+        assert session.scalar(
+            select(func.count())
+            .select_from(AskSession)
+            .where(AskSession.workspace_id == workspace_id)
+        ) == 2

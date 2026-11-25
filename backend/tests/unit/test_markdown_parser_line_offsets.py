@@ -19,7 +19,8 @@ _HEADINGS = 400
 
 def _heading_heavy_body(headings: int = _HEADINGS) -> str:
     return "".join(
-        f"## Section number {index} with a reasonably long heading title\n\nbody\n\n"
+        f"## Section number {index} with a reasonably long heading title\n\n"
+        "body\n\n"
         for index in range(headings)
     )
 

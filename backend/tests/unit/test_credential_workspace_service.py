@@ -7,7 +7,6 @@ from backend.tests.unit import test_mcp_access_db_consistency as fixtures
 
 db = fixtures.db
 
-
 def test_membership_only_search_cursor_order_and_permissions(db):
     with db.factory.begin() as session:
         for index in range(24):

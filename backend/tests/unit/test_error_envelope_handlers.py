@@ -41,7 +41,9 @@ def test_method_not_allowed_uses_error_envelope(tmp_path, monkeypatch):
 
     assert response.status_code == 405
     assert "GET" in response.headers["allow"]
-    _assert_envelope(response.json(), error_code="internal_error", status="failed")
+    _assert_envelope(
+        response.json(), error_code="internal_error", status="failed"
+    )
 
 
 def test_api_fallback_404_keeps_error_envelope(tmp_path, monkeypatch):
@@ -76,7 +78,9 @@ def test_unhandled_exception_returns_envelope_500(tmp_path, monkeypatch):
     response = client.get("/health/ready")
 
     assert response.status_code == 500
-    _assert_envelope(response.json(), error_code="internal_error", status="failed")
+    _assert_envelope(
+        response.json(), error_code="internal_error", status="failed"
+    )
     assert response.json()["message"] == "internal server error"
     assert "kaboom" not in response.text
 
@@ -116,7 +120,9 @@ def test_schema_mismatch_exception_returns_actionable_envelope(tmp_path, monkeyp
 
     assert response.status_code == 500
     body = response.json()
-    _assert_envelope(body, error_code="database_schema_mismatch", status="failed")
+    _assert_envelope(
+        body, error_code="database_schema_mismatch", status="failed"
+    )
     assert "reset the dev database" in body["message"]
     assert "dtxwiki bootstrap" in body["message"]
     assert "job.next_attempt_at" not in response.text

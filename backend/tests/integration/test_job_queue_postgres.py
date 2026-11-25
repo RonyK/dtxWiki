@@ -31,7 +31,8 @@ def postgres_test_url() -> str | None:
 @pytest.mark.skipif(
     postgres_test_url() is None,
     reason=(
-        "requires DTXWIKI_POSTGRES_TEST_DATABASE_URL or PostgreSQL DTXWIKI_DATABASE_URL"
+        "requires DTXWIKI_POSTGRES_TEST_DATABASE_URL or PostgreSQL "
+        "DTXWIKI_DATABASE_URL"
     ),
 )
 def test_postgres_conditional_claim_prevents_double_claim():
@@ -45,9 +46,9 @@ def test_postgres_conditional_claim_prevents_double_claim():
     try:
         with session_factory.begin() as session:
             workspace = Workspace(
-                slug=f"postgres-conditional-claim-{uuid4()}",
-                title="Postgres conditional claim test",
-                name="Postgres conditional claim test",
+            slug=f"postgres-conditional-claim-{uuid4()}",
+            title="Postgres conditional claim test",
+            name="Postgres conditional claim test",
             )
             session.add(workspace)
             session.flush()

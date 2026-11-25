@@ -27,7 +27,9 @@ def test_session_factory_built_once_under_concurrent_cold_start(monkeypatch):
         time.sleep(0.05)
         return object()
 
-    monkeypatch.setattr(app_state, "make_session_factory_from_settings", slow_factory)
+    monkeypatch.setattr(
+        app_state, "make_session_factory_from_settings", slow_factory
+    )
     request = _request()
     results = []
     start = threading.Barrier(8, timeout=30)
@@ -57,7 +59,9 @@ def test_page_service_built_once_under_concurrent_cold_start(monkeypatch):
         time.sleep(0.05)
         return object()
 
-    monkeypatch.setattr(app_state, "make_session_factory_from_settings", slow_factory)
+    monkeypatch.setattr(
+        app_state, "make_session_factory_from_settings", slow_factory
+    )
     request = _request()
     results = []
     start = threading.Barrier(8, timeout=30)

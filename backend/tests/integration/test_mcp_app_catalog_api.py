@@ -56,7 +56,9 @@ def test_catalog_api_projects_options_and_secret_free_setup_plan(page_service):
     assert len([app for app in payload["apps"] if app["featured_rank"]]) <= 4
     assert payload["generic_profiles"][0]["label"] == "기타 MCP 클라이언트"
     oauth = next(
-        option for option in payload["apps"][0]["options"] if option["auth"] == "oauth"
+        option
+        for option in payload["apps"][0]["options"]
+        if option["auth"] == "oauth"
     )
     assert oauth == {
         **oauth,

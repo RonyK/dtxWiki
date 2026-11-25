@@ -29,36 +29,23 @@ def test_package_spec():
 
 def test_build_pip_install_argv_basic():
     assert index.build_pip_install_argv(["py", "-m", "pip"], "dtxwiki") == [
-        "py",
-        "-m",
-        "pip",
-        "install",
-        "--upgrade",
-        "dtxwiki",
+        "py", "-m", "pip", "install", "--upgrade", "dtxwiki",
     ]
 
 
 def test_build_pip_install_argv_with_index_and_force():
     assert index.build_pip_install_argv(
-        ["pip"],
-        "dtxwiki==0.1.0",
-        index_url="https://idx/simple",
-        upgrade=False,
-        force_reinstall=True,
+        ["pip"], "dtxwiki==0.1.0",
+        index_url="https://idx/simple", upgrade=False, force_reinstall=True,
     ) == [
-        "pip",
-        "install",
-        "--force-reinstall",
-        "--index-url",
-        "https://idx/simple",
+        "pip", "install", "--force-reinstall",
+        "--index-url", "https://idx/simple",
         "dtxwiki==0.1.0",
     ]
 
 
 def test_build_pipx_install_argv_with_index():
-    argv = index.build_pipx_install_argv(
-        "dtxwiki==0.2.0", index_url="https://idx/simple"
-    )
+    argv = index.build_pipx_install_argv("dtxwiki==0.2.0", index_url="https://idx/simple")
     assert argv[:3] == ["pipx", "install", "--force"]
     assert "dtxwiki==0.2.0" in argv
     assert argv[-2:] == ["--pip-args", "--index-url https://idx/simple"]
@@ -79,17 +66,10 @@ def test_build_pipx_install_argv_pre():
 
 def test_systemctl_argv():
     assert service_control.systemctl_argv("stop") == [
-        "systemctl",
-        "stop",
-        "dtxwiki",
-        "dtxwiki-worker",
+        "systemctl", "stop", "dtxwiki", "dtxwiki-worker",
     ]
     assert service_control.systemctl_argv("enable", extra_flags=("--now",)) == [
-        "systemctl",
-        "enable",
-        "--now",
-        "dtxwiki",
-        "dtxwiki-worker",
+        "systemctl", "enable", "--now", "dtxwiki", "dtxwiki-worker",
     ]
 
 
@@ -199,8 +179,7 @@ class _Resp:
 
 def test_poll_health_ready_success(monkeypatch):
     monkeypatch.setattr(
-        healthcheck.httpx,
-        "get",
+        healthcheck.httpx, "get",
         lambda url, timeout: _Resp(200, {"status": "ready"}),
     )
     assert healthcheck.poll_health_ready("http://x/", sleep=lambda _s: None) is True
@@ -208,8 +187,7 @@ def test_poll_health_ready_success(monkeypatch):
 
 def test_poll_health_ready_times_out(monkeypatch):
     monkeypatch.setattr(
-        healthcheck.httpx,
-        "get",
+        healthcheck.httpx, "get",
         lambda url, timeout: _Resp(503, {"status": "unhealthy"}),
     )
     ticks = {"v": 0.0}
@@ -218,15 +196,9 @@ def test_poll_health_ready_times_out(monkeypatch):
         ticks["v"] += 10.0
         return ticks["v"]
 
-    assert (
-        healthcheck.poll_health_ready(
-            "http://x",
-            timeout_sec=5,
-            sleep=lambda _s: None,
-            now=fake_now,
-        )
-        is False
-    )
+    assert healthcheck.poll_health_ready(
+        "http://x", timeout_sec=5, sleep=lambda _s: None, now=fake_now,
+    ) is False
 
 
 def test_poll_health_ready_swallows_http_error(monkeypatch):
@@ -240,12 +212,6 @@ def test_poll_health_ready_swallows_http_error(monkeypatch):
         ticks["v"] += 10.0
         return ticks["v"]
 
-    assert (
-        healthcheck.poll_health_ready(
-            "http://x",
-            timeout_sec=5,
-            sleep=lambda _s: None,
-            now=fake_now,
-        )
-        is False
-    )
+    assert healthcheck.poll_health_ready(
+        "http://x", timeout_sec=5, sleep=lambda _s: None, now=fake_now,
+    ) is False

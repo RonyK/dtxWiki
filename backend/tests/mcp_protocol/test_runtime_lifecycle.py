@@ -37,7 +37,9 @@ def test_pat_discovery_uses_control_and_replica_scope_intersection(
     """Neither control intent nor a stale-wide replica may widen discovery."""
 
     with page_service.session_factory.begin() as session:
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        )
         user = User(
             email=f"discovery-scope-{uuid4()}@example.com",
             password_hash="test-hash",
@@ -117,7 +119,9 @@ def test_pat_discovery_uses_control_and_replica_scope_intersection(
                     {"workspace_id": str(workspace_id)},
                 )
             with pytest.raises(McpError) as resource_error:
-                await client.read_resource(f"dtxwiki://workspaces/{workspace_id}/guide")
+                await client.read_resource(
+                    f"dtxwiki://workspaces/{workspace_id}/guide"
+                )
             assert prompt_error.value.error.data["error_code"] == "scope_denied"
             assert resource_error.value.error.data["error_code"] == "scope_denied"
 
@@ -132,7 +136,9 @@ def test_oauth_protocol_surfaces_require_replica_before_lifecycle_first_touch(
     """Discovery and content reads fail closed without creating client state."""
 
     with page_service.session_factory.begin() as session:
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        )
         user = User(
             email=f"protocol-replica-{replica_state}@example.com",
             password_hash="test-hash",
@@ -216,7 +222,9 @@ def test_oauth_protocol_surfaces_require_replica_before_lifecycle_first_touch(
                     {"workspace_id": str(workspace_id)},
                 )
             with pytest.raises(McpError) as resource_error:
-                await client.read_resource(f"dtxwiki://workspaces/{workspace_id}/guide")
+                await client.read_resource(
+                    f"dtxwiki://workspaces/{workspace_id}/guide"
+                )
             assert prompt_error.value.error.data["error_code"] == (
                 "grant_replica_missing"
             )
@@ -358,7 +366,9 @@ def test_oauth_discovery_lists_cannot_bypass_disabled_nondefault_binding(
             for call in calls:
                 with pytest.raises(McpError) as error:
                     await call
-                assert error.value.error.data["error_code"] == ("mcp_client_disabled")
+                assert error.value.error.data["error_code"] == (
+                    "mcp_client_disabled"
+                )
 
     anyio.run(run)
 
@@ -459,7 +469,9 @@ def test_oauth_tool_call_respects_its_own_workspaces_disabled_binding(page_servi
     from uuid import uuid4
 
     with page_service.session_factory.begin() as session:
-        workspace = session.scalar(select(Workspace).where(Workspace.slug == "default"))
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.slug == "default")
+        )
         user = User(
             email="single-lifecycle@example.com",
             password_hash="test-hash",

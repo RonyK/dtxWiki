@@ -194,7 +194,6 @@ def test_streamable_dispatcher_binds_prompt_resource_request_metadata(
 
         async def run():
             async with create_connected_server_and_client_session(dispatcher) as client:
-
                 async def send(request, result_type):
                     return await _send_bound_dispatcher_request(
                         client, request, result_type, app=app, actor=actor
@@ -235,7 +234,9 @@ def test_streamable_dispatcher_binds_prompt_resource_request_metadata(
                     item.name for item in prompts.prompts
                 }
                 assert prompt.messages
-                assert "workspace-guide" in {item.name for item in resources.resources}
+                assert "workspace-guide" in {
+                    item.name for item in resources.resources
+                }
                 assert templates.resourceTemplates
                 assert guide.contents[0].mimeType == "application/json"
 
@@ -350,8 +351,12 @@ def test_resolve_and_check_rejects_pat_workspace_mismatch(
         message_contains="workspace token claim mismatch",
     )
 
-    own = _resolve_and_check_mcp_workspace(_Req(app), actor, _body(actor.workspace_id))
-    assert own is None, "SEC-1 positive control: own-scope request must proceed (None)"
+    own = _resolve_and_check_mcp_workspace(
+        _Req(app), actor, _body(actor.workspace_id)
+    )
+    assert own is None, (
+        "SEC-1 positive control: own-scope request must proceed (None)"
+    )
 
 
 def test_streamable_mode_503_when_manager_missing(page_service):
@@ -495,16 +500,14 @@ def test_dispatcher_request_bindings_do_not_leak_between_sdk_sessions(
                 clients = []
                 session_ids = []
                 for issued in (issued_a, issued_b):
-                    (
-                        read_stream,
-                        write_stream,
-                        get_session_id,
-                    ) = await stack.enter_async_context(
-                        streamablehttp_client(
-                            url=f"{server.url}/mcp",
-                            headers={
-                                "Authorization": f"Bearer {issued['plain_token']}"
-                            },
+                    read_stream, write_stream, get_session_id = (
+                        await stack.enter_async_context(
+                            streamablehttp_client(
+                                url=f"{server.url}/mcp",
+                                headers={
+                                    "Authorization": f"Bearer {issued['plain_token']}"
+                                },
+                            )
                         )
                     )
                     client = await stack.enter_async_context(
@@ -591,7 +594,9 @@ def test_streamable_post_handler_does_not_resolve_workspace_eagerly(
         eager_calls.append((actor.actor_id, len(body)))
         return original(req, actor, body)
 
-    monkeypatch.setattr(mcp_http_module, "_resolve_and_check_mcp_workspace", _spy)
+    monkeypatch.setattr(
+        mcp_http_module, "_resolve_and_check_mcp_workspace", _spy
+    )
 
     app = create_app(
         settings=_make_settings("streamable"),
@@ -670,7 +675,9 @@ def test_json_stateless_workspace_scoped_tool_keeps_transport_check(
         eager_calls.append((actor.actor_id, len(body)))
         return original(req, actor, body)
 
-    monkeypatch.setattr(mcp_http_module, "_resolve_and_check_mcp_workspace", _spy)
+    monkeypatch.setattr(
+        mcp_http_module, "_resolve_and_check_mcp_workspace", _spy
+    )
 
     app = create_app(
         settings=_make_settings("json_stateless"),
@@ -940,7 +947,9 @@ def test_mcp_auth_server_fault_returns_500_not_401(page_service, monkeypatch):
         def _server_fault(_request, _token):
             raise RuntimeError("database connection lost")
 
-        monkeypatch.setattr(mcp_http_module, "authenticate_bearer_token", _server_fault)
+        monkeypatch.setattr(
+            mcp_http_module, "authenticate_bearer_token", _server_fault
+        )
         responses = {
             "post": client.post(
                 "/mcp",
@@ -1214,7 +1223,8 @@ ACCEPT_MATRIX = [
     "row,mode,accept,expected_branch,expected_hack",
     ACCEPT_MATRIX,
     ids=[
-        f"row{row:02d}-{mode}-{accept!r}" for row, mode, accept, _, _ in ACCEPT_MATRIX
+        f"row{row:02d}-{mode}-{accept!r}"
+        for row, mode, accept, _, _ in ACCEPT_MATRIX
     ],
 )
 def test_accept_negotiation_matrix_row(
@@ -1717,7 +1727,9 @@ def test_streamable_sse_response_declares_utf8_and_roundtrips_unicode(
             "application/json",
         ),
         (
-            '{"jsonrpc":"2.0","id":1,"method":"initialize"}'.encode("utf-16"),
+            '{"jsonrpc":"2.0","id":1,"method":"initialize"}'.encode(
+                "utf-16"
+            ),
             "application/json, text/plain",
         ),
     ],
@@ -1783,7 +1795,9 @@ def test_malformed_json_keeps_accept_negotiation_precedence(mcp_modes):
     )
 
     assert incompatible.status_code == 415, incompatible.text
-    assert incompatible.json()["error"]["data"]["error"] == ("transport_mode_mismatch")
+    assert incompatible.json()["error"]["data"]["error"] == (
+        "transport_mode_mismatch"
+    )
     assert unacceptable.status_code == 406, unacceptable.text
     assert unacceptable.json()["error"]["data"]["error"] == "not_acceptable"
 
@@ -1857,7 +1871,9 @@ def _assert_session_error_envelope(body: dict) -> None:
     assert "details" not in body, (
         f"MCP transport body MUST NOT contain REST 'details' key; got {body}"
     )
-    assert "expected" not in body, f"legacy top-level 'expected' key leaked; got {body}"
+    assert "expected" not in body, (
+        f"legacy top-level 'expected' key leaked; got {body}"
+    )
 
 
 def _delete_session(client: TestClient, pat: str, response) -> None:
@@ -2078,7 +2094,9 @@ def test_initialize_without_session_in_json_stateless_no_op(page_service):
 # Pin the public_base_url used across Task 2.7 tests so the assertion
 # string is unambiguous (no scheme/host drift from default fixtures).
 _PUBLIC_ORIGIN = "https://mcp.example.com"
-_EXPECTED_METADATA_URL = f"{_PUBLIC_ORIGIN}/.well-known/oauth-protected-resource/mcp"
+_EXPECTED_METADATA_URL = (
+    f"{_PUBLIC_ORIGIN}/.well-known/oauth-protected-resource/mcp"
+)
 _EXPECTED_WWW_AUTH = (
     f'Bearer resource_metadata="{_EXPECTED_METADATA_URL}", '
     'scope="mcp:read mcp:write mcp:agent offline_access"'
@@ -2128,9 +2146,9 @@ def test_unauthorized_metadata_uses_public_origin(mcp_modes):
     )
 
     assert response.status_code == 401, response.text
-    assert response.headers["www-authenticate"] == _EXPECTED_WWW_AUTH, response.headers[
-        "www-authenticate"
-    ]
+    assert response.headers["www-authenticate"] == _EXPECTED_WWW_AUTH, (
+        response.headers["www-authenticate"]
+    )
     metadata = client.get(_EXPECTED_METADATA_URL.removeprefix(_PUBLIC_ORIGIN))
     assert metadata.status_code == 200, metadata.text
     assert metadata.json()["resource"] == f"{_PUBLIC_ORIGIN}/mcp"
@@ -2199,7 +2217,9 @@ def test_unauthorized_body_is_single_key(mcp_modes):
         "/mcp",
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
     )
-    get_resp = client.get("/mcp", headers={"Accept": "text/event-stream"})
+    get_resp = client.get(
+        "/mcp", headers={"Accept": "text/event-stream"}
+    )
     delete_resp = client.delete("/mcp")
 
     for verb, resp in (
@@ -2300,9 +2320,9 @@ def test_unauthorized_omitted_when_authorized(mcp_modes):
     )
 
     assert response.status_code == 200, response.text
-    assert "www-authenticate" not in {k.lower() for k in response.headers.keys()}, (
-        response.headers
-    )
+    assert "www-authenticate" not in {
+        k.lower() for k in response.headers.keys()
+    }, response.headers
 
 
 # ---------------------------------------------------------------------------
@@ -2335,7 +2355,9 @@ class _UvicornServer:
         # rather than reading a port number and letting go of it: under
         # parallel workers another process can claim the port in the window
         # between the probe closing and the server opening.
-        family = _socket.getaddrinfo(host, 0, type=_socket.SOCK_STREAM)[0][0]
+        family = _socket.getaddrinfo(
+            host, 0, type=_socket.SOCK_STREAM
+        )[0][0]
         self._socket = _socket.socket(family, _socket.SOCK_STREAM)
         self._socket.bind((host, 0))
         self.host, self.port = self._socket.getsockname()[:2]
@@ -2389,7 +2411,9 @@ class _UvicornServer:
                     except OSError:
                         pass
                 _time.sleep(0.05)
-            raise RuntimeError(f"uvicorn did not start on {self.url} within 10s")
+            raise RuntimeError(
+                f"uvicorn did not start on {self.url} within 10s"
+            )
         except BaseException:
             # Preserve the more specific startup error (and its cause). The
             # cleanup path still stops the thread and closes the bound socket.

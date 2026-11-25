@@ -475,7 +475,9 @@ def test_format_registry_checks_validator_result_against_descriptor() -> None:
         descriptors=(png_descriptor(),),
         validators={"png_validator": validator},
     )
-    assert registry.validate("PNG", BytesHandle(b"png"), byte_budget=32) == png_facts()
+    assert registry.validate(
+        "PNG", BytesHandle(b"png"), byte_budget=32
+    ) == png_facts()
     assert validator.budgets == [32]
 
     mismatched = StaticValidator(

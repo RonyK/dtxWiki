@@ -63,7 +63,9 @@ def test_non_default_self_removal_preserves_and_returns_accessible_default(
         target = _create_user(session, "fallback-target@example.com")
         starter_workspace_id = target.default_workspace_id
         assert starter_workspace_id is not None
-        default_workspace = _create_owned_workspace(session, owner, "persisted-default")
+        default_workspace = _create_owned_workspace(
+            session, owner, "persisted-default"
+        )
         removed_workspace = _create_owned_workspace(
             session, owner, "selected-for-removal"
         )
@@ -98,17 +100,15 @@ def test_non_default_self_removal_preserves_and_returns_accessible_default(
         persisted_target = session.get(User, target_id)
         assert persisted_target is not None
         assert persisted_target.default_workspace_id == default_workspace_id
-        assert (
-            session.get(WorkspaceMembership, (target_id, starter_workspace_id))
-            is not None
-        )
-        assert (
-            session.get(WorkspaceMembership, (target_id, default_workspace_id))
-            is not None
-        )
-        assert (
-            session.get(WorkspaceMembership, (target_id, removed_workspace_id)) is None
-        )
+        assert session.get(
+            WorkspaceMembership, (target_id, starter_workspace_id)
+        ) is not None
+        assert session.get(
+            WorkspaceMembership, (target_id, default_workspace_id)
+        ) is not None
+        assert session.get(
+            WorkspaceMembership, (target_id, removed_workspace_id)
+        ) is None
 
 
 def test_removal_uses_another_membership_when_default_is_removed(session_factory):
@@ -159,9 +159,9 @@ def test_removal_uses_another_membership_when_default_is_removed(session_factory
         persisted_target = session.get(User, target_id)
         assert persisted_target is not None
         assert persisted_target.default_workspace_id == fallback_workspace_id
-        assert (
-            session.get(WorkspaceMembership, (target_id, removed_workspace_id)) is None
-        )
+        assert session.get(
+            WorkspaceMembership, (target_id, removed_workspace_id)
+        ) is None
 
 
 def test_removal_allows_zero_workspace_state_when_no_fallback_exists(session_factory):
@@ -234,14 +234,11 @@ def test_membership_and_audit_roll_back_together(session_factory):
 
     with session_factory() as session:
         assert session.get(WorkspaceMembership, (target_id, workspace_id)) is None
-        assert (
-            session.scalar(
-                select(func.count())
-                .select_from(AuditEvent)
-                .where(AuditEvent.workspace_id == workspace_id)
-            )
-            == audit_count_before
-        )
+        assert session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.workspace_id == workspace_id)
+        ) == audit_count_before
         workspace = session.get(Workspace, workspace_id)
         assert workspace is not None
         assert workspace.owner_user_id == owner_id
@@ -297,14 +294,11 @@ def test_owner_projection_is_repaired_deterministically_on_idempotent_add(
         workspace = session.get(Workspace, workspace_id)
         assert workspace is not None
         assert workspace.owner_user_id == expected_owner_id
-        assert (
-            session.scalar(
-                select(func.count())
-                .select_from(AuditEvent)
-                .where(AuditEvent.workspace_id == workspace_id)
-            )
-            == 0
-        )
+        assert session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.workspace_id == workspace_id)
+        ) == 0
 
 
 def test_member_list_tie_breaks_joined_time_by_user_id(session_factory):
@@ -551,14 +545,11 @@ def test_concurrent_owner_demotions_cannot_reach_zero_owners(tmp_path, _iteratio
             )
         )
         assert sorted(roles) == ["owner", "viewer"]
-        assert (
-            session.scalar(
-                select(func.count())
-                .select_from(WorkspaceMembership)
-                .where(
-                    WorkspaceMembership.workspace_id == workspace_id,
-                    WorkspaceMembership.role == "owner",
-                )
+        assert session.scalar(
+            select(func.count())
+            .select_from(WorkspaceMembership)
+            .where(
+                WorkspaceMembership.workspace_id == workspace_id,
+                WorkspaceMembership.role == "owner",
             )
-            == 1
-        )
+        ) == 1

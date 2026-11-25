@@ -124,7 +124,9 @@ def test_gc_may_restore_without_reusing_generation():
     ("source", "target"),
     [
         (
-            BlobIncarnation(uuid4(), uuid4(), BlobEpoch(1), 4, "pending/key"),
+            BlobIncarnation(
+                uuid4(), uuid4(), BlobEpoch(1), 4, "pending/key"
+            ),
             BlobState.AVAILABLE,
         ),
         (
@@ -152,7 +154,9 @@ def test_gc_may_restore_without_reusing_generation():
         ),
     ],
 )
-def test_side_effecting_blob_transitions_require_an_explicit_generation(source, target):
+def test_side_effecting_blob_transitions_require_an_explicit_generation(
+    source, target
+):
     with pytest.raises(ValueError, match="generation"):
         source.transition(target)
 
@@ -340,7 +344,9 @@ def test_inspection_and_security_overlay_validate_uuid_fields():
             ScannerVerdict.NOT_CONFIGURED,
         )
     with pytest.raises(ValueError, match="SecurityState"):
-        SecurityBlockedBlob(uuid4(), uuid4(), BlobEpoch(1), 1, "quarantined", "malware")
+        SecurityBlockedBlob(
+            uuid4(), uuid4(), BlobEpoch(1), 1, "quarantined", "malware"
+        )
 
 
 def test_security_blocker_is_generation_fenced_and_must_complete_ordered_flow():
@@ -383,7 +389,9 @@ def test_format_descriptor_is_policy_neutral_normalized_and_frozen():
             "png", FormatCategory.IMAGE, ("png", "png"), ("image/png",), "d", "v", "l"
         )
     with pytest.raises(ValueError, match="FormatCategory"):
-        FormatDescriptor("png", "image", ("png",), ("image/png",), "d", "v", "l")
+        FormatDescriptor(
+            "png", "image", ("png",), ("image/png",), "d", "v", "l"
+        )
 
 
 def test_format_facts_record_exact_detector_and_validator_revisions():
@@ -514,7 +522,9 @@ def test_media_failure_validates_closed_types_reason_and_internal_audit_uuid():
         (FailureDisposition.SECURITY_BLOCK, True),
     ],
 )
-def test_media_failure_rejects_retryability_contradictions(disposition, retryable):
+def test_media_failure_rejects_retryability_contradictions(
+    disposition, retryable
+):
     with pytest.raises(ValueError, match="retry"):
         MediaFailure(
             MediaFailureCode.STATE_CHANGED,

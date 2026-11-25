@@ -87,7 +87,10 @@ def test_same_origin_workers_are_allowed_without_widening_script_or_network_sour
     assert directives["connect-src"] == ["'self'"]
     assert directives["default-src"] == ["'self'"]
     assert directives["object-src"] == ["'none'"]
-    assert all("blob:" not in sources for name, sources in directives.items())
+    assert all(
+        "blob:" not in sources
+        for name, sources in directives.items()
+    )
     assert "'unsafe-eval'" not in response.headers["content-security-policy"]
 
 
