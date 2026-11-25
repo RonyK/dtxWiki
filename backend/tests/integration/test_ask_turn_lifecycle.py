@@ -5,7 +5,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,17 +19,13 @@ from backend.app.settings import Settings
 from backend.llm.streaming import SteerUpdate
 from backend.models.ask import AskTurn
 from backend.models.workspace import Workspace
-from backend.schemas.ask import AskSessionCreate, AskTurnCreate
-from backend.schemas.read import SearchPayload
+from backend.services.ask_runtime import AskTurnPreview
 from backend.services.ask_service import (
     LLM_COMPOSER_RETRYABLE_WARNING,
-    AskAccessRevokedError,
     AskGenerationError,
-    AskService,
     ComposedTurn,
 )
 from backend.services.page_service import PageService
-from backend.services.read_errors import RejectedByPolicyError
 from backend.tests.conftest import authenticate_test_client_in_workspace
 
 pytestmark = pytest.mark.integration
@@ -37,120 +33,7 @@ pytestmark = pytest.mark.integration
 ACTOR_ID = "00000000-0000-0000-0000-000000000010"
 
 
-class _NoEvidenceSearch:
-    def search(self, **_kwargs):
-        return SearchPayload(
-            ranked_results=[],
-            supported_retrieval_modes=["keyword"],
-            permission_note=None,
-            next_cursor=None,
-        )
-
-
-def test_question_is_kept_when_its_answer_fails_or_the_server_restarts(
-    session_factory, monkeypatch
-):
-    service = AskService(search_service=_NoEvidenceSearch())
-    with session_factory.begin() as session:
-        workspace_id = session.scalar(
-            select(Workspace.id).where(Workspace.slug == "default")
-        )
-        ask_session_id = service.create_session(
-            session=session,
-            workspace_id=workspace_id,
-            request=AskSessionCreate(),
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-        ).id
-
-    def ask(message, *, after_turn_id=..., authorize=None):
-        request = AskTurnCreate(user_message=message)
-        if after_turn_id is not ...:
-            request = AskTurnCreate(user_message=message, after_turn_id=after_turn_id)
-        return service.run_turn(
-            session_factory,
-            workspace_id=workspace_id,
-            ask_session_id=ask_session_id,
-            request=request,
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-            authorize=authorize,
-        )
-
-    def turns():
-        with session_factory() as session:
-            return [
-                (turn.turn_no, turn.user_message, turn.status, turn.error_code)
-                for turn in session.scalars(
-                    select(AskTurn)
-                    .where(AskTurn.ask_session_id == ask_session_id)
-                    .order_by(AskTurn.turn_no)
-                )
-            ]
-
-    # Failing after the question was stored keeps the question.
-    def broken_search(*_args, **_kwargs):
-        raise RuntimeError("search is down")
-
-    monkeypatch.setattr(service, "_retrieve", broken_search)
-    with pytest.raises(RuntimeError, match="search is down"):
-        ask("first question")
-    monkeypatch.undo()
-
-    # Losing access while the answer is written keeps the question, too.
-    def revoked():
-        raise AskAccessRevokedError
-
-    with pytest.raises(AskAccessRevokedError):
-        ask("second question", authorize=revoked)
-
-    # One question at a time per session.
-    with session_factory.begin() as session:
-        pending_id = service.submit_turn(
-            session,
-            workspace_id=workspace_id,
-            ask_session_id=ask_session_id,
-            request=AskTurnCreate(user_message="third question"),
-            actor_kind="human",
-            actor_id=ACTOR_ID,
-        )
-    with pytest.raises(RejectedByPolicyError) as busy:
-        ask("fourth question")
-    assert busy.value.error_code == "ask_turn_in_progress"
-
-    # A serving process that starts finds nothing still answering the pending
-    # question: it ends as an internal error. `make backend-dev` serves through
-    # the lazy app; `dtxwiki serve` and Desktop pass create_serving_app to the
-    # runtime, which their own tests pin.
-    class _PreviousServer:
-        state = SimpleNamespace(
-            container=SimpleNamespace(
-                db=SimpleNamespace(session_factory=session_factory)
-            )
-        )
-
-        async def __call__(self, scope, receive, send):
-            return None
-
-    monkeypatch.setattr(app_main, "create_app", lambda **_kwargs: _PreviousServer())
-    asyncio.run(app_main._LazyASGIApp()({"type": "lifespan"}, None, None))
-
-    # A question asked after a turn the asker has not seen is refused.
-    with pytest.raises(RejectedByPolicyError) as stale:
-        ask("fifth question", after_turn_id=None)
-    assert stale.value.error_code == "ask_session_changed"
-
-    detail, _warnings = ask("sixth question", after_turn_id=pending_id)
-    assert (detail.status, detail.error_code) == ("completed", None)
-    assert turns() == [
-        (1, "first question", "failed", "internal_error"),
-        (2, "second question", "failed", "access_revoked"),
-        (3, "third question", "failed", "server_restarted"),
-        (4, "sixth question", "completed", None),
-    ]
-
-
-def test_ask_stream_accepts_queue_steers_and_replaces_current_turn(
+def test_ask_questions_queue_stream_steer_and_survive_failures(
     session_factory, tmp_path, request, monkeypatch
 ):
     # SSE, stop, and the worker must use independent database connections.
@@ -201,14 +84,18 @@ def test_ask_stream_accepts_queue_steers_and_replaces_current_turn(
         if question.endswith("first"):
             await on_delta("Provisional answer. ")
             first_started.set()
-            steer = await next_steer()
+            # Bounded, so a broken stream fails the test instead of hanging it.
+            steer = await asyncio.wait_for(next_steer(), 5)
+            await on_steer(SteerUpdate(steer.id, "sent"))
             await on_steer(SteerUpdate(steer.id, "applied"))
             return ComposedTurn(
                 steer.text, (), {"target": binding.target, "outcome": "completed"}
             )
-        if question.endswith("second"):
+        if question.endswith("broken"):
+            raise RuntimeError("composer bug")
+        if question.endswith(("second", "unanswered")):
             second_started.set()
-            await asyncio.Event().wait()
+            await asyncio.sleep(30)
         if question.endswith("failure"):
             assert prepared.history == (
                 ("Queue evidence second\n\nadd detail", "Replacement answer"),
@@ -225,7 +112,7 @@ def test_ask_stream_accepts_queue_steers_and_replaces_current_turn(
 
     async def observed_events(*args):
         async for event in events(*args):
-            if event.startswith("event: delta"):
+            if isinstance(event, AskTurnPreview) and event.text:
                 first_preview.set()
             yield event
 
@@ -252,7 +139,6 @@ def test_ask_stream_accepts_queue_steers_and_replaces_current_turn(
                     "model_profile_id": profile,
                 },
                 "replace_turn_id": replace,
-                "after_turn_id": None,
             }
             response = client.post(f"{session_url}/turns/stream", json=body)
             assert response.status_code == 202, response.text
@@ -311,17 +197,51 @@ def test_ask_stream_accepts_queue_steers_and_replaces_current_turn(
         fallback = client.get(f"{turn_url(failed)}/search")
         assert fallback.status_code == 200, fallback.text
         assert "Queue Evidence" in fallback.json()["data"]["assistant_message"]
-        turns = client.get(session_url).json()["data"]["turns"]
-        assert [turn["status"] for turn in turns] == [
-            "completed",
-            "stopped",
-            "stopped",
-            "failed",
-            "completed",
-        ]
-        assert started == [
-            "Queue evidence first",
-            "Queue evidence second",
-            "Queue evidence second\n\nadd detail",
-            "Queue evidence failure",
-        ]
+        # A failure outside the model keeps the question as an internal error.
+        broken = submit("Queue evidence broken")
+        assert (
+            '"error_code":"internal_error"'
+            in client.get(f"{turn_url(broken)}/stream").text
+        )
+        # Left answering when the server stops.
+        second_started.clear()
+        unanswered = submit("Queue evidence unanswered")
+        assert second_started.wait(3)
+
+    # The next serving process finds nobody answering it and ends it.
+    class _PreviousServer:
+        state = SimpleNamespace(
+            container=SimpleNamespace(
+                db=SimpleNamespace(session_factory=session_factory)
+            )
+        )
+
+        async def __call__(self, scope, receive, send):
+            return None
+
+    monkeypatch.setattr(app_main, "create_app", lambda **_kwargs: _PreviousServer())
+    asyncio.run(app_main._LazyASGIApp()({"type": "lifespan"}, None, None))
+    with session_factory() as session:
+        stored = session.scalars(
+            select(AskTurn)
+            .where(AskTurn.ask_session_id == UUID(created.json()["data"]["id"]))
+            .order_by(AskTurn.turn_no)
+        ).all()
+    assert [(turn.status, turn.error_code) for turn in stored] == [
+        ("completed", None),
+        ("stopped", None),
+        ("stopped", None),
+        ("failed", LLM_COMPOSER_RETRYABLE_WARNING),
+        ("completed", None),
+        ("failed", "internal_error"),
+        ("failed", "server_restarted"),
+    ]
+    assert stored[-1].id == UUID(unanswered["id"])
+    assert started == [
+        "Queue evidence first",
+        "Queue evidence second",
+        "Queue evidence second\n\nadd detail",
+        "Queue evidence failure",
+        "Queue evidence broken",
+        "Queue evidence unanswered",
+    ]

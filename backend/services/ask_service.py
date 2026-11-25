@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import exists, func, select, tuple_, update
@@ -38,6 +38,7 @@ from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
 from backend.schemas.ask import (
+    AskQuestion,
     AskSessionCreate,
     AskSessionDetail,
     AskSessionListData,
@@ -421,6 +422,29 @@ class AskGenerationError(RuntimeError):
         self.error_code = code
 
 
+class _CallerError(Exception):
+    """Carries an exception raised by a callback the model adapter called."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+def _from_caller[C: Callable[..., Awaitable[Any]]](callback: C | None) -> C | None:
+    """Mark the callback's own failures so they are not taken for the model's."""
+
+    if callback is None:
+        return None
+
+    async def call(*args: Any) -> Any:
+        try:
+            return await callback(*args)
+        except Exception as exc:
+            raise _CallerError(exc) from exc
+
+    return cast(C, call)
+
+
 class InvalidUserMessageError(ValueError):
     """Raised when user_message fails validation."""
 
@@ -624,104 +648,32 @@ class AskService:
             actor=actor,
         )
 
-    def run_turn(
-        self,
-        session_factory: sessionmaker[Session],
-        workspace_id: UUID,
-        ask_session_id: UUID,
-        request: AskTurnCreate,
-        actor_kind: str,
-        actor_id: str,
-        actor: ActorContext | None = None,
-        authorize: Callable[[], ActorContext] | None = None,
-    ) -> tuple[AskTurnDetail, list[str]]:
-        """Answer one question, storing the question before anything else.
-
-        Each step has its own short transaction and the provider call has
-        none. Once the question is stored, a failure ends the turn as
-        ``failed`` instead of losing the question. ``authorize`` re-checks the
-        asker's access before the provider call and before the answer is
-        stored, returning the current actor or raising
-        :class:`AskAccessRevokedError`; it runs outside every transaction
-        because authentication may write.
-        """
-
-        with session_factory.begin() as session:
-            turn_id = self.submit_turn(
-                session,
-                workspace_id=workspace_id,
-                ask_session_id=ask_session_id,
-                request=request,
-                actor_kind=actor_kind,
-                actor_id=actor_id,
-            )
-        try:
-            with session_factory() as session:
-                prepared = self.prepare_turn(session, workspace_id, turn_id, actor)
-            if authorize is not None:
-                actor = authorize()
-            # Nothing goes to the provider that the asker cannot read now.
-            with session_factory() as session:
-                sendable = ask_evidence_visible(
-                    session,
-                    context_refs=prepared.evidence.context,
-                    artifact_ids=prepared.evidence.library,
-                    actor=actor,
-                    workspace_id=workspace_id,
-                )
-            if not sendable:
-                with session_factory.begin() as session:
-                    return self._end_unanswered(
-                        session,
-                        workspace_id,
-                        prepared,
-                        ASK_TURN_EVIDENCE_UNAVAILABLE,
-                        actor,
-                    )
-            composed = self.compose_turn(prepared)
-            if authorize is not None:
-                actor = authorize()
-            with session_factory.begin() as session:
-                return self.finish_turn(
-                    session,
-                    workspace_id,
-                    prepared,
-                    composed,
-                    actor=actor,
-                )
-        except BaseException as error:
-            self._fail_after_error(
-                session_factory,
-                workspace_id,
-                turn_id,
-                ASK_TURN_ACCESS_REVOKED
-                if isinstance(error, AskAccessRevokedError)
-                else ASK_TURN_INTERNAL_ERROR,
-            )
-            raise
-
     def submit_turn(
         self,
         session: Session,
         *,
         workspace_id: UUID,
         ask_session_id: UUID,
-        request: AskTurnCreate,
+        request: AskQuestion,
         actor_kind: str,
         actor_id: str,
-        queued: bool = False,
-        steer_supported: bool = False,
         previous_user_message: str | None = None,
     ) -> UUID:
-        """Store the question as a ``pending`` turn and return its id."""
+        """Queue the question as a ``pending`` turn and return its id.
+
+        ``previous_user_message`` is the stopped question a replacement
+        continues; the combined text obeys the same limits.
+        """
 
         validate_request_inputs(request)
-        question = _validate_user_message(request.user_message)
-        if previous_user_message:
-            question = f"{previous_user_message}\n\n{question}"
-        # The session row lock orders every turn write in the session: one
-        # question at a time, and turn_no allocation without collisions. On
-        # SQLite the writer lock comes first, before the guarded read.
+        question = _validate_user_message(
+            f"{previous_user_message}\n\n{request.user_message}"
+            if previous_user_message
+            else request.user_message
+        )
+        # The session row lock orders every turn write in the session, so
+        # turn_no allocation cannot collide. On SQLite the writer lock comes
+        # first, before the guarded read.
         acquire_workspace_write_intent(session)
         ask_session = self._lock_session_for_turn_insert(
             session=session,
@@ -730,21 +682,6 @@ class AskService:
         )
         if ask_session is None:
             raise ReadNotFoundError("ask session not found")
-        if not queued:
-            pending = session.scalar(
-                select(AskTurn.id)
-                .where(
-                    AskTurn.workspace_id == workspace_id,
-                    AskTurn.ask_session_id == ask_session.id,
-                    AskTurn.status == ASK_TURN_PENDING,
-                )
-                .limit(1)
-            )
-            if pending is not None:
-                raise RejectedByPolicyError(
-                    "another question in this session is still being answered",
-                    error_code="ask_turn_in_progress",
-                )
         latest = session.execute(
             select(AskTurn.id, AskTurn.turn_no)
             .where(
@@ -755,7 +692,8 @@ class AskService:
             .limit(1)
         ).first()
         if (
-            "after_turn_id" in request.model_fields_set
+            isinstance(request, AskTurnCreate)
+            and "after_turn_id" in request.model_fields_set
             and request.after_turn_id != (latest.id if latest is not None else None)
         ):
             raise RejectedByPolicyError(
@@ -769,14 +707,12 @@ class AskService:
             user_message=question,
             assistant_message=None,
             status=ASK_TURN_PENDING,
-            started_at=None if queued else datetime.now(UTC),
             request_id=request.request_id,
             selection=(
                 request.selection.model_dump(mode="json")
                 if request.selection is not None
                 else None
             ),
-            steer_supported=steer_supported,
             topic_tags=ask_session.default_topic_tags,
             recommended_placement_tree_node_id=(
                 ask_session.default_context_parent_tree_node_id
@@ -886,22 +822,31 @@ class AskService:
             messages=_composer_messages(prepared, _pack_text(retrieved)),
             max_output_tokens=binding.max_output_tokens,
         )
+        steering = binding.steer
         try:
             async with asyncio.timeout(_MODEL_DEADLINE_SECONDS):
                 result = await generate_stream(
                     binding.port,
                     request,
                     ExecutionContext(timeout_seconds=_MODEL_NETWORK_TIMEOUT_SECONDS),
-                    on_delta=on_delta,
-                    next_steer=next_steer if binding.steer else None,
-                    on_steer=on_steer if binding.steer else None,
+                    on_delta=_from_caller(on_delta),
+                    next_steer=_from_caller(next_steer) if steering else None,
+                    on_steer=_from_caller(on_steer) if steering else None,
                 )
+        except _CallerError as failure:
+            # The application's own callback failed, not the model.
+            raise failure.error from None
         except TimeoutError:
             raise AskGenerationError(LLM_COMPOSER_RETRYABLE_WARNING) from None
         except LLMAdapterError as exc:
             raise AskGenerationError(
                 _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING)
             ) from None
+        except Exception:
+            # Any other failure of the selected model's adapter is a model
+            # failure like the ones above: the asker can search instead.
+            logger.exception("Ask model adapter failed")
+            raise AskGenerationError(LLM_PROVIDER_UNAVAILABLE_WARNING) from None
         if result.termination != "completed" or not result.text.strip():
             raise AskGenerationError(
                 _TERMINATION_WARNINGS.get(
@@ -1131,21 +1076,6 @@ class AskService:
         return self._end_pending_turn(
             session, workspace_id, turn_id, ASK_TURN_FAILED, error_code
         )
-
-    def _fail_after_error(
-        self,
-        session_factory: sessionmaker[Session],
-        workspace_id: UUID,
-        turn_id: UUID,
-        error_code: str,
-    ) -> None:
-        # Best effort: the original error is what the caller must see. If this
-        # cannot commit either, startup recovery ends the turn.
-        try:
-            with session_factory.begin() as session:
-                self.fail_turn(session, workspace_id, turn_id, error_code)
-        except Exception:
-            logger.exception("Could not end interrupted Ask turn %s", turn_id)
 
     @staticmethod
     def _end_pending_turn(

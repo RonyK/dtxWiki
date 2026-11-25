@@ -3658,18 +3658,6 @@
       "AskStreamTurnCreate": {
         "additionalProperties": false,
         "properties": {
-          "after_turn_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "After Turn Id"
-          },
           "replace_turn_id": {
             "anyOf": [
               {
@@ -3717,7 +3705,6 @@
         },
         "required": [
           "user_message",
-          "selection",
           "request_id"
         ],
         "title": "AskStreamTurnCreate",

@@ -49,22 +49,30 @@ class AskSteeringMessage(BaseModel):
     status: Literal["waiting", "applied", "failed", "unknown"]
 
 
-class AskTurnCreate(InputRequest):
+class AskQuestion(InputRequest):
+    """A question for an Ask session, whichever endpoint receives it."""
+
     user_message: str
     ttl_override_seconds: int | None = None
-    # The latest turn the asker saw: null for an empty session. A different
-    # latest turn means the session moved on (409). Leave it out to skip the
-    # check.
-    after_turn_id: UUID | None = None
+    # Leave it out for the workspace's default Ask; null searches without a
+    # model; a value asks that model.
     selection: AskModelSelection | None = None
+    # A resubmission with the same id returns the stored turn.
     request_id: UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
 
 
-class AskStreamTurnCreate(AskTurnCreate):
-    selection: AskModelSelection | None
+class AskTurnCreate(AskQuestion):
+    # The latest turn the asker saw: null for an empty session. A different
+    # latest turn means the session moved on (409). Leave it out to skip the
+    # check.
+    after_turn_id: UUID | None = None
+
+
+class AskStreamTurnCreate(AskQuestion):
     request_id: UUID
+    # A running turn of the same asker to stop; this question continues it.
     replace_turn_id: UUID | None = None
 
 

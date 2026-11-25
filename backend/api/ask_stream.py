@@ -1,3 +1,5 @@
+import json
+from collections.abc import AsyncIterator
 from uuid import UUID
 
 from fastapi import APIRouter, Request
@@ -20,10 +22,15 @@ from backend.schemas.ask import (
     AskModelListResponse,
     AskSteerRequest,
     AskStreamTurnCreate,
-    AskTurnCreate,
     AskTurnDetailResponse,
 )
 from backend.schemas.common import RESTErrorBody
+from backend.services.ask_runtime import (
+    AskTurnEvent,
+    AskTurnIdle,
+    AskTurnPreview,
+    AskTurnState,
+)
 from backend.services.ask_service import InvalidUserMessageError
 from backend.services.read_errors import ReadServiceError
 
@@ -33,6 +40,24 @@ _ERRORS = {status: {"model": RESTErrorBody} for status in (401, 403, 404, 409, 4
 
 def _runtime(request: Request):
     return get_container_from_app(request).ask_runtime
+
+
+async def _server_sent_events(events: AsyncIterator[AskTurnEvent]):
+    async for event in events:
+        yield _frame(event)
+
+
+def _frame(event: AskTurnEvent) -> str:
+    """One Server-Sent Events frame."""
+
+    match event:
+        case AskTurnState(turn=turn):
+            return f"event: state\ndata: {turn.model_dump_json()}\n\n"
+        case AskTurnPreview(text=text, reset=reset):
+            data = {"text": text, "reset": True} if reset else {"text": text}
+            return f"event: delta\ndata: {json.dumps(data)}\n\n"
+        case AskTurnIdle():
+            return ": keepalive\n\n"
 
 
 def _invalid_message(exc):
@@ -78,19 +103,13 @@ async def submit_ask_stream_turn(
     reauthorize: AskReauthorizeDep,
 ):
     try:
-        # Stream submissions join the queue independently of the last turn the
-        # browser saw. Only explicit stop/replace and steer name a live target.
-        queued_request = AskTurnCreate(
-            user_message=request_body.user_message,
-            ttl_override_seconds=request_body.ttl_override_seconds,
-            selection=request_body.selection,
-            request_id=request_body.request_id,
-        )
+        # Stream submissions join the session's queue; only stop, replace and
+        # steer name a running turn.
         detail, _job = await _runtime(request).submit(
             session_factory,
             workspace_id,
             ask_session_id,
-            queued_request,
+            request_body,
             actor,
             reauthorize,
             replace_turn_id=request_body.replace_turn_id,
@@ -114,8 +133,8 @@ async def read_ask_stream(
     actor: RestActorDep,
     _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
-    reauthorize: AskReauthorizeDep,
 ):
+    # Authorized once, when the stream opens; a reconnect is authorized again.
     runtime = _runtime(request)
     try:
         detail = await run_in_threadpool(
@@ -128,7 +147,9 @@ async def read_ask_stream(
     except ReadServiceError as exc:
         return read_service_error_response(exc)
     return StreamingResponse(
-        runtime.events(session_factory, workspace_id, detail, reauthorize),
+        _server_sent_events(
+            runtime.events(session_factory, workspace_id, detail, actor)
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )

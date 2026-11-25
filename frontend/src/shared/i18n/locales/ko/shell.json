@@ -317,7 +317,7 @@
     "email_conflict_already_decided": "이미 처리된 요청입니다. 목록을 새로고침하세요.",
     "email_conflict_not_found": "요청이 더 이상 없습니다. 목록을 새로고침하세요.",
     "invalid_email_conflict_decision": "사유를 1,000자 이내로 입력하세요.",
-    "ask_turn_in_progress": "이 질문에 대한 답변을 아직 만들고 있습니다. 끝난 뒤 다시 질문해 주세요.",
+    "ask_turn_not_yours": "질문한 사람만 이 질문을 변경할 수 있습니다.",
     "ask_session_changed": "이 질문 화면에 새 턴이 있습니다. 확인한 뒤 다시 질문해 주세요.",
     "ask_turn_not_completed": "완료된 답변만 저장할 수 있습니다."
   },

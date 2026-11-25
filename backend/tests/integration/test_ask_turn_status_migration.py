@@ -16,8 +16,7 @@ from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
 _PARENT = "dafc5339b3b1"
-_STATUS_REVISION = "916a6162b789"
-_REVISION = "837a0fa25ed1"
+_REVISION = "916a6162b789"
 _NEW_COLUMNS = {
     "status",
     "error_code",
@@ -110,22 +109,6 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
                 )
             )
 
-        command.upgrade(config, _STATUS_REVISION)
-        active_id = uuid4()
-        with engine.begin() as connection:
-            connection.execute(
-                sa.text(
-                    "INSERT INTO ask_turn (id, created_at, workspace_id, "
-                    "ask_session_id, turn_no, user_message, topic_tags, "
-                    "promotion_state, status) "
-                    "VALUES (:id, CURRENT_TIMESTAMP, :workspace_id, :ask_session_id, "
-                    "2, 'Active question', '[]', 'not_promoted', 'pending')"
-                ).bindparams(
-                    sa.bindparam("id", active_id, type_=sa.Uuid()),
-                    sa.bindparam("workspace_id", workspace_id, type_=sa.Uuid()),
-                    sa.bindparam("ask_session_id", ask_session_id, type_=sa.Uuid()),
-                )
-            )
         command.upgrade(config, _REVISION)
         assert ask_turn_columns() == parent_columns | _NEW_COLUMNS
         assert {_PENDING_INDEX, _REQUEST_INDEX} <= ask_turn_indexes()
@@ -136,9 +119,8 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
             assert (old.status, old.error_code) == ("completed", None)
             assert (old.input_evidence, old.generation) == (None, None)
             assert stored_turn() == ("Old question", "Old answer")
-            active = session.get(AskTurn, active_id)
-            assert active.started_at == active.created_at
-            assert active.steering_messages == [] and not active.steer_supported
+            assert old.started_at is None
+            assert old.steering_messages == [] and not old.steer_supported
 
             def add_turn(turn_no, status, *, started_at=None, request_id=None):
                 turn = AskTurn(
@@ -154,8 +136,10 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
                 session.flush()
                 return turn.id
 
+            # Queued turns wait without the slot; one started turn holds it.
             request_id = uuid4()
-            queued_id = add_turn(3, "pending", request_id=request_id)
+            add_turn(2, "pending", started_at=datetime.now(UTC))
+            add_turn(3, "pending", request_id=request_id)
             add_turn(4, "pending")
             # SQLite names the column, PostgreSQL the index.
             with (
@@ -179,17 +163,9 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
             ):
                 add_turn(5, "pendng")
 
-        command.downgrade(config, _STATUS_REVISION)
-        with engine.connect() as connection:
-            assert connection.execute(
-                sa.text(
-                    "SELECT status, error_code FROM ask_turn WHERE id = :id"
-                ).bindparams(sa.bindparam("id", queued_id, type_=sa.Uuid()))
-            ).one() == ("failed", "server_restarted")
-        assert _REQUEST_INDEX not in ask_turn_indexes()
         command.downgrade(config, _PARENT)
         assert ask_turn_columns() == parent_columns
-        assert _PENDING_INDEX not in ask_turn_indexes()
+        assert not {_PENDING_INDEX, _REQUEST_INDEX} & ask_turn_indexes()
         assert stored_turn() == ("Old question", "Old answer")
         with engine.connect() as connection:
             assert (

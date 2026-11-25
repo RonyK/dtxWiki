@@ -1086,3 +1086,71 @@ class ErrorProvider:
 class UnexpectedErrorProvider:
     def generate(self, **_kwargs):
         raise RuntimeError("unexpected provider failure")
+
+
+def test_responses_websocket_steer_starts_a_new_response_and_keeps_unsent_input():
+    from collections import deque
+
+    from backend.llm.responses_websocket import _Run
+    from backend.llm.streaming import SteerInput
+
+    def frame(kind, response_id=None, **fields):
+        event = {"type": kind, **fields}
+        if response_id is not None:
+            event["response"] = {"id": response_id}
+        return json.dumps(event)
+
+    steer_parent = {"previous_response_id": "r1"}
+    incoming = deque(
+        [
+            frame("response.created", "r1"),
+            frame("response.output_text.delta", delta="Draft. "),
+            frame("response.steer.accepted", steer={**steer_parent, "id": "p1"}),
+            frame("response.completed", "r1"),
+            frame("response.created", "r2"),
+            frame("response.output_text.delta", delta="Revised."),
+            frame("response.completed", "r2"),
+        ]
+    )
+    sent, deltas, updates = [], [], []
+    waiting = deque([SteerInput("s1", "be brief")])
+    more = asyncio.Event()
+
+    class Socket:
+        async def send(self, message):
+            sent.append(json.loads(message)["type"])
+
+        async def recv(self):
+            return incoming.popleft()
+
+    async def next_steer():
+        while not waiting:
+            more.clear()
+            await more.wait()
+        return waiting[0]
+
+    async def on_steer(update):
+        updates.append((update.id, update.status))
+        if update.status == "sent":
+            waiting.popleft()
+
+    async def on_delta(text):
+        deltas.append(text)
+        if text == "Revised.":
+            # Ready in the same step as the response's terminal event.
+            waiting.append(SteerInput("s2", "and cite"))
+            more.set()
+
+    def response_result(response, _response_id):
+        return CanonicalTextResult(text=deltas[-1], termination="completed")
+
+    run = _Run(5, response_result, on_delta, next_steer, on_steer)
+    result = asyncio.run(run.receive(Socket(), {"model": "m"}))
+
+    assert result.text == "Revised."
+    assert sent == ["response.create", "response.steer"]
+    # The applied steer marks where the replacing response's text begins.
+    assert updates == [("s1", "sent"), ("s1", "accepted"), ("s1", "applied")]
+    assert deltas == ["Draft. ", "Revised."]
+    # The terminal event won; the later instruction was never sent and stays.
+    assert [steer.id for steer in waiting] == ["s2"]

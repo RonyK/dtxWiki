@@ -40,16 +40,27 @@
   only, and only its own evidence is cited. When an earlier answer drew on
   evidence a reader cannot see, that reader sees the follow-up's question but
   not its answer, citations or search path, and cannot save it.
-- A question is stored as soon as it is accepted. A provider failure still
-  answers with the evidence summary and a warning, as before. If the turn
-  cannot be finished at all, it stays with `status` `failed` and an
-  `error_code`: `internal_error`, `access_revoked` (the asker lost access
-  meanwhile), `evidence_unavailable` (its evidence became unreadable), or
-  `server_restarted`. Only `completed` turns can be saved to Context.
+- A question is stored as soon as it is accepted. Questions in a session are
+  answered one at a time, in order; one sent meanwhile waits with `status`
+  `queued`. With the default model a provider failure still answers with the
+  evidence summary and a warning, as before. If the turn cannot be finished,
+  it stays with `status` `failed` and an `error_code`: `internal_error`,
+  `access_revoked` (the asker lost access meanwhile), `evidence_unavailable`
+  (its evidence became unreadable), `server_restarted`, or the failure of a
+  model the asker chose, which can be searched again without a model. Only
+  `completed` turns can be saved to Context.
+- The Ask screen streams the answer while it is written. Each question can use
+  the workspace's default model, another enabled LLM connection, or search
+  only; the browser remembers the last choice. The asker can stop a queued or
+  running question, add an instruction to a running answer (OpenAI models that
+  support steering), or replace the running question with a longer one. Only
+  the asker can change a question (`409 ask_turn_not_yours`).
 - `POST …/ask/sessions/{ask_session_id}/turns` takes an optional
   `after_turn_id`, the latest turn the asker saw (`null` for an empty session),
-  and answers `409 ask_session_changed` when it is not the latest. A second
-  question while one is being answered gets `409 ask_turn_in_progress`.
+  and answers `409 ask_session_changed` when it is not the latest. It waits
+  for the answer; `POST …/turns/stream` queues the question and returns at
+  once, and `GET …/ask/turns/{ask_turn_id}/stream` follows it as
+  Server-Sent Events.
 - A search hit whose source cannot be confirmed is left out of the answer and
   its search path.
 

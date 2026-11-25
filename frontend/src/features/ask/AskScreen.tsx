@@ -52,6 +52,7 @@ import {
   listWorkspaces,
 } from "../../shared/api/workspace";
 import type { TreeNodePayload } from "../../shared/api/workspace";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { WorkspaceFirstUseChecklist } from "../../shared/components/FirstUseChecklist";
 import { RouteLoading } from "../../shared/components/RouteLoading";
@@ -101,7 +102,7 @@ type ModelChoice = {
 };
 
 type ModelCatalog = {
-  workspaceId: string;
+  scope: string;
   items: AskModelOption[];
   failed: boolean;
 };
@@ -128,13 +129,12 @@ type AskCopy = {
   sending: string;
   generation: {
     connection: string;
-    chooseConnection: string;
+    defaultModel: string;
     model: string;
     chooseModel: string;
     personal: string;
     workspace: string;
     searchOnly: string;
-    loadingModels: string;
     noModels: string;
     modelsFailed: string;
     manageConnections: string;
@@ -272,6 +272,7 @@ type AskCopy = {
 // still answering.
 const PENDING_TURN_REFRESH_MS = 2000;
 const SEARCH_ONLY = "search-only";
+const DEFAULT_MODEL_CHOICE: ModelChoice = { connectionKey: "" };
 
 const ASK_COPY = {
   en: {
@@ -294,13 +295,12 @@ const ASK_COPY = {
     sending: "Sending…",
     generation: {
       connection: "LLM connection",
-      chooseConnection: "Select a connection",
+      defaultModel: "Default",
       model: "Model",
       chooseModel: "Select a model",
       personal: "My connections",
       workspace: "Workspace connections",
       searchOnly: "Search without AI",
-      loadingModels: "Loading connections…",
       noModels: "No verified LLM connections are available.",
       modelsFailed: "Connections could not be loaded.",
       manageConnections: "Manage LLM connections",
@@ -491,13 +491,12 @@ const ASK_COPY = {
     sending: "보내는 중…",
     generation: {
       connection: "LLM 연결",
-      chooseConnection: "연결 선택",
+      defaultModel: "기본값",
       model: "모델",
       chooseModel: "모델 선택",
       personal: "내 연결",
       workspace: "워크스페이스 연결",
       searchOnly: "AI 없이 검색",
-      loadingModels: "연결을 불러오는 중…",
       noModels: "사용 가능한 검증 완료 LLM 연결이 없습니다.",
       modelsFailed: "연결을 불러오지 못했습니다.",
       manageConnections: "LLM 연결 관리",
@@ -702,11 +701,40 @@ function connectionKeyFor(selection: AskModelSelection) {
   return `${selection.scope}:${selection.connection_id}`;
 }
 
-function choiceForModel(selection: AskModelSelection): ModelChoice {
-  return {
-    connectionKey: connectionKeyFor(selection),
-    profileId: selection.model_profile_id,
-  };
+function readModelChoice(storageKey: string | null): ModelChoice {
+  if (!storageKey) return DEFAULT_MODEL_CHOICE;
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (!stored) return DEFAULT_MODEL_CHOICE;
+    const choice: Partial<ModelChoice> | null = JSON.parse(stored);
+    if (choice?.connectionKey === SEARCH_ONLY) return { connectionKey: SEARCH_ONLY };
+    if (
+      typeof choice?.connectionKey === "string" && choice.connectionKey &&
+      typeof choice.profileId === "string" && choice.profileId
+    ) {
+      return { connectionKey: choice.connectionKey, profileId: choice.profileId };
+    }
+  } catch {
+    // The picker works without a stored preference.
+  }
+  return DEFAULT_MODEL_CHOICE;
+}
+
+function writeModelChoice(storageKey: string | null, choice: ModelChoice) {
+  if (!storageKey) return;
+  try {
+    if (!choice.connectionKey) {
+      window.localStorage.removeItem(storageKey);
+    } else if (choice.connectionKey === SEARCH_ONLY || choice.profileId) {
+      window.localStorage.setItem(storageKey, JSON.stringify(choice));
+    }
+  } catch {
+    // Keep the current choice in memory when storage is unavailable.
+  }
+}
+
+function profilesForConnection(catalog: ModelCatalog | null, connectionKey: string) {
+  return catalog?.items.filter((model) => connectionKeyFor(model) === connectionKey) ?? [];
 }
 
 function isUnfinishedTurn(turn: AskTurnDetail) {
@@ -777,6 +805,10 @@ export function AskScreen() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { t } = useTranslation("search");
+  const accountId = useOptionalAuth()?.user?.user_id;
+  const modelScope = `${accountId ?? ""}:${routeWorkspaceId ?? ""}`;
+  const modelStorageKey = accountId && routeWorkspaceId ? `dtxwiki:ask:model:${modelScope}` : null;
+  const storedModelChoice = useMemo(() => readModelChoice(modelStorageKey), [modelStorageKey]);
   const workspaceContext = useOptionalWorkspaceContext();
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
   const [state, setState] = useState<AskState | null>(null);
@@ -798,7 +830,7 @@ export function AskScreen() {
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [modelRetry, setModelRetry] = useState(0);
   const [modelChoice, setModelChoice] = useState<{
-    route: string;
+    scope: string;
     choice: ModelChoice;
   } | null>(null);
   const [preview, setPreview] = useState<{ turnId: string; text: string } | null>(null);
@@ -841,17 +873,17 @@ export function AskScreen() {
     void listAskModels(routeWorkspaceId, controller.signal).then(
       (items) => {
         if (!controller.signal.aborted) {
-          setModelCatalog({ workspaceId: routeWorkspaceId, items, failed: false });
+          setModelCatalog({ scope: modelScope, items, failed: false });
         }
       },
       () => {
         if (!controller.signal.aborted) {
-          setModelCatalog({ workspaceId: routeWorkspaceId, items: [], failed: true });
+          setModelCatalog({ scope: modelScope, items: [], failed: true });
         }
       },
     );
     return () => controller.abort();
-  }, [canEdit, routeWorkspaceId, modelRetry]);
+  }, [canEdit, routeWorkspaceId, modelScope, modelRetry]);
 
   async function load(preferredSessionId?: string): Promise<boolean> {
     const generation = ++loadGenerationRef.current;
@@ -1124,7 +1156,6 @@ export function AskScreen() {
       sendingTurn ||
       selectingSessionId ||
       turnActionId ||
-      (action !== "steer" && selection === undefined) ||
       (action !== "queue" && !activeTurn)
     ) {
       return;
@@ -1192,18 +1223,15 @@ export function AskScreen() {
         // question once the server has stored it.
         submissionRoute = `${routeWorkspaceId ?? ""}\u0000${detail.id}`;
         submittedRouteRef.current = submissionRoute;
-        setModelChoice({ route: submissionRoute, choice: { connectionKey, profileId } });
         setSelectedSessionParams(detail.id);
       }
       sessionId = detail.id;
-      if (selection === undefined) return;
       const replaceTurnId = action === "replace" ? activeTurn?.id : undefined;
       const requestId = submissionKey([state.workspaceId, detail.id, selection, action, replaceTurnId, question]);
       const created = await submitAskQuestion(state.workspaceId, detail.id, {
         user_message: question,
         request_id: requestId,
-        selection,
-        after_turn_id: detail.turns.at(-1)?.id ?? null,
+        ...(selection !== undefined ? { selection } : {}),
         ...(replaceTurnId ? { replace_turn_id: replaceTurnId } : {}),
       });
       if (!stillHere()) {
@@ -1217,9 +1245,6 @@ export function AskScreen() {
       // A read started before the acceptance can omit the newly stored turn.
       ++loadGenerationRef.current;
       setSelectingSessionId(null);
-      if (replaceTurnId) {
-        setPreview((previous) => previous?.turnId === replaceTurnId ? null : previous);
-      }
       const acceptedSession = detail;
       setState((previous) => {
         const liveState = previous?.workspaceId === state.workspaceId ? previous : state;
@@ -1415,23 +1440,28 @@ export function AskScreen() {
   const activeTurn = displayedTurns.find((turn) => turn.status === "pending");
   const watchedTurn = activeTurn ?? displayedTurns.find((turn) => turn.status === "queued");
   const watchedTurnId = watchedTurn?.id;
-  const catalog = modelCatalog?.workspaceId === routeWorkspaceId ? modelCatalog : null;
-  const modelOptions = catalog?.items;
-  const explicitChoice = modelChoice?.route === routeIdentity ? modelChoice.choice : undefined;
-  const remembered = visibleDetail?.turns.filter((turn) => turn.selection !== undefined).at(-1)?.selection;
-  const rememberedChoice = remembered === null
-    ? { connectionKey: SEARCH_ONLY }
-    : remembered && choiceForModel(remembered);
-  const choice = explicitChoice ?? rememberedChoice;
-  const connectionKey = choice?.connectionKey ?? "";
-  const profiles = modelOptions?.filter((model) => connectionKeyFor(model) === connectionKey) ?? [];
-  const profileId = choice?.profileId ?? (profiles.length === 1 ? profiles[0].model_profile_id : "");
-  const selectedModel = profiles.find((model) => model.model_profile_id === profileId);
-  const selection = connectionKey === SEARCH_ONLY ? null : selectedModel && {
+  const catalog = modelCatalog?.scope === modelScope ? modelCatalog : null;
+  const choice = modelChoice?.scope === modelScope ? modelChoice.choice : storedModelChoice;
+  const profiles = profilesForConnection(catalog, choice.connectionKey);
+  const selectedModel = profiles.find((model) => model.model_profile_id === choice.profileId);
+  const searchOnly = choice.connectionKey === SEARCH_ONLY;
+  const connectionAvailable = profiles.length > 0 && (!choice.profileId || selectedModel !== undefined);
+  const connectionKey = searchOnly || connectionAvailable ? choice.connectionKey : "";
+  const selection = searchOnly ? null : selectedModel && {
     scope: selectedModel.scope,
     connection_id: selectedModel.connection_id,
     model_profile_id: selectedModel.model_profile_id,
   };
+
+  function changeModelChoice(next: ModelChoice) {
+    const options = profilesForConnection(catalog, next.connectionKey);
+    const nextChoice = {
+      connectionKey: next.connectionKey,
+      profileId: next.profileId ?? (options.length === 1 ? options[0].model_profile_id : undefined),
+    };
+    setModelChoice({ scope: modelScope, choice: nextChoice });
+    writeModelChoice(modelStorageKey, nextChoice);
+  }
 
   useEffect(() => {
     if (!routeWorkspaceId || !requestedSessionId || !watchedTurnId) return;
@@ -1441,13 +1471,14 @@ export function AskScreen() {
     const controller = new AbortController();
     let timer: number | undefined;
     let ended = false;
-    const current = () =>
-      !controller.signal.aborted &&
-      mountedRef.current &&
-      routeIdentityRef.current === routeIdentity;
+    let previewText = "";
+    const onRoute = () => mountedRef.current && routeIdentityRef.current === routeIdentity;
+    const current = () => !controller.signal.aborted && onRoute();
+    const clearPreview = () => setPreview((previous) => previous?.turnId === turnId ? null : previous);
+    setPreview(null);
     function reconcile() {
       if (!current() || ended) return;
-      setPreview((previous) => previous?.turnId === turnId ? null : previous);
+      clearPreview();
       setReconnectingTurnId(turnId);
       timer = window.setTimeout(async () => {
         let shouldReconnect = true;
@@ -1478,12 +1509,8 @@ export function AskScreen() {
       setReconnectingTurnId((previous) => previous === turnId ? null : previous);
       if (event.kind === "delta") {
         if (!ended) {
-          setPreview((previous) => ({
-            turnId,
-            text: event.reset || previous?.turnId !== turnId
-              ? event.text
-              : previous.text + event.text,
-          }));
+          previewText = event.reset ? event.text : previewText + event.text;
+          setPreview({ turnId, text: previewText });
         }
         return;
       }
@@ -1495,12 +1522,13 @@ export function AskScreen() {
           : previous,
       );
       if (ended) {
-        setPreview((previous) => previous?.turnId === turnId ? null : previous);
+        clearPreview();
         // The terminal commit can also change the session's title and recency.
+        const generation = loadGenerationRef.current;
         void readAskSession(workspaceId, sessionId).then((detail) => {
-          if (!mountedRef.current || routeIdentityRef.current !== routeIdentity) return;
           setState((previous) =>
-            previous?.workspaceId === workspaceId && previous.detail?.id === sessionId
+            onRoute() && generation === loadGenerationRef.current &&
+              previous?.workspaceId === workspaceId && previous.detail?.id === sessionId
               ? mergeAskSnapshot(previous, previous.detail, detail)
               : previous,
           );
@@ -1509,6 +1537,7 @@ export function AskScreen() {
     }).then(reconcile, reconcile);
     return () => {
       controller.abort();
+      clearPreview();
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [requestedSessionId, routeIdentity, routeWorkspaceId, streamAttempt, watchedTurnId]);
@@ -1668,14 +1697,14 @@ export function AskScreen() {
               <AskModelPicker
                 catalog={catalog}
                 connectionKey={connectionKey}
-                profileId={profileId}
-                profiles={profiles}
+                profileId={selectedModel?.model_profile_id ?? ""}
+                profiles={connectionAvailable ? profiles : []}
                 copy={copy}
                 disabled={composerBusy}
                 manageHref={workspaceContext?.selectedWorkspace?.role === "owner"
                   ? `${workspacePath(routeWorkspaceId, "settings")}?section=workspace-llm`
                   : "/account/integrations?section=llm"}
-                onChange={(choice) => setModelChoice({ route: routeIdentity, choice })}
+                onChange={changeModelChoice}
                 onRetry={() => {
                   setModelCatalog(null);
                   setModelRetry((attempt) => attempt + 1);
@@ -1692,7 +1721,7 @@ export function AskScreen() {
               <button
                 aria-busy={sendingTurn}
                 className="icon-button primary"
-                disabled={composerBusy || composerEmpty || selection === undefined}
+                disabled={composerBusy || composerEmpty}
                 type="submit"
               >
                 <Send size={16} aria-hidden="true" />
@@ -1703,7 +1732,7 @@ export function AskScreen() {
                   <button
                     type="button"
                     className="icon-button text-button"
-                    disabled={composerBusy || composerEmpty || (!activeTurn.steer_supported && selection === undefined)}
+                    disabled={composerBusy || composerEmpty}
                     onClick={() => void sendTurn(activeTurn.steer_supported ? "steer" : "replace")}
                   >
                     {activeTurn.steer_supported ? copy.generation.steer : copy.generation.replace}
@@ -1757,7 +1786,6 @@ function AskModelPicker({
   const connections = new Map(
     catalog?.items.map((option) => [connectionKeyFor(option), option]),
   );
-  const profileAvailable = profiles.some((model) => model.model_profile_id === profileId);
   const options = [...connections.values()];
   const noModels = catalog?.items.length === 0;
 
@@ -1766,11 +1794,11 @@ function AskModelPicker({
       <label className="field-stack">
         <span>{labels.connection}</span>
         <select
-          disabled={disabled || !catalog}
-          value={connections.has(connectionKey) || connectionKey === SEARCH_ONLY ? connectionKey : ""}
+          disabled={disabled}
+          value={connectionKey}
           onChange={(event) => onChange({ connectionKey: event.target.value })}
         >
-          <option value="">{catalog ? labels.chooseConnection : labels.loadingModels}</option>
+          <option value="">{labels.defaultModel}</option>
           {(["personal", "workspace"] as const).map((scope) => {
             const scoped = options.filter((option) => option.scope === scope);
             return scoped.length > 0 ? (
@@ -1791,7 +1819,7 @@ function AskModelPicker({
           <span>{labels.model}</span>
           <select
             disabled={disabled || profiles.length === 0}
-            value={profileAvailable ? profileId : ""}
+            value={profileId}
             onChange={(event) => onChange({ connectionKey, profileId: event.target.value })}
           >
             <option value="">{labels.chooseModel}</option>

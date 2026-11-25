@@ -302,7 +302,7 @@ def status_code_for_read_error(exc: ReadServiceError) -> int:
         "decision_id_conflict",
         "review_decision_impact_changed",
         "review_decision_undo_unavailable",
-        "ask_turn_in_progress",
+        "ask_turn_not_yours",
         "ask_session_changed",
         "ask_turn_not_completed",
     }:

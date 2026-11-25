@@ -5128,8 +5128,6 @@ export interface components {
         };
         /** AskStreamTurnCreate */
         AskStreamTurnCreate: {
-            /** After Turn Id */
-            after_turn_id?: string | null;
             /** Replace Turn Id */
             replace_turn_id?: string | null;
             /**
@@ -5137,7 +5135,7 @@ export interface components {
              * Format: uuid
              */
             request_id: string;
-            selection: components["schemas"]["AskModelSelection"] | null;
+            selection?: components["schemas"]["AskModelSelection"] | null;
             /** Ttl Override Seconds */
             ttl_override_seconds?: number | null;
             /**
