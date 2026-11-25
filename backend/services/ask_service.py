@@ -1237,9 +1237,12 @@ class AskService:
                 if not isinstance(row.generation, Mapping):
                     return tuple(reversed(picked))
                 generation = row.generation
-                if generated_only and generation.get("outcome") != "completed":
-                    # A deliberate local search does not reset the conversation.
-                    # An actual answer from a different destination still does.
+                # A search without a model, and for a chosen model an answer it
+                # did not write, do not reset the conversation. An answer from
+                # a different model still does.
+                if generation.get("target") is None or (
+                    generated_only and generation.get("outcome") != "completed"
+                ):
                     continue
                 if generation.get("target") != target:
                     return tuple(reversed(picked))

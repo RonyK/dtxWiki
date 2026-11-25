@@ -1229,7 +1229,10 @@ export function AskScreen() {
       }
       sessionId = detail.id;
       const replaceTurnId = action === "replace" ? activeTurn?.id : undefined;
-      const requestId = submissionKey([state.workspaceId, detail.id, selection, action, replaceTurnId, question]);
+      // The key names the input, not the turn it replaces: a retry after a
+      // lost response must reuse the request id even when the accepted
+      // replacement has become the running turn.
+      const requestId = submissionKey([state.workspaceId, detail.id, selection, question]);
       const created = await submitAskQuestion(state.workspaceId, detail.id, {
         user_message: question,
         request_id: requestId,
@@ -1449,8 +1452,12 @@ export function AskScreen() {
   const searchOnly = choice.connectionKey === SEARCH_ONLY;
   const connectionAvailable = profiles.length > 0 && (!choice.profileId || selectedModel !== undefined);
   const connectionKey = searchOnly || connectionAvailable ? choice.connectionKey : "";
-  // A remembered model is applied once the list of models arrives.
-  const modelChoicePending = catalog === null && choice.connectionKey !== "" && !searchOnly;
+  // A chosen model must be resolved before a question uses it: while the
+  // list loads, or while a connection with several models has none picked.
+  // Sending then would silently use the default model instead.
+  const modelChoicePending =
+    !searchOnly && choice.connectionKey !== "" && selectedModel === undefined &&
+    (catalog === null || connectionAvailable);
   const selection = searchOnly ? null : selectedModel && {
     scope: selectedModel.scope,
     connection_id: selectedModel.connection_id,
