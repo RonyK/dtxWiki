@@ -4,6 +4,7 @@ import { createContext, useContext } from "react";
 import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AskModelOption } from "../../../shared/api/askStreams";
 import type { AskTurnDetail } from "../../../shared/api/operations";
 import type { TreeNodePayload } from "../../../shared/api/workspace";
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -1964,7 +1965,7 @@ describe("AskScreen", () => {
         return { data: askTurn({ id: "turn-3", turn_no: 3, selection: null }) };
       }
       throw new Error(`Unexpected request: ${url}`);
-    });
+    }, [TEST_MODEL, { ...TEST_MODEL, model_profile_id: "model-alt", model_label: "Alternate model" }]);
 
     const renderAsk = () => render(
       <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
@@ -1973,7 +1974,12 @@ describe("AskScreen", () => {
     );
 
     let view = renderAsk();
+    await userEvent.type(await screen.findByRole("textbox", { name: "Message" }), "Question");
     await chooseTestModel();
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send).toBeDisabled();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Model" }), TEST_MODEL.model_profile_id);
+    expect(send).toBeEnabled();
     view.unmount();
 
     view = renderAsk();
@@ -2660,16 +2666,17 @@ async function chooseTestModel() {
 
 function mockAskFetch(
   handler: typeof globalThis.fetch,
+  models: AskModelOption[] = [TEST_MODEL],
 ) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (input.toString() === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/models`) {
-      return jsonResponse({ data: { items: [TEST_MODEL] } });
+      return jsonResponse({ data: { items: models } });
     }
     return handler(input, init);
   });
 }
 
-function mockFetch(handler: (url: string, init?: RequestInit) => unknown) {
+function mockFetch(handler: (url: string, init?: RequestInit) => unknown, models?: AskModelOption[]) {
   mockAskFetch(async (input, init) => {
     const body = handler(input.toString(), init);
     if (body instanceof Response) {
@@ -2679,7 +2686,7 @@ function mockFetch(handler: (url: string, init?: RequestInit) => unknown) {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  });
+  }, models);
 }
 
 function jsonResponse(body: unknown, status = 200) {

@@ -468,7 +468,11 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             context=[_semantic_context_result(draft_id, version.id)]
         )
         provider = _RecordingProvider("The plan [1].", "Roll it back [1].")
-        service = AskService(search_service=search, provider=provider)
+        service = AskService(
+            search_service=search,
+            provider=provider,
+            provider_target={"kind": "server", "model": "test-default"},
+        )
         ask_session = service.create_session(
             session=session,
             workspace_id=workspace.id,
@@ -487,9 +491,34 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor_id=ACTOR_ID,
             actor=_actor("editor"),
         )
-        # A follow-up answered from a public page, with the draft answer shown
-        # to the model as the earlier turn.
         search._context = [_semantic_context_result(public.id, published.id)]
+        search_turn_id = service.submit_turn(
+            session,
+            workspace_id=workspace.id,
+            ask_session_id=ask_session.id,
+            request=AskTurnCreate(
+                user_message="find rollback guidance", selection=None
+            ),
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+        )
+        actor = _actor("editor")
+        prepared = service.prepare_turn(
+            session,
+            workspace.id,
+            search_turn_id,
+            actor,
+            keyword_only=True,
+            use_legacy_provider=False,
+        )
+        service.finish_turn(
+            session,
+            workspace.id,
+            prepared,
+            service.compose_evidence(prepared),
+            actor=actor,
+        )
+        # The follow-up uses public evidence and the earlier model exchange.
         follow_up, _warnings = create_turn_in_session(
             service,
             session=session,
@@ -500,6 +529,12 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor_id=ACTOR_ID,
             actor=_actor("editor"),
         )
+        # The model saw the earlier exchange and the follow-up with its pack.
+        *history, _question = provider.calls[1]
+        assert [(message.role, message.text) for message in history] == [
+            ("user", "what is the plan?"),
+            ("assistant", "The plan [1]."),
+        ]
         # Saving it is refused where reading it is: at the promotion entry.
         with pytest.raises(ReadNotFoundError):
             ContextIngressService().promote_ask_turn(
@@ -526,17 +561,12 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor=_actor("viewer"),
         )
 
-    # The model saw the earlier exchange, then the question with its pack.
-    assert [(message.role, message.text) for message in provider.calls[1][:2]] == [
-        ("user", "what is the plan?"),
-        ("assistant", "The plan [1]."),
-    ]
     assert follow_up.cited_context_page_ids == [public.id]
     # It cites only the public page but drew on the draft: whoever cannot read
     # the draft cannot read or save it.
-    assert editor_detail.turns[1].assistant_message == "Roll it back [1]."
-    assert viewer_detail.turns[1].assistant_message != "Roll it back [1]."
-    assert viewer_detail.turns[1].cited_context_page_ids == []
+    assert editor_detail.turns[2].assistant_message == "Roll it back [1]."
+    assert viewer_detail.turns[2].assistant_message != "Roll it back [1]."
+    assert viewer_detail.turns[2].cited_context_page_ids == []
     editor_turn = editor_detail.turns[0]
     viewer_turn = viewer_detail.turns[0]
     # The editor who can read the draft evidence sees the full answer.

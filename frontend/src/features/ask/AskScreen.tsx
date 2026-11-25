@@ -851,7 +851,9 @@ export function AskScreen() {
   // that route loads. The question's outcome can arrive before the route is
   // applied, and the route's load must not clear it.
   const submittedRouteRef = useRef<string | null>(null);
-  const requestRef = useRef<{ key: string; id: string } | null>(null);
+  // The submission whose outcome is not known yet: a retry of the same input
+  // reuses its request id and the turn it first targeted.
+  const requestRef = useRef<{ key: string; id: string; targetTurnId?: string } | null>(null);
   const entryRefreshGenerationRef = useRef(0);
   // Tracks whether the component is still mounted. Async handlers below
   // (`startSession`, `load`, `sendTurn`, `acceptPlacement`,
@@ -1139,12 +1141,12 @@ export function AskScreen() {
   }
 
 
-  function submissionKey(input: unknown) {
+  function submission(input: unknown, targetTurnId?: string) {
     const key = JSON.stringify(input);
     if (requestRef.current?.key !== key) {
-      requestRef.current = { key, id: newIdempotencyKey() };
+      requestRef.current = { key, id: newIdempotencyKey(), targetTurnId };
     }
-    return requestRef.current.id;
+    return requestRef.current;
   }
 
   async function sendTurn(action: "queue" | "steer" | "replace") {
@@ -1203,7 +1205,7 @@ export function AskScreen() {
       if (action === "steer") {
         if (!selectedDetail || !activeTurn?.steer_supported) return;
         sessionId = selectedDetail.id;
-        const requestId = submissionKey([state.workspaceId, activeTurn.id, action, question]);
+        const requestId = submission([state.workspaceId, activeTurn.id, action, question]).id;
         const steered = await steerAskTurn(state.workspaceId, activeTurn.id, question, requestId);
         if (!stillHere()) return;
         requestRef.current = null;
@@ -1228,11 +1230,15 @@ export function AskScreen() {
         setSelectedSessionParams(detail.id);
       }
       sessionId = detail.id;
-      const replaceTurnId = action === "replace" ? activeTurn?.id : undefined;
-      // The key names the input, not the turn it replaces: a retry after a
-      // lost response must reuse the request id even when the accepted
-      // replacement has become the running turn.
-      const requestId = submissionKey([state.workspaceId, detail.id, selection, question]);
+      // The key names the input, not the running turn: after a lost response
+      // the accepted replacement is the running turn, and a retry must still
+      // send the original request id and target.
+      const pending = submission(
+        [state.workspaceId, detail.id, selection, action, question],
+        action === "replace" ? activeTurn?.id : undefined,
+      );
+      const replaceTurnId = pending.targetTurnId;
+      const requestId = pending.id;
       const created = await submitAskQuestion(state.workspaceId, detail.id, {
         user_message: question,
         request_id: requestId,
