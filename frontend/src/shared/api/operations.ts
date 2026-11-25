@@ -153,7 +153,8 @@ export type SettingsPolicyGroup =
   | "review"
   | "lint"
   | "graph"
-  | "labs";
+  | "labs"
+  | "llm";
 
 export type SearchScope =
   | "all"

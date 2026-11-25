@@ -665,8 +665,9 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
         # References can fetch, miss or loop: forms must be self-contained.
         ([factory(credential_schema={"$ref": "#"})], {}),
         ([factory(options=frozenset({"top_k"}))], {}),
-        ([factory(default_base_url="http://api.example/v1")], {}),
         ([factory(default_base_url="https://api.example/v1?")], {}),
+        # urlsplit reads this host; the HTTP client cannot send to it.
+        ([factory(default_base_url="https://[v1.example]/v1")], {}),
         ([OneArgumentFactory()], {}),
         ([object()], {}),
     ):
@@ -700,7 +701,7 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
     ]
     # A registration without a default endpoint needs one from its connection,
     # and a model cannot use an option its adapter cannot encode.
-    with pytest.raises(LLMAdapterRegistryError, match="https base URL"):
+    with pytest.raises(LLMAdapterRegistryError, match=r"http\(s\) base URL"):
         create(registry, "builtin.plain")
     with pytest.raises(LLMAdapterRegistryError, match="options"):
         create(

@@ -1156,6 +1156,12 @@
         "label": "Ask 검색 모드",
         "hint": "자동은 이 서버가 제공할 수 있는 최선의 모드를 씁니다. 특정 모드를 고정하면 제공 불가일 때 안내와 함께 대체됩니다."
       }
+    },
+    "llm": {
+      "customEndpointsEnabled": {
+        "label": "직접 입력한 엔드포인트 주소",
+        "hint": "공용 연결이 설정에 직접 입력한 주소를 쓸 수 있게 합니다. 끄면 공용 연결은 서비스 기본 엔드포인트와 서버 운영자가 지정한 엔드포인트만 쓸 수 있습니다. 직접 입력한 주소의 개인 연결은 Ask가 LLM 연결을 쓰게 되면 이 워크스페이스에서 쓸 수 없습니다."
+      }
     }
   },
   "userRecovery": {
@@ -2217,7 +2223,7 @@
     "deleteTitle": "{{name}}을(를) 삭제할까요?",
     "deleteBody": "저장한 키를 여기서 파기합니다. 키가 유출되었을 수 있다면 제공자 콘솔에서도 키를 폐기하세요.",
     "endpointDefault": "제공자 기본 엔드포인트",
-    "endpointHint": "dtxWiki 서버가 접속하는 주소입니다. 서버 운영자가 허용한 엔드포인트만 표시됩니다.",
+    "endpointHint": "dtxWiki 서버가 접속하는 주소입니다. 서비스 기본 주소, 서버 운영자가 지정한 주소, 또는 허용된 곳에서는 직접 입력한 주소를 쓸 수 있습니다.",
     "needsOperatorEndpoint": "운영자 엔드포인트 필요",
     "unsupportedConfig": "이 서비스의 일부 설정은 여기서 편집할 수 없습니다.",
     "keyHint": "키는 서버에서 암호화해 보관하며 다시 표시하지 않습니다.",
@@ -2270,7 +2276,8 @@
       "models": "모델",
       "modelId": "모델 ID",
       "displayName": "표시 이름(선택)",
-      "verifiedAt": "마지막 검증"
+      "verifiedAt": "마지막 검증",
+      "endpointUrl": "엔드포인트 주소"
     },
     "credentialFields": {
       "api_key": "API 키"
@@ -2287,12 +2294,20 @@
       "adapter_unavailable": "이 서비스 유형을 서버에서 사용할 수 없습니다.",
       "adapter_version_unavailable": "이 서비스 유형의 버전을 서버에서 사용할 수 없습니다.",
       "llm_vault_unavailable": "지금은 서버가 키를 보관할 수 없습니다. 서버 운영자에게 문의하세요.",
-      "validation_failed": "입력한 내용을 확인한 뒤 다시 시도하세요."
+      "validation_failed": "입력한 내용을 확인한 뒤 다시 시도하세요.",
+      "custom_endpoint_disabled": "이 워크스페이스는 직접 입력한 엔드포인트 주소를 허용하지 않습니다. 목록의 엔드포인트를 고르세요.",
+      "endpoint_url_invalid": "사용자 이름, 쿼리, #, `.`·`..` 경로, 키 값이 없는 http 또는 https 주소를 입력하세요."
     },
     "ownerOnly": "이 워크스페이스의 소유자만 공용 LLM 연결을 관리할 수 있습니다.",
     "keyRejected": "새 키를 저장하지 않았습니다.",
     "endpointRetired": "더 이상 허용되지 않는 엔드포인트 — 다른 엔드포인트를 고르세요",
     "chooseOption": "값을 고르세요",
-    "endpointUnavailable": "저장된 엔드포인트를 지금 그대로는 쓸 수 없습니다. 편집에서 엔드포인트를 골라 저장하면 다시 연결합니다."
+    "endpointUnavailable": "저장된 엔드포인트를 지금 그대로는 쓸 수 없습니다. 편집에서 엔드포인트를 골라 저장하면 다시 연결합니다.",
+    "endpointReconnect": "저장된 엔드포인트를 지금 그대로는 쓸 수 없습니다. 저장하면 위에서 고른 엔드포인트로 다시 연결합니다.",
+    "endpointCustomOption": "주소 직접 입력…",
+    "customEndpointOff": "직접 입력한 주소(이 워크스페이스에서 허용 안 함)",
+    "endpointCustom": "직접 입력한 주소",
+    "endpointUrlHint": "dtxWiki 서버가 이 주소로 요청과 키를 보냅니다. http와 https를 쓸 수 있습니다.",
+    "policySummary": "이 워크스페이스에서 공용·개인 LLM 연결이 쓸 수 있는 엔드포인트 주소를 정합니다."
   }
 }

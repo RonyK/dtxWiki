@@ -32,6 +32,7 @@ from backend.schemas.llm_connection import (
     LLMVerificationResponse,
 )
 from backend.services.llm_connection_service import LLMConnectionError
+from backend.services.settings_service import llm_custom_endpoints_enabled
 from backend.spi.types import ActorContext
 
 
@@ -85,6 +86,9 @@ class ConnectionOwner:
     actor: ActorContext
     session_factory: sessionmaker[Session]
     control_session_factory: sessionmaker[Session] | None = None
+    # Whether entered endpoint URLs are allowed: always for an account's own
+    # connections, and as the Workspace owner chose for shared ones.
+    custom_endpoints: bool = True
 
 
 def account_owner(
@@ -108,8 +112,15 @@ def workspace_owner(
     session_factory: WorkspaceSessionFactoryDep,
     control_session_factory: SessionFactoryDep,
 ) -> ConnectionOwner:
+    with control_session_factory() as control:
+        custom_endpoints = llm_custom_endpoints_enabled(control, workspace_id)
     return ConnectionOwner(
-        "workspace", workspace_id, actor, session_factory, control_session_factory
+        "workspace",
+        workspace_id,
+        actor,
+        session_factory,
+        control_session_factory,
+        custom_endpoints,
     )
 
 
@@ -155,7 +166,10 @@ def add_connection_routes(
     def list_connections(owner: OwnerDep, services: ServicesDep):
         with owner.session_factory() as session:
             records = services.llm_connections.list(
-                session, scope=owner.scope, owner_id=owner.owner_id
+                session,
+                scope=owner.scope,
+                owner_id=owner.owner_id,
+                custom_endpoints=owner.custom_endpoints,
             )
         return {"data": records}
 
@@ -165,6 +179,7 @@ def add_connection_routes(
                 session,
                 scope=owner.scope,
                 owner_id=owner.owner_id,
+                custom_endpoints=owner.custom_endpoints,
                 connection_id=connection_id,
             )
         return {"data": record}
@@ -180,6 +195,7 @@ def add_connection_routes(
                 session,
                 scope=owner.scope,
                 owner_id=owner.owner_id,
+                custom_endpoints=owner.custom_endpoints,
                 actor=owner.actor,
                 request=request,
             )
@@ -197,6 +213,7 @@ def add_connection_routes(
                 session,
                 scope=owner.scope,
                 owner_id=owner.owner_id,
+                custom_endpoints=owner.custom_endpoints,
                 actor=owner.actor,
                 connection_id=connection_id,
                 request=request,
@@ -215,6 +232,7 @@ def add_connection_routes(
                 session,
                 scope=owner.scope,
                 owner_id=owner.owner_id,
+                custom_endpoints=owner.custom_endpoints,
                 actor=owner.actor,
                 connection_id=connection_id,
                 expected_revision=expected_revision,
@@ -236,6 +254,7 @@ def add_connection_routes(
             owner.session_factory,
             scope=owner.scope,
             owner_id=owner.owner_id,
+            custom_endpoints=owner.custom_endpoints,
             actor=owner.actor,
             connection_id=connection_id,
             expected_revision=request.expected_revision,
@@ -255,6 +274,7 @@ def add_connection_routes(
             owner.session_factory,
             scope=owner.scope,
             owner_id=owner.owner_id,
+            custom_endpoints=owner.custom_endpoints,
             actor=owner.actor,
             connection_id=connection_id,
             request=request,

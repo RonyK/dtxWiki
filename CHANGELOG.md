@@ -44,9 +44,13 @@
   result. A connection can be enabled only after its current setup verifies.
   A replacement key is checked before it is saved; a refused one is never
   stored.
-- `DTXWIKI_LLM_ENDPOINT_PROFILES_JSON` lists the extra endpoints, such as an
-  internal gateway or an OpenAI-compatible server, that connections may use.
-  Users choose from that list and never enter a URL. A stored key is never
+- A connection uses its service's own endpoint, one listed in
+  `DTXWIKI_LLM_ENDPOINT_PROFILES_JSON` (such as an internal gateway), or an
+  http or https address entered in its settings. Entered addresses are
+  allowed by default; a Workspace owner can turn them off for the
+  Workspace's shared connections under Settings > Shared LLM connections.
+  The API server sends requests and keys to entered addresses, so block
+  internal addresses it must not reach at the network. A stored key is never
   sent to an address it was not verified with: when an endpoint is removed or
   moved, the connection shows why it cannot be used and is reconnected from
   Edit (with a new key if one is stored).

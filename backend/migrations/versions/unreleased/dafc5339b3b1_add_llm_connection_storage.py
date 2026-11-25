@@ -15,6 +15,7 @@ depends_on = None
 
 _PERSONAL = "user_llm_connection"
 _WORKSPACE = "workspace_llm_connection"
+_SWITCH = "llm_custom_endpoints_enabled"
 
 
 def _connection_fields(table: str) -> tuple:
@@ -84,8 +85,13 @@ def upgrade() -> None:
         ),
         *_connection_fields(_WORKSPACE),
     )
+    op.add_column(
+        "workspace",
+        sa.Column(_SWITCH, sa.Boolean(), nullable=False, server_default=sa.true()),
+    )
 
 
 def downgrade() -> None:
+    op.drop_column("workspace", _SWITCH)
     op.drop_table(_WORKSPACE)
     op.drop_table(_PERSONAL)

@@ -24,6 +24,7 @@ it("retries only the key replacement after the settings were saved", async () =>
     config_schema_version: 1,
     api_profile: "builtin.anthropic.messages",
     endpoint_profile_id: null,
+    endpoint_url: null,
     unavailable_reason: null,
     provider_options: { region: "eu", routing: { pool: "a" } },
     model_profiles: [
@@ -160,6 +161,7 @@ it("saves only what the server accepts, and reconnects a moved endpoint", async 
     config_schema_version: 1,
     api_profile: adapter.adapter_id,
     endpoint_profile_id: "gw",
+    endpoint_url: null,
     unavailable_reason: "endpoint_unavailable",
     provider_options: { tier: "free" },
     model_profiles: [{ id: "m", model_id: "local-model", options: [] }],
@@ -194,6 +196,7 @@ it("saves only what the server accepts, and reconnects a moved endpoint", async 
   render(<LlmConnectionsSection labelledBy="heading" scope={{ kind: "user" }} />);
   const enable = await screen.findAllByRole("button", { name: "Enable" });
   expect(enable[0]).toBeDisabled();
+  expect(screen.getAllByRole("button", { name: "Verify" })[0]).toBeDisabled();
   await user.click(screen.getAllByRole("button", { name: "Edit" })[1]);
   expect(
     within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
@@ -217,6 +220,56 @@ it("saves only what the server accepts, and reconnects a moved endpoint", async 
       { expected_revision: 2, credential: {}, endpoint_profile_id: "gw" },
     ],
   ]);
+});
+
+it("creates a connection with an entered address only where allowed", async () => {
+  const adapter = {
+    adapter_id: "builtin.openai_compatible.chat_completions",
+    adapter_version: "1.0.0",
+    display_name: { en: "OpenAI-compatible API" },
+    config_schema: { type: "object", properties: {} },
+    credential_schema: { type: "object", properties: { api_key: { type: "string" } } },
+    options: [],
+    endpoints: [],
+  };
+  const writes: unknown[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = input.toString();
+    if (init?.method === "POST") {
+      writes.push(JSON.parse(String(init.body)));
+      return json({ data: {} }, 201);
+    }
+    if (url.endsWith("/api/v1/llm-adapters")) return json({ data: [adapter] });
+    if (url.endsWith("/llm-connections")) return json({ data: [] });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const user = userEvent.setup();
+  const scope = { kind: "workspace", workspaceId: "w1" } as const;
+  // Turned off, a service type without listed endpoints cannot be set up.
+  const { unmount } = render(
+    <LlmConnectionsSection customEndpoints={false} labelledBy="heading" scope={scope} />,
+  );
+  await user.click(await screen.findByRole("button", { name: "Add service" }));
+  expect(within(screen.getByRole("dialog")).queryByLabelText("Endpoint address", { exact: false })).toBeNull();
+  unmount();
+
+  render(<LlmConnectionsSection labelledBy="heading" scope={scope} />);
+  await user.click(await screen.findByRole("button", { name: "Add service" }));
+  const dialog = screen.getByRole("dialog");
+  await user.type(within(dialog).getByLabelText("Name", { exact: true }), "Local");
+  await user.type(within(dialog).getByLabelText("Model ID"), "local-model");
+  const address = within(dialog).getByLabelText("Endpoint address", { exact: false });
+  const save = within(dialog).getByRole("button", { name: "Save" });
+  await user.type(address, "http://10.0.0.5:11434/v1?debug");
+  expect(save).toBeDisabled();
+  await user.clear(address);
+  await user.type(address, "http://10.0.0.5:11434/v1/");
+  await user.click(save);
+  await vi.waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({
+    endpoint_profile_id: null,
+    endpoint_url: "http://10.0.0.5:11434/v1/",
+  });
 });
 
 function json(body: unknown, status = 200) {

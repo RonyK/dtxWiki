@@ -8120,6 +8120,8 @@ export interface components {
             };
             /** Endpoint Profile Id */
             endpoint_profile_id?: string | null;
+            /** Endpoint Url */
+            endpoint_url?: string | null;
             /** Model Profiles */
             model_profiles: components["schemas"]["LLMModelProfile"][];
             /** Name */
@@ -8192,6 +8194,8 @@ export interface components {
             credential_updated_at: string | null;
             /** Endpoint Profile Id */
             endpoint_profile_id: string | null;
+            /** Endpoint Url */
+            endpoint_url: string | null;
             /** Has Credential */
             has_credential: boolean;
             /**
@@ -8215,7 +8219,7 @@ export interface components {
              */
             status: "enabled" | "disabled" | "deleted";
             /** Unavailable Reason */
-            unavailable_reason: ("adapter_unavailable" | "adapter_version_unavailable" | "endpoint_unavailable") | null;
+            unavailable_reason: ("adapter_unavailable" | "adapter_version_unavailable" | "endpoint_unavailable" | "custom_endpoint_disabled") | null;
             /**
              * Updated At
              * Format: date-time
@@ -8233,9 +8237,10 @@ export interface components {
          * LLMCredentialReplace
          * @description A replacement credential, verified before it replaces the active one.
          *
-         *     The endpoint can change only together with a credential. Omit
-         *     ``endpoint_profile_id`` to keep the current endpoint; ``null`` selects
-         *     the adapter's own endpoint.
+         *     The endpoint can change only together with a credential. Omit both
+         *     endpoint fields to keep the current endpoint; otherwise they choose it as
+         *     on create, so ``endpoint_profile_id: null`` alone selects the adapter's
+         *     own endpoint.
          */
         LLMCredentialReplace: {
             /** Credential */
@@ -8244,6 +8249,8 @@ export interface components {
             };
             /** Endpoint Profile Id */
             endpoint_profile_id?: string | null;
+            /** Endpoint Url */
+            endpoint_url?: string | null;
             /** Expected Revision */
             expected_revision: number;
         };
@@ -12378,6 +12385,7 @@ export interface components {
             labs?: components["schemas"]["PolicyCard"] | null;
             library: components["schemas"]["PolicyCard"];
             lint: components["schemas"]["PolicyCard"];
+            llm: components["schemas"]["PolicyCard"];
             /** Mcp Clients */
             mcp_clients: components["schemas"]["SettingsMcpClientData"][];
             /** Mcp Clients Next Cursor */
@@ -12402,7 +12410,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "workspace" | "attachments" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph" | "labs";
+            group: "workspace" | "attachments" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph" | "labs" | "llm";
         };
         /** SettingsPolicyUpdateRequest */
         SettingsPolicyUpdateRequest: {
@@ -12410,7 +12418,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph" | "labs";
+            group: "workspace" | "library" | "citation" | "context_write" | "agent_injection" | "review" | "lint" | "graph" | "labs" | "llm";
             /** Key */
             key: string;
             /** Value */

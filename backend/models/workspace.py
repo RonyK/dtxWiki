@@ -105,6 +105,9 @@ def default_review_policy() -> dict[str, Any]:
 
 class Workspace(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "workspace"
+    # Columns the database fills are read when used, not returned on insert
+    # (see llm_custom_endpoints_enabled).
+    __mapper_args__ = {"eager_defaults": False}
     __table_args__ = (
         CheckConstraint(
             "visibility IN ('private', 'team', 'public')",
@@ -194,6 +197,17 @@ class Workspace(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     # switches retain their existing columns as the single source of truth.
     labs_policy: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
+    )
+    # Whether this Workspace's shared LLM connections may use a URL their
+    # owner enters, and whether members' personal connections with one may be
+    # used here. Allowed unless the owner turns it off. The database fills
+    # the default and the ORM loads it only when read, so loading or adding
+    # a Workspace does not need the column (as against an older schema).
+    llm_custom_endpoints_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=true(),
+        deferred=True,
     )
     # Knowledge graph Settings card. The workspace-wide map is an owner
     # choice and starts off; per-document Local Graphs do not depend on it.

@@ -1156,6 +1156,12 @@
         "label": "Ask retrieval mode",
         "hint": "Automatic uses the best mode this server can serve; a fixed choice falls back with a notice when it cannot."
       }
+    },
+    "llm": {
+      "customEndpointsEnabled": {
+        "label": "Entered endpoint addresses",
+        "hint": "Let shared connections use an address entered in their settings. When off, shared connections can use only the service's own endpoint and those the server operator lists; personal connections with an entered address will not be usable here once Ask uses LLM connections."
+      }
     }
   },
   "userRecovery": {
@@ -2217,7 +2223,7 @@
     "deleteTitle": "Delete {{name}}?",
     "deleteBody": "The stored key is destroyed here. Revoke it in the provider's console as well if it may have leaked.",
     "endpointDefault": "Provider endpoint",
-    "endpointHint": "The address dtxWiki's server connects to. Only endpoints the server operator allows are listed.",
+    "endpointHint": "The address dtxWiki's server connects to: the service's own, one the server operator lists, or one you enter where this workspace allows it.",
     "needsOperatorEndpoint": "needs an operator endpoint",
     "unsupportedConfig": "Some settings of this service cannot be edited here.",
     "keyHint": "The key is encrypted on the server and never shown again.",
@@ -2270,7 +2276,8 @@
       "models": "Models",
       "modelId": "Model ID",
       "displayName": "Display name (optional)",
-      "verifiedAt": "Last verified"
+      "verifiedAt": "Last verified",
+      "endpointUrl": "Endpoint address"
     },
     "credentialFields": {
       "api_key": "API key"
@@ -2287,12 +2294,20 @@
       "adapter_unavailable": "This service type is not available on the server.",
       "adapter_version_unavailable": "This service type's version is not available on the server.",
       "llm_vault_unavailable": "The server cannot store keys right now. Ask the server operator.",
-      "validation_failed": "Check the fields and try again."
+      "validation_failed": "Check the fields and try again.",
+      "custom_endpoint_disabled": "This workspace does not allow entered endpoint addresses. Choose a listed endpoint.",
+      "endpoint_url_invalid": "Enter an http or https address without a user name, query, fragment, dot segments or the key itself."
     },
     "ownerOnly": "Only owners of this workspace can manage its shared LLM connections.",
     "keyRejected": "The new key was not saved.",
     "endpointRetired": "Endpoint no longer allowed — choose another",
     "chooseOption": "Choose a value",
-    "endpointUnavailable": "The saved endpoint can no longer be used as saved. Choose an endpoint under Edit and save to connect again."
+    "endpointUnavailable": "The saved endpoint can no longer be used as saved. Choose an endpoint under Edit and save to connect again.",
+    "endpointReconnect": "The saved endpoint can no longer be used as saved. Saving reconnects to the endpoint selected above.",
+    "endpointCustomOption": "Enter an address…",
+    "customEndpointOff": "Entered address (not allowed in this workspace)",
+    "endpointCustom": "Entered address",
+    "endpointUrlHint": "dtxWiki's server sends requests and the key to this address. http and https are accepted.",
+    "policySummary": "Which endpoint addresses shared and personal LLM connections may use in this workspace."
   }
 }

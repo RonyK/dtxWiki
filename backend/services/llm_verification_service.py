@@ -93,6 +93,7 @@ class LLMVerificationService:
         actor: ActorContext,
         connection_id: UUID,
         expected_revision: int,
+        custom_endpoints: bool,
         before_write: Callable[[], None] = lambda: None,
     ) -> tuple[dict, dict]:
         """Check the stored setup and record whether it works.
@@ -111,9 +112,12 @@ class LLMVerificationService:
                     409,
                 )
             endpoint = connection.endpoint_profile
-            code = self._connections.unavailable(connection, endpoint)
+            refused = self._connections.unavailable(
+                connection, endpoint, custom_endpoints=custom_endpoints
+            )
+            code: str | None = None
             credential: dict[str, str] = {}
-            if code is None and connection.active_credential is not None:
+            if refused is None and connection.active_credential is not None:
                 try:
                     credential = self._vault.decrypt(
                         connection.active_credential,
@@ -124,11 +128,27 @@ class LLMVerificationService:
                 except CredentialVaultError:
                     code = "credential_unavailable"
             target = _target(connection, endpoint, credential)
+        if refused is not None:
+            # The setup cannot be used as stored (see unavailable): nothing
+            # was checked, so nothing is recorded, and it reads as before
+            # once it is usable again. An unreadable key is a failed check.
+            with plane() as session:
+                view = self._connections.get(
+                    session,
+                    custom_endpoints=custom_endpoints,
+                    scope=scope,
+                    owner_id=owner_id,
+                    connection_id=connection_id,
+                )
+            if view["revision"] != expected_revision:
+                raise _changed()
+            return view, _failed(refused)
         result = _failed(code) if code is not None else self._check(target)
         before_write()
         with plane.begin() as session:
             view = self._connections.record_verification(
                 session,
+                custom_endpoints=custom_endpoints,
                 scope=scope,
                 owner_id=owner_id,
                 actor=actor,
@@ -149,6 +169,7 @@ class LLMVerificationService:
         actor: ActorContext,
         connection_id: UUID,
         request: LLMCredentialReplace,
+        custom_endpoints: bool,
         before_write: Callable[[], None] = lambda: None,
     ) -> tuple[dict, dict]:
         """Verify a new credential (and endpoint), then store it if it works."""
@@ -158,13 +179,16 @@ class LLMVerificationService:
         with plane() as session:
             connection, endpoint = self._connections.candidate(
                 session,
+                custom_endpoints=custom_endpoints,
                 scope=scope,
                 owner_id=owner_id,
                 connection_id=connection_id,
                 request=request,
                 credential=credential,
             )
-            code = self._connections.unavailable(connection, endpoint)
+            code = self._connections.unavailable(
+                connection, endpoint, custom_endpoints=custom_endpoints
+            )
             target = _target(connection, endpoint, credential)
         result = _failed(code) if code is not None else self._check(target)
         before_write()
@@ -172,6 +196,7 @@ class LLMVerificationService:
             if result["status"] == "succeeded":
                 view = self._connections.swap_credential(
                     session,
+                    custom_endpoints=custom_endpoints,
                     scope=scope,
                     owner_id=owner_id,
                     actor=actor,
@@ -185,6 +210,7 @@ class LLMVerificationService:
             else:
                 view = self._connections.get(
                     session,
+                    custom_endpoints=custom_endpoints,
                     scope=scope,
                     owner_id=owner_id,
                     connection_id=connection_id,
