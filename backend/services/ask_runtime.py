@@ -793,13 +793,15 @@ def _person(actor: ActorContext) -> tuple[str, str]:
 def _controllable(job: _Job | None, actor: ActorContext, *, running: bool) -> _Job:
     """The job ``actor`` may change: their own, queued or (``running``) started."""
 
-    if job is None or (running and job.task is None):
+    if job is None:
         raise _turn_changed()
     if not job.owned_by(actor):
         raise RejectedByPolicyError(
             "only the person who asked can change this Ask turn",
             error_code="ask_turn_not_yours",
         )
+    if running and job.task is None:
+        raise _turn_changed()
     return job
 
 

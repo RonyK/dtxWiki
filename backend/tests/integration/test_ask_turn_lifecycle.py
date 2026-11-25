@@ -69,6 +69,7 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
         actor_provenance="browser_session",
     )
     first_started, first_preview, second_started = Event(), Event(), Event()
+    steered_preview = Event()
     started = []
 
     def resolve(_control, _workspace, _id, _actor, selection):
@@ -88,6 +89,12 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
             steer = await asyncio.wait_for(next_steer(), 5)
             await on_steer(SteerUpdate(steer.id, "sent"))
             await on_steer(SteerUpdate(steer.id, "applied"))
+            # The response after the instruction replaces the preview.
+            await on_delta(steer.text)
+            for _ in range(100):
+                if steered_preview.is_set():
+                    break
+                await asyncio.sleep(0.05)
             return ComposedTurn(
                 steer.text, (), {"target": binding.target, "outcome": "completed"}
             )
@@ -114,6 +121,8 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
         async for event in events(*args):
             if isinstance(event, AskTurnPreview) and event.text:
                 first_preview.set()
+                if event.reset and event.text == "Continue briefly":
+                    steered_preview.set()
             yield event
 
     monkeypatch.setattr(runtime, "events", observed_events)
@@ -180,8 +189,10 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
             assert steered.status_code == 200, steered.text
             assert steered.json()["data"]["steering_messages"][0]["status"] == "waiting"
             payload = stream.result(timeout=4).text
-            # A stream's first preview frame replaces whatever was shown.
+            # A stream's first preview frame replaces whatever was shown, and
+            # so does the response that follows an applied instruction.
             assert '{"text": "Provisional answer. ", "reset": true}' in payload
+            assert steered_preview.is_set()
             assert '"status":"applied"' in payload and "Continue briefly" in payload, (
                 payload
             )

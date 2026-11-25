@@ -1156,7 +1156,8 @@ export function AskScreen() {
       sendingTurn ||
       selectingSessionId ||
       turnActionId ||
-      modelChoicePending ||
+      // A new or replacing question uses the chosen model; steering does not.
+      (action !== "steer" && modelChoicePending) ||
       (action !== "queue" && !activeTurn)
     ) {
       return;
@@ -1592,7 +1593,7 @@ export function AskScreen() {
   const uiLanguage = normalizeAskLocale(resolveInitialLocale(state.workspaceLanguage));
   const copy = ASK_COPY[uiLanguage];
   const composerBusy =
-    startingSession || sendingTurn || Boolean(selectingSessionId) || Boolean(turnActionId) || modelChoicePending;
+    startingSession || sendingTurn || Boolean(selectingSessionId) || Boolean(turnActionId);
   const composerEmpty = !message.trim();
   // A7: on the empty state the composer is rendered non-sticky (it would
   // otherwise overlap the first-use checklist on mobile) and the redundant
@@ -1725,7 +1726,7 @@ export function AskScreen() {
               <button
                 aria-busy={sendingTurn}
                 className="icon-button primary"
-                disabled={composerBusy || composerEmpty}
+                disabled={composerBusy || composerEmpty || modelChoicePending}
                 type="submit"
               >
                 <Send size={16} aria-hidden="true" />
@@ -1736,7 +1737,7 @@ export function AskScreen() {
                   <button
                     type="button"
                     className="icon-button text-button"
-                    disabled={composerBusy || composerEmpty}
+                    disabled={composerBusy || composerEmpty || (!activeTurn.steer_supported && modelChoicePending)}
                     onClick={() => void sendTurn(activeTurn.steer_supported ? "steer" : "replace")}
                   >
                     {activeTurn.steer_supported ? copy.generation.steer : copy.generation.replace}
