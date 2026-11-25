@@ -1120,7 +1120,11 @@ describe("AskScreen", () => {
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/`) &&
           url.endsWith("/turns") && init?.method === "POST") {
         createTurnPath = url;
-        return jsonResponse({ data: askTurn({ id: "turn-new", ask_session_id: "session-new" }) });
+        // Fails at once: likely before the new session's URL is applied.
+        return jsonResponse(
+          { error_code: "internal_error", message: "boom", request_id: "r" },
+          500,
+        );
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1152,6 +1156,10 @@ describe("AskScreen", () => {
     await waitFor(() => expect(createTurnPath).toContain("/sessions/session-new/turns"));
     expect(createTurnPath).not.toContain(`/sessions/${SESSION_ID}/turns`);
     expect(await screen.findByRole("heading", { name: "New Ask" })).toBeInTheDocument();
+    // The first question's failure is still reported on the new session.
+    expect(
+      screen.getByText("The server could not complete the request. Please try again."),
+    ).toBeInTheDocument();
     resolveOverviewSessions(jsonResponse({
       data: { items: [sessionRef()], date_buckets: [], next_cursor: null },
     }));

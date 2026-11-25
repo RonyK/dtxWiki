@@ -1712,6 +1712,8 @@ def ask_evidence_visible(
     """
 
     cache = {} if cache is None else cache
+    # Read once: the sources are walked twice below.
+    library_ids = set(artifact_ids)
     for page_id, version_id in context_refs:
         key = ("context", page_id, version_id)
         if key not in cache:
@@ -1722,7 +1724,7 @@ def ask_evidence_visible(
             return False
     unchecked = [
         artifact_id
-        for artifact_id in set(artifact_ids)
+        for artifact_id in library_ids
         if ("library", artifact_id, None) not in cache
     ]
     for start in range(0, len(unchecked), _VISIBILITY_BATCH):
@@ -1730,9 +1732,7 @@ def ask_evidence_visible(
         visible = _library_artifacts_visible(session, batch, actor, workspace_id)
         for artifact_id in batch:
             cache[("library", artifact_id, None)] = artifact_id in visible
-    return all(
-        cache[("library", artifact_id, None)] for artifact_id in set(artifact_ids)
-    )
+    return all(cache[("library", artifact_id, None)] for artifact_id in library_ids)
 
 
 def _context_ref_visible(

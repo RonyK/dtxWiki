@@ -617,6 +617,10 @@ export function AskScreen() {
     routeIdentityRef.current = routeIdentity;
     return () => { routeIdentityRef.current = ""; };
   }, [routeIdentity]);
+  // The route of a session this screen created for a first question, until
+  // that route loads. The question's outcome can arrive before the route is
+  // applied, and the route's load must not clear it.
+  const submittedRouteRef = useRef<string | null>(null);
   const entryRefreshGenerationRef = useRef(0);
   // Tracks whether the component is still mounted. Async handlers below
   // (`startSession`, `load`, `sendTurn`, `acceptPlacement`,
@@ -785,9 +789,13 @@ export function AskScreen() {
   useEffect(() => {
     let cancelled = false;
     async function initialLoad() {
+      const submitted = submittedRouteRef.current === routeIdentity;
+      submittedRouteRef.current = null;
       setNotFound(false);
-      setError(null);
-      setLastTurnWarnings([]);
+      if (!submitted) {
+        setError(null);
+        setLastTurnWarnings([]);
+      }
       setSelectingSessionId(requestedSessionId);
       try { await load(); } finally { if (!cancelled) setSelectingSessionId(null); }
     }
@@ -903,7 +911,14 @@ export function AskScreen() {
     setSendingTurn(true);
     // The route this submission belongs to. A new session moves it to that
     // session's URL; any other navigation means the user went elsewhere.
+    const startRoute = routeIdentity;
     let submissionRoute = routeIdentity;
+    const stillHere = () =>
+      mountedRef.current &&
+      (routeIdentityRef.current === submissionRoute ||
+        // The new session's URL is set but not applied yet.
+        (submittedRouteRef.current === submissionRoute &&
+          routeIdentityRef.current === startRoute));
     let sessionId: string | null = null;
     try {
       // The overview deliberately has no selected session. During a route
@@ -920,16 +935,14 @@ export function AskScreen() {
       let detail = detailMatchesRoute ? state.detail : null;
       if (!detail) {
         detail = await createAskSession(state.workspaceId, {});
-        if (
-          !mountedRef.current ||
-          routeIdentityRef.current !== submissionRoute
-        ) {
+        if (!stillHere()) {
           return;
         }
         // Show the session's address before asking, so a reload finds the
         // question once the server has stored it.
-        setSelectedSessionParams(detail.id);
         submissionRoute = `${routeWorkspaceId ?? ""}\u0000${detail.id}`;
+        submittedRouteRef.current = submissionRoute;
+        setSelectedSessionParams(detail.id);
       }
       sessionId = detail.id;
       const created = await createAskTurn(
@@ -938,20 +951,14 @@ export function AskScreen() {
         message.trim(),
         detail.turns.at(-1)?.id ?? null,
       );
-      if (
-        !mountedRef.current ||
-        routeIdentityRef.current !== submissionRoute
-      ) {
+      if (!stillHere()) {
         return;
       }
       setLastTurnWarnings(created.warnings);
       setMessage("");
       await load(detail.id);
     } catch (e) {
-      if (
-        !mountedRef.current ||
-        routeIdentityRef.current !== submissionRoute
-      ) {
+      if (!stillHere()) {
         return;
       }
       setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.sendTurn));
