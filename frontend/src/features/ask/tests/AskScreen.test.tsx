@@ -866,7 +866,12 @@ describe("AskScreen", () => {
     holdRefresh = false;
     await act(async () => {
       resolveRefresh!(jsonResponse({
-        data: { ...sessionDetail([turns[0], pending, regenerated]), title: "Refreshed Ask" },
+        // The server renames a session together with its activity time.
+        data: {
+          ...sessionDetail([turns[0], pending, regenerated]),
+          title: "Refreshed Ask",
+          updated_at: "2026-05-09T00:00:05Z",
+        },
       }));
     });
     expect(screen.getByRole("heading", { name: "Refreshed Ask" })).toBeInTheDocument();
