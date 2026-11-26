@@ -130,6 +130,7 @@ type AskCopy = {
   generation: {
     connection: string;
     defaultModel: string;
+    unresolvedConnection: string;
     model: string;
     chooseModel: string;
     personal: string;
@@ -196,7 +197,6 @@ type AskCopy = {
     saveAnswer: string;
     pending: string;
     failed: string;
-    accessChanged: string;
     stopped: string;
   };
   evidence: {
@@ -296,6 +296,7 @@ const ASK_COPY = {
     generation: {
       connection: "LLM connection",
       defaultModel: "Default",
+      unresolvedConnection: "Selected connection",
       model: "Model",
       chooseModel: "Select a model",
       personal: "My connections",
@@ -367,7 +368,6 @@ const ASK_COPY = {
       saveAnswer: "Save answer",
       pending: "Writing the answer…",
       failed: "Internal server error. The answer was not saved.",
-      accessChanged: "Access changed while answering. The answer was not saved.",
       stopped: "Stopped. The answer was not saved.",
     },
     evidence: {
@@ -492,6 +492,7 @@ const ASK_COPY = {
     generation: {
       connection: "LLM 연결",
       defaultModel: "기본값",
+      unresolvedConnection: "선택한 연결",
       model: "모델",
       chooseModel: "모델 선택",
       personal: "내 연결",
@@ -563,7 +564,6 @@ const ASK_COPY = {
       saveAnswer: "답변 저장",
       pending: "답변을 만들고 있습니다…",
       failed: "내부 서버 오류가 발생해 답변을 저장하지 못했습니다.",
-      accessChanged: "답변하는 동안 접근 권한이 바뀌어 답변을 저장하지 않았습니다.",
       stopped: "중지되어 답변을 저장하지 않았습니다.",
     },
     evidence: {
@@ -770,24 +770,44 @@ function newerTurn(previous: AskTurnDetail | undefined, current: AskTurnDetail):
   };
 }
 
-function mergeAskTurn(state: AskState, detail: AskSessionDetail, turn: AskTurnDetail): AskState {
+function updateAskHistory(
+  sessions: AskSessionRef[],
+  detail: AskSessionDetail,
+  insertIfMissing: boolean,
+) {
+  if (insertIfMissing && !sessions.some((session) => session.id === detail.id)) {
+    return [detail, ...sessions];
+  }
+  return sessions.map((session) => session.id === detail.id ? detail : session);
+}
+
+function mergeAskTurn(
+  state: AskState,
+  detail: AskSessionDetail,
+  turn: AskTurnDetail,
+  questionAccepted = false,
+): AskState {
   const saved = detail.turns.find((item) => item.id === turn.id);
   const turns = saved
     ? detail.turns.map((item) => item.id === turn.id ? newerTurn(saved, turn) : item)
     : [...detail.turns, turn].sort((left, right) => left.turn_no - right.turn_no);
-  const session = { ...detail, turns, turn_count: turns.length };
-  const currentSessionKnown = state.sessions.some((item) => item.id === session.id);
-  const sessions = !currentSessionKnown && state.detail?.id !== session.id
-    ? [session, ...state.sessions]
-    : state.sessions.map((item) => item.id === session.id ? session : item);
+  // A question response carries its creation time; the terminal read will
+  // supply the session's authoritative activity time.
+  const updatedAt = questionAccepted && Date.parse(turn.created_at) > Date.parse(sessionActivityAt(detail))
+    ? turn.created_at
+    : detail.updated_at;
+  const session = { ...detail, updated_at: updatedAt, turns, turn_count: turns.length };
+  const sessions = updateAskHistory(state.sessions, session, questionAccepted);
   return { ...state, detail: session, sessions };
 }
 
 function mergeAskSnapshot(
   state: AskState,
-  previous: AskSessionDetail,
   reported: AskSessionDetail,
+  insertIfMissing = false,
 ): AskState {
+  const previous = state.detail;
+  if (previous?.id !== reported.id) return { ...state, detail: reported };
   // A GET can start before a send or stream update that resolved earlier.
   const priorTurns = new Map(previous.turns.map((turn) => [turn.id, turn]));
   const turns = reported.turns.map((turn) => {
@@ -798,7 +818,7 @@ function mergeAskSnapshot(
   turns.push(...priorTurns.values());
   turns.sort((left, right) => left.turn_no - right.turn_no);
   const detail = { ...reported, turns, turn_count: turns.length };
-  const sessions = state.sessions.map((item) => item.id === detail.id ? detail : item);
+  const sessions = updateAskHistory(state.sessions, detail, insertIfMissing);
   return { ...state, detail, sessions };
 }
 
@@ -915,14 +935,17 @@ export function AskScreen() {
     if (!mountedRef.current || loadGenerationRef.current !== generation) {
       return false;
     }
-    setState({
-      workspaceId,
-      workspaceLanguage: normalizeAskLocale(workspace?.default_language),
-      sessions,
-      sessionsCursor: sessionsData.next_cursor,
-      sessionsHasMore: sessionsData.has_more,
-      contextTree,
-      detail,
+    setState((previous) => {
+      const next: AskState = {
+        workspaceId,
+        workspaceLanguage: normalizeAskLocale(workspace?.default_language),
+        sessions,
+        sessionsCursor: sessionsData.next_cursor,
+        sessionsHasMore: sessionsData.has_more,
+        contextTree,
+        detail: previous?.workspaceId === workspaceId ? previous.detail : null,
+      };
+      return detail ? mergeAskSnapshot(next, detail) : { ...next, detail: null };
     });
     return true;
   }
@@ -1278,7 +1301,7 @@ export function AskScreen() {
             ),
           };
         }) : liveDetail.turns;
-        return mergeAskTurn(liveState, { ...liveDetail, turns }, created.turn);
+        return mergeAskTurn(liveState, { ...liveDetail, turns }, created.turn, true);
       });
     } catch (e) {
       if (!stillHere()) {
@@ -1463,13 +1486,13 @@ export function AskScreen() {
   const selectedModel = profiles.find((model) => model.model_profile_id === choice.profileId);
   const searchOnly = choice.connectionKey === SEARCH_ONLY;
   const connectionAvailable = profiles.length > 0 && (!choice.profileId || selectedModel !== undefined);
-  const connectionKey = searchOnly || connectionAvailable ? choice.connectionKey : "";
+  const catalogResolved = catalog !== null && !catalog.failed;
+  const connectionKey = searchOnly || !catalogResolved || connectionAvailable ? choice.connectionKey : "";
   // A chosen model must be resolved before a question uses it: while the
-  // list loads, or while a connection with several models has none picked.
+  // list is unavailable, or while a connection with several models has none picked.
   // Sending then would silently use the default model instead.
   const modelChoicePending =
-    !searchOnly && choice.connectionKey !== "" && selectedModel === undefined &&
-    (catalog === null || connectionAvailable);
+    !searchOnly && connectionKey !== "" && selectedModel === undefined;
   const selection = searchOnly ? null : selectedModel && {
     scope: selectedModel.scope,
     connection_id: selectedModel.connection_id,
@@ -1510,7 +1533,7 @@ export function AskScreen() {
           if (!current()) return;
           setState((previous) =>
             previous?.workspaceId === workspaceId && previous.detail?.id === sessionId
-              ? mergeAskSnapshot(previous, previous.detail, detail)
+              ? mergeAskSnapshot(previous, detail)
               : previous,
           );
           shouldReconnect = detail.turns.some((turn) => turn.id === turnId && isUnfinishedTurn(turn));
@@ -1552,7 +1575,7 @@ export function AskScreen() {
           setState((previous) =>
             onRoute() && generation === loadGenerationRef.current &&
               previous?.workspaceId === workspaceId && previous.detail?.id === sessionId
-              ? mergeAskSnapshot(previous, previous.detail, detail)
+              ? mergeAskSnapshot(previous, detail, true)
               : previous,
           );
         }).catch(() => undefined);
@@ -1823,6 +1846,9 @@ function AskModelPicker({
           onChange={(event) => onChange({ connectionKey: event.target.value })}
         >
           <option value="">{labels.defaultModel}</option>
+          {connectionKey && connectionKey !== SEARCH_ONLY && !connections.has(connectionKey) ? (
+            <option value={connectionKey}>{labels.unresolvedConnection}</option>
+          ) : null}
           {(["personal", "workspace"] as const).map((scope) => {
             const scoped = options.filter((option) => option.scope === scope);
             return scoped.length > 0 ? (
@@ -2910,12 +2936,9 @@ function unansweredTurnLabel(turn: AskTurnDetail, copy: AskCopy) {
   if (turn.status === "pending") return copy.turns.pending;
   if (turn.status === "stopped") return copy.turns.stopped;
   if (turn.error_code === "server_restarted") return copy.generation.restarted;
-  return turn.error_code === "access_revoked" ||
-    turn.error_code === "evidence_unavailable"
-    ? copy.turns.accessChanged
-    : !turn.error_code || turn.error_code === "internal_error"
-      ? copy.turns.failed
-      : copy.generation.failed;
+  return !turn.error_code || turn.error_code === "internal_error"
+    ? copy.turns.failed
+    : copy.generation.failed;
 }
 
 function hasCitations(turn: AskTurnDetail) {

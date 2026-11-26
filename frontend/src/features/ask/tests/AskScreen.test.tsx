@@ -596,6 +596,7 @@ describe("AskScreen", () => {
     let stream!: ReadableStreamDefaultController<Uint8Array>;
     let steeringBody: unknown;
     let queuedBody: unknown;
+    let sessionReads = 0;
     const encoder = new TextEncoder();
     const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
     mockFetch((url, init) => {
@@ -606,13 +607,17 @@ describe("AskScreen", () => {
         return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) return { data: [] };
-      if (url === `${prefix}/sessions/${SESSION_ID}`) return { data: sessionDetail(turns) };
+      if (url === `${prefix}/sessions/${SESSION_ID}`) {
+        sessionReads += 1;
+        return { data: sessionDetail(turns) };
+      }
       if (url === `${prefix}/turns/${TURN_ID}/stream`) {
         return new Response(new ReadableStream<Uint8Array>({
           start(controller) { stream = controller; },
         }), { headers: { "Content-Type": "text/event-stream" } });
       }
       if (url === `${prefix}/turns/${TURN_ID}/steer`) {
+        if (steeringBody) return jsonResponse({ error_code: "internal_error" }, 500);
         steeringBody = JSON.parse(String(init?.body));
         turns = [{ ...pending, steering_messages: [instruction] }];
         return { data: turns[0] };
@@ -651,6 +656,22 @@ describe("AskScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Apply to current answer" }));
     expect(await screen.findByText("Waiting to apply")).toBeInTheDocument();
     expect(steeringBody).toEqual({ user_message: instruction.user_message, request_id: expect.any(String) });
+
+    const steered = { ...pending, steering_messages: [{ ...instruction, status: "applied" }] };
+    stream.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(steered)}\n\n`));
+    await screen.findByText("Applied");
+    // A failed instruction reloads the session; that read can lag the stream.
+    turns = [{ ...turns[0], steer_supported: false }];
+    await userEvent.type(composer, "Add a citation");
+    await userEvent.click(screen.getByRole("button", { name: "Apply to current answer" }));
+    await waitFor(() => {
+      expect(sessionReads).toBe(2);
+      expect(screen.getByRole("button", { name: "Apply to current answer" })).toBeEnabled();
+    });
+    expect(screen.getByText("Applied")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting to apply")).toBeNull();
+    await userEvent.clear(composer);
+
     await userEvent.type(composer, queued.user_message!);
     await userEvent.click(screen.getByRole("button", { name: "Queue next question" }));
     expect(await screen.findByText("Queued")).toBeInTheDocument();
@@ -675,7 +696,10 @@ describe("AskScreen", () => {
   it("keeps a terminal stream refresh from overwriting a newer send on the same route", async () => {
     const pending = askTurn({ status: "pending", assistant_message: null });
     const completed = askTurn({ assistant_message: "Completed answer" });
-    const next = askTurn({ id: "turn-2", turn_no: 2, assistant_message: "Newer answer" });
+    const next = askTurn({
+      id: "turn-2", turn_no: 2, assistant_message: "Newer answer",
+      created_at: "2026-05-11T00:00:00Z",
+    });
     const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
     let stream!: ReadableStreamDefaultController<Uint8Array>;
     let resolveRefresh: ((response: Response) => void) | undefined;
@@ -686,7 +710,8 @@ describe("AskScreen", () => {
         return jsonResponse({ data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } });
       }
       if (url === `${prefix}/sessions`) {
-        return jsonResponse({ data: { items: [sessionRef()], date_buckets: [], next_cursor: null } });
+        const other = { ...olderSessionRef(), updated_at: "2026-05-10T00:00:00Z" };
+        return jsonResponse({ data: { items: [other], date_buckets: [], next_cursor: null } });
       }
       if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
         return jsonResponse({ data: [] });
@@ -712,12 +737,16 @@ describe("AskScreen", () => {
     );
 
     await waitFor(() => expect(stream).toBeDefined());
+    const history = within(screen.getByRole("complementary", { name: "Ask history" }));
+    expect(history.queryByRole("button", { name: /Research Ask/ })).toBeNull();
     stream.enqueue(new TextEncoder().encode(`event: state\ndata: ${JSON.stringify(completed)}\n\n`));
     await screen.findByText("Completed answer");
     await waitFor(() => expect(resolveRefresh).toBeDefined());
     await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Next question");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByText("Newer answer");
+    expect(history.getAllByRole("button", { name: /Research Ask|Second Ask/ })[0])
+      .toHaveAccessibleName(/Research Ask/);
 
     await act(async () => {
       resolveRefresh!(jsonResponse({
@@ -745,13 +774,22 @@ describe("AskScreen", () => {
     });
     let turns = [active, queued];
     let replacementBody: unknown;
+    let catalogFails = true;
     let holdRefresh = false;
     let resolveRefresh: ((response: Response) => void) | undefined;
     const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
     const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
     const encoder = new TextEncoder();
-    mockAskFetch(async (input, init) => {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({
+      connectionKey: "workspace:connection-test", profileId: TEST_MODEL.model_profile_id,
+    }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
+      if (url === `${prefix}/models`) {
+        return catalogFails
+          ? jsonResponse({ error_code: "internal_error" }, 500)
+          : jsonResponse({ data: { items: [TEST_MODEL] } });
+      }
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } });
       }
@@ -788,8 +826,14 @@ describe("AskScreen", () => {
 
     const composer = await screen.findByRole("textbox", { name: "Message" });
     await waitFor(() => expect(streams.has(active.id)).toBe(true));
-    await chooseTestModel();
     await userEvent.type(composer, "Change the answer");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.getByRole("option", { name: "Selected connection", selected: true }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Queue next question" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop and regenerate" })).toBeDisabled();
+    catalogFails = false;
+    await userEvent.click(retry);
     await waitFor(() => expect(screen.getByRole("button", { name: "Stop and regenerate" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "Stop and regenerate" }));
 
@@ -1969,6 +2013,7 @@ describe("AskScreen", () => {
 
   it("remembers complete model and search-only choices and clears them with Default", async () => {
     const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
+    const models = [TEST_MODEL, { ...TEST_MODEL, model_profile_id: "model-alt", model_label: "Alternate model" }];
     const turns = [
       askTurn({ selection: TEST_SELECTION }),
       askTurn({ id: "turn-2", turn_no: 2, selection: null }),
@@ -1992,7 +2037,7 @@ describe("AskScreen", () => {
         return { data: askTurn({ id: "turn-3", turn_no: 3, selection: null }) };
       }
       throw new Error(`Unexpected request: ${url}`);
-    }, [TEST_MODEL, { ...TEST_MODEL, model_profile_id: "model-alt", model_label: "Alternate model" }]);
+    }, models);
 
     const renderAsk = () => render(
       <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
@@ -2008,6 +2053,15 @@ describe("AskScreen", () => {
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Model" }), TEST_MODEL.model_profile_id);
     expect(send).toBeEnabled();
     view.unmount();
+
+    models.shift();
+    view = renderAsk();
+    await userEvent.type(await screen.findByRole("textbox", { name: "Message" }), "Question");
+    await screen.findByRole("option", { name: TEST_MODEL.connection_label });
+    expect(screen.getByRole("option", { name: "Default", selected: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    view.unmount();
+    models.unshift(TEST_MODEL);
 
     view = renderAsk();
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Model" }))
