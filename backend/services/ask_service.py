@@ -753,9 +753,7 @@ class AskService:
         )
 
     @staticmethod
-    def compose_evidence(
-        prepared: PreparedTurn, *, warnings: tuple[str, ...] = ()
-    ) -> ComposedTurn:
+    def compose_evidence(prepared: PreparedTurn) -> ComposedTurn:
         """Answer with the search result itself, without a model."""
         retrieved = prepared.retrieved
         return ComposedTurn(
@@ -764,7 +762,7 @@ class AskService:
                 if retrieved.pack
                 else _no_evidence_answer(retrieved.language)
             ),
-            warnings=(*retrieved.warnings, *warnings),
+            warnings=retrieved.warnings,
             generation={
                 "target": None,
                 "outcome": "evidence_pack" if retrieved.pack else "no_evidence",

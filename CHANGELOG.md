@@ -38,8 +38,9 @@
 ### Ask
 
 - A follow-up question sees the session's earlier answers (up to four, from
-  the same answer model). Evidence is still searched for the new question
-  only, and only its own evidence is cited. When an earlier answer drew on
+  the same answer model) when the new question's own search finds citable
+  evidence; without it no model is asked. Evidence is still searched for the
+  new question only, and only its own evidence is cited. When an earlier answer drew on
   evidence a reader cannot see, that reader sees the follow-up's question but
   not its answer, citations or search path, and cannot save it.
 - A question is stored as soon as it is accepted. Questions in a session are

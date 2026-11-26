@@ -149,10 +149,15 @@ async def open_json_events(
         )
         if not response.is_success:
             raw = bytearray()
-            async for block in response.aiter_bytes():
-                raw.extend(block[: _MAX_EVENT_BYTES - len(raw)])
-                if len(raw) >= _MAX_EVENT_BYTES:
-                    break
+            try:
+                async for block in response.aiter_bytes():
+                    raw.extend(block[: _MAX_EVENT_BYTES - len(raw)])
+                    if len(raw) >= _MAX_EVENT_BYTES:
+                        break
+            except Exception:
+                # The status already says what failed; a body that breaks off
+                # only loses the provider's detail, as on the JSON path.
+                pass
             body = _json_object(bytes(raw)) or {}
             raise LLMAdapterError(
                 _error_code(

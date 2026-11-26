@@ -394,7 +394,7 @@ class AskRuntime:
                     )
             earlier_text = None
             if replace_turn_id is not None:
-                replaced = _controllable(replaced, workspace_id, actor, running=True)
+                replaced = _controllable(replaced, workspace_id, actor)
                 target = self._turn(session, workspace_id, replaced.turn_id)
                 if target.ask_session_id != session_id or not _running(target):
                     raise _turn_changed()
@@ -430,9 +430,7 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         async with self._write:
-            job = _controllable(
-                self._jobs.get(turn_id), workspace_id, actor, running=False
-            )
+            job = _controllable(self._jobs.get(turn_id), workspace_id, actor)
             detail = await run_in_threadpool(
                 self._store_stop, factory, workspace_id, turn_id, actor
             )
@@ -463,9 +461,7 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         async with self._write:
-            job = _controllable(
-                self._jobs.get(turn_id), workspace_id, actor, running=True
-            )
+            job = _controllable(self._jobs.get(turn_id), workspace_id, actor)
             detail, created = await run_in_threadpool(
                 self._store_steer, factory, workspace_id, turn_id, request, actor
             )
@@ -567,9 +563,7 @@ class AskRuntime:
                     on_steer=lambda update: self._on_steer(job, update),
                 )
             else:
-                composed = self.service.compose_evidence(
-                    prepared, warnings=self._default_unavailable(job)
-                )
+                composed = self.service.compose_evidence(prepared)
             await run_in_threadpool(self._finish, job, prepared, composed)
         except AskGenerationError as exc:
             await run_in_threadpool(self._fail, job, exc.code)
@@ -585,6 +579,10 @@ class AskRuntime:
         is search only, a selection is that connection's model."""
 
         if _names_no_model(job.request):
+            if self.connections.default_unavailable_reason:
+                # A configured default model that cannot be built is a model
+                # failure like any other; no default model at all is not.
+                raise AskGenerationError(LLM_PROVIDER_UNAVAILABLE_WARNING)
             return self.connections.default
         if job.request.selection is None:
             return None
@@ -596,13 +594,6 @@ class AskRuntime:
             job.actor,
             job.request.selection,
         )
-
-    def _default_unavailable(self, job: _Job) -> tuple[str, ...]:
-        """Say why a question for the default model got no model answer."""
-
-        if _names_no_model(job.request) and self.connections.default_unavailable_reason:
-            return (LLM_PROVIDER_UNAVAILABLE_WARNING,)
-        return ()
 
     def _start(self, job: _Job) -> bool:
         with job.factory.begin() as session:
@@ -776,10 +767,9 @@ def _person(actor: ActorContext) -> tuple[str, str]:
     return (actor.actor_kind, actor.actor_id)
 
 
-def _controllable(
-    job: _Job | None, workspace_id: UUID, actor: ActorContext, *, running: bool
-) -> _Job:
-    """The job ``actor`` may change: their own, queued or (``running``) started."""
+def _controllable(job: _Job | None, workspace_id: UUID, actor: ActorContext) -> _Job:
+    """The live job of a turn ``actor`` asked. Whether the turn is in a state
+    the change applies to is checked on the row, under its lock."""
 
     if job is None or job.workspace_id != workspace_id:
         raise _turn_changed()
@@ -788,8 +778,6 @@ def _controllable(
             "only the person who asked can change this Ask turn",
             error_code="ask_turn_not_yours",
         )
-    if running and job.task is None:
-        raise _turn_changed()
     return job
 
 

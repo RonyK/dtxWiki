@@ -121,7 +121,7 @@ def test_ask_session_list_survives_a_misconfigured_provider(
     assert response.status_code == 200, response.text
 
 
-def test_ask_turn_answers_and_discloses_why_the_model_was_skipped(
+def test_a_misconfigured_default_model_fails_the_turn_like_any_model(
     session_factory, page_service
 ):
     container = assemble(
@@ -162,14 +162,14 @@ def test_ask_turn_answers_and_discloses_why_the_model_was_skipped(
     )
 
     assert turn.status_code == 200, turn.text
-    body = turn.json()
-    # An answer is served, not an error.
-    assert body["data"]["assistant_message"]
-    # ...and the user is told why it is the deterministic summary.
-    assert LLM_PROVIDER_UNAVAILABLE_WARNING in body["data"]["warning_codes"]
-    assert LLM_PROVIDER_UNAVAILABLE_WARNING in [
-        warning["code"] for warning in body["envelope"]["warnings"]
-    ]
+    data = turn.json()["data"]
+    # The question is kept; a configured default model that cannot be built
+    # is a model failure like any other, and the asker can search instead.
+    assert (data["status"], data["error_code"], data["can_search"]) == (
+        "failed",
+        LLM_PROVIDER_UNAVAILABLE_WARNING,
+        True,
+    )
 
 
 def _answer_with_default_port(session_factory, page_service, port: TextGenerationPort):

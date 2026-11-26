@@ -747,8 +747,10 @@ function compareTurnExecutionOrder(left: AskTurnDetail, right: AskTurnDetail) {
   if (leftQueued !== rightQueued) return leftQueued ? 1 : -1;
   const turnNumberOrder = left.turn_no - right.turn_no;
   if (leftQueued) return turnNumberOrder;
-  return Date.parse(left.started_at ?? left.created_at) -
-    Date.parse(right.started_at ?? right.created_at) || turnNumberOrder;
+  const leftAt = left.started_at ?? left.created_at;
+  const rightAt = right.started_at ?? right.created_at;
+  // The server's timestamps carry microseconds that Date.parse drops.
+  return Date.parse(leftAt) - Date.parse(rightAt) || leftAt.localeCompare(rightAt) || turnNumberOrder;
 }
 
 function newerTurn(previous: AskTurnDetail | undefined, current: AskTurnDetail): AskTurnDetail {
@@ -796,6 +798,16 @@ function mergeAskTurn(
   const session = { ...detail, updated_at: updatedAt, turns, turn_count: turns.length };
   const sessions = updateAskHistory(state.sessions, session);
   return { ...state, detail: session, sessions };
+}
+
+function applySessionRead(
+  state: AskState | null,
+  workspaceId: string,
+  reported: AskSessionDetail,
+): AskState | null {
+  return state?.workspaceId === workspaceId && state.detail?.id === reported.id
+    ? mergeAskSnapshot(state, reported)
+    : state;
 }
 
 function mergeAskSnapshot(state: AskState, reported: AskSessionDetail): AskState {
@@ -1311,6 +1323,11 @@ export function AskScreen() {
       if (!stillHere()) {
         return;
       }
+      // A retry reuses the request only while its outcome is unknown; the
+      // server's refusal is an outcome.
+      if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+        requestRef.current = null;
+      }
       setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.sendTurn));
       // The question may be stored even though its answer failed; show the
       // session as the server has it. This error stays the one reported.
@@ -1326,6 +1343,17 @@ export function AskScreen() {
     }
   }
 
+  // A session read applies only if no newer load started meanwhile.
+  function refreshSession(workspaceId: string, sessionId: string) {
+    const generation = loadGenerationRef.current;
+    const route = routeIdentityRef.current;
+    void readAskSession(workspaceId, sessionId).then((detail) => {
+      if (!mountedRef.current || routeIdentityRef.current !== route) return;
+      if (generation !== loadGenerationRef.current) return;
+      setState((previous) => applySessionRead(previous, workspaceId, detail));
+    }).catch(() => undefined);
+  }
+
   async function stopTurn(turn: AskTurnDetail) {
     if (!canCompose || !state?.workspaceId || sendingTurn || turnActionId) return;
     const routeAtAction = routeIdentity;
@@ -1334,12 +1362,13 @@ export function AskScreen() {
     try {
       const stopped = await stopAskTurn(state.workspaceId, turn.id);
       if (routeIdentityRef.current !== routeAtAction) return;
-      requestRef.current = null;
       setState((previous) =>
         previous?.detail?.id === stopped.ask_session_id
           ? mergeAskTurn(previous, previous.detail, stopped)
           : previous,
       );
+      // Another question may start now; show the session as it is.
+      refreshSession(state.workspaceId, stopped.ask_session_id);
     } catch (exc) {
       if (routeIdentityRef.current === routeAtAction) {
         setError(errorMessage(exc, ASK_COPY[state.workspaceLanguage].errors.sendTurn));
@@ -1533,13 +1562,12 @@ export function AskScreen() {
       timer = window.setTimeout(async () => {
         let shouldReconnect = true;
         try {
+          const generation = loadGenerationRef.current;
           const detail = await readAskSession(workspaceId, sessionId);
           if (!current()) return;
-          setState((previous) =>
-            previous?.workspaceId === workspaceId && previous.detail?.id === sessionId
-              ? mergeAskSnapshot(previous, detail)
-              : previous,
-          );
+          if (generation === loadGenerationRef.current) {
+            setState((previous) => applySessionRead(previous, workspaceId, detail));
+          }
           shouldReconnect = detail.turns.some((turn) => turn.id === turnId && isUnfinishedTurn(turn));
         } catch (exc) {
           if (!current()) return;
@@ -1574,15 +1602,7 @@ export function AskScreen() {
       if (ended) {
         clearPreview();
         // The terminal commit can also change the session's title and recency.
-        const generation = loadGenerationRef.current;
-        void readAskSession(workspaceId, sessionId).then((detail) => {
-          setState((previous) =>
-            onRoute() && generation === loadGenerationRef.current &&
-              previous?.workspaceId === workspaceId && previous.detail?.id === sessionId
-              ? mergeAskSnapshot(previous, detail)
-              : previous,
-          );
-        }).catch(() => undefined);
+        refreshSession(workspaceId, sessionId);
       }
     }).then(reconcile, reconcile);
     return () => {
@@ -2162,7 +2182,6 @@ function TurnCard({
   preview?: string;
   reconnecting: boolean;
 }) {
-  const { t } = useTranslation("search");
   const noEvidence = isNoEvidenceTurn(turn);
   const workspaceId = useRouteWorkspaceId();
   const recoveryDescriptionId = `no-evidence-recovery-${turn.id}`;
@@ -2213,7 +2232,7 @@ function TurnCard({
           </button>
         ) : null}
         {turn.status === "failed" && turn.can_search && workspaceId ? (
-          <AskSearchPreview copy={copy} workspaceId={workspaceId} turnId={turn.id} />
+          <AskSearchPreview copy={copy} workspaceId={workspaceId} turnId={turn.id} locale={locale} />
         ) : null}
         {turn.status === "failed" && turn.error_code === "server_restarted" && turn.user_message && onRestore ? (
           <button
@@ -2257,11 +2276,7 @@ function TurnCard({
       {turn.retrieval_trace.length > 0 || (turn.tried_lanes ?? []).length > 0 ? (
         <SearchTrace copy={copy} turn={turn} />
       ) : null}
-      {(turn.warning_codes ?? []).map((code) => (
-        <StatusBanner key={code} tone="warning">
-          {resolveAskWarningLabel(code, copy, t, locale)}
-        </StatusBanner>
-      ))}
+      <AskWarnings codes={turn.warning_codes ?? []} copy={copy} locale={locale} />
       {turn.fallback_disclosure && !noEvidence ? (
         <StatusBanner tone="info">{copy.evidence.fallbackNotice}</StatusBanner>
       ) : null}
@@ -2288,10 +2303,28 @@ function TurnCard({
   );
 }
 
-function AskSearchPreview({ copy, workspaceId, turnId }: {
+function AskWarnings({ codes, copy, locale }: {
+  codes: string[];
+  copy: AskCopy;
+  locale: AskLocale;
+}) {
+  const { t } = useTranslation("search");
+  return (
+    <>
+      {codes.map((code) => (
+        <StatusBanner key={code} tone="warning">
+          {resolveAskWarningLabel(code, copy, t, locale)}
+        </StatusBanner>
+      ))}
+    </>
+  );
+}
+
+function AskSearchPreview({ copy, workspaceId, turnId, locale }: {
   copy: AskCopy;
   workspaceId: string;
   turnId: string;
+  locale: AskLocale;
 }) {
   const [result, setResult] = useState<AskTurnDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2329,6 +2362,7 @@ function AskSearchPreview({ copy, workspaceId, turnId }: {
             wikilinkMode="plain"
           />
           {hasCitations(result) ? <EvidencePack copy={copy} turn={result} /> : null}
+          <AskWarnings codes={result.warning_codes ?? []} copy={copy} locale={locale} />
         </>
       ) : (
         <button
