@@ -506,6 +506,10 @@ class AskRuntime:
     def _cancel(self, job: _Job) -> None:
         if job.task is not None:
             job.task.cancel()
+        else:
+            # A stopped job that never started will not run; those waiting for
+            # it get the stopped turn now, not when the queue reaches it.
+            job.done.set()
         job.state_changed()
 
     def _session_queue(self, session_id: UUID) -> deque[_Job]:
