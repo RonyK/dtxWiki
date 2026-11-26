@@ -1323,9 +1323,10 @@ export function AskScreen() {
       if (!stillHere()) {
         return;
       }
-      // A retry reuses the request only while its outcome is unknown; the
-      // server's refusal is an outcome.
-      if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+      // A retry reuses the request only while its outcome is unknown. Only a
+      // refusal of the question itself settles it; an access error happens
+      // before the server looks the request up.
+      if (e instanceof ApiError && (e.status === 409 || e.status === 422)) {
         requestRef.current = null;
       }
       setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.sendTurn));
@@ -1565,10 +1566,11 @@ export function AskScreen() {
           const generation = loadGenerationRef.current;
           const detail = await readAskSession(workspaceId, sessionId);
           if (!current()) return;
+          // A read overtaken by a newer load decides nothing: keep following.
           if (generation === loadGenerationRef.current) {
             setState((previous) => applySessionRead(previous, workspaceId, detail));
+            shouldReconnect = detail.turns.some((turn) => turn.id === turnId && isUnfinishedTurn(turn));
           }
-          shouldReconnect = detail.turns.some((turn) => turn.id === turnId && isUnfinishedTurn(turn));
         } catch (exc) {
           if (!current()) return;
           if (exc instanceof ApiError && [401, 403, 404].includes(exc.status)) {
