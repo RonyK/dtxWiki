@@ -1,10 +1,22 @@
 """One application process schedules Ask turns and streams their live output.
 
 Questions in a session are answered one at a time, in order. The process that
-accepted a question answers it; a restart ends unanswered questions (see
-``fail_interrupted_ask_turns``). Access is checked when a request is made and
+accepted a question answers it. Access is checked when a request is made and
 when the database is read for it; a turn then runs with the access its request
 had, and an open stream is not re-checked.
+
+Recovery is deliberately simple (MVP). The question is always kept; these
+losses are accepted rather than handled:
+
+- The queue and every answer in progress live in memory. A restart does not
+  resume them: when serving starts, unanswered questions end as
+  ``failed/server_restarted`` (``prepare_serving``), and instructions still
+  waiting end as ``unknown``. A partial answer is not kept.
+- If storing a turn's ending fails, the turn stays ``pending`` until the
+  session's next question starts (``_start`` ends it) or the server restarts.
+- One serving process per database; a second one is not coordinated with.
+- A retry after a lost response reuses its request id; if the original was
+  answered meanwhile, a retry sent as a new question asks it again.
 """
 
 from __future__ import annotations
