@@ -24,6 +24,7 @@ from backend.services.ask_service import (
     LLM_COMPOSER_RETRYABLE_WARNING,
     AskGenerationError,
     ComposedTurn,
+    fail_interrupted_ask_turns,
 )
 from backend.services.page_service import PageService
 from backend.tests.conftest import authenticate_test_client_in_workspace
@@ -220,19 +221,9 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
         unanswered = submit("Queue evidence unanswered")
         assert second_started.wait(3)
 
-    # The next serving process finds nobody answering it and ends it.
-    class _PreviousServer:
-        state = SimpleNamespace(
-            container=SimpleNamespace(
-                db=SimpleNamespace(session_factory=session_factory)
-            )
-        )
-
-        async def __call__(self, scope, receive, send):
-            return None
-
-    monkeypatch.setattr(app_main, "create_app", lambda **_kwargs: _PreviousServer())
-    asyncio.run(app_main._LazyASGIApp()({"type": "lifespan"}, None, None))
+    # Serving starts by ending questions nobody is answering any more
+    # (bootstrap_core, which every serving path runs before it serves).
+    fail_interrupted_ask_turns(session_factory)
     with session_factory() as session:
         stored = session.scalars(
             select(AskTurn)

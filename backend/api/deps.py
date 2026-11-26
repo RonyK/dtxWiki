@@ -1,11 +1,8 @@
-from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from fastapi.security import HTTPAuthorizationCredentials
-from fastapi.security.utils import get_authorization_scheme_param
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.container import DatabaseProvider, ServiceRegistry
@@ -16,7 +13,7 @@ from backend.app.state import (
     get_search_service_from_app,
     get_session_factory_from_app,
 )
-from backend.policy.auth import ActorContext, get_rest_actor
+from backend.policy.auth import ActorContext
 from backend.policy.rbac import (
     GrantReplicaMissingError,
     WorkspaceAccess,
@@ -28,7 +25,7 @@ from backend.policy.rest_scopes import (
     defer_token_scope_until_target,
     require_token_scope,
 )
-from backend.services.ask_service import AskAccessRevokedError, AskService
+from backend.services.ask_service import AskService
 from backend.services.read_errors import (
     BundleExpiredError,
     ChatOwnerUnresolvableError,
@@ -219,43 +216,6 @@ WorkspaceAskAccessDep = Annotated[
 ]
 
 
-def reauthorize_ask(request: Request, workspace_id: UUID) -> ActorContext:
-    """Run the Ask route's access checks again for a request still in flight.
-
-    An answer takes long enough for a token, a membership or the Ask switch to
-    be withdrawn meanwhile. Returns the current actor. A refusal is raised as
-    ``AskAccessRevokedError`` caused by the original HTTP error; any other
-    failure (an unavailable plane, a database error) is raised unchanged. Call
-    this outside any transaction: authenticating a token may write.
-    """
-
-    scheme, token = get_authorization_scheme_param(request.headers.get("authorization"))
-    credentials = (
-        HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
-        if scheme.lower() == "bearer" and token
-        else None
-    )
-    try:
-        actor = require_token_scope(request, get_rest_actor(request, credentials))
-        control_factory = get_session_factory(request)
-        access = workspace_access("viewer")(
-            workspace_id, actor, control_factory, get_database_provider(request)
-        )
-        require_workspace_labs_feature(workspace_id, access, control_factory, "ask")
-    except HTTPException as exc:
-        if exc.status_code in {401, 403, 404}:
-            raise AskAccessRevokedError from exc
-        raise
-    return actor
-
-
-def ask_reauthorizer(
-    request: Request, workspace_id: UUID
-) -> Callable[[], ActorContext]:
-    return lambda: reauthorize_ask(request, workspace_id)
-
-
-AskReauthorizeDep = Annotated[Callable[[], ActorContext], Depends(ask_reauthorizer)]
 WorkspaceAgentAccessDep = Annotated[
     WorkspaceAccess, Depends(labs_workspace_access("agent"))
 ]

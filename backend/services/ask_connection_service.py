@@ -61,8 +61,6 @@ class AskConnectionService:
         workspace_id: UUID,
         actor: ActorContext,
     ) -> list[dict]:
-        with control_factory() as control:
-            custom_endpoints = llm_custom_endpoints_enabled(control, workspace_id)
         choices = []
         scopes: list[tuple[str, ConnectionScope, UUID, sessionmaker[Session]]] = [
             ("workspace", "workspace", workspace_id, workspace_factory)
@@ -75,13 +73,14 @@ class AskConnectionService:
                     session,
                     scope=stored_scope,
                     owner_id=owner_id,
-                    custom_endpoints=custom_endpoints,
+                    custom_endpoints=_custom_endpoints_allowed(
+                        control_factory, workspace_id, stored_scope
+                    ),
                 )
                 for view in views:
                     if (
                         view["status"] != "enabled"
                         or view["verification_status"] != "ready"
-                        or not view["has_credential"]
                         or view["unavailable_reason"] is not None
                     ):
                         continue
@@ -124,8 +123,9 @@ class AskConnectionService:
             scope, owner_id, factory = "user", actor.user_id, control_factory
         else:
             scope, owner_id, factory = "workspace", workspace_id, workspace_factory
-        with control_factory() as control:
-            custom_endpoints = llm_custom_endpoints_enabled(control, workspace_id)
+        custom_endpoints = _custom_endpoints_allowed(
+            control_factory, workspace_id, scope
+        )
         with factory() as session:
             connection = self._connections.owned(
                 session,
@@ -136,7 +136,6 @@ class AskConnectionService:
             if (
                 connection.status != "enabled"
                 or connection.verification_status != "ready"
-                or connection.active_credential is None
             ):
                 raise _unavailable()
             endpoint = connection.endpoint_profile
@@ -155,11 +154,17 @@ class AskConnectionService:
             if profile is None:
                 raise _unavailable()
             try:
-                credential = self._connections.vault.decrypt(
-                    connection.active_credential,
-                    binding=CredentialBinding(
-                        scope, owner_id, connection.id, connection.secret_revision
-                    ),
+                # A connection verified without a key (a local server) runs
+                # without one; the adapter's schema decides what it needs.
+                credential = (
+                    self._connections.vault.decrypt(
+                        connection.active_credential,
+                        binding=CredentialBinding(
+                            scope, owner_id, connection.id, connection.secret_revision
+                        ),
+                    )
+                    if connection.active_credential is not None
+                    else {}
                 )
             except CredentialVaultError:
                 raise LLMConnectionError(
@@ -204,6 +209,18 @@ class AskConnectionService:
                 and supports_native_steer(adapter_id, base_url, model)
             ),
         )
+
+
+def _custom_endpoints_allowed(
+    control_factory: sessionmaker[Session], workspace_id: UUID, scope: ConnectionScope
+) -> bool:
+    """A person's own connections may use any address; the Workspace's switch
+    governs only the Workspace's connections."""
+
+    if scope == "user":
+        return True
+    with control_factory() as control:
+        return llm_custom_endpoints_enabled(control, workspace_id)
 
 
 def _unavailable() -> LLMConnectionError:

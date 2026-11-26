@@ -7,7 +7,6 @@ from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import (
-    AskReauthorizeDep,
     AskServiceDep,
     RestActorDep,
     SessionFactoryDep,
@@ -100,7 +99,6 @@ async def submit_ask_stream_turn(
     actor: RestActorDep,
     _access: WorkspaceAskAccessDep,
     session_factory: WorkspaceSessionFactoryDep,
-    reauthorize: AskReauthorizeDep,
 ):
     try:
         # Stream submissions join the session's queue; only stop, replace and
@@ -111,7 +109,6 @@ async def submit_ask_stream_turn(
             ask_session_id,
             request_body,
             actor,
-            reauthorize,
             replace_turn_id=request_body.replace_turn_id,
         )
     except (InvalidUserMessageError, InputPolicyError) as exc:

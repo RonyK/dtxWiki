@@ -45,12 +45,13 @@
   `queued`. With the default model a provider failure still answers with the
   evidence summary and a warning, as before. If the turn cannot be finished,
   it stays with `status` `failed` and an `error_code`: `internal_error`,
-  `access_revoked` (the asker lost access meanwhile), `evidence_unavailable`
-  (its evidence became unreadable), `server_restarted`, or the failure of a
-  model the asker chose, which can be searched again without a model. Only
+  `server_restarted`, or the failure of a model the asker chose, which can be
+  searched again without a model. Access is checked when a question is asked
+  and its evidence is searched; a running answer is not re-checked. Only
   `completed` turns can be saved to Context.
 - The Ask screen streams the answer while it is written. Each question can use
-  the workspace's default model, another enabled LLM connection, or search
+  the workspace's default model, any enabled LLM connection — the asker's own
+  connections whatever their address and with or without a key — or search
   only; the browser remembers the last choice. The asker can stop a queued or
   running question, add an instruction to a running answer (OpenAI models that
   support steering), or replace the running question with a longer one. Only

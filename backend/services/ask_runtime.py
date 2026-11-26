@@ -2,10 +2,9 @@
 
 Questions in a session are answered one at a time, in order. The process that
 accepted a question answers it; a restart ends unanswered questions (see
-``fail_interrupted_ask_turns``). Access is checked when a request arrives and
-once per turn before the model is called and before the answer is stored, as
-chat applications do; a stream that is already open is not re-checked per
-chunk.
+``fail_interrupted_ask_turns``). Access is checked when a request is made and
+when the database is read for it; a turn then runs with the access its request
+had, and an open stream is not re-checked.
 """
 
 from __future__ import annotations
@@ -38,11 +37,8 @@ from backend.services.ask_connection_service import (
     AskGenerationBinding,
 )
 from backend.services.ask_service import (
-    ASK_TURN_ACCESS_REVOKED,
-    ASK_TURN_EVIDENCE_UNAVAILABLE,
     ASK_TURN_INTERNAL_ERROR,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
-    AskAccessRevokedError,
     AskEvidence,
     AskGenerationError,
     AskService,
@@ -58,7 +54,6 @@ from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyErro
 
 logger = logging.getLogger(__name__)
 
-Authorize = Callable[[], ActorContext]
 SessionFactory = sessionmaker[Session]
 _T = TypeVar("_T")
 _LIVE = frozenset({"pending", "queued"})
@@ -96,7 +91,6 @@ class _Job:
     workspace_id: UUID
     turn_id: UUID
     factory: SessionFactory
-    authorize: Authorize
     actor: ActorContext
     request: AskQuestion
     # A replacement starts in the slot its predecessor held.
@@ -152,7 +146,6 @@ class AskRuntime:
         session_id: UUID,
         request: AskQuestion,
         actor: ActorContext,
-        authorize: Authorize,
         *,
         replace_turn_id: UUID | None = None,
     ) -> tuple[AskTurnDetail, _Job | None]:
@@ -165,7 +158,6 @@ class AskRuntime:
                 session_id,
                 request,
                 actor,
-                authorize,
                 replace_turn_id,
             )
         )
@@ -177,12 +169,11 @@ class AskRuntime:
         session_id: UUID,
         request: AskQuestion,
         actor: ActorContext,
-        authorize: Authorize,
     ) -> AskTurnDetail:
         """Submit and wait for the answer (the JSON endpoint)."""
 
         detail, job = await self.submit(
-            factory, workspace_id, session_id, request, actor, authorize
+            factory, workspace_id, session_id, request, actor
         )
         if job is None:
             return detail
@@ -321,7 +312,6 @@ class AskRuntime:
         session_id: UUID,
         request: AskQuestion,
         actor: ActorContext,
-        authorize: Authorize,
         replace_turn_id: UUID | None,
     ) -> tuple[AskTurnDetail, _Job | None]:
         async with self._write:
@@ -344,7 +334,6 @@ class AskRuntime:
                 workspace_id,
                 detail.id,
                 factory,
-                authorize,
                 actor,
                 request,
                 reserved=replaced is not None,
@@ -395,7 +384,7 @@ class AskRuntime:
                     )
             earlier_text = None
             if replace_turn_id is not None:
-                replaced = _controllable(replaced, actor, running=True)
+                replaced = _controllable(replaced, workspace_id, actor, running=True)
                 target = self._turn(session, workspace_id, replaced.turn_id)
                 if target.ask_session_id != session_id or not _running(target):
                     raise _turn_changed()
@@ -431,7 +420,9 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         async with self._write:
-            job = _controllable(self._jobs.get(turn_id), actor, running=False)
+            job = _controllable(
+                self._jobs.get(turn_id), workspace_id, actor, running=False
+            )
             detail = await run_in_threadpool(
                 self._store_stop, factory, workspace_id, turn_id, actor
             )
@@ -462,7 +453,9 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         async with self._write:
-            job = _controllable(self._jobs.get(turn_id), actor, running=True)
+            job = _controllable(
+                self._jobs.get(turn_id), workspace_id, actor, running=True
+            )
             detail, created = await run_in_threadpool(
                 self._store_steer, factory, workspace_id, turn_id, request, actor
             )
@@ -542,33 +535,22 @@ class AskRuntime:
             self._queues.pop(session_id, None)
 
     async def _run(self, job: _Job) -> None:
+        """Answer one turn with the access its request had."""
+
         try:
             if not await run_in_threadpool(self._start, job):
                 return
             job.state_changed()
-            actor = await run_in_threadpool(job.authorize)
-            binding = await self._binding(job, actor)
+            binding = await self._binding(job)
             explicit = "selection" in job.request.model_fields_set
-            prepared = await run_in_threadpool(
-                self._prepare, job, actor, binding, explicit
-            )
+            prepared = await run_in_threadpool(self._prepare, job, binding, explicit)
             streams = binding is not None and bool(prepared.retrieved.pack)
             if streams and binding.steer:
                 await run_in_threadpool(self._enable_steering, job)
                 job.state_changed()
-            # Nothing goes to a model that the asker cannot read now.
-            if not await run_in_threadpool(
-                self._visible, job.factory, job.workspace_id, prepared.evidence, actor
-            ):
-                await run_in_threadpool(self._fail, job, ASK_TURN_EVIDENCE_UNAVAILABLE)
-                return
             job.evidence = prepared.evidence
             composed = await self._compose(job, prepared, binding, explicit, streams)
-            actor = await run_in_threadpool(job.authorize)
-            await run_in_threadpool(self._finish, job, prepared, composed, actor)
-        except AskAccessRevokedError as exc:
-            job.error = exc
-            await run_in_threadpool(self._fail, job, ASK_TURN_ACCESS_REVOKED)
+            await run_in_threadpool(self._finish, job, prepared, composed)
         except AskGenerationError as exc:
             await run_in_threadpool(self._fail, job, exc.code)
         except LLMConnectionError:
@@ -578,9 +560,7 @@ class AskRuntime:
             logger.exception("Ask turn %s failed", job.turn_id)
             await run_in_threadpool(self._fail, job, ASK_TURN_INTERNAL_ERROR)
 
-    async def _binding(
-        self, job: _Job, actor: ActorContext
-    ) -> AskGenerationBinding | None:
+    async def _binding(self, job: _Job) -> AskGenerationBinding | None:
         if job.request.selection is None:
             return None
         return await run_in_threadpool(
@@ -588,7 +568,7 @@ class AskRuntime:
             self.control_factory(),
             job.factory,
             job.workspace_id,
-            actor,
+            job.actor,
             job.request.selection,
         )
 
@@ -645,7 +625,6 @@ class AskRuntime:
     def _prepare(
         self,
         job: _Job,
-        actor: ActorContext,
         binding: AskGenerationBinding | None,
         explicit: bool,
     ) -> PreparedTurn:
@@ -654,7 +633,7 @@ class AskRuntime:
                 session,
                 job.workspace_id,
                 job.turn_id,
-                actor,
+                job.actor,
                 binding=binding,
                 keyword_only=explicit and binding is None,
                 use_legacy_provider=not explicit,
@@ -671,7 +650,6 @@ class AskRuntime:
         job: _Job,
         prepared: PreparedTurn,
         composed: ComposedTurn,
-        actor: ActorContext,
     ) -> None:
         with job.factory.begin() as session:
             # Instructions the model never received did not shape the answer.
@@ -679,9 +657,7 @@ class AskRuntime:
                 self._locked_turn(session, job.workspace_id, job.turn_id), "failed"
             )
             session.flush()
-            self.service.finish_turn(
-                session, job.workspace_id, prepared, composed, actor=actor
-            )
+            self.service.finish_turn(session, job.workspace_id, prepared, composed)
 
     def _fail(self, job: _Job, code: str) -> None:
         try:
@@ -790,10 +766,12 @@ def _person(actor: ActorContext) -> tuple[str, str]:
     return (actor.actor_kind, actor.actor_id)
 
 
-def _controllable(job: _Job | None, actor: ActorContext, *, running: bool) -> _Job:
+def _controllable(
+    job: _Job | None, workspace_id: UUID, actor: ActorContext, *, running: bool
+) -> _Job:
     """The job ``actor`` may change: their own, queued or (``running``) started."""
 
-    if job is None:
+    if job is None or job.workspace_id != workspace_id:
         raise _turn_changed()
     if not job.owned_by(actor):
         raise RejectedByPolicyError(

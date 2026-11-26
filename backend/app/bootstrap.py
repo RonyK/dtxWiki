@@ -88,10 +88,26 @@ def bootstrap_core(settings: Settings) -> None:
     if not settings.auto_bootstrap:
         logger.info("auto_bootstrap=false; verifying the database without migrating")
         verify_database_current(settings)
-        return
-    ensure_data_dirs()
-    ensure_app_version_synced(settings)
-    registry.migrate(settings, allow_upgrade=True)
+    else:
+        ensure_data_dirs()
+        ensure_app_version_synced(settings)
+        registry.migrate(settings, allow_upgrade=True)
+    _end_interrupted_ask_turns(settings)
+
+
+def _end_interrupted_ask_turns(settings: Settings) -> None:
+    """No process is answering Ask questions before serving starts.
+
+    Questions a stopped server left unanswered stay, ended as internal errors.
+    """
+
+    from backend.services.ask_service import fail_interrupted_ask_turns
+
+    engine = make_engine(settings.database_url)
+    try:
+        fail_interrupted_ask_turns(make_session_factory(engine))
+    finally:
+        engine.dispose()
 
 
 def _hold_runtime_lock(app) -> runtime_lock.RuntimeLock | None:

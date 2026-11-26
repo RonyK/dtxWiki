@@ -593,7 +593,7 @@ def test_verification_applies_only_to_the_setup_it_checked(
         },
     )
     assert personal_enabled.status_code == 200, personal_enabled.text
-    assert personal_record["id"] not in available_ask_connections()
-    with pytest.raises(LLMConnectionError) as unavailable:
-        bind_ask_connection("personal", personal_record["id"])
-    assert unavailable.value.error_code == "custom_endpoint_disabled"
+    # A person's own connection is theirs to use: the Workspace switch governs
+    # only the Workspace's connections.
+    assert personal_record["id"] in available_ask_connections()
+    assert bind_ask_connection("personal", personal_record["id"]).model

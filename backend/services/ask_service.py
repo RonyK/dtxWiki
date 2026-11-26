@@ -171,8 +171,6 @@ _HISTORY_BATCH = 20
 _VISIBILITY_BATCH = 500
 # Why a turn ended as failed. Only these codes reach clients.
 ASK_TURN_INTERNAL_ERROR = "internal_error"
-ASK_TURN_ACCESS_REVOKED = "access_revoked"
-ASK_TURN_EVIDENCE_UNAVAILABLE = "evidence_unavailable"
 ASK_TURN_SERVER_RESTARTED = "server_restarted"
 ASK_MODEL_ERROR_CODES = frozenset(
     {
@@ -404,13 +402,6 @@ def ask_session_for_turn_insert_statement(ask_session_id: UUID, workspace_id: UU
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-
-
-class AskAccessRevokedError(Exception):
-    """The asker lost access while the answer was being written.
-
-    The cause is the original authentication or policy refusal.
-    """
 
 
 class AskGenerationError(RuntimeError):
@@ -955,18 +946,6 @@ class AskService:
         )
         if ask_session is None:
             raise ReadNotFoundError("ask session not found")
-        if actor is not None and not ask_evidence_visible(
-            session,
-            context_refs=prepared.evidence.context,
-            artifact_ids=prepared.evidence.library,
-            actor=actor,
-            workspace_id=workspace_id,
-        ):
-            # The asker lost access to evidence while the answer was being
-            # written: keep the question, store no answer.
-            return self._end_unanswered(
-                session, workspace_id, prepared, ASK_TURN_EVIDENCE_UNAVAILABLE, actor
-            )
         if not self._end_pending_turn(
             session, workspace_id, prepared.turn_id, ASK_TURN_COMPLETED
         ):
@@ -1036,20 +1015,6 @@ class AskService:
             ),
             warning_codes,
         )
-
-    def _end_unanswered(
-        self,
-        session: Session,
-        workspace_id: UUID,
-        prepared: PreparedTurn,
-        error_code: str,
-        actor: ActorContext | None,
-    ) -> tuple[AskTurnDetail, list[str]]:
-        self.fail_turn(session, workspace_id, prepared.turn_id, error_code)
-        ask_session = self._require_session(
-            session, workspace_id, prepared.ask_session_id
-        )
-        return self._stored_turn(session, ask_session, prepared.turn_id, actor), []
 
     def fail_turn(
         self,
@@ -1150,17 +1115,6 @@ class AskService:
             use_legacy_provider=False,
         )
         retrieved = prepared.retrieved
-        if not ask_evidence_visible(
-            session,
-            context_refs=retrieved.evidence.context,
-            artifact_ids=retrieved.evidence.library,
-            actor=actor,
-            workspace_id=workspace_id,
-        ):
-            raise RejectedByPolicyError(
-                "The search evidence is unavailable.",
-                error_code=ASK_TURN_EVIDENCE_UNAVAILABLE,
-            )
         composed = self.compose_evidence(prepared)
         warnings = [
             code
@@ -1824,8 +1778,9 @@ class AskService:
             started_at=turn.started_at,
             tree_path=tree_path,
             retrieval_trace=retrieval_trace,
-            tried_lanes=turn.tried_lanes or [],
-            fallback_disclosure=turn.fallback_disclosure,
+            # The search path is evidence-derived too.
+            tried_lanes=(turn.tried_lanes or []) if evidence_visible else [],
+            fallback_disclosure=turn.fallback_disclosure and evidence_visible,
             warning_codes=turn.warning_codes or [],
             graph_context=turn_graph_context,
             link_targets=link_targets,

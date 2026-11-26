@@ -196,7 +196,7 @@ def _emit_runtime_event(**event: str) -> None:
 async def _serve(host: str, port: int) -> None:
     if host not in {"127.0.0.1", "::1"}:
         raise ValueError("desktop engine only accepts a loopback host")
-    from backend.app.main import create_serving_app
+    from backend.app.main import create_app
     from backend.app.runtime import serve_runtime
     from backend.app.settings import Settings
 
@@ -219,7 +219,7 @@ async def _serve(host: str, port: int) -> None:
         host=host,
         port=port,
         log_level="info",
-        application_factory=lambda effective: create_serving_app(effective),
+        application_factory=lambda effective: create_app(settings=effective),
         on_server=watch_parent,
         on_progress=lambda phase: _emit_runtime_event(phase=phase),
         # A frozen executable is this entry point, not a Python interpreter.

@@ -26,9 +26,7 @@ def serve(monkeypatch, tmp_path):
     clear_ambient_dtxwiki_env(monkeypatch)
     monkeypatch.setenv("DTXWIKI_DATA_DIR", str(tmp_path / "data"))
     calls: dict = {}
-    monkeypatch.setattr(
-        cli_main, "create_serving_app", lambda *_args, **_kwargs: object()
-    )
+    monkeypatch.setattr(cli_main, "create_app", lambda **_kwargs: object())
 
     async def fake_runtime(
         _app, _settings, *, application_factory, on_started, **kwargs
