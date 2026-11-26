@@ -745,18 +745,28 @@ describe("AskScreen", () => {
     });
     let turns = [active, queued];
     let replacementBody: unknown;
+    let holdRefresh = false;
+    let resolveRefresh: ((response: Response) => void) | undefined;
     const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
     const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
     const encoder = new TextEncoder();
-    mockFetch((url, init) => {
+    mockAskFetch(async (input, init) => {
+      const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
-        return { data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } };
+        return jsonResponse({ data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } });
       }
       if (url === `${prefix}/sessions`) {
-        return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
+        return jsonResponse({ data: { items: [sessionRef()], date_buckets: [], next_cursor: null } });
       }
-      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) return { data: [] };
-      if (url === `${prefix}/sessions/${SESSION_ID}`) return { data: sessionDetail(turns) };
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return jsonResponse({ data: [] });
+      }
+      if (url === `${prefix}/sessions/${SESSION_ID}`) {
+        if (holdRefresh) {
+          return new Promise<Response>((resolve) => { resolveRefresh = resolve; });
+        }
+        return jsonResponse({ data: sessionDetail(turns) });
+      }
       if (url === `${prefix}/sessions/${SESSION_ID}/turns/stream` && init?.method === "POST") {
         replacementBody = JSON.parse(String(init.body));
         turns = [{ ...active, status: "stopped" }, queued, replacement];
@@ -798,10 +808,27 @@ describe("AskScreen", () => {
 
     const regenerated = { ...replacement, status: "completed", assistant_message: "Replacement answer" } as const;
     turns = [turns[0], queued, regenerated];
+    holdRefresh = true;
     streams.get(replacement.id)!.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(regenerated)}\n\n`));
     await waitFor(() => expect(streams.has(queued.id)).toBe(true));
+    await waitFor(() => expect(resolveRefresh).toBeDefined());
+    const pending = {
+      ...queued, status: "pending", started_at: "2026-05-09T00:00:04Z",
+    } as const;
+    streams.get(queued.id)!.enqueue(encoder.encode(
+      `event: state\ndata: ${JSON.stringify({ ...pending, steer_supported: true })}\n\n`,
+    ));
+    await screen.findByRole("button", { name: "Apply to current answer" });
+    holdRefresh = false;
+    await act(async () => {
+      resolveRefresh!(jsonResponse({
+        data: { ...sessionDetail([turns[0], pending, regenerated]), title: "Refreshed Ask" },
+      }));
+    });
+    expect(screen.getByRole("heading", { name: "Refreshed Ask" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply to current answer" })).toBeInTheDocument();
     const followUp = {
-      ...queued, status: "completed", started_at: "2026-05-09T00:00:04Z", assistant_message: "Queued answer",
+      ...pending, status: "completed", assistant_message: "Queued answer",
     } as const;
     turns = [turns[0], followUp, regenerated];
     streams.get(queued.id)!.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(followUp)}\n\n`));
