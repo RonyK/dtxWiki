@@ -33,6 +33,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
+from backend.llm.binding import ModelBinding
 from backend.llm.streaming import SteerInput, SteerUpdate
 from backend.models.ask import (
     ASK_TURN_FAILED,
@@ -44,10 +45,7 @@ from backend.policy.auth import ActorContext
 from backend.repositories.workspace_scoped import get_in_workspace, select_in_workspace
 from backend.schemas.ask import AskQuestion, AskSteerRequest, AskTurnDetail
 from backend.schemas.input_policy import validate_request_inputs
-from backend.services.ask_connection_service import (
-    AskConnectionService,
-    AskGenerationBinding,
-)
+from backend.services.ask_connection_service import AskConnectionService
 from backend.services.ask_service import (
     ASK_TURN_INTERNAL_ERROR,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
@@ -554,14 +552,24 @@ class AskRuntime:
                 return
             job.state_changed()
             binding = await self._binding(job)
-            explicit = "selection" in job.request.model_fields_set
-            prepared = await run_in_threadpool(self._prepare, job, binding, explicit)
-            streams = binding is not None and bool(prepared.retrieved.pack)
-            if streams and binding.steer:
+            prepared = await run_in_threadpool(self._prepare, job, binding)
+            asks_model = binding is not None and bool(prepared.retrieved.pack)
+            if asks_model and binding.steer:
                 await run_in_threadpool(self._enable_steering, job)
                 job.state_changed()
             job.evidence = prepared.evidence
-            composed = await self._compose(job, prepared, binding, explicit, streams)
+            if asks_model:
+                composed = await self.service.stream_turn(
+                    prepared,
+                    binding,
+                    on_delta=lambda text: self._on_delta(job, text),
+                    next_steer=lambda: self._next_steer(job),
+                    on_steer=lambda update: self._on_steer(job, update),
+                )
+            else:
+                composed = self.service.compose_evidence(
+                    prepared, warnings=self._default_unavailable(job)
+                )
             await run_in_threadpool(self._finish, job, prepared, composed)
         except AskGenerationError as exc:
             await run_in_threadpool(self._fail, job, exc.code)
@@ -572,7 +580,12 @@ class AskRuntime:
             logger.exception("Ask turn %s failed", job.turn_id)
             await run_in_threadpool(self._fail, job, ASK_TURN_INTERNAL_ERROR)
 
-    async def _binding(self, job: _Job) -> AskGenerationBinding | None:
+    async def _binding(self, job: _Job) -> ModelBinding | None:
+        """The model a question asks: none named is the default model, null
+        is search only, a selection is that connection's model."""
+
+        if _names_no_model(job.request):
+            return self.connections.default
         if job.request.selection is None:
             return None
         return await run_in_threadpool(
@@ -584,27 +597,12 @@ class AskRuntime:
             job.request.selection,
         )
 
-    async def _compose(
-        self,
-        job: _Job,
-        prepared: PreparedTurn,
-        binding: AskGenerationBinding | None,
-        explicit: bool,
-        streams: bool,
-    ) -> ComposedTurn:
-        if streams:
-            assert binding is not None
-            return await self.service.stream_turn(
-                prepared,
-                binding,
-                on_delta=lambda text: self._on_delta(job, text),
-                next_steer=lambda: self._next_steer(job),
-                on_steer=lambda update: self._on_steer(job, update),
-            )
-        if explicit:
-            # Search only, or a chosen model with nothing to answer from.
-            return self.service.compose_evidence(prepared)
-        return await run_in_threadpool(self.service.compose_turn, prepared)
+    def _default_unavailable(self, job: _Job) -> tuple[str, ...]:
+        """Say why a question for the default model got no model answer."""
+
+        if _names_no_model(job.request) and self.connections.default_unavailable_reason:
+            return (LLM_PROVIDER_UNAVAILABLE_WARNING,)
+        return ()
 
     def _start(self, job: _Job) -> bool:
         with job.factory.begin() as session:
@@ -634,12 +632,7 @@ class AskRuntime:
             turn.started_at = datetime.now(UTC)
         return True
 
-    def _prepare(
-        self,
-        job: _Job,
-        binding: AskGenerationBinding | None,
-        explicit: bool,
-    ) -> PreparedTurn:
+    def _prepare(self, job: _Job, binding: ModelBinding | None) -> PreparedTurn:
         with job.factory() as session:
             return self.service.prepare_turn(
                 session,
@@ -647,8 +640,9 @@ class AskRuntime:
                 job.turn_id,
                 job.actor,
                 binding=binding,
-                keyword_only=explicit and binding is None,
-                use_legacy_provider=not explicit,
+                # Search only uses keyword search, as "search again" does.
+                keyword_only=not _names_no_model(job.request)
+                and job.request.selection is None,
             )
 
     def _enable_steering(self, job: _Job) -> None:
@@ -768,6 +762,10 @@ class AskRuntime:
         if turn.status == ASK_TURN_PENDING:
             turn.status = ASK_TURN_STOPPED
             _settle_steering(turn, "unknown")
+
+
+def _names_no_model(request: AskQuestion) -> bool:
+    return "selection" not in request.model_fields_set
 
 
 def _person(actor: ActorContext) -> tuple[str, str]:

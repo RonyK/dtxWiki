@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -11,6 +10,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.llm.adapter_registry import LLMAdapterRegistry, LLMAdapterRegistryError
+from backend.llm.binding import ModelBinding
 from backend.llm.credential_vault import (
     ConnectionScope,
     CredentialBinding,
@@ -23,23 +23,11 @@ from backend.services.llm_connection_service import (
     LLMConnectionService,
 )
 from backend.services.settings_service import llm_custom_endpoints_enabled
-from backend.spi.llm import LLMModelCapabilities, LLMTransport, TextGenerationPort
+from backend.spi.llm import LLMModelCapabilities, LLMTransport
 from backend.spi.types import ActorContext
 
 if TYPE_CHECKING:
     from backend.schemas.ask import AskModelSelection
-
-
-@dataclass(frozen=True)
-class AskGenerationBinding:
-    """A request-local port with an identity that is safe to store with history."""
-
-    port: TextGenerationPort = field(repr=False)
-    target: dict[str, str]
-    model: str
-    max_output_tokens: int
-    context_window: int | None
-    steer: bool
 
 
 class AskConnectionService:
@@ -48,11 +36,17 @@ class AskConnectionService:
         connections: LLMConnectionService,
         registry: LLMAdapterRegistry,
         *,
+        default: ModelBinding | None = None,
+        default_unavailable_reason: str | None = None,
         transport_factory: Callable[[], LLMTransport] = HttpxLLMTransport,
     ) -> None:
         self._connections = connections
         self._registry = registry
         self._transport_factory = transport_factory
+        # The server's default model (DTXWIKI_LLM_PROVIDER), used when a
+        # question names no model; the reason is set when it is misconfigured.
+        self.default = default
+        self.default_unavailable_reason = default_unavailable_reason
 
     def list_choices(
         self,
@@ -116,7 +110,7 @@ class AskConnectionService:
         workspace_id: UUID,
         actor: ActorContext,
         selection: AskModelSelection,
-    ) -> AskGenerationBinding:
+    ) -> ModelBinding:
         if selection.scope == "personal":
             if actor.user_id is None:
                 raise _unavailable()
@@ -198,7 +192,7 @@ class AskConnectionService:
             )
         except (LLMAdapterRegistryError, ValueError):
             raise _unavailable() from None
-        return AskGenerationBinding(
+        return ModelBinding(
             port=port,
             target=target,
             model=model,

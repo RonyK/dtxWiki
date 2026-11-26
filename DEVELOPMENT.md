@@ -262,8 +262,8 @@ adapter는 주입된 transport로만 통신하며 연결의 base URL 밖으로 �
 credential을 넣을 수 없습니다(query parameter는 허용). 웹 앱은 시작할 때 registry를
 검증하고, worker와 CLI는 LLM adapter를 만들지 않습니다.
 `backend.testing.spi_conformance.llm.assert_llm_adapter_contract`에 플러그인 이름과
-provider 응답 fixture를 넣어 계약을 확인합니다. 현재 Ask는 `DTXWIKI_LLM_PROVIDER`로
-고른 내장 adapter만 사용합니다.
+provider 응답 fixture를 넣어 계약을 확인합니다. Ask는 `DTXWIKI_LLM_PROVIDER` 기본 모델과
+등록된 LLM 연결을 같은 `ModelBinding` 경로로 실행합니다.
 
 플러그인 migration은 core head 적용 뒤 단일 DB에 실행되며 core가 제공하는
 Alembic 환경과 별도 `alembic_version_<name>`을 사용합니다. 플러그인의 `env.py`는

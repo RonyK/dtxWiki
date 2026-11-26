@@ -19,7 +19,7 @@ from backend.domain.input_policy import (
     fit_generated_title,
     normalize_ask_user_message,
 )
-from backend.llm.generation import TextGenerator
+from backend.llm.binding import ModelBinding
 from backend.llm.streaming import SteerInput, SteerUpdate, generate_stream
 from backend.models.ask import (
     ASK_TURN_COMPLETED,
@@ -53,7 +53,6 @@ from backend.services.actor_visible_read import (
     context_page_visible,
     context_version_is_visible,
 )
-from backend.services.ask_connection_service import AskGenerationBinding
 from backend.services.audit_service import AuditService
 from backend.services.context_link_targets import ask_context_link_targets
 from backend.services.coverage_service import record_coverage_gap, resolve_coverage_gap
@@ -332,7 +331,7 @@ def _history_within_context(
     history: tuple[tuple[str, str, AskEvidence], ...],
     question: str,
     retrieved: RetrievedEvidence,
-    binding: AskGenerationBinding,
+    binding: ModelBinding,
 ) -> tuple[tuple[str, str, AskEvidence], ...]:
     """Use UTF-8 size as a conservative estimate for optional history."""
     assert binding.context_window is not None
@@ -499,24 +498,12 @@ class AskService:
         search_service: SearchService | None = None,
         audit_service: AuditService | None = None,
         tree_read_service: TreeReadService | None = None,
-        provider: TextGenerator | None = None,
         graph_service: GraphService | None = None,
-        provider_unavailable_reason: str | None = None,
-        provider_target: Mapping[str, str] | None = None,
     ) -> None:
         self.search_service = search_service or SearchService()
         self.audit_service = audit_service or AuditService()
         self.tree_read_service = tree_read_service or TreeReadService()
-        self.provider = provider
         self.graph_service = graph_service
-        # Set when the configured LLM provider could not be built. Ask still
-        # answers from the deterministic evidence pack; the reason is reported
-        # so the operator (and the user) learn why the answer style changed
-        # instead of the request failing.
-        self.provider_unavailable_reason = provider_unavailable_reason
-        # Which model answers: an answer is shown later only to the same model,
-        # so the earlier conversation never goes to a different endpoint.
-        self.provider_target = dict(provider_target) if provider_target else None
 
     def list_sessions(
         self,
@@ -730,11 +717,11 @@ class AskService:
         turn_id: UUID,
         actor: ActorContext | None = None,
         *,
-        binding: AskGenerationBinding | None = None,
+        binding: ModelBinding | None = None,
         keyword_only: bool = False,
-        use_legacy_provider: bool = True,
     ) -> PreparedTurn:
-        """Find this question's evidence and the earlier turns to show."""
+        """Find this question's evidence and, for ``binding``, the earlier
+        turns to show it."""
 
         turn = get_in_workspace(
             session, AskTurn, workspace_id=workspace_id, resource_id=turn_id
@@ -746,19 +733,9 @@ class AskService:
             session, workspace_id, question, actor, keyword_only=keyword_only
         )
         # Earlier turns only matter when a model is asked.
-        use_model = binding is not None or (
-            use_legacy_provider and self.provider is not None
-        )
         history = (
-            self._history(
-                session,
-                workspace_id,
-                turn,
-                actor,
-                target=binding.target if binding is not None else self.provider_target,
-                generated_only=binding is not None,
-            )
-            if use_model and retrieved.pack
+            self._history(session, workspace_id, turn, actor, target=binding.target)
+            if binding is not None and retrieved.pack
             else ()
         )
         if binding is not None and binding.context_window is not None:
@@ -776,8 +753,10 @@ class AskService:
         )
 
     @staticmethod
-    def compose_evidence(prepared: PreparedTurn) -> ComposedTurn:
-        """Compose a local search result without an LLM generation call."""
+    def compose_evidence(
+        prepared: PreparedTurn, *, warnings: tuple[str, ...] = ()
+    ) -> ComposedTurn:
+        """Answer with the search result itself, without a model."""
         retrieved = prepared.retrieved
         return ComposedTurn(
             answer=(
@@ -785,7 +764,7 @@ class AskService:
                 if retrieved.pack
                 else _no_evidence_answer(retrieved.language)
             ),
-            warnings=retrieved.warnings,
+            warnings=(*retrieved.warnings, *warnings),
             generation={
                 "target": None,
                 "outcome": "evidence_pack" if retrieved.pack else "no_evidence",
@@ -795,13 +774,17 @@ class AskService:
     async def stream_turn(
         self,
         prepared: PreparedTurn,
-        binding: AskGenerationBinding | None,
+        binding: ModelBinding | None,
         *,
         on_delta: Callable[[str], Awaitable[None]],
         next_steer: Callable[[], Awaitable[SteerInput]] | None = None,
         on_steer: Callable[[SteerUpdate], Awaitable[None]] | None = None,
     ) -> ComposedTurn:
-        """Run the selected model, streaming only provisional text."""
+        """Ask the model, streaming only provisional text.
+
+        Any failure of the model ends the turn as failed (the asker can search
+        again without a model); the default model follows the same rule.
+        """
         retrieved = prepared.retrieved
         if binding is None or not retrieved.pack:
             return self.compose_evidence(prepared)
@@ -810,6 +793,7 @@ class AskService:
             model=binding.model,
             messages=_composer_messages(prepared, _pack_text(retrieved)),
             max_output_tokens=binding.max_output_tokens,
+            temperature=binding.temperature,
         )
         steering = binding.steer
         try:
@@ -828,6 +812,9 @@ class AskService:
         except TimeoutError:
             raise AskGenerationError(LLM_COMPOSER_RETRYABLE_WARNING) from None
         except LLMAdapterError as exc:
+            # The asker sees the normalized warning; the administrator who is
+            # asked to check needs the adapter's code.
+            logger.warning("Ask model call failed (%s)", exc.code)
             raise AskGenerationError(
                 _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING)
             ) from None
@@ -846,81 +833,6 @@ class AskService:
             answer=result.text.strip(),
             warnings=retrieved.warnings,
             generation=_generation_record(result, binding.target, "completed"),
-        )
-
-    def compose_turn(self, prepared: PreparedTurn) -> ComposedTurn:
-        """Write the answer. Uses no database session."""
-
-        retrieved = prepared.retrieved
-        warnings = list(retrieved.warnings)
-        target = self.provider_target
-        if not retrieved.pack:
-            return ComposedTurn(
-                answer=_no_evidence_answer(retrieved.language),
-                warnings=tuple(warnings),
-                generation={"target": target, "outcome": "no_evidence"},
-            )
-        pack_text = _pack_text(retrieved)
-        if self.provider_unavailable_reason:
-            # Configured but unbuildable provider: a persistent, operator-owned
-            # condition. Disclose it instead of silently serving a different
-            # answer style than the workspace is configured for.
-            warnings.append(LLM_PROVIDER_UNAVAILABLE_WARNING)
-        if self.provider is None:
-            return ComposedTurn(
-                answer=pack_text,
-                warnings=tuple(warnings),
-                generation={"target": target, "outcome": "evidence_pack"},
-            )
-        try:
-            result = self.provider.generate(
-                system=_COMPOSER_SYSTEM,
-                messages=_composer_messages(prepared, pack_text),
-                max_output_tokens=1024,
-            )
-        except LLMAdapterError as exc:
-            # The pack is a valid answer, but the user must know it is not
-            # the composed one, and whether retrying or an admin can help.
-            logger.warning(
-                "Ask composer call failed (%s); using deterministic pack",
-                exc.code,
-            )
-            warnings.append(
-                _ERROR_WARNINGS.get(exc.code, LLM_PROVIDER_UNAVAILABLE_WARNING)
-            )
-            return ComposedTurn(
-                answer=pack_text,
-                warnings=tuple(warnings),
-                generation={"target": target, "outcome": "evidence_pack"},
-            )
-        except Exception:
-            # Unexpected composer errors need an administrator to inspect
-            # the server log.
-            logger.warning(
-                "Ask composer failed unexpectedly; using deterministic pack",
-                exc_info=True,
-            )
-            warnings.append(LLM_PROVIDER_UNAVAILABLE_WARNING)
-            return ComposedTurn(
-                answer=pack_text,
-                warnings=tuple(warnings),
-                generation={"target": target, "outcome": "evidence_pack"},
-            )
-        # Only a completed answer replaces the pack: truncated, refused or
-        # filtered output is not an answer.
-        if result.termination == "completed" and result.text.strip():
-            return ComposedTurn(
-                answer=result.text.strip(),
-                warnings=tuple(warnings),
-                generation=_generation_record(result, target, "completed"),
-            )
-        warnings.append(
-            _TERMINATION_WARNINGS.get(result.termination, LLM_ANSWER_INCOMPLETE_WARNING)
-        )
-        return ComposedTurn(
-            answer=pack_text,
-            warnings=tuple(warnings),
-            generation=_generation_record(result, target, "evidence_pack"),
         )
 
     def finish_turn(
@@ -1085,7 +997,6 @@ class AskService:
             turn_id,
             actor,
             keyword_only=True,
-            use_legacy_provider=False,
         )
         retrieved = prepared.retrieved
         composed = self.compose_evidence(prepared)
@@ -1127,8 +1038,7 @@ class AskService:
         turn: AskTurn,
         actor: ActorContext | None,
         *,
-        target: dict[str, str] | None,
-        generated_only: bool,
+        target: dict[str, str],
     ) -> tuple[tuple[str, str, AskEvidence], ...]:
         """Earlier answered turns to show the model, oldest first.
 
@@ -1164,12 +1074,9 @@ class AskService:
                 if not isinstance(row.generation, Mapping):
                     return tuple(reversed(picked))
                 generation = row.generation
-                # A search without a model, and for a chosen model an answer it
-                # did not write, do not reset the conversation. An answer from
-                # a different model still does.
-                if generation.get("target") is None or (
-                    generated_only and generation.get("outcome") != "completed"
-                ):
+                # Only model answers continue a conversation: results without
+                # a model are skipped, and a different model's answer ends it.
+                if generation.get("outcome") != "completed":
                     continue
                 if generation.get("target") != target:
                     return tuple(reversed(picked))
@@ -1740,7 +1647,6 @@ class AskService:
             steering_messages=turn.steering_messages or [],
             can_search=(
                 turn.status == ASK_TURN_FAILED
-                and turn.selection is not None
                 and turn.error_code in ASK_MODEL_ERROR_CODES
             ),
             created_at=turn.created_at,

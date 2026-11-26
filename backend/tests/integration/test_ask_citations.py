@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select
 
+from backend.llm.binding import ModelBinding
 from backend.models.ask import AskTurn, AskTurnCitation
 from backend.models.chunk import ContentChunk
 from backend.models.context import ContextPage, ContextPageVersion
@@ -37,7 +38,7 @@ from backend.services.context_ingress_service import ContextIngressService
 from backend.services.graph_service import GraphService
 from backend.services.read_errors import ReadNotFoundError
 from backend.services.search_service import SearchService
-from backend.spi.llm import CanonicalTextResult
+from backend.spi.llm import CanonicalTextResult, TextMessage
 from backend.tests.utils.ask import create_turn_in_session
 
 pytestmark = pytest.mark.integration
@@ -86,13 +87,13 @@ class FakeSemanticSearch:
         )
 
 
-class _RecordingProvider:
+class _RecordingPort:
     def __init__(self, *answers: str) -> None:
         self.answers = list(answers)
-        self.calls: list[tuple] = []
+        self.calls: list[tuple[TextMessage, ...]] = []
 
-    def generate(self, *, system, messages, max_output_tokens):
-        self.calls.append(tuple(messages))
+    async def generate(self, request, _context):
+        self.calls.append(request.messages)
         return CanonicalTextResult(text=self.answers.pop(0), termination="completed")
 
 
@@ -467,12 +468,16 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
         search = FakeSemanticSearch(
             context=[_semantic_context_result(draft_id, version.id)]
         )
-        provider = _RecordingProvider("The plan [1].", "Roll it back [1].")
-        service = AskService(
-            search_service=search,
-            provider=provider,
-            provider_target={"kind": "server", "model": "test-default"},
+        port = _RecordingPort("The plan [1].", "Roll it back [1].")
+        binding = ModelBinding(
+            port=port,
+            target={"kind": "server", "model": "test-default"},
+            model="test-default",
+            max_output_tokens=1024,
+            context_window=None,
+            steer=False,
         )
+        service = AskService(search_service=search)
         ask_session = service.create_session(
             session=session,
             workspace_id=workspace.id,
@@ -490,6 +495,7 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor_kind="human",
             actor_id=ACTOR_ID,
             actor=_actor("editor"),
+            binding=binding,
         )
         search._context = [_semantic_context_result(public.id, published.id)]
         search_turn_id = service.submit_turn(
@@ -509,7 +515,6 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             search_turn_id,
             actor,
             keyword_only=True,
-            use_legacy_provider=False,
         )
         service.finish_turn(
             session,
@@ -527,9 +532,10 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor_kind="human",
             actor_id=ACTOR_ID,
             actor=_actor("editor"),
+            binding=binding,
         )
         # The model saw the earlier exchange and the follow-up with its pack.
-        *history, _question = provider.calls[1]
+        *history, _question = port.calls[1]
         assert [(message.role, message.text) for message in history] == [
             ("user", "what is the plan?"),
             ("assistant", "The plan [1]."),

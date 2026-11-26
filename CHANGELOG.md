@@ -25,11 +25,13 @@
   no longer sent again, because the provider may already have charged for it.
   `openai` sends `max_completion_tokens` instead of the deprecated
   `max_tokens`.
-- Ask uses only a completed answer. It shows an evidence summary with
-  `llm_composer_retryable` for a temporary failure, `llm_answer_incomplete` for a
-  cut-off or unusable reply, `llm_answer_refused` for a declined or filtered
-  reply, or `llm_provider_unavailable` when an administrator needs to investigate.
-  Saved turns with `llm_composer_failed` display a generic fallback message.
+- Ask uses only a completed answer. A model that fails ends the question as
+  `failed` with `llm_composer_retryable` for a temporary failure,
+  `llm_answer_incomplete` for a cut-off or unusable reply, `llm_answer_refused`
+  for a declined or filtered reply, or `llm_provider_unavailable` when an
+  administrator needs to investigate; the asker can search again without a
+  model. Saved turns with `llm_composer_failed` display a generic fallback
+  message.
 - Provider options refuse a credential field's name at any depth, not only at
   the top level, also when a plugin schema allows nested options.
 
@@ -42,11 +44,13 @@
   not its answer, citations or search path, and cannot save it.
 - A question is stored as soon as it is accepted. Questions in a session are
   answered one at a time, in order; one sent meanwhile waits with `status`
-  `queued`. With the default model a provider failure still answers with the
-  evidence summary and a warning, as before. If the turn cannot be finished,
-  it stays with `status` `failed` and an `error_code`: `internal_error`,
-  `server_restarted`, or the failure of a model the asker chose, which can be
-  searched again without a model. Access is checked when a question is asked
+  `queued`. The default model (`DTXWIKI_LLM_PROVIDER`) and every LLM
+  connection answer the same way: streamed, stoppable, and a failure is the
+  model's failure. Without a usable default model a question that names no
+  model is answered with the evidence summary (with `llm_provider_unavailable`
+  when the setting is wrong). If the turn cannot be finished, it stays with
+  `status` `failed` and an `error_code`: `internal_error`, `server_restarted`,
+  or the model's failure, which can be searched again without a model. Access is checked when a question is asked
   and its evidence is searched; a running answer is not re-checked. Only
   `completed` turns can be saved to Context.
 - The Ask screen streams the answer while it is written. Each question can use
