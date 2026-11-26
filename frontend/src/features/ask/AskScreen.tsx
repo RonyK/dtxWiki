@@ -756,12 +756,18 @@ function newerTurn(previous: AskTurnDetail | undefined, current: AskTurnDetail):
   if (!isUnfinishedTurn(previous) || (previous.status === "pending" && current.status === "queued")) {
     return previous;
   }
+  // Facts that only move forward during a turn survive an older snapshot:
+  // instruction outcomes, and steering once the model has enabled it.
   const steering = new Map(previous.steering_messages?.map((message) => [message.id, message]));
   for (const message of current.steering_messages ?? []) {
     const existing = steering.get(message.id);
     if (!existing || message.status !== "waiting") steering.set(message.id, message);
   }
-  return steering.size > 0 ? { ...current, steering_messages: [...steering.values()] } : current;
+  return {
+    ...current,
+    steer_supported: Boolean(current.steer_supported || previous.steer_supported),
+    ...(steering.size > 0 ? { steering_messages: [...steering.values()] } : {}),
+  };
 }
 
 function mergeAskTurn(state: AskState, detail: AskSessionDetail, turn: AskTurnDetail): AskState {
