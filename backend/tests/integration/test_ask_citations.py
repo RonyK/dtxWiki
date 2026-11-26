@@ -516,7 +516,6 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             workspace.id,
             prepared,
             service.compose_evidence(prepared),
-            actor=actor,
         )
         # The follow-up uses public evidence and the earlier model exchange.
         follow_up, _warnings = create_turn_in_session(

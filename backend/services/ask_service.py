@@ -929,13 +929,11 @@ class AskService:
         workspace_id: UUID,
         prepared: PreparedTurn,
         composed: ComposedTurn,
-        *,
-        actor: ActorContext | None = None,
-    ) -> tuple[AskTurnDetail, list[str]]:
+    ) -> None:
         """Store the answer if the turn is still pending.
 
         Another ending (stop, startup recovery) may have been stored first;
-        then nothing is written and the stored turn is returned.
+        then nothing is written. Read the turn with ``get_turn``.
         """
 
         acquire_workspace_write_intent(session)
@@ -949,7 +947,7 @@ class AskService:
         if not self._end_pending_turn(
             session, workspace_id, prepared.turn_id, ASK_TURN_COMPLETED
         ):
-            return self._stored_turn(session, ask_session, prepared.turn_id, actor), []
+            return
         turn = self._reload_turn(session, workspace_id, prepared.turn_id)
         retrieved = prepared.retrieved
         warning_codes = [
@@ -1005,16 +1003,6 @@ class AskService:
             ask_session=ask_session,
         )
         ask_session.updated_at = datetime.now(UTC)
-        return (
-            self._turn_detail(
-                session=session,
-                ask_session=ask_session,
-                turn=turn,
-                actor=actor,
-                revalidate_evidence=False,
-            ),
-            warning_codes,
-        )
 
     def fail_turn(
         self,
@@ -1061,21 +1049,6 @@ class AskService:
             .execution_options(synchronize_session=False)
         )
         return result.rowcount == 1
-
-    def _stored_turn(
-        self,
-        session: Session,
-        ask_session: AskSession,
-        turn_id: UUID,
-        actor: ActorContext | None,
-    ) -> AskTurnDetail:
-        turn = self._reload_turn(session, ask_session.workspace_id, turn_id)
-        return self._turn_detail(
-            session=session,
-            ask_session=ask_session,
-            turn=turn,
-            actor=actor,
-        )
 
     def get_turn(
         self,
@@ -1670,7 +1643,6 @@ class AskService:
         proposal_ids: list[str] | None = None,
         actor: ActorContext | None = None,
         graph_context: list[GraphNeighborEntry] | None = None,
-        revalidate_evidence: bool = True,
         visibility_cache: dict[tuple[str, UUID, UUID | None], bool] | None = None,
     ) -> AskTurnDetail:
         node = get_in_workspace(
@@ -1698,11 +1670,8 @@ class AskService:
         # draft Context evidence). On a READ, re-validate the grounding evidence
         # against the CURRENT actor; if any cited document is no longer visible to
         # them, the answer is derived from evidence they cannot read, so redact the
-        # whole evidence-derived payload rather than replay it. On the creation
-        # return, the actor IS the author whose search already filtered the
-        # evidence, so re-validation is skipped (redundant, and a divergence there
-        # would falsely blank the author's own just-created answer).
-        evidence_visible = not revalidate_evidence or ask_turn_visible(
+        # whole evidence-derived payload rather than replay it.
+        evidence_visible = ask_turn_visible(
             session,
             turn,
             citations,

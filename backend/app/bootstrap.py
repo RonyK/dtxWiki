@@ -66,7 +66,7 @@ def bootstrap(settings: Settings, app=None) -> None:
 
     lock = _hold_runtime_lock(app)
     try:
-        bootstrap_core(settings)
+        prepare_serving(settings)
         if app is not None:
             app.state.app_version_synced = True
     except BaseException:
@@ -88,18 +88,21 @@ def bootstrap_core(settings: Settings) -> None:
     if not settings.auto_bootstrap:
         logger.info("auto_bootstrap=false; verifying the database without migrating")
         verify_database_current(settings)
-    else:
-        ensure_data_dirs()
-        ensure_app_version_synced(settings)
-        registry.migrate(settings, allow_upgrade=True)
-    _end_interrupted_ask_turns(settings)
+        return
+    ensure_data_dirs()
+    ensure_app_version_synced(settings)
+    registry.migrate(settings, allow_upgrade=True)
 
 
-def _end_interrupted_ask_turns(settings: Settings) -> None:
-    """No process is answering Ask questions before serving starts.
+def prepare_serving(settings: Settings) -> None:
+    """Prepare storage for a process about to serve.
 
-    Questions a stopped server left unanswered stay, ended as internal errors.
+    Before it serves, no process is answering Ask questions: those a stopped
+    server left unanswered stay, ended as internal errors. Maintenance
+    commands use ``bootstrap_core`` alone; they may run beside a server.
     """
+
+    bootstrap_core(settings)
 
     from backend.services.ask_service import fail_interrupted_ask_turns
 

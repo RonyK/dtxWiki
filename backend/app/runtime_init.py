@@ -23,7 +23,7 @@ def main() -> None:
     control.set_interrupt(lambda: _thread.interrupt_main(signal.SIGTERM))
     try:
         packet = control.read_config()
-        from backend.app.bootstrap import bootstrap_core
+        from backend.app.bootstrap import prepare_serving
         from backend.app.runtime_credentials import prepare_serving_credentials
         from backend.app.runtime_resources import RuntimeResources
         from backend.app.settings import Settings
@@ -41,7 +41,7 @@ def main() -> None:
             # Refuse invalid serving config before schema or key writes.
             settings.validate_for_startup()
             settings = prepare_serving_credentials(settings)
-            bootstrap_core(settings)
+            prepare_serving(settings)
             if control.stop_requested.is_set():
                 raise ChildShutdownRequested("initialization stopped")
             key_path = settings.oauth_jwt_private_key_path

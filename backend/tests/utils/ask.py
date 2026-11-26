@@ -34,10 +34,6 @@ def create_turn_in_session(
         actor_id=actor_id,
     )
     prepared = service.prepare_turn(session, workspace_id, turn_id, actor)
-    return service.finish_turn(
-        session,
-        workspace_id,
-        prepared,
-        service.compose_turn(prepared),
-        actor=actor,
-    )
+    service.finish_turn(session, workspace_id, prepared, service.compose_turn(prepared))
+    detail = service.get_turn(session, workspace_id, turn_id, actor)
+    return detail, list(detail.warning_codes)

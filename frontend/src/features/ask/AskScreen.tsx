@@ -770,15 +770,12 @@ function newerTurn(previous: AskTurnDetail | undefined, current: AskTurnDetail):
   };
 }
 
-function updateAskHistory(
-  sessions: AskSessionRef[],
-  detail: AskSessionDetail,
-  insertIfMissing: boolean,
-) {
-  if (insertIfMissing && !sessions.some((session) => session.id === detail.id)) {
-    return [detail, ...sessions];
-  }
-  return sessions.map((session) => session.id === detail.id ? detail : session);
+// The open session is always in the history rail, in activity order.
+function updateAskHistory(sessions: AskSessionRef[], detail: AskSessionDetail) {
+  return sortSessionsByActivity([
+    detail,
+    ...sessions.filter((session) => session.id !== detail.id),
+  ]);
 }
 
 function mergeAskTurn(
@@ -797,15 +794,11 @@ function mergeAskTurn(
     ? turn.created_at
     : detail.updated_at;
   const session = { ...detail, updated_at: updatedAt, turns, turn_count: turns.length };
-  const sessions = updateAskHistory(state.sessions, session, questionAccepted);
+  const sessions = updateAskHistory(state.sessions, session);
   return { ...state, detail: session, sessions };
 }
 
-function mergeAskSnapshot(
-  state: AskState,
-  reported: AskSessionDetail,
-  insertIfMissing = false,
-): AskState {
+function mergeAskSnapshot(state: AskState, reported: AskSessionDetail): AskState {
   const previous = state.detail;
   if (previous?.id !== reported.id) return { ...state, detail: reported };
   // A GET can start before a send or stream update that resolved earlier.
@@ -817,8 +810,15 @@ function mergeAskSnapshot(
   });
   turns.push(...priorTurns.values());
   turns.sort((left, right) => left.turn_no - right.turn_no);
-  const detail = { ...reported, turns, turn_count: turns.length };
-  const sessions = updateAskHistory(state.sessions, detail, insertIfMissing);
+  // A read that started earlier keeps the newer title and activity time.
+  const olderRead = Date.parse(sessionActivityAt(reported)) < Date.parse(sessionActivityAt(previous));
+  const detail = {
+    ...reported,
+    ...(olderRead ? { title: previous.title, updated_at: previous.updated_at } : {}),
+    turns,
+    turn_count: turns.length,
+  };
+  const sessions = updateAskHistory(state.sessions, detail);
   return { ...state, detail, sessions };
 }
 
@@ -1050,7 +1050,11 @@ export function AskScreen() {
         }
         return {
           ...prev,
-          sessions: sortSessionsByActivity([...prev.sessions, ...next.items]),
+          // A session already shown (e.g. the open one) is not added twice.
+          sessions: sortSessionsByActivity([
+            ...prev.sessions,
+            ...next.items.filter((item) => !prev.sessions.some((shown) => shown.id === item.id)),
+          ]),
           sessionsCursor: next.next_cursor,
           sessionsHasMore: next.has_more,
         };
@@ -1575,7 +1579,7 @@ export function AskScreen() {
           setState((previous) =>
             onRoute() && generation === loadGenerationRef.current &&
               previous?.workspaceId === workspaceId && previous.detail?.id === sessionId
-              ? mergeAskSnapshot(previous, detail, true)
+              ? mergeAskSnapshot(previous, detail)
               : previous,
           );
         }).catch(() => undefined);
