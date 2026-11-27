@@ -415,8 +415,9 @@ class SteerableTextPort(StreamingTextPort, Protocol):
         """Stream, and send the provider each instruction while it answers.
 
         ``next_steer`` returns the oldest instruction not yet sent; it stays
-        queued until ``on_steer`` reports it ``sent``. Every instruction the
-        port takes ends ``applied``, ``failed`` or ``unknown``. An applied
+        queued until ``on_steer`` reports it, ``sent`` or already settled.
+        Every instruction the port takes ends ``applied``, ``failed`` or
+        ``unknown``. An applied
         instruction starts a new response: ``on_delta`` then carries the new
         text, which replaces what was passed before.
         """

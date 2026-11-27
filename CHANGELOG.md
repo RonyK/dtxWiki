@@ -67,8 +67,8 @@
   only; the browser remembers the last choice. The asker can stop a queued or
   running question, or add an instruction to a running answer
   (`POST …/ask/turns/{ask_turn_id}/steer`). A model that takes instructions
-  while it answers gets it at once, and the instruction shows whether it was
-  applied or failed. Otherwise the answer is stopped and the question is asked
+  while it answers is sent it in order, and the instruction shows whether it
+  was applied, failed or could not be confirmed. Otherwise the answer is stopped and the question is asked
   again with the instruction, with the same model selection (checked again
   when it starts) and ahead of queued questions, and the new turn is
   returned. Only the asker can change a

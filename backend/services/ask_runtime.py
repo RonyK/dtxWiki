@@ -461,7 +461,8 @@ class AskRuntime:
         request.user_message = _validate_user_message(request.user_message)
         with factory.begin() as session:
             turn = self._locked_turn(session, workspace_id, turn_id)
-            # A retry returns what the first request did, even after the job
+            # A request id is the session's idempotency key, as for questions:
+            # a retry returns what the first request did, even after the job
             # it changed has ended.
             request_id = str(request.request_id)
             if any(message["id"] == request_id for message in turn.steering_messages):
@@ -474,7 +475,6 @@ class AskRuntime:
                     workspace_id=workspace_id,
                     criteria=(
                         AskTurn.ask_session_id == turn.ask_session_id,
-                        AskTurn.turn_no > turn.turn_no,
                         AskTurn.request_id == request.request_id,
                     ),
                 ).with_only_columns(AskTurn.id)
