@@ -54,12 +54,6 @@ def upgrade() -> None:
         _TABLE,
         sa.Column("steering_messages", sa.JSON(), nullable=False, server_default="[]"),
     )
-    op.add_column(
-        _TABLE,
-        sa.Column(
-            "steer_supported", sa.Boolean(), nullable=False, server_default=sa.false()
-        ),
-    )
     op.create_index(
         _ACTIVE_INDEX,
         _TABLE,
@@ -79,7 +73,6 @@ def downgrade() -> None:
     op.drop_index(_REQUEST_INDEX, table_name=_TABLE)
     op.drop_index(_ACTIVE_INDEX, table_name=_TABLE)
     for column in (
-        "steer_supported",
         "steering_messages",
         "selection",
         "request_id",

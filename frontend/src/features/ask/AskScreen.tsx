@@ -142,7 +142,6 @@ type AskCopy = {
     retry: string;
     queue: string;
     steer: string;
-    replace: string;
     stop: string;
     cancelQueued: string;
     queued: string;
@@ -307,8 +306,7 @@ const ASK_COPY = {
       manageConnections: "Manage LLM connections",
       retry: "Retry",
       queue: "Queue next question",
-      steer: "Apply to current answer",
-      replace: "Stop and regenerate",
+      steer: "Add instruction",
       stop: "Stop generation",
       cancelQueued: "Cancel queued question",
       queued: "Queued",
@@ -503,8 +501,7 @@ const ASK_COPY = {
       manageConnections: "LLM 연결 관리",
       retry: "다시 시도",
       queue: "다음 질문 예약",
-      steer: "현재 답변에 반영",
-      replace: "중지하고 다시 생성",
+      steer: "지시 추가",
       stop: "답변 생성 중지",
       cancelQueued: "예약 질문 취소",
       queued: "예약됨",
@@ -758,8 +755,8 @@ function newerTurn(previous: AskTurnDetail | undefined, current: AskTurnDetail):
   if (!isUnfinishedTurn(previous) || (previous.status === "pending" && current.status === "queued")) {
     return previous;
   }
-  // Facts that only move forward during a turn survive an older snapshot:
-  // instruction outcomes, and steering once the model has enabled it.
+  // Instruction outcomes only move forward during a turn, so they survive an
+  // older snapshot.
   const steering = new Map(previous.steering_messages?.map((message) => [message.id, message]));
   for (const message of current.steering_messages ?? []) {
     const existing = steering.get(message.id);
@@ -767,7 +764,6 @@ function newerTurn(previous: AskTurnDetail | undefined, current: AskTurnDetail):
   }
   return {
     ...current,
-    steer_supported: Boolean(current.steer_supported || previous.steer_supported),
     ...(steering.size > 0 ? { steering_messages: [...steering.values()] } : {}),
   };
 }
@@ -1194,7 +1190,7 @@ export function AskScreen() {
     return requestRef.current;
   }
 
-  async function sendTurn(action: "queue" | "steer" | "replace") {
+  async function sendTurn(action: "queue" | "steer") {
     if (
       !state ||
       !state.workspaceId ||
@@ -1203,9 +1199,10 @@ export function AskScreen() {
       sendingTurn ||
       selectingSessionId ||
       turnActionId ||
-      // A new or replacing question uses the chosen model; steering does not.
-      (action !== "steer" && modelChoicePending) ||
-      (action !== "queue" && !activeTurn)
+      // A new question uses the chosen model; an instruction keeps the
+      // running turn's model.
+      (action === "queue" && modelChoicePending) ||
+      (action === "steer" && !activeTurn)
     ) {
       return;
     }
@@ -1246,55 +1243,61 @@ export function AskScreen() {
       if (requestedSessionId && !detailMatchesRoute) {
         return;
       }
-      const selectedDetail = detailMatchesRoute ? state.detail : null;
+      let detail = detailMatchesRoute ? state.detail : null;
+      let accepted: AskTurnDetail;
+      let warnings: EnvelopeWarning[] = [];
+      let stoppedTurnId: string | undefined;
       if (action === "steer") {
-        if (!selectedDetail || !activeTurn?.steer_supported) return;
-        sessionId = selectedDetail.id;
-        const requestId = submission([state.workspaceId, activeTurn.id, action, question]).id;
-        const steered = await steerAskTurn(state.workspaceId, activeTurn.id, question, requestId);
+        if (!detail || !activeTurn) return;
+        sessionId = detail.id;
+        // The key names the input, not the running turn: when the answer is
+        // asked again, the new turn is the running one, and a retry after a
+        // lost response must still send the original request id and target.
+        const pending = submission([state.workspaceId, detail.id, action, question], activeTurn.id);
+        const targetTurnId = pending.targetTurnId!;
+        const steered = await steerAskTurn(state.workspaceId, targetTurnId, question, pending.id);
         if (!stillHere()) return;
-        requestRef.current = null;
-        setMessage("");
-        setState((previous) =>
-          previous?.detail?.id === steered.ask_session_id
-            ? mergeAskTurn(previous, previous.detail, steered)
-            : previous,
-        );
-        return;
-      }
-      let detail = selectedDetail;
-      if (!detail) {
-        detail = await createAskSession(state.workspaceId, {});
+        if (steered.id === targetTurnId) {
+          requestRef.current = null;
+          setMessage("");
+          setState((previous) =>
+            previous?.detail?.id === steered.ask_session_id
+              ? mergeAskTurn(previous, previous.detail, steered)
+              : previous,
+          );
+          return;
+        }
+        // The running model takes no instructions while it answers: the
+        // server stopped that turn and asks its question again with this one.
+        accepted = steered;
+        stoppedTurnId = targetTurnId;
+      } else {
+        if (!detail) {
+          detail = await createAskSession(state.workspaceId, {});
+          if (!stillHere()) {
+            return;
+          }
+          // Show the session's address before asking, so a reload finds the
+          // question once the server has stored it.
+          submissionRoute = `${routeWorkspaceId ?? ""}\u0000${detail.id}`;
+          submittedRouteRef.current = submissionRoute;
+          setSelectedSessionParams(detail.id);
+        }
+        sessionId = detail.id;
+        const requestId = submission([state.workspaceId, detail.id, selection, action, question]).id;
+        const created = await submitAskQuestion(state.workspaceId, detail.id, {
+          user_message: question,
+          request_id: requestId,
+          ...(selection !== undefined ? { selection } : {}),
+        });
         if (!stillHere()) {
           return;
         }
-        // Show the session's address before asking, so a reload finds the
-        // question once the server has stored it.
-        submissionRoute = `${routeWorkspaceId ?? ""}\u0000${detail.id}`;
-        submittedRouteRef.current = submissionRoute;
-        setSelectedSessionParams(detail.id);
-      }
-      sessionId = detail.id;
-      // The key names the input, not the running turn: after a lost response
-      // the accepted replacement is the running turn, and a retry must still
-      // send the original request id and target.
-      const pending = submission(
-        [state.workspaceId, detail.id, selection, action, question],
-        action === "replace" ? activeTurn?.id : undefined,
-      );
-      const replaceTurnId = pending.targetTurnId;
-      const requestId = pending.id;
-      const created = await submitAskQuestion(state.workspaceId, detail.id, {
-        user_message: question,
-        request_id: requestId,
-        ...(selection !== undefined ? { selection } : {}),
-        ...(replaceTurnId ? { replace_turn_id: replaceTurnId } : {}),
-      });
-      if (!stillHere()) {
-        return;
+        accepted = created.turn;
+        warnings = created.warnings;
       }
       requestRef.current = null;
-      setLastTurnWarnings(created.warnings);
+      setLastTurnWarnings(warnings);
       setMessage("");
       setError(null);
       setNotFound(false);
@@ -1307,8 +1310,8 @@ export function AskScreen() {
         const liveDetail = liveState.detail?.id === acceptedSession.id
           ? liveState.detail
           : acceptedSession;
-        const turns = replaceTurnId ? liveDetail.turns.map((turn) => {
-          if (turn.id !== replaceTurnId || !isUnfinishedTurn(turn)) return turn;
+        const turns = stoppedTurnId ? liveDetail.turns.map((turn) => {
+          if (turn.id !== stoppedTurnId || !isUnfinishedTurn(turn)) return turn;
           return {
             ...turn,
             status: "stopped" as const,
@@ -1317,7 +1320,7 @@ export function AskScreen() {
             ),
           };
         }) : liveDetail.turns;
-        return mergeAskTurn(liveState, { ...liveDetail, turns }, created.turn, true);
+        return mergeAskTurn(liveState, { ...liveDetail, turns }, accepted, true);
       });
     } catch (e) {
       if (!stillHere()) {
@@ -1805,10 +1808,10 @@ export function AskScreen() {
                   <button
                     type="button"
                     className="icon-button text-button"
-                    disabled={composerBusy || composerEmpty || (!activeTurn.steer_supported && modelChoicePending)}
-                    onClick={() => void sendTurn(activeTurn.steer_supported ? "steer" : "replace")}
+                    disabled={composerBusy || composerEmpty}
+                    onClick={() => void sendTurn("steer")}
                   >
-                    {activeTurn.steer_supported ? copy.generation.steer : copy.generation.replace}
+                    {copy.generation.steer}
                   </button>
                 </div>
               ) : null}

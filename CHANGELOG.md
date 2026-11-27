@@ -64,9 +64,12 @@
   the workspace's default model, any enabled LLM connection — the asker's own
   connections whatever their address and with or without a key — or search
   only; the browser remembers the last choice. The asker can stop a queued or
-  running question, add an instruction to a running answer (OpenAI models that
-  support steering), or replace the running question with a longer one. Only
-  the asker can change a question (`409 ask_turn_not_yours`).
+  running question, or add an instruction to a running answer
+  (`POST …/ask/turns/{ask_turn_id}/steer`). A model that takes instructions
+  while it answers applies it at once; otherwise the answer is stopped and the
+  question is asked again with the instruction, by the same model and ahead of
+  queued questions, and the new turn is returned. Only the asker can change a
+  question (`409 ask_turn_not_yours`).
 - `POST …/ask/sessions/{ask_session_id}/turns` takes an optional
   `after_turn_id`, the latest turn the asker saw (`null` for an empty session),
   and answers `409 ask_session_changed` when it is not the latest. It waits

@@ -101,15 +101,10 @@ async def submit_ask_stream_turn(
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
-        # Stream submissions join the session's queue; only stop, replace and
-        # steer name a running turn.
+        # Stream submissions join the session's queue; only stop and steer
+        # name a running turn.
         detail, _job = await _runtime(request).submit(
-            session_factory,
-            workspace_id,
-            ask_session_id,
-            request_body,
-            actor,
-            replace_turn_id=request_body.replace_turn_id,
+            session_factory, workspace_id, ask_session_id, request_body, actor
         )
     except (InvalidUserMessageError, InputPolicyError) as exc:
         return _invalid_message(exc)

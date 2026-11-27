@@ -3653,18 +3653,6 @@
       "AskStreamTurnCreate": {
         "additionalProperties": false,
         "properties": {
-          "replace_turn_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Replace Turn Id"
-          },
           "request_id": {
             "format": "uuid",
             "title": "Request Id",
@@ -3933,11 +3921,6 @@
             ],
             "title": "Status",
             "type": "string"
-          },
-          "steer_supported": {
-            "default": false,
-            "title": "Steer Supported",
-            "type": "boolean"
           },
           "steering_messages": {
             "items": {

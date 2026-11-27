@@ -212,9 +212,6 @@ class AskTurn(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     steering_messages: Mapped[list[dict[str, str]]] = mapped_column(
         JSON, nullable=False, default=list, server_default="[]"
     )
-    steer_supported: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=false()
-    )
     # Every source the model was given for this turn, including the evidence
     # of the earlier turns it was shown. NULL for turns stored before this
     # record existed: their citations are their evidence.

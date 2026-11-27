@@ -1640,7 +1640,6 @@ class AskService:
             ),
             error_code=turn.error_code,
             selection=turn.selection,
-            steer_supported=turn.steer_supported,
             steering_messages=turn.steering_messages or [],
             can_search=(
                 turn.status == ASK_TURN_FAILED

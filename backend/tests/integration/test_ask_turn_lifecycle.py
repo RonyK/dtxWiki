@@ -140,7 +140,7 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
         session_url = f"{prefix}/sessions/{created.json()['data']['id']}"
         connection_id = str(uuid4())
 
-        def submit(question, *, profile="plain", replace=None, request_id=None):
+        def submit(question, *, profile="plain", request_id=None):
             body = {
                 "user_message": question,
                 "request_id": request_id or str(uuid4()),
@@ -149,7 +149,6 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
                     "connection_id": connection_id,
                     "model_profile_id": profile,
                 },
-                "replace_turn_id": replace,
             }
             response = client.post(f"{session_url}/turns/stream", json=body)
             assert response.status_code == 202, response.text
@@ -200,9 +199,18 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
             )
 
         assert second_started.wait(3)
-        replaced = submit("add detail", replace=second["id"])
+        # A model that takes no instructions while answering is asked again,
+        # with the same selection, ahead of the queued question.
+        instruction = {"request_id": str(uuid4()), "user_message": "add detail"}
+        replaced = client.post(f"{turn_url(second)}/steer", json=instruction)
+        assert replaced.status_code == 200, replaced.text
+        replaced = replaced.json()["data"]
         assert replaced["status"] == "pending" and replaced["started_at"]
         assert replaced["user_message"] == "Queue evidence second\n\nadd detail"
+        assert replaced["selection"]["model_profile_id"] == "plain"
+        # A retry after a lost response gets the same new turn.
+        retried = client.post(f"{turn_url(second)}/steer", json=instruction)
+        assert retried.json()["data"]["id"] == replaced["id"], retried.text
         terminal = client.get(f"{turn_url(failed)}/stream")
         assert (
             '"status":"failed"' in terminal.text

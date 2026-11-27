@@ -26,7 +26,6 @@ _NEW_COLUMNS = {
     "request_id",
     "selection",
     "steering_messages",
-    "steer_supported",
 }
 _PENDING_INDEX = "uq_ask_turn_session_pending"
 _REQUEST_INDEX = "uq_ask_turn_request"
@@ -130,7 +129,7 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
             assert stored_nulls() == (True, True)
             assert stored_turn() == ("Old question", "Old answer")
             assert old.started_at is None
-            assert old.steering_messages == [] and not old.steer_supported
+            assert old.steering_messages == []
 
             def add_turn(turn_no, status, *, started_at=None, request_id=None):
                 turn = AskTurn(

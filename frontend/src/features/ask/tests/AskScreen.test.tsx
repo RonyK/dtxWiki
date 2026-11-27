@@ -26,7 +26,6 @@ const TEST_MODEL = {
   ...TEST_SELECTION,
   connection_label: "Workspace connection",
   model_label: "Workspace model",
-  steer: true,
 };
 
 vi.mock("../../../shared/auth/AuthContext", async (importOriginal) => ({
@@ -584,7 +583,7 @@ describe("AskScreen", () => {
 
   it("streams the current answer while steering that turn and queuing a follow-up", async () => {
     const activeSelection = { ...TEST_SELECTION, connection_id: "disabled-connection" };
-    const pending = askTurn({ status: "pending", assistant_message: null, selection: activeSelection, steer_supported: true });
+    const pending = askTurn({ status: "pending", assistant_message: null, selection: activeSelection });
     const instruction = { id: "instruction-1", user_message: "Use a table", status: "waiting" as const };
     const queued = askTurn({ id: "turn-2", turn_no: 2, user_message: "What about rollback?", assistant_message: null, status: "queued", selection: null });
     const final = askTurn({
@@ -653,7 +652,7 @@ describe("AskScreen", () => {
     expect(queueButton).toBeEnabled();
     const localOption = await screen.findByRole("option", { name: "Search without AI" });
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "LLM connection" }), localOption);
-    await userEvent.click(screen.getByRole("button", { name: "Apply to current answer" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add instruction" }));
     expect(await screen.findByText("Waiting to apply")).toBeInTheDocument();
     expect(steeringBody).toEqual({ user_message: instruction.user_message, request_id: expect.any(String) });
 
@@ -661,12 +660,11 @@ describe("AskScreen", () => {
     stream.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(steered)}\n\n`));
     await screen.findByText("Applied");
     // A failed instruction reloads the session; that read can lag the stream.
-    turns = [{ ...turns[0], steer_supported: false }];
     await userEvent.type(composer, "Add a citation");
-    await userEvent.click(screen.getByRole("button", { name: "Apply to current answer" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add instruction" }));
     await waitFor(() => {
       expect(sessionReads).toBe(2);
-      expect(screen.getByRole("button", { name: "Apply to current answer" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Add instruction" })).toBeEnabled();
     });
     expect(screen.getByText("Applied")).toBeInTheDocument();
     expect(screen.queryByText("Waiting to apply")).toBeNull();
@@ -757,7 +755,7 @@ describe("AskScreen", () => {
     expect(screen.getByText("Newer answer")).toBeInTheDocument();
   });
 
-  it("follows a replacement ahead of queued questions and saves the last executed answer", async () => {
+  it("follows an instruction's replacement ahead of queued questions and saves the last executed answer", async () => {
     const active = askTurn({
       status: "pending", assistant_message: null, selection: TEST_SELECTION,
       started_at: "2026-05-09T00:00:01Z",
@@ -774,7 +772,6 @@ describe("AskScreen", () => {
     });
     let turns = [active, queued];
     let replacementBody: unknown;
-    let catalogFails = true;
     let holdRefresh = false;
     let resolveRefresh: ((response: Response) => void) | undefined;
     const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
@@ -786,9 +783,7 @@ describe("AskScreen", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input.toString();
       if (url === `${prefix}/models`) {
-        return catalogFails
-          ? jsonResponse({ error_code: "internal_error" }, 500)
-          : jsonResponse({ data: { items: [TEST_MODEL] } });
+        return jsonResponse({ error_code: "internal_error" }, 500);
       }
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } });
@@ -805,10 +800,10 @@ describe("AskScreen", () => {
         }
         return jsonResponse({ data: sessionDetail(turns) });
       }
-      if (url === `${prefix}/sessions/${SESSION_ID}/turns/stream` && init?.method === "POST") {
+      if (url === `${prefix}/turns/${active.id}/steer` && init?.method === "POST") {
         replacementBody = JSON.parse(String(init.body));
         turns = [{ ...active, status: "stopped" }, queued, replacement];
-        return jsonResponse({ data: replacement }, 202);
+        return jsonResponse({ data: replacement });
       }
       const streamedTurn = [active, queued, replacement].find((turn) => url === `${prefix}/turns/${turn.id}/stream`);
       if (streamedTurn) {
@@ -827,22 +822,18 @@ describe("AskScreen", () => {
     const composer = await screen.findByRole("textbox", { name: "Message" });
     await waitFor(() => expect(streams.has(active.id)).toBe(true));
     await userEvent.type(composer, "Change the answer");
-    const retry = await screen.findByRole("button", { name: "Retry" });
+    await screen.findByRole("button", { name: "Retry" });
     expect(screen.getByRole("option", { name: "Selected connection", selected: true }))
       .toBeInTheDocument();
+    // A new question waits for the model picker; an instruction keeps the
+    // running turn's model.
     expect(screen.getByRole("button", { name: "Queue next question" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Stop and regenerate" })).toBeDisabled();
-    catalogFails = false;
-    await userEvent.click(retry);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Stop and regenerate" })).toBeEnabled());
-    await userEvent.click(screen.getByRole("button", { name: "Stop and regenerate" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add instruction" }));
 
     expect(await screen.findByText("Stopped. The answer was not saved.")).toBeInTheDocument();
     expect(replacementBody).toEqual({
       user_message: "Change the answer",
       request_id: expect.any(String),
-      replace_turn_id: active.id,
-      selection: TEST_SELECTION,
     });
     expect(screen.getAllByText(/^Turn [123]$/).map((label) => label.textContent))
       .toEqual(["Turn 1", "Turn 3", "Turn 2"]);
@@ -860,9 +851,9 @@ describe("AskScreen", () => {
       ...queued, status: "pending", started_at: "2026-05-09T00:00:04Z",
     } as const;
     streams.get(queued.id)!.enqueue(encoder.encode(
-      `event: state\ndata: ${JSON.stringify({ ...pending, steer_supported: true })}\n\n`,
+      `event: state\ndata: ${JSON.stringify(pending)}\n\n`,
     ));
-    await screen.findByRole("button", { name: "Apply to current answer" });
+    await screen.findByRole("button", { name: "Add instruction" });
     holdRefresh = false;
     await act(async () => {
       resolveRefresh!(jsonResponse({
@@ -875,7 +866,7 @@ describe("AskScreen", () => {
       }));
     });
     expect(screen.getByRole("heading", { name: "Refreshed Ask" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply to current answer" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add instruction" })).toBeInTheDocument();
     const followUp = {
       ...pending, status: "completed", assistant_message: "Queued answer",
     } as const;
@@ -2835,7 +2826,6 @@ function askTurn(overrides: Partial<AskTurnDetail> = {}): AskTurnDetail {
     promotion_state: "not_promoted",
     status: "completed",
     can_search: false,
-    steer_supported: false,
     created_at: "2026-05-09T00:00:00Z",
     retrieval_trace: [],
     tried_lanes: [],
