@@ -19,15 +19,18 @@ from backend.llm.adapters._shared import (
     text_of,
 )
 from backend.llm.adapters.openai_errors import refine_openai_error
-from backend.llm.streaming import NextSteer, OnDelta, OnSteer, supports_native_steer
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
     ExecutionContext,
+    GenerationFeatures,
     LLMAdapterDescriptor,
     LLMAdapterError,
     LLMConnection,
     LLMTransport,
+    NextSteer,
+    OnDelta,
+    OnSteer,
     Termination,
     TokenUsage,
 )
@@ -43,6 +46,21 @@ _MIN_OUTPUT_TOKENS = 16
 # Calls the model asks the client to run. Hosted tools run at OpenAI and are
 # not requests to dtxWiki.
 _CLIENT_TOOL_CALLS = frozenset({"function_call", "custom_tool_call"})
+_OPENAI_BASE_URL = "https://api.openai.com/v1"
+# Published models in the GPT-6 family take instructions while they answer,
+# over OpenAI's own WebSocket endpoint. Aliases outside this catalog and
+# other servers stream without them.
+_STEER_MODELS = frozenset(
+    {
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-6-luna",
+        "gpt-6.1-sol",
+        "gpt-6.1-terra",
+        "gpt-6.2-astra",
+        "gpt-6.2-sol",
+    }
+)
 
 DESCRIPTOR = LLMAdapterDescriptor(
     adapter_id="builtin.openai.responses",
@@ -50,15 +68,22 @@ DESCRIPTOR = LLMAdapterDescriptor(
     display_name={"en": "OpenAI Responses API", "ko": "OpenAI Responses API"},
     config_schema=NO_CONFIG_SCHEMA,
     credential_schema=api_key_schema(required=True),
+    features=GenerationFeatures(streaming=True, steering=True),
     options=frozenset({"temperature"}),
-    default_base_url="https://api.openai.com/v1",
+    default_base_url=_OPENAI_BASE_URL,
 )
 
 
 class OpenAIResponsesAdapter:
-    def __init__(self, connection: LLMConnection, transport: LLMTransport) -> None:
+    def __init__(
+        self, connection: LLMConnection, transport: LLMTransport, model: str
+    ) -> None:
         self._connection = connection
         self._transport = transport
+        self.features = GenerationFeatures(
+            streaming=True,
+            steering=connection.base_url == _OPENAI_BASE_URL and model in _STEER_MODELS,
+        )
 
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext
@@ -122,7 +147,7 @@ class OpenAIResponsesAdapter:
                     )
             raise _stream_error(request_id)
 
-    async def steered_stream(
+    async def stream_with_steering(
         self,
         request: CanonicalTextRequest,
         context: ExecutionContext,
@@ -134,10 +159,6 @@ class OpenAIResponsesAdapter:
         from backend.llm.responses_websocket import stream_responses_websocket
 
         _require_output_limit(request)
-        if not supports_native_steer(
-            DESCRIPTOR.adapter_id, self._connection.base_url, request.model
-        ):
-            raise LLMAdapterError("unsupported_option", delivery="not_sent")
         payload = _payload(request)
         # GPT-6 reasoning does not accept legacy sampling options. A first
         # developer message keeps the instruction prefix for continuation.

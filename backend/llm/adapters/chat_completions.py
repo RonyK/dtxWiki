@@ -26,15 +26,16 @@ from backend.llm.adapters._shared import (
     text_of,
 )
 from backend.llm.adapters.openai_errors import refine_openai_error
-from backend.llm.streaming import OnDelta
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
     ExecutionContext,
+    GenerationFeatures,
     LLMAdapterDescriptor,
     LLMAdapterError,
     LLMConnection,
     LLMTransport,
+    OnDelta,
     Termination,
     TokenUsage,
 )
@@ -55,10 +56,13 @@ class ChatCompletionsDialect:
 
 
 class ChatCompletionsAdapter:
+    features = GenerationFeatures(streaming=True, steering=False)
+
     def __init__(
         self,
         connection: LLMConnection,
         transport: LLMTransport,
+        _model: str,
         *,
         dialect: ChatCompletionsDialect,
     ) -> None:
@@ -220,6 +224,7 @@ OPENAI_FACTORY = BuiltinAdapterFactory(
         },
         config_schema=NO_CONFIG_SCHEMA,
         credential_schema=api_key_schema(required=True),
+        features=ChatCompletionsAdapter.features,
         options=frozenset({"temperature"}),
         default_base_url="https://api.openai.com/v1",
     ),
@@ -240,6 +245,7 @@ COMPATIBLE_FACTORY = BuiltinAdapterFactory(
         config_schema=NO_CONFIG_SCHEMA,
         # Self-hosted compatible servers often run without a key.
         credential_schema=api_key_schema(required=False),
+        features=ChatCompletionsAdapter.features,
         options=frozenset({"temperature"}),
     ),
     build=partial(

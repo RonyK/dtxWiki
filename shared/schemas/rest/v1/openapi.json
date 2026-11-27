@@ -3224,10 +3224,6 @@
             ],
             "title": "Scope",
             "type": "string"
-          },
-          "steer": {
-            "title": "Steer",
-            "type": "boolean"
           }
         },
         "required": [
@@ -3235,8 +3231,7 @@
           "connection_id",
           "model_profile_id",
           "connection_label",
-          "model_label",
-          "steer"
+          "model_label"
         ],
         "title": "AskModelChoice",
         "type": "object"

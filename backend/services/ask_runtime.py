@@ -34,7 +34,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
 from backend.llm.binding import ModelBinding
-from backend.llm.streaming import SteerInput, SteerUpdate
 from backend.models.ask import (
     ASK_TURN_FAILED,
     ASK_TURN_PENDING,
@@ -61,6 +60,7 @@ from backend.services.ask_service import (
 from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.llm_connection_service import LLMConnectionError
 from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyError
+from backend.spi.llm import SteerInput, SteerUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -554,7 +554,7 @@ class AskRuntime:
             binding = await self._binding(job)
             prepared = await run_in_threadpool(self._prepare, job, binding)
             asks_model = binding is not None and bool(prepared.retrieved.pack)
-            if asks_model and binding.steer:
+            if asks_model and binding.features.steering:
                 await run_in_threadpool(self._enable_steering, job)
                 job.state_changed()
             job.evidence = prepared.evidence

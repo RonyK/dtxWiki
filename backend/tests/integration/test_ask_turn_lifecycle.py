@@ -16,7 +16,6 @@ from backend.app import main as app_main
 from backend.app.container import assemble
 from backend.app.db import make_engine
 from backend.app.settings import Settings
-from backend.llm.streaming import SteerUpdate
 from backend.models.ask import AskTurn
 from backend.models.workspace import Workspace
 from backend.services.ask_runtime import AskTurnPreview
@@ -27,6 +26,7 @@ from backend.services.ask_service import (
     fail_interrupted_ask_turns,
 )
 from backend.services.page_service import PageService
+from backend.spi.llm import GenerationFeatures, SteerUpdate
 from backend.tests.conftest import authenticate_test_client_in_workspace
 
 pytestmark = pytest.mark.integration
@@ -74,8 +74,9 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
     started = []
 
     def resolve(_control, _workspace, _id, _actor, selection):
+        native = selection.model_profile_id == "native"
         return SimpleNamespace(
-            steer=selection.model_profile_id == "native",
+            features=GenerationFeatures(streaming=True, steering=native),
             context_window=None,
             target={"model": selection.model_profile_id},
         )

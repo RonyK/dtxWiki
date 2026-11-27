@@ -22,13 +22,14 @@ from backend.services.ask_service import (
     LLM_ANSWER_REFUSED_WARNING,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
 )
-from backend.spi.llm import CanonicalTextResult, TextGenerationPort
+from backend.spi.llm import CanonicalTextResult, GenerationFeatures, TextGenerationPort
 from backend.tests.conftest import (
     authenticate_test_client_in_workspace,
     captured_log_messages,
 )
 
 pytestmark = pytest.mark.integration
+GENERATE_ONLY = GenerationFeatures(streaming=False, steering=False)
 
 
 def _workspace_id(session_factory):
@@ -184,7 +185,6 @@ def _answer_with_default_port(session_factory, page_service, port: TextGeneratio
         model="test-default",
         max_output_tokens=1024,
         context_window=None,
-        steer=False,
     )
     workspace_id = _workspace_id(session_factory)
     with session_factory.begin() as session:
@@ -219,6 +219,8 @@ def test_default_model_refusal_fails_the_turn_and_allows_search(
     session_factory, page_service
 ):
     class RefusingPort:
+        features = GENERATE_ONLY
+
         async def generate(self, request, context):
             return CanonicalTextResult(text="I can't help.", termination="refused")
 
@@ -236,6 +238,8 @@ def test_unexpected_default_model_exception_fails_the_turn(
     session_factory, page_service
 ):
     class BuggyPort:
+        features = GENERATE_ONLY
+
         async def generate(self, request, context):
             raise RuntimeError("composer bug")
 

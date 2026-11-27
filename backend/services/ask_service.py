@@ -20,7 +20,6 @@ from backend.domain.input_policy import (
     normalize_ask_user_message,
 )
 from backend.llm.binding import ModelBinding
-from backend.llm.streaming import SteerInput, SteerUpdate, generate_stream
 from backend.models.ask import (
     ASK_TURN_COMPLETED,
     ASK_TURN_FAILED,
@@ -85,6 +84,8 @@ from backend.spi.llm import (
     CanonicalTextResult,
     ExecutionContext,
     LLMAdapterError,
+    SteerInput,
+    SteerUpdate,
     TextMessage,
     TokenUsage,
 )
@@ -793,16 +794,14 @@ class AskService:
             max_output_tokens=binding.max_output_tokens,
             temperature=binding.temperature,
         )
-        steering = binding.steer
         try:
             async with asyncio.timeout(_MODEL_DEADLINE_SECONDS):
-                result = await generate_stream(
-                    binding.port,
+                result = await binding.generate(
                     request,
                     ExecutionContext(timeout_seconds=_MODEL_NETWORK_TIMEOUT_SECONDS),
                     on_delta=_from_caller(on_delta),
-                    next_steer=_from_caller(next_steer) if steering else None,
-                    on_steer=_from_caller(on_steer) if steering else None,
+                    next_steer=_from_caller(next_steer),
+                    on_steer=_from_caller(on_steer),
                 )
         except _CallerError as failure:
             # The application's own callback failed, not the model.

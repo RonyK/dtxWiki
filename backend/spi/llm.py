@@ -14,7 +14,8 @@ sandbox.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, Protocol, get_args
@@ -243,13 +244,25 @@ class TransportResponse:
         )
 
 
+class SSEResponse(Protocol):
+    """An open HTTP reply read as it arrives (an ``httpx.Response``)."""
+
+    status_code: int
+    headers: Mapping[str, str]
+
+    @property
+    def is_success(self) -> bool: ...
+
+    def aiter_bytes(self) -> AsyncIterator[bytes]: ...
+
+
 class LLMTransport(Protocol):
     """Core-owned network access: endpoint policy, proxy and TLS live here.
 
-    One call is one POST of ``payload`` (JSON-compatible values) and returns
-    any HTTP reply. A failure raises :class:`LLMAdapterError` with the
-    delivery the transport can prove; a URL outside the execution's
-    connection is refused before sending (``invalid_request``).
+    One call is one POST of ``payload`` (JSON-compatible values). A failure
+    raises :class:`LLMAdapterError` with the delivery the transport can prove;
+    a URL outside the execution's connection is refused before sending
+    (``invalid_request``).
     """
 
     async def post_json(
@@ -259,7 +272,20 @@ class LLMTransport(Protocol):
         headers: Mapping[str, str],
         payload: Mapping[str, object],
         timeout_seconds: float,
-    ) -> TransportResponse: ...
+    ) -> TransportResponse:
+        """Return any HTTP reply, fully read."""
+        ...
+
+    def open_sse(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+        timeout_seconds: float,
+    ) -> AbstractAsyncContextManager[SSEResponse]:
+        """Open a Server-Sent Events reply for a streaming port to read."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,15 +302,41 @@ class LLMConnection:
 
 
 @dataclass(frozen=True, slots=True)
+class GenerationFeatures:
+    """What a port does besides one ``generate`` call.
+
+    ``streaming``: ``stream`` passes the answer's text on as it arrives.
+    ``steering``: ``stream_with_steering`` also takes instructions while the
+    model answers; it builds on streaming.
+    """
+
+    streaming: bool
+    steering: bool
+
+    def __post_init__(self) -> None:
+        if type(self.streaming) is not bool or type(self.steering) is not bool:
+            raise TypeError("generation features must be booleans")
+        if self.steering and not self.streaming:
+            raise ValueError("steering requires streaming")
+
+    def within(self, other: GenerationFeatures) -> bool:
+        return (not self.streaming or other.streaming) and (
+            not self.steering or other.steering
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class LLMAdapterDescriptor:
-    """Identity and input schemas of one API specification.
+    """Identity, input schemas and features of one API specification.
 
     ``adapter_id`` is namespaced (``builtin.*`` or ``<plugin name>.*``) and
-    never changes protocol. ``options`` lists the common options the adapter
-    can encode. Both schemas are self-contained JSON Schema 2020-12 documents
-    (no ``$schema``, references, ``$id`` or anchors); ``credential_schema``
-    declares input-only secret fields as a flat object with ``properties``,
-    optional ``required``, and ``additionalProperties: false``.
+    never changes protocol. ``features`` declares what the adapter
+    implements; a port may offer less for its model and endpoint, never more.
+    ``options`` lists the common options the adapter can encode. Both schemas
+    are self-contained JSON Schema 2020-12 documents (no ``$schema``,
+    references, ``$id`` or anchors); ``credential_schema`` declares input-only
+    secret fields as a flat object with ``properties``, optional ``required``,
+    and ``additionalProperties: false``.
     """
 
     adapter_id: str
@@ -292,17 +344,82 @@ class LLMAdapterDescriptor:
     display_name: Mapping[str, str]
     config_schema: Mapping[str, object]
     credential_schema: Mapping[str, object]
+    features: GenerationFeatures
     options: frozenset[str] = frozenset()
     default_base_url: str | None = None
     config_schema_version: int = 1
     spi_version: str = LLM_ADAPTER_SPI_VERSION
 
 
+@dataclass(frozen=True, slots=True)
+class SteerInput:
+    """An instruction for the answer being written."""
+
+    id: str
+    text: str = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class SteerUpdate:
+    """What became of an instruction. ``sent`` means the provider has it;
+    ``applied``, ``failed`` and ``unknown`` are final."""
+
+    id: str
+    status: Literal["sent", "accepted", "applied", "failed", "unknown"]
+    error_code: str | None = None
+
+
+OnDelta = Callable[[str], Awaitable[None]]
+NextSteer = Callable[[], Awaitable[SteerInput]]
+OnSteer = Callable[[SteerUpdate], Awaitable[None]]
+
+
 class TextGenerationPort(Protocol):
+    """One execution's adapter for one model.
+
+    ``features`` says which of ``stream`` and ``stream_with_steering`` the
+    port offers; Core calls no other. Each of the three makes at most one
+    provider call: no hidden retry or continuation.
+    """
+
+    @property
+    def features(self) -> GenerationFeatures: ...
+
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext
+    ) -> CanonicalTextResult: ...
+
+
+class StreamingTextPort(TextGenerationPort, Protocol):
+    async def stream(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
     ) -> CanonicalTextResult:
-        """Make at most one provider call: no hidden retry or continuation."""
+        """Generate, passing each piece of the answer's text to ``on_delta``."""
+        ...
+
+
+class SteerableTextPort(StreamingTextPort, Protocol):
+    async def stream_with_steering(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
+        next_steer: NextSteer,
+        on_steer: OnSteer,
+    ) -> CanonicalTextResult:
+        """Stream, and send the provider each instruction while it answers.
+
+        ``next_steer`` returns the oldest instruction not yet sent; it stays
+        queued until ``on_steer`` reports it ``sent``. Every instruction the
+        port takes ends ``applied``, ``failed`` or ``unknown``. An applied
+        instruction starts a new response: ``on_delta`` then carries the new
+        text, which replaces what was passed before.
+        """
         ...
 
 
@@ -311,9 +428,9 @@ class LLMAdapterFactory(Protocol):
     def descriptor(self) -> LLMAdapterDescriptor: ...
 
     def create(
-        self, connection: LLMConnection, transport: LLMTransport
+        self, connection: LLMConnection, transport: LLMTransport, model: str
     ) -> TextGenerationPort:
-        """Build an adapter for one execution."""
+        """Build the adapter for one execution of ``model``."""
         ...
 
 
@@ -324,6 +441,7 @@ __all__ = [
     "CanonicalTextResult",
     "Delivery",
     "ExecutionContext",
+    "GenerationFeatures",
     "LLMAdapterDescriptor",
     "LLMAdapterError",
     "LLMAdapterFactory",
@@ -331,6 +449,14 @@ __all__ = [
     "LLMErrorCode",
     "LLMModelCapabilities",
     "LLMTransport",
+    "NextSteer",
+    "OnDelta",
+    "OnSteer",
+    "SSEResponse",
+    "SteerInput",
+    "SteerUpdate",
+    "SteerableTextPort",
+    "StreamingTextPort",
     "Termination",
     "TextGenerationPort",
     "TextMessage",

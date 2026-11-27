@@ -90,7 +90,6 @@ def build_default_binding(
         model=answer_model.model,
         max_output_tokens=_MAX_OUTPUT_TOKENS,
         context_window=None,
-        steer=False,
         temperature=_TEMPERATURE,
     )
 

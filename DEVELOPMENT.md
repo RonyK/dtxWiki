@@ -250,11 +250,19 @@ ack·재시도 한도와 지연을 관리합니다. 작업은 중복 전달에 �
 LLM adapter 하나는 API 규격 하나를 구현합니다. `adapter_id`는 `<플러그인 이름>.<규격>`
 형식이고 `builtin.` namespace는 core 전용입니다. `descriptor`는 구현 version, 표시
 이름, 비밀이 아닌 연결 설정과 입력 전용 credential의 JSON Schema, 인코딩할 수 있는
-공통 옵션(`COMMON_OPTIONS`)과 기본 HTTPS endpoint를 선언합니다. schema는 Draft 2020-12
+공통 옵션(`COMMON_OPTIONS`)과 기본 HTTPS endpoint, 그리고 구현한 기능
+`features`(`GenerationFeatures(streaming, steering)`, 기본값 없음)를 선언합니다.
+steering은 streaming을 전제로 합니다. schema는 Draft 2020-12
 형식이며 `$ref`·`$id`·anchor 없이 자기 완결적이어야 합니다. credential schema의
 최상위는 `type: object`, `properties`, 선택적 `required`, `additionalProperties: false`만
 사용합니다. 비밀 필드는 모두 최상위 properties에 선언합니다. `create(connection,
-transport)`가 만든 `TextGenerationPort.generate()`는 provider를 최대 한 번 호출하고
+transport, model)`은 한 모델의 실행용 port를 만들고, port는 그 모델과 endpoint에서
+실제로 제공하는 `features`를 노출합니다. 이 값은 descriptor의 선언을 넘을 수 없으며,
+켠 기능마다 `stream(request, context, on_delta=)`(streaming)과
+`stream_with_steering(request, context, on_delta=, next_steer=, on_steer=)`(steering)을
+구현해야 합니다. registry는 등록과 port 생성 때 이 선언과 구현을 검사하고, core는 port가
+노출한 기능만 호출합니다. streaming은 transport의 `open_sse`로 SSE 응답을 읽습니다.
+`generate()`·`stream()`·`stream_with_steering()`은 각각 provider를 최대 한 번 호출하고
 응답을 `CanonicalTextResult`(종료 유형·usage)로, 실패를 `LLMAdapterError`(code·delivery)로
 정규화합니다. 요청이 설정하지 않은 옵션은 보내지 않고, provider 오류 문구는 예외에
 담지 않습니다. 재시도·endpoint 정책·proxy·TLS와 모델 capability 검사는 core가 맡습니다.

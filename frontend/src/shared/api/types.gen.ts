@@ -4954,8 +4954,6 @@ export interface components {
              * @enum {string}
              */
             scope: "personal" | "workspace";
-            /** Steer */
-            steer: boolean;
         };
         /** AskModelChoices */
         AskModelChoices: {

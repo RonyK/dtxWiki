@@ -27,8 +27,10 @@ from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
     ExecutionContext,
+    GenerationFeatures,
     LLMAdapterError,
     LLMModelCapabilities,
+    SteerInput,
     TextMessage,
     TokenUsage,
     TransportResponse,
@@ -36,6 +38,7 @@ from backend.spi.llm import (
 from backend.testing.spi_conformance import WireCase, assert_llm_adapter_contract
 
 KEY = "secret-test-key"
+GENERATE_ONLY = GenerationFeatures(streaming=False, steering=False)
 VERSION_ID = uuid4()
 REQUEST = CanonicalTextRequest(
     model="model-x",
@@ -760,20 +763,33 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
         assert KEY not in str(unsafe.value)
 
     class WrongSignature:
-        def __init__(self, connection, transport):
+        features = GENERATE_ONLY
+
+        def __init__(self, connection, transport, model):
             pass
 
         async def generate(self, request):
             return None
 
-    with pytest.raises(LLMAdapterRegistryError, match="text generation port"):
-        create(
-            LLMAdapterRegistry([factory(build=WrongSignature)]), descriptor.adapter_id
-        )
+    # A port offers what it reports, within what its adapter declares.
+    class UndeclaredStream(WrongSignature):
+        features = GenerationFeatures(streaming=True, steering=False)
+
+        async def generate(self, request, context):
+            return None
+
+    for build, error in (
+        (WrongSignature, "text generation port"),
+        (UndeclaredStream, "declared features"),
+    ):
+        with pytest.raises(LLMAdapterRegistryError, match=error):
+            create(LLMAdapterRegistry([factory(build=build)]), descriptor.adapter_id)
 
     # A provider request ID that carries the credential is dropped.
     class EchoingKey:
-        def __init__(self, connection, transport):
+        features = GENERATE_ONLY
+
+        def __init__(self, connection, transport, model):
             pass
 
         async def generate(self, request, context):
@@ -796,7 +812,9 @@ def test_llm_adapter_registry_rejects_unsafe_registrations():
     ):
 
         class Exfiltrating:
-            def __init__(self, connection, transport, url=url, headers=headers):
+            features = GENERATE_ONLY
+
+            def __init__(self, connection, transport, model, url=url, headers=headers):
                 self.transport, self.url, self.headers = transport, url, headers
 
             async def generate(self, request, context):
@@ -884,7 +902,9 @@ def test_plugin_adapter_can_post_to_its_configured_endpoint():
     endpoint = "https://api.example/generate"
 
     class ExactEndpointAdapter:
-        def __init__(self, connection, transport):
+        features = GenerationFeatures(streaming=True, steering=False)
+
+        def __init__(self, connection, transport, model):
             self.connection = connection
             self.transport = transport
 
@@ -896,6 +916,10 @@ def test_plugin_adapter_can_post_to_its_configured_endpoint():
                 timeout_seconds=context.timeout_seconds,
             )
             return CanonicalTextResult(text="answer", termination="completed")
+
+        async def stream(self, request, context, *, on_delta):
+            await on_delta("ans")
+            return await self.generate(request, context)
 
     descriptor = replace(
         chat_completions.COMPATIBLE_FACTORY.descriptor,
@@ -914,7 +938,23 @@ def test_plugin_adapter_can_post_to_its_configured_endpoint():
         transport=transport,
     )
 
-    assert asyncio.run(port.generate(REQUEST, ExecutionContext(5))).text == "answer"
+    deltas = []
+
+    async def on_delta(text):
+        deltas.append(text)
+
+    # A plugin port streams when it declares streaming, as built-in ports do.
+    binding = ModelBinding(
+        port=port,
+        target={},
+        model=REQUEST.model,
+        max_output_tokens=64,
+        context_window=None,
+    )
+    result = asyncio.run(
+        binding.generate(REQUEST, ExecutionContext(5), on_delta=on_delta)
+    )
+    assert (result.text, deltas) == ("answer", ["ans"])
     assert [call["url"] for call in transport.calls] == [endpoint]
 
 
@@ -1012,7 +1052,6 @@ def _binding(port):
         model="model-x",
         max_output_tokens=1024,
         context_window=None,
-        steer=False,
     )
 
 
@@ -1049,6 +1088,8 @@ class FakeSearchService:
 
 
 class FixedPort:
+    features = GENERATE_ONLY
+
     def __init__(self, text: str, *, termination: str = "completed") -> None:
         self.text = text
         self.termination = termination
@@ -1060,11 +1101,15 @@ class FixedPort:
 
 
 class RejectedCredentialPort:
+    features = GENERATE_ONLY
+
     async def generate(self, request, context):
         raise LLMAdapterError("authentication_failed", delivery="sent", status_code=401)
 
 
 class StalledPort:
+    features = GENERATE_ONLY
+
     async def generate(self, request, context):
         await asyncio.sleep(0)
         return CanonicalTextResult(text="Too late", termination="completed")
@@ -1102,7 +1147,6 @@ def test_responses_websocket_steer_starts_a_new_response_and_keeps_unsent_input(
     from collections import deque
 
     from backend.llm.responses_websocket import _Run
-    from backend.llm.streaming import SteerInput
 
     def frame(kind, response_id=None, **fields):
         event = {"type": kind, **fields}

@@ -15,11 +15,15 @@ from websockets.exceptions import InvalidStatus, WebSocketException
 
 from backend.llm.adapters._shared import _error_code, mapping, text_of, total
 from backend.llm.adapters.openai_errors import refine_openai_error
-from backend.llm.streaming import NextSteer, OnDelta, OnSteer, SteerInput, SteerUpdate
 from backend.spi.llm import (
     CanonicalTextResult,
     ExecutionContext,
     LLMAdapterError,
+    NextSteer,
+    OnDelta,
+    OnSteer,
+    SteerInput,
+    SteerUpdate,
     TokenUsage,
 )
 

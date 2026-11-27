@@ -32,7 +32,6 @@ class AskModelSelection(BaseModel):
 class AskModelChoice(AskModelSelection):
     connection_label: str
     model_label: str
-    steer: bool
 
 
 class AskModelChoices(BaseModel):

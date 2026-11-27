@@ -38,7 +38,7 @@ from backend.services.context_ingress_service import ContextIngressService
 from backend.services.graph_service import GraphService
 from backend.services.read_errors import ReadNotFoundError
 from backend.services.search_service import SearchService
-from backend.spi.llm import CanonicalTextResult, TextMessage
+from backend.spi.llm import CanonicalTextResult, GenerationFeatures, TextMessage
 from backend.tests.utils.ask import create_turn_in_session
 
 pytestmark = pytest.mark.integration
@@ -88,6 +88,8 @@ class FakeSemanticSearch:
 
 
 class _RecordingPort:
+    features = GenerationFeatures(streaming=False, steering=False)
+
     def __init__(self, *answers: str) -> None:
         self.answers = list(answers)
         self.calls: list[tuple[TextMessage, ...]] = []
@@ -475,7 +477,6 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             model="test-default",
             max_output_tokens=1024,
             context_window=None,
-            steer=False,
         )
         service = AskService(search_service=search)
         ask_session = service.create_session(
