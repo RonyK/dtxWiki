@@ -474,6 +474,7 @@ class AskRuntime:
                     workspace_id=workspace_id,
                     criteria=(
                         AskTurn.ask_session_id == turn.ask_session_id,
+                        AskTurn.turn_no > turn.turn_no,
                         AskTurn.request_id == request.request_id,
                     ),
                 ).with_only_columns(AskTurn.id)
@@ -569,7 +570,10 @@ class AskRuntime:
             binding = await self._binding(job)
             prepared = await run_in_threadpool(self._prepare, job, binding)
             asks_model = binding is not None and bool(prepared.retrieved.pack)
-            job.takes_steering = asks_model and binding.features.steering
+            async with self._write:
+                # Under the lock ``steer`` decides by: an instruction either
+                # reaches this model call or asks again before it is sent.
+                job.takes_steering = asks_model and binding.features.steering
             job.evidence = prepared.evidence
             if asks_model:
                 composed = await self.service.stream_turn(
@@ -696,7 +700,8 @@ class AskRuntime:
         return job.steering[0]
 
     async def _on_steer(self, job: _Job, update: SteerUpdate) -> None:
-        if update.status == "sent" and job.steering and job.steering[0].id == update.id:
+        # Sent, or settled without being sent: either way it is not offered again.
+        if job.steering and job.steering[0].id == update.id:
             job.steering.popleft()
         if update.status not in _STORED_STEER_STATES:
             return

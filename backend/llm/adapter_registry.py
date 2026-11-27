@@ -196,7 +196,7 @@ class LLMAdapterRegistry:
             raise LLMAdapterRegistryError(
                 f"LLM adapter {adapter_id!r} built a port without its declared features"
             )
-        return _GuardedPort(port, model, capabilities, secrets=secrets)
+        return _GuardedPort(port, model, capabilities, features, secrets=secrets)
 
     @staticmethod
     def _validate_fields(
@@ -388,6 +388,7 @@ class _GuardedPort:
         port: Any,
         model: str,
         capabilities: LLMModelCapabilities,
+        features: GenerationFeatures,
         *,
         secrets: tuple[str, ...],
     ) -> None:
@@ -395,7 +396,8 @@ class _GuardedPort:
         self._model = model
         self._capabilities = capabilities
         self._secrets = secrets
-        self.features: GenerationFeatures = port.features
+        # The value that was checked against the port's methods.
+        self.features = features
 
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext

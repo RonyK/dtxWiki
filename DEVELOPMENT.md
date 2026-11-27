@@ -262,15 +262,17 @@ transport, model)`은 한 모델의 실행용 port를 만들고, port는 그 모
 `stream_with_steering(request, context, on_delta=, next_steer=, on_steer=)`(steering)을
 구현해야 합니다. registry는 등록과 port 생성 때 이 선언과 구현을 검사하고, core는 port가
 노출한 기능만 호출합니다. streaming은 transport의 `open_sse`로 SSE 응답을 읽습니다.
-`generate()`·`stream()`·`stream_with_steering()`은 각각 provider를 최대 한 번 호출하고
+`generate()`·`stream()`·`stream_with_steering()`은 각각 응답 생성을 최대 한 번 요청하고
+(숨은 재시도나 이어 쓰기 없음, 지시는 그 응답이 진행되는 동안 보냅니다)
 응답을 `CanonicalTextResult`(종료 유형·usage)로, 실패를 `LLMAdapterError`(code·delivery)로
 정규화합니다. 요청이 설정하지 않은 옵션은 보내지 않고, provider 오류 문구는 예외에
 담지 않습니다. 재시도·endpoint 정책·proxy·TLS와 모델 capability 검사는 core가 맡습니다.
 adapter는 주입된 transport로만 통신하며 연결의 base URL 밖으로 요청하거나 URL에
-credential을 넣을 수 없습니다(query parameter는 허용). 웹 앱은 시작할 때 registry를
+credential을 넣을 수 없습니다(query parameter는 허용). 내장 OpenAI Responses의 steering만
+OpenAI 공식 WebSocket endpoint에 직접 연결합니다. 웹 앱은 시작할 때 registry를
 검증하고, worker와 CLI는 LLM adapter를 만들지 않습니다.
 `backend.testing.spi_conformance.llm.assert_llm_adapter_contract`에 플러그인 이름과
-provider 응답 fixture를 넣어 계약을 확인합니다. Ask는 `DTXWIKI_LLM_PROVIDER` 기본 모델과
+provider 응답 fixture를 넣어 등록 검사와 `generate()` 계약을 확인합니다. Ask는 `DTXWIKI_LLM_PROVIDER` 기본 모델과
 등록된 LLM 연결을 같은 `ModelBinding` 경로로 실행합니다.
 
 플러그인 migration은 core head 적용 뒤 단일 DB에 실행되며 core가 제공하는
