@@ -33,7 +33,8 @@ from backend.policy.auth import ActorContext
 from backend.schemas.ask import AskSessionCreate, AskTurnCreate
 from backend.schemas.context_ingress import AskTurnPromoteRequest
 from backend.schemas.read import RankedResult, SearchPayload
-from backend.services.ask_service import AskService, ask_evidence_visible
+from backend.services.ask_service import AskService
+from backend.services.ask_visibility import ask_evidence_visible
 from backend.services.context_ingress_service import ContextIngressService
 from backend.services.graph_service import GraphService
 from backend.services.read_errors import ReadNotFoundError
@@ -256,7 +257,7 @@ def _create_turn(
     expected_warnings=None,
     actor=None,
 ):
-    ask_session = service.create_session(
+    ask_session = service.sessions.create_session(
         session=session,
         workspace_id=workspace_id,
         request=AskSessionCreate(),
@@ -479,7 +480,7 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             context_window=None,
         )
         service = AskService(search_service=search)
-        ask_session = service.create_session(
+        ask_session = service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(),
@@ -499,7 +500,7 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             binding=binding,
         )
         search._context = [_semantic_context_result(public.id, published.id)]
-        search_turn_id = service.submit_turn(
+        search_turn_id = service.store.submit_turn(
             session,
             workspace_id=workspace.id,
             ask_session_id=ask_session.id,
@@ -510,18 +511,18 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor_id=ACTOR_ID,
         )
         actor = _actor("editor")
-        prepared = service.prepare_turn(
+        prepared = service.retriever.prepare_turn(
             session,
             workspace.id,
             search_turn_id,
             actor,
             keyword_only=True,
         )
-        service.finish_turn(
+        service.store.finish_turn(
             session,
             workspace.id,
             prepared,
-            service.compose_evidence(prepared),
+            service.composer.compose_evidence(prepared),
         )
         # The follow-up uses public evidence and the earlier model exchange.
         follow_up, _warnings = create_turn_in_session(
@@ -554,13 +555,13 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
                 actor_id=ACTOR_ID,
                 actor=_actor("viewer"),
             )
-        editor_detail = service.get_session(
+        editor_detail = service.reader.get_session(
             session=session,
             workspace_id=workspace.id,
             ask_session_id=ask_session.id,
             actor=_actor("editor"),
         )
-        viewer_detail = service.get_session(
+        viewer_detail = service.reader.get_session(
             session=session,
             workspace_id=workspace.id,
             ask_session_id=ask_session.id,
@@ -857,7 +858,7 @@ def test_ask_graph_context_is_bounded_and_actor_visible(
             ),
             graph_service=GraphService(),
         )
-        ask_session = service.create_session(
+        ask_session = service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(),
@@ -875,7 +876,7 @@ def test_ask_graph_context_is_bounded_and_actor_visible(
             actor_id=ACTOR_ID,
             actor=_actor("editor"),
         )
-        viewer_session = service.get_session(
+        viewer_session = service.reader.get_session(
             session=session,
             workspace_id=workspace.id,
             ask_session_id=ask_session.id,
@@ -898,7 +899,7 @@ def test_ask_graph_context_is_empty_without_context_citation(session_factory):
             search_service=FakeSemanticSearch(),
             graph_service=GraphService(),
         )
-        ask_session = service.create_session(
+        ask_session = service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(),
@@ -923,7 +924,7 @@ def test_deterministic_no_evidence_message_uses_workspace_language(session_facto
         workspace = _ws(session)
         workspace.default_language = "ko"
         service = AskService(search_service=FakeSemanticSearch())
-        ask_session = service.create_session(
+        ask_session = service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(),
@@ -988,7 +989,7 @@ def test_session_detail_batches_graph_context_for_all_turns(session_factory):
             search_service=FakeSemanticSearch(),
             graph_service=graph,
         )
-        ask_session = service.create_session(
+        ask_session = service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(),
@@ -1022,7 +1023,7 @@ def test_session_detail_batches_graph_context_for_all_turns(session_factory):
                     rank=0,
                 )
             )
-        detail = service.get_session(
+        detail = service.reader.get_session(
             session,
             workspace.id,
             ask_session.id,

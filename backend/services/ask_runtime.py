@@ -45,18 +45,21 @@ from backend.repositories.workspace_scoped import get_in_workspace, select_in_wo
 from backend.schemas.ask import AskQuestion, AskSteerRequest, AskTurnDetail
 from backend.schemas.input_policy import validate_request_inputs
 from backend.services.ask_connection_service import AskConnectionService
-from backend.services.ask_service import (
+from backend.services.ask_service import AskService
+from backend.services.ask_turn_store import (
+    ask_session_for_turn_insert_statement,
+    settle_steering,
+)
+from backend.services.ask_types import (
     ASK_TURN_INTERNAL_ERROR,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
     AskEvidence,
     AskGenerationError,
-    AskService,
     ComposedTurn,
     PreparedTurn,
     _validate_user_message,
-    ask_evidence_visible,
-    ask_session_for_turn_insert_statement,
 )
+from backend.services.ask_visibility import ask_evidence_visible
 from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.llm_connection_service import LLMConnectionError
 from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyError
@@ -228,7 +231,7 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         with factory() as session:
-            return self.service.get_turn(session, workspace_id, turn_id, actor)
+            return self.service.reader.get_turn(session, workspace_id, turn_id, actor)
 
     async def events(
         self,
@@ -370,10 +373,12 @@ class AskRuntime:
                 )
                 if existing is not None:
                     return (
-                        self.service.get_turn(session, workspace_id, existing, actor),
+                        self.service.reader.get_turn(
+                            session, workspace_id, existing, actor
+                        ),
                         False,
                     )
-            turn_id = self.service.submit_turn(
+            turn_id = self.service.store.submit_turn(
                 session,
                 workspace_id=workspace_id,
                 ask_session_id=session_id,
@@ -381,7 +386,9 @@ class AskRuntime:
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
             )
-            return self.service.get_turn(session, workspace_id, turn_id, actor), True
+            return self.service.reader.get_turn(
+                session, workspace_id, turn_id, actor
+            ), True
 
     async def _stop(
         self,
@@ -411,7 +418,7 @@ class AskRuntime:
                 raise _turn_changed()
             self._mark_stopped(turn)
             session.flush()
-            return self.service.get_turn(session, workspace_id, turn_id, actor)
+            return self.service.reader.get_turn(session, workspace_id, turn_id, actor)
 
     async def _steer(
         self,
@@ -466,7 +473,7 @@ class AskRuntime:
             # it changed has ended.
             request_id = str(request.request_id)
             if any(message["id"] == request_id for message in turn.steering_messages):
-                return self.service.get_turn(
+                return self.service.reader.get_turn(
                     session, workspace_id, turn_id, actor
                 ), "stored"
             asked_again = session.scalar(
@@ -480,7 +487,7 @@ class AskRuntime:
                 ).with_only_columns(AskTurn.id)
             )
             if asked_again is not None:
-                return self.service.get_turn(
+                return self.service.reader.get_turn(
                     session, workspace_id, asked_again, actor
                 ), "stored"
             job = _controllable(job, workspace_id, actor)
@@ -496,7 +503,7 @@ class AskRuntime:
                     },
                 ]
                 session.flush()
-                return self.service.get_turn(
+                return self.service.reader.get_turn(
                     session, workspace_id, turn_id, actor
                 ), "sent"
             # Asked again in one transaction: the stopped question with the
@@ -504,7 +511,7 @@ class AskRuntime:
             # the next queued question.
             self._mark_stopped(turn)
             session.flush()
-            again_id = self.service.submit_turn(
+            again_id = self.service.store.submit_turn(
                 session,
                 workspace_id=workspace_id,
                 ask_session_id=turn.ask_session_id,
@@ -515,7 +522,7 @@ class AskRuntime:
             )
             self._turn(session, workspace_id, again_id).started_at = datetime.now(UTC)
             session.flush()
-            return self.service.get_turn(
+            return self.service.reader.get_turn(
                 session, workspace_id, again_id, actor
             ), "asked again"
 
@@ -576,7 +583,7 @@ class AskRuntime:
                 job.takes_steering = asks_model and binding.features.steering
             job.evidence = prepared.evidence
             if asks_model:
-                composed = await self.service.stream_turn(
+                composed = await self.service.composer.stream_turn(
                     prepared,
                     binding,
                     on_delta=lambda text: self._on_delta(job, text),
@@ -584,7 +591,7 @@ class AskRuntime:
                     on_steer=lambda update: self._on_steer(job, update),
                 )
             else:
-                composed = self.service.compose_evidence(prepared)
+                composed = self.service.composer.compose_evidence(prepared)
             await run_in_threadpool(self._finish, job, prepared, composed)
         except AskGenerationError as exc:
             await run_in_threadpool(self._fail, job, exc.code)
@@ -639,14 +646,14 @@ class AskRuntime:
             if stale is not None:
                 stale.status = ASK_TURN_FAILED
                 stale.error_code = ASK_TURN_INTERNAL_ERROR
-                _settle_steering(stale, "unknown")
+                settle_steering(stale, "unknown")
                 session.flush()
             turn.started_at = datetime.now(UTC)
         return True
 
     def _prepare(self, job: _Job, binding: ModelBinding | None) -> PreparedTurn:
         with job.factory() as session:
-            return self.service.prepare_turn(
+            return self.service.retriever.prepare_turn(
                 session,
                 job.workspace_id,
                 job.turn_id,
@@ -665,21 +672,25 @@ class AskRuntime:
     ) -> None:
         with job.factory.begin() as session:
             # Instructions the model never received did not shape the answer.
-            _settle_steering(
+            settle_steering(
                 self._locked_turn(session, job.workspace_id, job.turn_id), "failed"
             )
             session.flush()
-            self.service.finish_turn(session, job.workspace_id, prepared, composed)
+            self.service.store.finish_turn(
+                session, job.workspace_id, prepared, composed
+            )
 
     def _fail(self, job: _Job, code: str) -> None:
         try:
             with job.factory.begin() as session:
-                _settle_steering(
+                settle_steering(
                     self._locked_turn(session, job.workspace_id, job.turn_id),
                     "unknown",
                 )
                 session.flush()
-                self.service.fail_turn(session, job.workspace_id, job.turn_id, code)
+                self.service.store.fail_turn(
+                    session, job.workspace_id, job.turn_id, code
+                )
         except Exception:
             logger.exception("Could not record failure for Ask turn %s", job.turn_id)
 
@@ -768,7 +779,7 @@ class AskRuntime:
     def _mark_stopped(turn: AskTurn) -> None:
         if turn.status == ASK_TURN_PENDING:
             turn.status = ASK_TURN_STOPPED
-            _settle_steering(turn, "unknown")
+            settle_steering(turn, "unknown")
 
 
 def _names_no_model(request: AskQuestion) -> bool:
@@ -811,16 +822,6 @@ def _controllable(job: _Job | None, workspace_id: UUID, actor: ActorContext) -> 
 
 def _running(turn: AskTurn) -> bool:
     return turn.status == ASK_TURN_PENDING and turn.started_at is not None
-
-
-def _settle_steering(turn: AskTurn, status: str) -> None:
-    """Give every instruction still waiting its final status."""
-
-    if any(message["status"] == "waiting" for message in turn.steering_messages):
-        turn.steering_messages = [
-            {**message, "status": status} if message["status"] == "waiting" else message
-            for message in turn.steering_messages
-        ]
 
 
 def _turn_changed() -> RejectedByPolicyError:

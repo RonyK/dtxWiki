@@ -30,7 +30,7 @@ from backend.services.ask_runtime import (
     AskTurnPreview,
     AskTurnState,
 )
-from backend.services.ask_service import InvalidUserMessageError
+from backend.services.ask_types import InvalidUserMessageError
 from backend.services.read_errors import ReadServiceError
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/ask", tags=["read"])
@@ -211,7 +211,7 @@ def search_failed_ask_turn(
 ):
     try:
         with session_factory() as session:
-            detail = ask_service.search_failed_turn(
+            detail = ask_service.reader.search_failed_turn(
                 session, workspace_id, ask_turn_id, actor
             )
     except ReadServiceError as exc:

@@ -41,6 +41,10 @@ from backend.schemas.context_ingress import (
     ProposalSourceRef,
 )
 from backend.schemas.input_policy import validate_request_inputs
+from backend.services.ask_visibility import (
+    _turn_citations_by_turn,
+    ask_turn_visible,
+)
 from backend.services.audit_service import AuditService
 from backend.services.body_preparer import BodyInput, BodyPreparer, WriteContext
 from backend.services.context_lifecycle import record_metadata_snapshot
@@ -675,12 +679,6 @@ def _proposal_evidence_visible(
     actor: ActorContext | None,
     expected_workspace_id: UUID,
 ) -> bool:
-    # Imported lazily to avoid a module-load cycle with ask_service.
-    from backend.services.ask_service import (
-        _turn_citations_by_turn,
-        ask_turn_visible,
-    )
-
     # Fail CLOSED when the source turn is gone (source_ask_turn_id nulled on
     # delete, or the id points at a deleted turn): the cloned answer can no
     # longer be re-authorized, and a deleted turn has no citations to check —

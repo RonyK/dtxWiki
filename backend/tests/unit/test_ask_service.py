@@ -1,11 +1,11 @@
 import pytest
 
-from backend.services.ask_service import (
+from backend.services.ask_session_service import derive_title_snippet
+from backend.services.ask_types import (
     ASK_TITLE_MAX_WORDS,
     USER_MESSAGE_MAX_CHARS,
     InvalidUserMessageError,
     _validate_user_message,
-    derive_title_snippet,
 )
 
 

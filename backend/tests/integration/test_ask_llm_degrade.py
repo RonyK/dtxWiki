@@ -18,7 +18,7 @@ from backend.llm.binding import ModelBinding
 from backend.llm.legacy import resolve_default_binding
 from backend.llm.registry import resolve_embedding_provider, resolve_reranker
 from backend.models.workspace import Workspace
-from backend.services.ask_service import (
+from backend.services.ask_types import (
     LLM_ANSWER_REFUSED_WARNING,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
 )

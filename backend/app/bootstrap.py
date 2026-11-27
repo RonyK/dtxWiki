@@ -104,7 +104,7 @@ def prepare_serving(settings: Settings) -> None:
 
     bootstrap_core(settings)
 
-    from backend.services.ask_service import fail_interrupted_ask_turns
+    from backend.services.ask_turn_store import fail_interrupted_ask_turns
 
     engine = make_engine(settings.database_url)
     try:

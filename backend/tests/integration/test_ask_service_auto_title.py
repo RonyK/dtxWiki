@@ -102,7 +102,7 @@ def test_ask_session_without_context_parent_defaults_to_inbox(session_factory):
         )
         assert inbox is not None
 
-        detail = AskService(search_service=FakeSearchService()).create_session(
+        detail = AskService(search_service=FakeSearchService()).sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(),
@@ -146,13 +146,13 @@ def test_ask_session_id_is_opaque_across_workspaces(session_factory):
         session.flush()
 
         with pytest.raises(ReadNotFoundError) as missing_error:
-            service.get_session(
+            service.reader.get_session(
                 session=session,
                 workspace_id=requested_workspace.id,
                 ask_session_id=uuid4(),
             )
         with pytest.raises(ReadNotFoundError) as foreign_error:
-            service.get_session(
+            service.reader.get_session(
                 session=session,
                 workspace_id=requested_workspace.id,
                 ask_session_id=foreign_session.id,
@@ -168,7 +168,7 @@ def test_ask_ingress_without_placement_creates_page_in_inbox(session_factory):
 
     with session_factory.begin() as session:
         workspace = _default_workspace(session)
-        ask_detail = ask_service.create_session(
+        ask_detail = ask_service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(),
@@ -305,7 +305,7 @@ def test_ask_auto_title_uses_intent_then_repeated_context_anchor(session_factory
         workspace = _default_workspace(session)
         page = _seed_context_page(session, workspace.id, "Deployment Plan")
         service = AskService(search_service=FakeSearchService(page.id))
-        detail = service.create_session(
+        detail = service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(),
@@ -356,14 +356,14 @@ def test_ask_auto_title_preserves_user_supplied_title(session_factory, monkeypat
         workspace = _default_workspace(session)
         page = _seed_context_page(session, workspace.id, "Deployment Plan")
         service = AskService(search_service=FakeSearchService(page.id))
-        detail = service.create_session(
+        detail = service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(title="Incident analysis"),
             actor_kind="human",
             actor_id=ACTOR_ID,
         )
-        original_lock = service._lock_session_for_turn_insert
+        original_lock = service.store._lock_session_for_turn_insert
         locked_sessions = []
 
         def tracked_lock(*, session, ask_session_id, workspace_id):
@@ -375,7 +375,7 @@ def test_ask_auto_title_preserves_user_supplied_title(session_factory, monkeypat
             )
 
         monkeypatch.setattr(
-            service,
+            service.store,
             "_lock_session_for_turn_insert",
             tracked_lock,
         )
@@ -400,7 +400,7 @@ def test_ask_auto_title_uses_topic_anchor_when_context_anchor_absent(session_fac
     with session_factory.begin() as session:
         workspace = _default_workspace(session)
         service = AskService(search_service=FakeSearchService())
-        detail = service.create_session(
+        detail = service.sessions.create_session(
             session=session,
             workspace_id=workspace.id,
             request=AskSessionCreate(default_topic_tags=["Retention"]),
@@ -431,7 +431,7 @@ def test_ask_auto_title_space_boundary_and_long_anchor_keep_intent(session_facto
             (page.id, "Explain the deployment"),
         ):
             service = AskService(search_service=FakeSearchService(anchor_id))
-            detail = service.create_session(
+            detail = service.sessions.create_session(
                 session=session,
                 workspace_id=workspace.id,
                 request=AskSessionCreate(),

@@ -19,11 +19,11 @@ from backend.app.settings import Settings
 from backend.models.ask import AskTurn
 from backend.models.workspace import Workspace
 from backend.services.ask_runtime import AskTurnPreview
-from backend.services.ask_service import (
+from backend.services.ask_turn_store import fail_interrupted_ask_turns
+from backend.services.ask_types import (
     LLM_COMPOSER_RETRYABLE_WARNING,
     AskGenerationError,
     ComposedTurn,
-    fail_interrupted_ask_turns,
 )
 from backend.services.page_service import PageService
 from backend.spi.llm import GenerationFeatures, SteerUpdate
@@ -116,7 +116,7 @@ def test_ask_questions_queue_stream_steer_and_survive_failures(
 
     runtime = container.ask_runtime
     monkeypatch.setattr(runtime.connections, "resolve", resolve)
-    monkeypatch.setattr(runtime.service, "stream_turn", generate)
+    monkeypatch.setattr(runtime.service.composer, "stream_turn", generate)
     events = runtime.events
 
     async def observed_events(*args):

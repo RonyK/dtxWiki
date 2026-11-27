@@ -429,7 +429,7 @@ def test_ask_warns_without_recording_gap(
     actor = _owner(workspace_id)
     service = AskService(search_service=SearchService())
     with session_factory.begin() as session:
-        ask_session = service.create_session(
+        ask_session = service.sessions.create_session(
             session=session,
             workspace_id=workspace_id,
             request=AskSessionCreate(),

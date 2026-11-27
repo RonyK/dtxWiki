@@ -32,7 +32,7 @@ def create_turn_in_session(
     actor: ActorContext | None = None,
     binding: ModelBinding | None = None,
 ) -> tuple[AskTurnDetail, list[str]]:
-    turn_id = service.submit_turn(
+    turn_id = service.store.submit_turn(
         session,
         workspace_id=workspace_id,
         ask_session_id=ask_session_id,
@@ -40,14 +40,16 @@ def create_turn_in_session(
         actor_kind=actor_kind,
         actor_id=actor_id,
     )
-    prepared = service.prepare_turn(
+    prepared = service.retriever.prepare_turn(
         session, workspace_id, turn_id, actor, binding=binding
     )
     composed = (
-        service.compose_evidence(prepared)
+        service.composer.compose_evidence(prepared)
         if binding is None
-        else asyncio.run(service.stream_turn(prepared, binding, on_delta=_ignore_delta))
+        else asyncio.run(
+            service.composer.stream_turn(prepared, binding, on_delta=_ignore_delta)
+        )
     )
-    service.finish_turn(session, workspace_id, prepared, composed)
-    detail = service.get_turn(session, workspace_id, turn_id, actor)
+    service.store.finish_turn(session, workspace_id, prepared, composed)
+    detail = service.reader.get_turn(session, workspace_id, turn_id, actor)
     return detail, list(detail.warning_codes)

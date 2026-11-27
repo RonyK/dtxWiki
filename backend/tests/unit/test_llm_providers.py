@@ -21,8 +21,9 @@ from backend.llm.binding import ModelBinding
 from backend.llm.legacy import build_default_binding
 from backend.llm.transport import HttpxLLMTransport
 from backend.schemas.read import RankedResult, SearchPayload
-from backend.services import ask_service
-from backend.services.ask_service import AskGenerationError, AskService, PreparedTurn
+from backend.services import ask_composer
+from backend.services.ask_service import AskService
+from backend.services.ask_types import AskGenerationError, PreparedTurn
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
@@ -86,7 +87,9 @@ def test_configured_default_bindings_stream_with_their_model_settings():
     assert build_default_binding(Settings(_env_file=None), registry) is None
 
     service = AskService(search_service=_needle_search(uuid4()))
-    prepared = _prepared(service._retrieve(_NoPolicySession(), uuid4(), "Needle"))
+    prepared = _prepared(
+        service.retriever._retrieve(_NoPolicySession(), uuid4(), "Needle")
+    )
     requests = []
     deltas = []
 
@@ -150,7 +153,7 @@ def test_configured_default_bindings_stream_with_their_model_settings():
         )
         assert binding is not None
         composed = asyncio.run(
-            service.stream_turn(prepared, binding, on_delta=on_delta)
+            service.composer.stream_turn(prepared, binding, on_delta=on_delta)
         )
         (request,) = requests
         payload = json.loads(request.content)
@@ -183,7 +186,7 @@ def test_configured_default_bindings_stream_with_their_model_settings():
     )
     assert binding is not None
     with pytest.raises(AskGenerationError) as failure:
-        asyncio.run(service.stream_turn(prepared, binding, on_delta=on_delta))
+        asyncio.run(service.composer.stream_turn(prepared, binding, on_delta=on_delta))
     assert (failure.value.code, len(requests)) == ("llm_composer_retryable", 1)
 
     # An option the model cannot honor is refused before anything is sent.
@@ -1018,9 +1021,11 @@ def test_ask_service_composes_from_evidence_with_a_model_binding():
     result_id = uuid4()
     service = AskService(search_service=_needle_search(result_id))
     binding = _binding(FixedPort("Composed answer [1]."))
-    retrieved = service._retrieve(_NoPolicySession(), uuid4(), "Needle")
+    retrieved = service.retriever._retrieve(_NoPolicySession(), uuid4(), "Needle")
     composed = asyncio.run(
-        service.stream_turn(_prepared(retrieved), binding, on_delta=_ignore_delta)
+        service.composer.stream_turn(
+            _prepared(retrieved), binding, on_delta=_ignore_delta
+        )
     )
 
     assert composed.answer == "Composed answer [1]."
@@ -1131,13 +1136,17 @@ class StalledPort:
 )
 def test_ask_service_raises_for_model_failure(port, code, monkeypatch):
     if isinstance(port, StalledPort):
-        monkeypatch.setattr(ask_service, "_MODEL_DEADLINE_SECONDS", 0)
+        monkeypatch.setattr(ask_composer, "_MODEL_DEADLINE_SECONDS", 0)
     service = AskService(search_service=_needle_search(uuid4()))
-    prepared = _prepared(service._retrieve(_NoPolicySession(), uuid4(), "Needle"))
+    prepared = _prepared(
+        service.retriever._retrieve(_NoPolicySession(), uuid4(), "Needle")
+    )
 
     with pytest.raises(AskGenerationError) as failure:
         asyncio.run(
-            service.stream_turn(prepared, _binding(port), on_delta=_ignore_delta)
+            service.composer.stream_turn(
+                prepared, _binding(port), on_delta=_ignore_delta
+            )
         )
 
     assert failure.value.code == code

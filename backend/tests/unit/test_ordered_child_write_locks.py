@@ -6,7 +6,7 @@ from backend.services.agent_page_service import (
     agent_page_by_id_for_update_statement,
     agent_page_by_slug_for_update_statement,
 )
-from backend.services.ask_service import ask_session_for_turn_insert_statement
+from backend.services.ask_turn_store import ask_session_for_turn_insert_statement
 from backend.services.context_ingress_service import (
     context_ingress_proposal_for_update_statement,
     context_page_for_ingress_update_statement,

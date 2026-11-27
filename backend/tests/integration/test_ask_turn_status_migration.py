@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.repositories.workspace_repo import insert_workspace
-from backend.services.ask_service import ensure_ask_root
+from backend.services.ask_session_service import ensure_ask_root
 from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
