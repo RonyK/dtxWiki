@@ -1520,6 +1520,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/ask/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Ask Models */
+        get: operations["list_ask_models_api_v1_workspaces__workspace_id__ask_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/ask/sessions": {
         parameters: {
             query?: never;
@@ -1564,8 +1581,29 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Ask Turn */
+        /**
+         * Create Ask Turn
+         * @description Answer a question. The question is stored first: if answering fails
+         *     after that, the turn stays in the session as ``failed``.
+         */
         post: operations["create_ask_turn_api_v1_workspaces__workspace_id__ask_sessions__ask_session_id__turns_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/ask/sessions/{ask_session_id}/turns/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Ask Stream Turn */
+        post: operations["submit_ask_stream_turn_api_v1_workspaces__workspace_id__ask_sessions__ask_session_id__turns_stream_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1583,6 +1621,74 @@ export interface paths {
         put?: never;
         /** Promote Ask Turn */
         post: operations["promote_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Failed Ask Turn */
+        get: operations["search_failed_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/steer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Steer Ask Turn */
+        post: operations["steer_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__steer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Ask Turn */
+        post: operations["stop_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Ask Stream */
+        get: operations["read_ask_stream_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__stream_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4830,6 +4936,52 @@ export interface components {
             /** Value */
             value: (components["schemas"]["LiteralAtom"] | components["schemas"]["McpUrlAtom"] | components["schemas"]["ServerNameAtom"])[];
         };
+        /** AskModelChoice */
+        AskModelChoice: {
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /** Connection Label */
+            connection_label: string;
+            /** Model Label */
+            model_label: string;
+            /** Model Profile Id */
+            model_profile_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "personal" | "workspace";
+            /** Steer */
+            steer: boolean;
+        };
+        /** AskModelChoices */
+        AskModelChoices: {
+            /** Items */
+            items: components["schemas"]["AskModelChoice"][];
+        };
+        /** AskModelListResponse */
+        AskModelListResponse: {
+            data: components["schemas"]["AskModelChoices"];
+            envelope?: components["schemas"]["RESTResultEnvelope"];
+        };
+        /** AskModelSelection */
+        AskModelSelection: {
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /** Model Profile Id */
+            model_profile_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "personal" | "workspace";
+        };
         /** AskSessionCreate */
         AskSessionCreate: {
             /** Default Context Parent Tree Node Id */
@@ -4946,8 +5098,59 @@ export interface components {
              */
             updated_at: string;
         };
+        /** AskSteerRequest */
+        AskSteerRequest: {
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * User Message
+             * @description Maximum 8000 Unicode code points after trimming surrounding whitespace.
+             */
+            user_message: string;
+        };
+        /** AskSteeringMessage */
+        AskSteeringMessage: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "waiting" | "applied" | "failed" | "unknown";
+            /** User Message */
+            user_message: string;
+        };
+        /** AskStreamTurnCreate */
+        AskStreamTurnCreate: {
+            /** Replace Turn Id */
+            replace_turn_id?: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            selection?: components["schemas"]["AskModelSelection"] | null;
+            /** Ttl Override Seconds */
+            ttl_override_seconds?: number | null;
+            /**
+             * User Message
+             * @description Maximum 8000 Unicode code points after trimming surrounding whitespace.
+             */
+            user_message: string;
+        };
         /** AskTurnCreate */
         AskTurnCreate: {
+            /** After Turn Id */
+            after_turn_id?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            selection?: components["schemas"]["AskModelSelection"] | null;
             /** Ttl Override Seconds */
             ttl_override_seconds?: number | null;
             /**
@@ -4965,6 +5168,11 @@ export interface components {
             ask_session_id: string;
             /** Assistant Message */
             assistant_message: string | null;
+            /**
+             * Can Search
+             * @default false
+             */
+            can_search: boolean;
             /** Cited Context Page Ids */
             cited_context_page_ids: string[];
             /** Cited Library Artifact Ids */
@@ -4976,6 +5184,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Error Code */
+            error_code?: string | null;
             /** Fallback Disclosure */
             fallback_disclosure: boolean;
             /** Graph Context */
@@ -4999,6 +5209,21 @@ export interface components {
             retrieval_trace: {
                 [key: string]: string;
             }[];
+            selection?: components["schemas"]["AskModelSelection"] | null;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "pending" | "completed" | "failed" | "stopped";
+            /**
+             * Steer Supported
+             * @default false
+             */
+            steer_supported: boolean;
+            /** Steering Messages */
+            steering_messages?: components["schemas"]["AskSteeringMessage"][];
             /** Topic Tags */
             topic_tags: string[];
             /** Tree Path */
@@ -20275,6 +20500,73 @@ export interface operations {
             };
         };
     };
+    list_ask_models_api_v1_workspaces__workspace_id__ask_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskModelListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
     list_ask_sessions_api_v1_workspaces__workspace_id__ask_sessions_get: {
         parameters: {
             query?: {
@@ -20554,6 +20846,87 @@ export interface operations {
                     "application/json": components["schemas"]["RESTErrorBody"];
                 };
             };
+            /** @description The question may have been stored before the failure; read the session to see whether it was, as a `failed` turn. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    submit_ask_stream_turn_api_v1_workspaces__workspace_id__ask_sessions__ask_session_id__turns_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ask_session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskStreamTurnCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskTurnDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
         };
     };
     promote_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__promote_post: {
@@ -20579,6 +20952,282 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContextIngressProposalResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    search_failed_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__search_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ask_turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskTurnDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    steer_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__steer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ask_turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskSteerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskTurnDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    stop_ask_turn_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ask_turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskTurnDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RESTErrorBody"];
+                };
+            };
+        };
+    };
+    read_ask_stream_api_v1_workspaces__workspace_id__ask_turns__ask_turn_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ask_turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
                 };
             };
             /** @description Unauthorized */

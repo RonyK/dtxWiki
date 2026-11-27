@@ -9,7 +9,7 @@ from __future__ import annotations
 import copy
 import inspect
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from urllib.parse import unquote, urlsplit
@@ -19,6 +19,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from packaging.version import InvalidVersion, Version
 
+from backend.llm.streaming import NextSteer, OnDelta, OnSteer, supports_native_steer
 from backend.spi.llm import (
     COMMON_OPTIONS,
     LLM_ADAPTER_SPI_VERSION,
@@ -162,7 +163,15 @@ class LLMAdapterRegistry:
             raise LLMAdapterRegistryError(
                 f"LLM adapter {adapter_id!r} did not build a text generation port"
             )
-        return _GuardedPort(port, model, capabilities, secrets=secrets)
+        return _GuardedPort(
+            port,
+            model,
+            capabilities,
+            secrets=secrets,
+            http_stream=adapter_id.startswith(f"{BUILTIN_NAMESPACE}.")
+            and callable(getattr(transport, "open_sse", None)),
+            native_steer=supports_native_steer(adapter_id, endpoint.url, model),
+        )
 
     @staticmethod
     def _validate_fields(
@@ -316,8 +325,26 @@ class _EndpointScopedTransport:
         payload: Mapping[str, object],
         timeout_seconds: float,
     ) -> TransportResponse:
-        # A request may carry query parameters (an API version, say); the
-        # credential check below keeps secrets out of them.
+        self._check_target(url, headers)
+        return await self._transport.post_json(
+            url, headers=headers, payload=payload, timeout_seconds=timeout_seconds
+        )
+
+    def open_sse(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+        timeout_seconds: float,
+    ):
+        self._check_target(url, headers)
+        return self._transport.open_sse(
+            url, headers=headers, payload=payload, timeout_seconds=timeout_seconds
+        )
+
+    def _check_target(self, url: str, headers: Mapping[str, str]) -> None:
+        # API-version query parameters are allowed. Credentials belong in headers.
         target = _Endpoint.parse(url, query_allowed=True)
         if (
             target is None
@@ -326,9 +353,6 @@ class _EndpointScopedTransport:
             or any(secret in url or secret in unquote(url) for secret in self._secrets)
         ):
             raise LLMAdapterError("invalid_request", delivery="not_sent")
-        return await self._transport.post_json(
-            url, headers=headers, payload=payload, timeout_seconds=timeout_seconds
-        )
 
 
 class _GuardedPort:
@@ -341,21 +365,62 @@ class _GuardedPort:
         capabilities: LLMModelCapabilities,
         *,
         secrets: tuple[str, ...],
+        http_stream: bool,
+        native_steer: bool,
     ) -> None:
         self._port = port
         self._model = model
         self._capabilities = capabilities
         self._secrets = secrets
+        self._http_stream = http_stream
+        self._native_steer = native_steer
 
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext
     ) -> CanonicalTextResult:
+        self._check_request(request)
+        return await self._checked_result(self._port.generate(request, context))
+
+    async def stream(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
+        next_steer: NextSteer | None,
+        on_steer: OnSteer | None,
+    ) -> CanonicalTextResult:
+        self._check_request(request)
+        ws = getattr(self._port, "steered_stream", None)
+        if self._native_steer and callable(ws) and next_steer and on_steer:
+            return await self._checked_result(
+                ws(
+                    request,
+                    context,
+                    on_delta=on_delta,
+                    next_steer=next_steer,
+                    on_steer=on_steer,
+                )
+            )
+        stream = getattr(self._port, "stream", None)
+        if self._http_stream and callable(stream):
+            return await self._checked_result(
+                stream(request, context, on_delta=on_delta)
+            )
+        return await self._checked_result(self._port.generate(request, context))
+
+    def _check_request(self, request: CanonicalTextRequest) -> None:
         # The capabilities describe one model; another model is not covered.
         if request.model != self._model:
             raise LLMAdapterError("invalid_request", delivery="not_sent")
         self._capabilities.require_supported(request)
+
+    async def _checked_result(
+        self,
+        operation: Awaitable[CanonicalTextResult],
+    ) -> CanonicalTextResult:
         try:
-            result = await self._port.generate(request, context)
+            result = await operation
         except LLMAdapterError as exc:
             exc.provider_request_id = self._opaque(exc.provider_request_id)
             raise

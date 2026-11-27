@@ -1,11 +1,6 @@
-"""A misconfigured answer model must degrade Ask, not break it.
+"""An unusable default configuration serves evidence with a warning.
 
-The LLM provider is built while FastAPI resolves ``AskServiceDep``, i.e. before
-any handler body runs, so a raise there escaped every ``try/except`` and turned
-the whole Ask surface into a 500. The frontend then wrote an empty workspace id
-into its state, and every later call went to ``/workspaces//ask/...`` — which is
-the "route not found" 404 users actually reported. These tests pin the backend
-half: configuration failures become a served answer plus a warning.
+Failures during model execution leave a failed turn with its error code.
 """
 
 from uuid import uuid4
@@ -19,13 +14,15 @@ from backend.app.main import create_app
 from backend.app.settings import Settings
 from backend.llm.adapter_registry import LLMAdapterRegistry
 from backend.llm.adapters import build_builtin_llm_adapters
-from backend.llm.legacy import resolve_llm_provider
+from backend.llm.binding import ModelBinding
+from backend.llm.legacy import resolve_default_binding
 from backend.llm.registry import resolve_embedding_provider, resolve_reranker
 from backend.models.workspace import Workspace
 from backend.services.ask_service import (
-    LLM_COMPOSER_RETRYABLE_WARNING,
+    LLM_ANSWER_REFUSED_WARNING,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
 )
+from backend.spi.llm import CanonicalTextResult, TextGenerationPort
 from backend.tests.conftest import (
     authenticate_test_client_in_workspace,
     captured_log_messages,
@@ -53,27 +50,27 @@ def _misconfigured_settings() -> Settings:
     )
 
 
-def test_resolve_llm_provider_reports_reason_instead_of_raising():
-    provider, reason = resolve_llm_provider(
+def test_resolve_default_binding_reports_missing_key():
+    binding, reason = resolve_default_binding(
         _misconfigured_settings(), LLMAdapterRegistry(build_builtin_llm_adapters())
     )
 
-    assert provider is None
+    assert binding is None
     assert reason and "API key" in reason
 
 
-def test_resolve_llm_provider_reports_unknown_provider():
+def test_resolve_default_binding_reports_unknown_provider():
     settings = Settings(
         database_url="sqlite+pysqlite:///:memory:",
         session_secret="ask-degrade-secret",
         llm_provider="not-a-provider",
     )
 
-    provider, reason = resolve_llm_provider(
+    binding, reason = resolve_default_binding(
         settings, LLMAdapterRegistry(build_builtin_llm_adapters())
     )
 
-    assert provider is None
+    assert binding is None
     assert reason and "DTXWIKI_LLM_PROVIDER" in reason
 
 
@@ -124,7 +121,7 @@ def test_ask_session_list_survives_a_misconfigured_provider(
     assert response.status_code == 200, response.text
 
 
-def test_ask_turn_answers_and_discloses_why_the_model_was_skipped(
+def test_a_misconfigured_default_model_fails_the_turn_like_any_model(
     session_factory, page_service
 ):
     container = assemble(
@@ -165,127 +162,89 @@ def test_ask_turn_answers_and_discloses_why_the_model_was_skipped(
     )
 
     assert turn.status_code == 200, turn.text
-    body = turn.json()
-    # An answer is served, not an error.
-    assert body["data"]["assistant_message"]
-    # ...and the user is told why it is the deterministic summary.
-    assert LLM_PROVIDER_UNAVAILABLE_WARNING in body["data"]["warning_codes"]
-    assert LLM_PROVIDER_UNAVAILABLE_WARNING in [
-        warning["code"] for warning in body["envelope"]["warnings"]
-    ]
+    data = turn.json()["data"]
+    # The question is kept; a configured default model that cannot be built
+    # is a model failure like any other, and the asker can search instead.
+    assert (data["status"], data["error_code"], data["can_search"]) == (
+        "failed",
+        LLM_PROVIDER_UNAVAILABLE_WARNING,
+        True,
+    )
 
 
-def test_composer_failure_is_disclosed_instead_of_silently_swallowed(
+def _answer_with_default_port(session_factory, page_service, port: TextGenerationPort):
+    container = assemble(
+        Settings(llm_provider="none"),
+        session_factory=session_factory,
+        page_service=page_service,
+    )
+    container.ask_connections.default = ModelBinding(
+        port=port,
+        target={"kind": "server", "model": "test-default"},
+        model="test-default",
+        max_output_tokens=1024,
+        context_window=None,
+        steer=False,
+    )
+    workspace_id = _workspace_id(session_factory)
+    with session_factory.begin() as session:
+        session.get(Workspace, workspace_id).labs_policy = {"ask_enabled": True}
+    page_service.write_page(
+        workspace_slug="default",
+        slug="composer-evidence",
+        title="Composer Evidence",
+        body_md="# Composer Evidence\n\nEvidence for the model to use.",
+        actor_kind="human",
+        actor_id=str(uuid4()),
+        actor_provenance="browser_session",
+    )
+    prefix = f"/api/v1/workspaces/{workspace_id}/ask"
+    app = create_app(container=container, bootstrap_on_startup=False)
+    with TestClient(app) as client:
+        authenticate_test_client_in_workspace(
+            client, session_factory, email="ask-default-failure@example.com"
+        )
+        created = client.post(f"{prefix}/sessions", json={})
+        assert created.status_code == 201, created.text
+        ask_session_id = created.json()["data"]["id"]
+        response = client.post(
+            f"{prefix}/sessions/{ask_session_id}/turns",
+            json={"user_message": "What does the composer evidence say?"},
+        )
+    assert response.status_code == 200, response.text
+    return response.json()["data"]
+
+
+def test_default_model_refusal_fails_the_turn_and_allows_search(
     session_factory, page_service
 ):
-    """A composer failure used to be `pass`-ed with no user signal. A declined
-    reply must reach the saved turn with its own warning, not a retry hint."""
-
-    from backend.schemas.ask import AskSessionCreate, AskTurnCreate
-    from backend.services.ask_service import (
-        LLM_ANSWER_REFUSED_WARNING,
-        AskService,
-    )
-    from backend.spi.llm import CanonicalTextResult
-
-    class _RefusingProvider:
-        def generate(self, **_kwargs):
-            # A wrong signature would raise TypeError instead, which the
-            # service's generic `except Exception` arm warns on differently.
+    class RefusingPort:
+        async def generate(self, request, context):
             return CanonicalTextResult(text="I can't help.", termination="refused")
 
-    workspace_id = _workspace_id(session_factory)
-    with session_factory.begin() as session:
-        session.get(Workspace, workspace_id).labs_policy = {"ask_enabled": True}
-    page_service.write_page(
-        workspace_slug="default",
-        slug="composer-failure-evidence",
-        title="Composer Failure Evidence",
-        body_md="# Composer Failure Evidence\n\nPack text stands in.",
-        actor_kind="human",
-        actor_id=str(uuid4()),
-        actor_provenance="browser_session",
+    turn = _answer_with_default_port(session_factory, page_service, RefusingPort())
+
+    assert (turn["status"], turn["error_code"], turn["assistant_message"]) == (
+        "failed",
+        LLM_ANSWER_REFUSED_WARNING,
+        None,
     )
-    service = AskService(provider=_RefusingProvider())
-
-    with session_factory.begin() as session:
-        ask_session = service.create_session(
-            session=session,
-            workspace_id=workspace_id,
-            request=AskSessionCreate(),
-            actor_kind="human",
-            actor_id=str(uuid4()),
-        )
-        detail, warnings = service.create_turn(
-            session=session,
-            workspace_id=workspace_id,
-            ask_session_id=ask_session.id,
-            request=AskTurnCreate(user_message="composer failure evidence"),
-            actor_kind="human",
-            actor_id=str(uuid4()),
-        )
-
-    # The saved turn answers with the evidence summary, not the refusal, and
-    # keeps the warning: create_turn forwards only Ask's own codes.
-    assert "I can't help." not in detail.assistant_message
-    assert "Composer Failure Evidence" in detail.assistant_message
-    assert LLM_ANSWER_REFUSED_WARNING in warnings
-    assert LLM_ANSWER_REFUSED_WARNING in detail.warning_codes
+    assert turn["selection"] is None and turn["can_search"] is True
 
 
-def test_an_unexpected_composer_exception_does_not_promise_a_retry(
+def test_unexpected_default_model_exception_fails_the_turn(
     session_factory, page_service
 ):
-    """`llm_composer_retryable` tells the user to try again later.
+    class BuggyPort:
+        async def generate(self, request, context):
+            raise RuntimeError("composer bug")
 
-    That fits an upstream timeout or overload and never a bug in our own
-    composer, so the two arms must not emit the same code — otherwise the only
-    advice a user gets for a server-side crash is one that cannot work.
-    """
+    turn = _answer_with_default_port(session_factory, page_service, BuggyPort())
 
-    from backend.schemas.ask import AskSessionCreate, AskTurnCreate
-    from backend.services.ask_service import (
+    assert (turn["status"], turn["error_code"]) == (
+        "failed",
         LLM_PROVIDER_UNAVAILABLE_WARNING,
-        AskService,
     )
-
-    class _BuggyProvider:
-        def generate(self, **_kwargs):
-            raise TypeError("composer bug, not an upstream failure")
-
-    workspace_id = _workspace_id(session_factory)
-    with session_factory.begin() as session:
-        session.get(Workspace, workspace_id).labs_policy = {"ask_enabled": True}
-    page_service.write_page(
-        workspace_slug="default",
-        slug="composer-bug-evidence",
-        title="Composer Bug Evidence",
-        body_md="# Composer Bug Evidence\n\nPack text stands in.",
-        actor_kind="human",
-        actor_id=str(uuid4()),
-        actor_provenance="browser_session",
-    )
-    service = AskService(provider=_BuggyProvider())
-
-    with session_factory.begin() as session:
-        ask_session = service.create_session(
-            session=session,
-            workspace_id=workspace_id,
-            request=AskSessionCreate(),
-            actor_kind="human",
-            actor_id=str(uuid4()),
-        )
-        _detail, warnings = service.create_turn(
-            session=session,
-            workspace_id=workspace_id,
-            ask_session_id=ask_session.id,
-            request=AskTurnCreate(user_message="composer bug evidence"),
-            actor_kind="human",
-            actor_id=str(uuid4()),
-        )
-
-    assert LLM_PROVIDER_UNAVAILABLE_WARNING in warnings
-    assert LLM_COMPOSER_RETRYABLE_WARNING not in warnings
 
 
 def test_a_broken_embedding_config_disables_semantic_indexing_instead_of_the_job(
@@ -331,6 +290,9 @@ def test_the_reason_an_answer_model_was_skipped_reaches_the_server_log(
             session_factory=session_factory,
             page_service=page_service,
         )
-        container.get_ask_service()
+        _ = container.ask_connections
 
-    assert any("Ask answer model unavailable" in message for message in records)
+    assert any(
+        "Ask answer model unavailable" in message and "API key" in message
+        for message in records
+    )

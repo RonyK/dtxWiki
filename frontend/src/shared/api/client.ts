@@ -164,6 +164,15 @@ export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  const response = await requestApiResponse(path, init, "application/json");
+  return (await response.json()) as T;
+}
+
+export function apiEventStream(path: string, signal: AbortSignal) {
+  return requestApiResponse(path, { signal }, "text/event-stream");
+}
+
+async function requestApiResponse(path: string, init: RequestInit, accept: string) {
   assertRequestPath(path);
   const inputError = outgoingContentError(path, init.body);
   if (inputError) {
@@ -172,7 +181,7 @@ export async function apiRequest<T>(
     });
   }
   const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
+  headers.set("Accept", accept);
   const apiToken = getApiToken();
   if (apiToken) {
     headers.set("Authorization", `Bearer ${apiToken}`);
@@ -195,7 +204,7 @@ export async function apiRequest<T>(
     throw new ApiError(response.status, body);
   }
 
-  return (await response.json()) as T;
+  return response;
 }
 
 // Server Admin surfaces deliberately return 401 when recent reauthentication is

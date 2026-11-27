@@ -299,6 +299,13 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "/api/v1/workspaces/{workspace_id}/agent/bundles/{bundle_id}",
     ): ("agent-bundle",),
     ("GET", "/api/v1/workspaces/{workspace_id}/ask/sessions"): ("read",),
+    ("GET", "/api/v1/workspaces/{workspace_id}/ask/models"): ("read",),
+    ("GET", "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/stream"): (
+        "read",
+    ),
+    ("GET", "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/search"): (
+        "read",
+    ),
     (
         "GET",
         "/api/v1/workspaces/{workspace_id}/ask/sessions/{ask_session_id}",
@@ -421,6 +428,16 @@ REST_REQUIRED_SCOPES: dict[tuple[str, str], tuple[str, ...]] = {
         "/api/v1/workspaces/{workspace_id}/library/items/{library_item_id}",
     ): ("draft-write",),
     ("POST", "/api/v1/workspaces/{workspace_id}/ask/sessions"): ("draft-write",),
+    (
+        "POST",
+        "/api/v1/workspaces/{workspace_id}/ask/sessions/{ask_session_id}/turns/stream",
+    ): ("draft-write",),
+    ("POST", "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/stop"): (
+        "draft-write",
+    ),
+    ("POST", "/api/v1/workspaces/{workspace_id}/ask/turns/{ask_turn_id}/steer"): (
+        "draft-write",
+    ),
     (
         "POST",
         "/api/v1/workspaces/{workspace_id}/ask/sessions/{ask_session_id}/turns",

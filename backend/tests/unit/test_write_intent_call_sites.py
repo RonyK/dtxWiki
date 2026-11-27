@@ -295,13 +295,9 @@ def _reject_request():
 # --- ask_service: turn_no allocation ------------------------------------------
 
 
-def test_create_turn_holds_write_intent(db, probe, monkeypatch):
-    """Pinned on the branch that emits no DML before the allocation.
-
-    ``trace`` is non-empty with no citable evidence, so ``create_turn`` takes the
-    ``evidence_not_citable`` path -- neither ``record_coverage_gap`` nor
-    ``resolve_coverage_gap`` runs, and nothing has opened the transaction.
-    """
+def test_submit_turn_holds_write_intent(db, probe):
+    """The session row read that guards turn_no allocation and the
+    one-pending-turn check runs under the writer lock."""
 
     with db.factory.begin() as session:
         tree_node_id = (
@@ -323,25 +319,11 @@ def test_create_turn_holds_write_intent(db, probe, monkeypatch):
         session.flush()
         ask_session_id = ask_session.id
 
-    monkeypatch.setattr(
-        AskService,
-        "_answer",
-        lambda *_args, **_kwargs: (
-            "answer",
-            [],
-            [],
-            [{"lane": "keyword"}],
-            ["keyword"],
-            False,
-            [],
-            [],
-        ),
-    )
     probe(AskService, "_lock_session_for_turn_insert")
     with db.factory.begin() as session:
         _assert_locked_at_guarded_read(
-            lambda: AskService().create_turn(
-                session=session,
+            lambda: AskService().submit_turn(
+                session,
                 workspace_id=db.workspace_id,
                 ask_session_id=ask_session_id,
                 request=AskTurnCreate(user_message="what is write intent?"),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 
 import httpx
 
@@ -45,15 +45,7 @@ class HttpxLLMTransport:
         payload: Mapping[str, object],
         timeout_seconds: float,
     ) -> TransportResponse:
-        timeout = httpx.Timeout(
-            timeout_seconds,
-            connect=min(self._connect_timeout_seconds, timeout_seconds),
-        )
-        client = httpx.AsyncClient(
-            timeout=timeout,
-            transport=self._transport,
-            follow_redirects=False,
-        )
+        client = self._client(timeout_seconds)
         response = None
         try:
             request = client.build_request(
@@ -98,4 +90,55 @@ class HttpxLLMTransport:
             status_code=response.status_code,
             headers=response.headers,
             body=body,
+        )
+
+    @contextlib.asynccontextmanager
+    async def open_sse(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+        timeout_seconds: float,
+    ) -> AsyncIterator[httpx.Response]:
+        client = self._client(timeout_seconds)
+        response = None
+        try:
+            request = client.build_request(
+                "POST",
+                url,
+                headers={**headers, "accept": "text/event-stream"},
+                json=dict(payload),
+            )
+            response = await client.send(request, stream=True)
+            yield response
+        except httpx.DecodingError:
+            raise LLMAdapterError("invalid_response", delivery="sent") from None
+        except httpx.RequestError as exc:
+            delivery: Delivery = "unknown"
+            if response is not None:
+                delivery = "sent"
+            elif isinstance(exc, _NOT_SENT):
+                delivery = "not_sent"
+            raise LLMAdapterError(
+                "timeout"
+                if isinstance(exc, httpx.TimeoutException)
+                else "network_error",
+                delivery=delivery,
+                status_code=response.status_code if response is not None else None,
+            ) from None
+        finally:
+            if response is not None:
+                with contextlib.suppress(httpx.HTTPError):
+                    await response.aclose()
+            with contextlib.suppress(httpx.HTTPError):
+                await client.aclose()
+
+    def _client(self, seconds: float) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                seconds, connect=min(self._connect_timeout_seconds, seconds)
+            ),
+            transport=self._transport,
+            follow_redirects=False,
         )

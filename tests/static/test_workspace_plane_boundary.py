@@ -432,6 +432,11 @@ CONTROL_SESSION_FACTORY_ALLOWLIST: dict[str, str] = {
 # separate allowlist rather than folded into CONTROL_SESSION_FACTORY_
 # ALLOWLIST above). Each entry records which identity-plane reads are allowed.
 SESSION_FACTORY_DEP_ALLOWLIST: dict[str, str] = {
+    "backend/api/ask_stream.py": (
+        "The model catalog uses the control-plane factory only for the "
+        "authenticated user's personal LLM connections. Workspace connections "
+        "are listed through WorkspaceSessionFactoryDep."
+    ),
     "backend/api/auth_verification.py": (
         "Identity-plane only: browser-bound purpose-bound "
         "reauthentication challenges use global users/identity/outbox records, "

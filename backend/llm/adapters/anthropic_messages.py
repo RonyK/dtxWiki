@@ -8,20 +8,24 @@ from typing import Any
 from backend.llm.adapters._shared import (
     NO_CONFIG_SCHEMA,
     BuiltinAdapterFactory,
+    _stream_error,
     api_key_schema,
     count,
     count_or_zero,
     mapping,
+    open_json_events,
     post_json_object,
     sequence,
     text_of,
     total,
 )
+from backend.llm.streaming import OnDelta
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
     ExecutionContext,
     LLMAdapterDescriptor,
+    LLMAdapterError,
     LLMConnection,
     LLMErrorCode,
     LLMTransport,
@@ -86,6 +90,77 @@ class AnthropicMessagesAdapter:
             provider_request_id=reply.request_id,
         )
 
+    async def stream(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
+    ) -> CanonicalTextResult:
+        model = None
+        reason = ""
+        usage = {}
+        text = []
+        async with open_json_events(
+            self._transport,
+            f"{self._connection.base_url}/messages",
+            headers={
+                "x-api-key": self._connection.credential["api_key"],
+                "anthropic-version": API_VERSION,
+            },
+            payload={**_payload(request), "stream": True},
+            context=context,
+            request_id_header="request-id",
+            refine_error=_refine_error,
+        ) as (events, request_id):
+            async for event in events:
+                if event is None:
+                    raise _stream_error(request_id)
+                kind = event.get("type")
+                if kind == "message_start":
+                    message = mapping(event.get("message"))
+                    model = text_of(message.get("model")) or None
+                    usage.update(mapping(message.get("usage")))
+                elif kind == "message_delta":
+                    reason = (
+                        text_of(mapping(event.get("delta")).get("stop_reason"))
+                        or reason
+                    )
+                    usage.update(mapping(event.get("usage")))
+                elif kind == "message_stop":
+                    return CanonicalTextResult(
+                        text="".join(text),
+                        termination=_TERMINATIONS.get(reason, "unknown"),
+                        model=model,
+                        usage=_usage(usage),
+                        provider_request_id=request_id,
+                    )
+                elif kind == "error":
+                    error = mapping(event.get("error"))
+                    raise LLMAdapterError(
+                        _refine_error(error)
+                        or _STREAM_ERRORS.get(
+                            text_of(error.get("type")), "provider_error"
+                        ),
+                        delivery="sent",
+                        provider_request_id=request_id,
+                    )
+                else:
+                    block = mapping(event.get("content_block"))
+                    delta = mapping(event.get("delta"))
+                    piece = ""
+                    if kind == "content_block_start" and block.get("type") == "text":
+                        piece = text_of(block.get("text"))
+                    elif (
+                        kind == "content_block_delta"
+                        and delta.get("type") == "text_delta"
+                    ):
+                        piece = text_of(delta.get("text"))
+                    if piece:
+                        text.append(piece)
+                        await on_delta(piece)
+            raise _stream_error(request_id)
+
 
 def _payload(request: CanonicalTextRequest) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -126,6 +201,11 @@ def _usage(usage: Mapping[str, Any]) -> TokenUsage:
 _SPEND_LIMIT_ERROR_CODES = frozenset(
     {"contract_spend_limit_reached", "enforced_spend_limit_reached"}
 )
+_STREAM_ERRORS: Mapping[str, LLMErrorCode] = {
+    "overloaded_error": "provider_unavailable",
+    "rate_limit_error": "rate_limited",
+    "invalid_request_error": "invalid_request",
+}
 
 
 def _refine_error(error: Mapping[str, Any]) -> LLMErrorCode | None:

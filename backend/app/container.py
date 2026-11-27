@@ -1261,31 +1261,43 @@ class AppContainer:
 
     def get_ask_service(self):
         if self.ask_service is None:
-            from backend.llm.legacy import resolve_llm_provider
             from backend.services.ask_service import AskService
 
-            # A bad DTXWIKI_LLM_PROVIDER setting must not 500 the Ask surface:
-            # the provider is built during dependency resolution, so a raise here
-            # escapes every handler's try/except and takes Ask down entirely.
-            # Degrade to the deterministic evidence pack and carry the reason so
-            # the user is told why the answer style changed.
-            provider, reason = resolve_llm_provider(
-                self.settings, self.services.llm_adapter_registry
-            )
-            if reason:
-                # Say it once server-side. The UI tells the user to ask an admin
-                # to check the LLM settings, and before the degrade this reason
-                # was in the 500's traceback -- without this line the admin they
-                # ask finds nothing in the log at all. Matches what
-                # build_search_service already does for embedding/rerank.
-                logger.warning("Ask answer model unavailable: %s", reason)
             self.ask_service = AskService(
                 search_service=self.get_search_service(),
-                provider=provider,
                 graph_service=self.services.graph_service,
-                provider_unavailable_reason=reason,
             )
         return self.ask_service
+
+    @cached_property
+    def ask_connections(self):
+        from backend.llm.legacy import resolve_default_binding
+        from backend.services.ask_connection_service import AskConnectionService
+
+        # A bad DTXWIKI_LLM_PROVIDER setting must not take Ask down: questions
+        # that name no model are answered with the evidence summary and a
+        # warning. Say it once server-side so the admin finds the reason.
+        default, reason = resolve_default_binding(
+            self.settings, self.services.llm_adapter_registry
+        )
+        if reason:
+            logger.warning("Ask answer model unavailable: %s", reason)
+        return AskConnectionService(
+            self.services.llm_connections,
+            self.services.llm_adapter_registry,
+            default=default,
+            default_unavailable_reason=reason,
+        )
+
+    @cached_property
+    def ask_runtime(self):
+        from backend.services.ask_runtime import AskRuntime
+
+        return AskRuntime(
+            self.get_ask_service(),
+            self.ask_connections,
+            self.db.control_session_factory,
+        )
 
     def get_services(self) -> ServiceRegistry:
         # Tool handlers receive the registry through ToolCallContext. Stamp the

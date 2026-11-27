@@ -7,6 +7,10 @@
 - The MCP tool contract adds the Ask warnings `llm_composer_retryable`,
   `llm_answer_incomplete` and `llm_answer_refused`. Refresh cached tool catalogs
   and result schemas.
+- DB schema: migration `916a6162b789` follows `dafc5339b3b1` and adds Ask turn
+  status columns. Existing turns become `completed`. Downgrading drops the
+  record of the evidence each answer was given; follow-up answers are then
+  checked against their own citations only.
 
 ### LLM adapters
 
@@ -17,16 +21,54 @@
   Completions (and compatible servers) and the Gemini API register the same
   way plugin adapters do. Each makes at most one provider call per request and
   reports a normalized result, token usage and error.
-- `DTXWIKI_LLM_PROVIDER` keeps its models, temperature and two retries.
+- `DTXWIKI_LLM_PROVIDER` keeps its models and temperature. A failed call is
+  no longer sent again, because the provider may already have charged for it.
   `openai` sends `max_completion_tokens` instead of the deprecated
   `max_tokens`.
-- Ask uses only a completed answer. It shows an evidence summary with
-  `llm_composer_retryable` for a temporary failure, `llm_answer_incomplete` for a
-  cut-off or unusable reply, `llm_answer_refused` for a declined or filtered
-  reply, or `llm_provider_unavailable` when an administrator needs to investigate.
-  Saved turns with `llm_composer_failed` display a generic fallback message.
+- Ask uses only a completed answer. A model that fails ends the question as
+  `failed` with `llm_composer_retryable` for a temporary failure,
+  `llm_answer_incomplete` for a cut-off or unusable reply, `llm_answer_refused`
+  for a declined or filtered reply, or `llm_provider_unavailable` when an
+  administrator needs to investigate; the asker can search again without a
+  model. Saved turns with `llm_composer_failed` display a generic fallback
+  message.
 - Provider options refuse a credential field's name at any depth, not only at
   the top level, also when a plugin schema allows nested options.
+
+### Ask
+
+- A follow-up question sees the session's earlier answers (up to four, from
+  the same answer model) when the new question's own search finds citable
+  evidence; without it no model is asked. Evidence is still searched for the
+  new question only, and only its own evidence is cited. When an earlier answer drew on
+  evidence a reader cannot see, that reader sees the follow-up's question but
+  not its answer, citations or search path, and cannot save it.
+- A question is stored as soon as it is accepted. Questions in a session are
+  answered one at a time, in order; one sent meanwhile waits with `status`
+  `queued`. The default model (`DTXWIKI_LLM_PROVIDER`) and every LLM
+  connection answer the same way: streamed, stoppable, and a failure is the
+  model's failure. Without a usable default model a question that names no
+  model is answered with the evidence summary (with `llm_provider_unavailable`
+  when the setting is wrong). If the turn cannot be finished, it stays with
+  `status` `failed` and an `error_code`: `internal_error`, `server_restarted`,
+  or the model's failure, which can be searched again without a model. Access is checked when a question is asked
+  and its evidence is searched; a running answer is not re-checked. Only
+  `completed` turns can be saved to Context.
+- The Ask screen streams the answer while it is written. Each question can use
+  the workspace's default model, any enabled LLM connection — the asker's own
+  connections whatever their address and with or without a key — or search
+  only; the browser remembers the last choice. The asker can stop a queued or
+  running question, add an instruction to a running answer (OpenAI models that
+  support steering), or replace the running question with a longer one. Only
+  the asker can change a question (`409 ask_turn_not_yours`).
+- `POST …/ask/sessions/{ask_session_id}/turns` takes an optional
+  `after_turn_id`, the latest turn the asker saw (`null` for an empty session),
+  and answers `409 ask_session_changed` when it is not the latest. It waits
+  for the answer; `POST …/turns/stream` queues the question and returns at
+  once, and `GET …/ask/turns/{ask_turn_id}/stream` follows it as
+  Server-Sent Events.
+- A search hit whose source cannot be confirmed is left out of the answer and
+  its search path.
 
 ### Backup and rollback
 

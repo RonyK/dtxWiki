@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createContext, useContext } from "react";
 import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AskModelOption } from "../../../shared/api/askStreams";
 import type { AskTurnDetail } from "../../../shared/api/operations";
 import type { TreeNodePayload } from "../../../shared/api/workspace";
 import { readAppStyles } from "../../../test-support/appStyles";
@@ -11,9 +12,27 @@ import { AskScreen } from "../AskScreen";
 
 const BASE = "http://127.0.0.1:21080";
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
+const ACCOUNT_ID = "account-1";
+const MODEL_STORAGE_KEY = `dtxwiki:ask:model:${ACCOUNT_ID}:${WORKSPACE_ID}`;
 const SESSION_ID = "session-1";
 const TURN_ID = "turn-1";
 const PARENT_ID = "context-parent-1";
+const TEST_SELECTION = {
+  scope: "workspace",
+  connection_id: "connection-test",
+  model_profile_id: "model-test",
+} as const;
+const TEST_MODEL = {
+  ...TEST_SELECTION,
+  connection_label: "Workspace connection",
+  model_label: "Workspace model",
+  steer: true,
+};
+
+vi.mock("../../../shared/auth/AuthContext", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../shared/auth/AuthContext")>(),
+  useOptionalAuth: () => ({ user: { user_id: ACCOUNT_ID } }),
+}));
 
 // AskScreen reads role via useOptionalWorkspaceContext to gate write
 // affordances; the tests render it without a provider, so mock the role here.
@@ -44,6 +63,7 @@ describe("AskScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.localStorage.removeItem("dtxwiki:workspace-layout:ask:inspector");
+    window.localStorage.removeItem(MODEL_STORAGE_KEY);
     askWorkspace.current = { selectedWorkspace: { role: "owner" } };
   });
 
@@ -446,7 +466,7 @@ describe("AskScreen", () => {
         };
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns/stream` &&
         init?.method === "POST"
       ) {
         turns = [
@@ -476,6 +496,7 @@ describe("AskScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
     expect(screen.getByLabelText("Title")).toHaveValue("Needle");
 
+    await chooseTestModel();
     await userEvent.type(
       screen.getByRole("textbox", { name: "Message" }),
       "Follow up question",
@@ -488,6 +509,427 @@ describe("AskScreen", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Title")).toHaveValue("Follow up question");
     });
+  });
+
+  it("sends with Default and keeps a question whose answer failed", async () => {
+    let turns = [askTurn({ selection: TEST_SELECTION })];
+    let sentBody: unknown = null;
+    mockFetch((url, init) => {
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions`) {
+        return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return { data: [] };
+      }
+      if (
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns/stream` &&
+        init?.method === "POST"
+      ) {
+        sentBody = JSON.parse(String(init.body));
+        // The server stored the question, then failed to answer it.
+        turns = [
+          askTurn(),
+          askTurn({
+            id: "turn-2",
+            turn_no: 2,
+            user_message: "Second question",
+            assistant_message: null,
+            cited_context_page_ids: [],
+            status: "failed",
+            error_code: "internal_error",
+          }),
+        ];
+        return jsonResponse(
+          { error_code: "internal_error", message: "boom", request_id: "r" },
+          500,
+        );
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}`) {
+        return { data: sessionDetail(turns) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText(/Context-first retrieval summary/);
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Second question");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(
+      await screen.findByText("Internal server error. The answer was not saved."),
+    ).toBeInTheDocument();
+    expect(sentBody).toEqual({
+      user_message: "Second question",
+      request_id: expect.any(String),
+    });
+    expect(screen.getByText("Second question")).toBeInTheDocument();
+    // The send error stays. The failed turn has nothing to save, but the
+    // answer before it still can be saved.
+    expect(
+      screen.getByText("The server could not complete the request. Please try again."),
+    ).toBeInTheDocument();
+    const failedCard = screen.getByText("Second question").closest("article");
+    expect(failedCard).not.toBeNull();
+    expect(within(failedCard!).queryByRole("button", { name: "Save answer" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Save answer" })).toHaveLength(1);
+  });
+
+  it("streams the current answer while steering that turn and queuing a follow-up", async () => {
+    const activeSelection = { ...TEST_SELECTION, connection_id: "disabled-connection" };
+    const pending = askTurn({ status: "pending", assistant_message: null, selection: activeSelection, steer_supported: true });
+    const instruction = { id: "instruction-1", user_message: "Use a table", status: "waiting" as const };
+    const queued = askTurn({ id: "turn-2", turn_no: 2, user_message: "What about rollback?", assistant_message: null, status: "queued", selection: null });
+    const final = askTurn({
+      assistant_message: "Final answer",
+      steering_messages: [{ ...instruction, status: "applied" }],
+      selection: activeSelection,
+    });
+    let turns = [pending];
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    let steeringBody: unknown;
+    let queuedBody: unknown;
+    let sessionReads = 0;
+    const encoder = new TextEncoder();
+    const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
+    mockFetch((url, init) => {
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return { data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } };
+      }
+      if (url === `${prefix}/sessions`) {
+        return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) return { data: [] };
+      if (url === `${prefix}/sessions/${SESSION_ID}`) {
+        sessionReads += 1;
+        return { data: sessionDetail(turns) };
+      }
+      if (url === `${prefix}/turns/${TURN_ID}/stream`) {
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) { stream = controller; },
+        }), { headers: { "Content-Type": "text/event-stream" } });
+      }
+      if (url === `${prefix}/turns/${TURN_ID}/steer`) {
+        if (steeringBody) return jsonResponse({ error_code: "internal_error" }, 500);
+        steeringBody = JSON.parse(String(init?.body));
+        turns = [{ ...pending, steering_messages: [instruction] }];
+        return { data: turns[0] };
+      }
+      if (url === `${prefix}/sessions/${SESSION_ID}/turns/stream`) {
+        queuedBody = JSON.parse(String(init?.body));
+        turns = [...turns, queued];
+        return jsonResponse({ data: queued }, 202);
+      }
+      if (url === `${prefix}/turns/${queued.id}/stream`) {
+        return new Response(new ReadableStream({}), {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+      </MemoryRouter>,
+    );
+    const composer = await screen.findByRole("textbox", { name: "Message" });
+    await waitFor(() => expect(stream).toBeDefined());
+    const delta = encoder.encode('event: delta\r\ndata: {"text":"진행 중","reset":true}\r\n\r\n');
+    const split = encoder.encode('event: delta\r\ndata: {"text":"').length + 1;
+    stream.enqueue(delta.slice(0, split));
+    stream.enqueue(delta.slice(split));
+    expect(await screen.findByText("진행 중")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save answer" })).toBeNull();
+
+    await userEvent.type(composer, instruction.user_message);
+    const queueButton = screen.getByRole("button", { name: "Queue next question" });
+    expect(queueButton).toBeEnabled();
+    const localOption = await screen.findByRole("option", { name: "Search without AI" });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "LLM connection" }), localOption);
+    await userEvent.click(screen.getByRole("button", { name: "Apply to current answer" }));
+    expect(await screen.findByText("Waiting to apply")).toBeInTheDocument();
+    expect(steeringBody).toEqual({ user_message: instruction.user_message, request_id: expect.any(String) });
+
+    const steered = { ...pending, steering_messages: [{ ...instruction, status: "applied" }] };
+    stream.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(steered)}\n\n`));
+    await screen.findByText("Applied");
+    // A failed instruction reloads the session; that read can lag the stream.
+    turns = [{ ...turns[0], steer_supported: false }];
+    await userEvent.type(composer, "Add a citation");
+    await userEvent.click(screen.getByRole("button", { name: "Apply to current answer" }));
+    await waitFor(() => {
+      expect(sessionReads).toBe(2);
+      expect(screen.getByRole("button", { name: "Apply to current answer" })).toBeEnabled();
+    });
+    expect(screen.getByText("Applied")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting to apply")).toBeNull();
+    await userEvent.clear(composer);
+
+    await userEvent.type(composer, queued.user_message!);
+    await userEvent.click(screen.getByRole("button", { name: "Queue next question" }));
+    expect(await screen.findByText("Queued")).toBeInTheDocument();
+    expect(queuedBody).toEqual(expect.objectContaining({
+      user_message: queued.user_message,
+      selection: null,
+      request_id: expect.any(String),
+    }));
+
+    stream.enqueue(encoder.encode('event: delta\ndata: {"text":"Updated","reset":true}\n\nevent: delta\ndata: {"text":" preview"}\n\n'));
+    expect(await screen.findByText("Updated preview")).toBeInTheDocument();
+    expect(screen.queryByText(/진행 중/)).toBeNull();
+    turns = [final, queued];
+    stream.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(final)}\n\n`));
+    stream.close();
+    expect(await screen.findByText("Final answer")).toBeInTheDocument();
+    expect(screen.getByText("Applied")).toBeInTheDocument();
+    expect(screen.queryByText("Updated preview")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save answer" })).toBeEnabled();
+  });
+
+  it("keeps a terminal stream refresh from overwriting a newer send on the same route", async () => {
+    const pending = askTurn({ status: "pending", assistant_message: null });
+    const completed = askTurn({ assistant_message: "Completed answer" });
+    const next = askTurn({
+      id: "turn-2", turn_no: 2, assistant_message: "Newer answer",
+      created_at: "2026-05-11T00:00:00Z",
+    });
+    const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    let sessionReads = 0;
+    mockAskFetch(async (input) => {
+      const url = input.toString();
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } });
+      }
+      if (url === `${prefix}/sessions`) {
+        const other = { ...olderSessionRef(), updated_at: "2026-05-10T00:00:00Z" };
+        return jsonResponse({ data: { items: [other], date_buckets: [], next_cursor: null } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return jsonResponse({ data: [] });
+      }
+      if (url === `${prefix}/sessions/${SESSION_ID}`) {
+        if (++sessionReads === 1) return jsonResponse({ data: sessionDetail([pending]) });
+        return new Promise<Response>((resolve) => { resolveRefresh = resolve; });
+      }
+      if (url === `${prefix}/turns/${TURN_ID}/stream`) {
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) { stream = controller; },
+        }), { headers: { "Content-Type": "text/event-stream" } });
+      }
+      if (url === `${prefix}/sessions/${SESSION_ID}/turns/stream`) {
+        return jsonResponse({ data: next });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(stream).toBeDefined());
+    const history = within(screen.getByRole("complementary", { name: "Ask history" }));
+    expect(history.queryByRole("button", { name: /Research Ask/ })).toBeNull();
+    stream.enqueue(new TextEncoder().encode(`event: state\ndata: ${JSON.stringify(completed)}\n\n`));
+    await screen.findByText("Completed answer");
+    await waitFor(() => expect(resolveRefresh).toBeDefined());
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Next question");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByText("Newer answer");
+    expect(history.getAllByRole("button", { name: /Research Ask|Second Ask/ })[0])
+      .toHaveAccessibleName(/Research Ask/);
+
+    await act(async () => {
+      resolveRefresh!(jsonResponse({
+        data: { ...sessionDetail([completed]), title: "Stale title" },
+      }));
+    });
+    expect(screen.getByRole("heading", { name: "Research Ask" })).toBeInTheDocument();
+    expect(screen.getByText("Newer answer")).toBeInTheDocument();
+  });
+
+  it("follows a replacement ahead of queued questions and saves the last executed answer", async () => {
+    const active = askTurn({
+      status: "pending", assistant_message: null, selection: TEST_SELECTION,
+      started_at: "2026-05-09T00:00:01Z",
+    });
+    const queued = askTurn({
+      id: "turn-2", turn_no: 2, status: "queued", assistant_message: null,
+      user_message: "Queued question", created_at: "2026-05-09T00:00:02Z", started_at: null,
+      selection: TEST_SELECTION,
+    });
+    const replacement = askTurn({
+      id: "turn-3", turn_no: 3, status: "pending", assistant_message: null,
+      user_message: "Replacement question", created_at: "2026-05-09T00:00:03Z",
+      started_at: "2026-05-09T00:00:03Z", selection: TEST_SELECTION,
+    });
+    let turns = [active, queued];
+    let replacementBody: unknown;
+    let catalogFails = true;
+    let holdRefresh = false;
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
+    const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
+    const encoder = new TextEncoder();
+    window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({
+      connectionKey: "workspace:connection-test", profileId: TEST_MODEL.model_profile_id,
+    }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input.toString();
+      if (url === `${prefix}/models`) {
+        return catalogFails
+          ? jsonResponse({ error_code: "internal_error" }, 500)
+          : jsonResponse({ data: { items: [TEST_MODEL] } });
+      }
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return jsonResponse({ data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } });
+      }
+      if (url === `${prefix}/sessions`) {
+        return jsonResponse({ data: { items: [sessionRef()], date_buckets: [], next_cursor: null } });
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return jsonResponse({ data: [] });
+      }
+      if (url === `${prefix}/sessions/${SESSION_ID}`) {
+        if (holdRefresh) {
+          return new Promise<Response>((resolve) => { resolveRefresh = resolve; });
+        }
+        return jsonResponse({ data: sessionDetail(turns) });
+      }
+      if (url === `${prefix}/sessions/${SESSION_ID}/turns/stream` && init?.method === "POST") {
+        replacementBody = JSON.parse(String(init.body));
+        turns = [{ ...active, status: "stopped" }, queued, replacement];
+        return jsonResponse({ data: replacement }, 202);
+      }
+      const streamedTurn = [active, queued, replacement].find((turn) => url === `${prefix}/turns/${turn.id}/stream`);
+      if (streamedTurn) {
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) { streams.set(streamedTurn.id, controller); },
+        }), { headers: { "Content-Type": "text/event-stream" } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+      </MemoryRouter>,
+    );
+
+    const composer = await screen.findByRole("textbox", { name: "Message" });
+    await waitFor(() => expect(streams.has(active.id)).toBe(true));
+    await userEvent.type(composer, "Change the answer");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.getByRole("option", { name: "Selected connection", selected: true }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Queue next question" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop and regenerate" })).toBeDisabled();
+    catalogFails = false;
+    await userEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stop and regenerate" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Stop and regenerate" }));
+
+    expect(await screen.findByText("Stopped. The answer was not saved.")).toBeInTheDocument();
+    expect(replacementBody).toEqual({
+      user_message: "Change the answer",
+      request_id: expect.any(String),
+      replace_turn_id: active.id,
+      selection: TEST_SELECTION,
+    });
+    expect(screen.getAllByText(/^Turn [123]$/).map((label) => label.textContent))
+      .toEqual(["Turn 1", "Turn 3", "Turn 2"]);
+    await waitFor(() => expect([...streams.keys()]).toEqual([active.id, replacement.id]));
+    streams.get(replacement.id)!.enqueue(encoder.encode('event: delta\ndata: {"text":"Replacement preview"}\n\n'));
+    expect(await screen.findByText("Replacement preview")).toBeInTheDocument();
+
+    const regenerated = { ...replacement, status: "completed", assistant_message: "Replacement answer" } as const;
+    turns = [turns[0], queued, regenerated];
+    holdRefresh = true;
+    streams.get(replacement.id)!.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(regenerated)}\n\n`));
+    await waitFor(() => expect(streams.has(queued.id)).toBe(true));
+    await waitFor(() => expect(resolveRefresh).toBeDefined());
+    const pending = {
+      ...queued, status: "pending", started_at: "2026-05-09T00:00:04Z",
+    } as const;
+    streams.get(queued.id)!.enqueue(encoder.encode(
+      `event: state\ndata: ${JSON.stringify({ ...pending, steer_supported: true })}\n\n`,
+    ));
+    await screen.findByRole("button", { name: "Apply to current answer" });
+    holdRefresh = false;
+    await act(async () => {
+      resolveRefresh!(jsonResponse({
+        // The server renames a session together with its activity time.
+        data: {
+          ...sessionDetail([turns[0], pending, regenerated]),
+          title: "Refreshed Ask",
+          updated_at: "2026-05-09T00:00:05Z",
+        },
+      }));
+    });
+    expect(screen.getByRole("heading", { name: "Refreshed Ask" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply to current answer" })).toBeInTheDocument();
+    const followUp = {
+      ...pending, status: "completed", assistant_message: "Queued answer",
+    } as const;
+    turns = [turns[0], followUp, regenerated];
+    streams.get(queued.id)!.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(followUp)}\n\n`));
+
+    await screen.findByText("Queued answer");
+    const lastCard = screen.getByText("Turn 2").closest("article")!;
+    expect(within(lastCard).getByRole("button", { name: "Save answer" })).toBeEnabled();
+    expect(screen.getAllByText(/^Turn [123]$/).map((label) => label.textContent))
+      .toEqual(["Turn 1", "Turn 3", "Turn 2"]);
+  });
+
+  it("fetches a read-only search result only on explicit action after failure", async () => {
+    const failed = askTurn({
+      status: "failed",
+      error_code: "server_restarted",
+      assistant_message: null,
+      can_search: true,
+    });
+    let searches = 0;
+    const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
+    mockFetch((url) => {
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return { data: { workspaces: [{ id: WORKSPACE_ID, default_language: "en" }] } };
+      }
+      if (url === `${prefix}/sessions`) {
+        return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) return { data: [] };
+      if (url === `${prefix}/sessions/${SESSION_ID}`) return { data: sessionDetail([failed]) };
+      if (url === `${prefix}/turns/${TURN_ID}/search`) {
+        searches += 1;
+        return { data: askTurn({ assistant_message: "Keyword evidence" }) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+      </MemoryRouter>,
+    );
+    const action = await screen.findByRole("button", { name: "Search without AI" });
+    expect(searches).toBe(0);
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(composer, "Existing draft");
+    await userEvent.click(screen.getByRole("button", { name: "Copy to message" }));
+    expect(composer).toHaveValue(`Existing draft ${failed.user_message}`);
+    expect(searches).toBe(0);
+    await userEvent.click(action);
+    expect(await screen.findByText("Keyword evidence")).toBeInTheDocument();
+    expect(searches).toBe(1);
+    expect(screen.getByText("The server restarted before the answer finished.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save answer" })).toBeNull();
   });
 
   it("appends an older keyset page when Load more is pressed", async () => {
@@ -560,7 +1002,7 @@ describe("AskScreen", () => {
     // Ask warns about the gap, Lint is where the user goes to find it: the two
     // screens must not call the same record different things.
     let resolveTurn!: (response: Response) => void;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockAskFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({
@@ -584,7 +1026,7 @@ describe("AskScreen", () => {
         return jsonResponse({ data: sessionDetail() });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns/stream` &&
         init?.method === "POST"
       ) {
         return new Promise<Response>((resolve) => {
@@ -601,6 +1043,7 @@ describe("AskScreen", () => {
     );
 
     await screen.findByText(/Context-first retrieval summary/);
+    await chooseTestModel();
     await userEvent.type(screen.getByRole("textbox", { name: "메시지" }), "안녕");
     await userEvent.click(screen.getByRole("button", { name: "보내기" }));
     resolveTurn(
@@ -653,7 +1096,7 @@ describe("AskScreen", () => {
         return { data: sessionDetail() };
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns/stream` &&
         init?.method === "POST"
       ) {
         return {
@@ -684,6 +1127,7 @@ describe("AskScreen", () => {
     );
 
     await screen.findByText(/Context-first retrieval summary/);
+    await chooseTestModel();
     await userEvent.type(screen.getByRole("textbox", { name: "메시지" }), "안녕");
     await userEvent.click(screen.getByRole("button", { name: "보내기" }));
 
@@ -775,7 +1219,7 @@ describe("AskScreen", () => {
       started_at: "2026-05-08T00:00:00Z",
       updated_at: "2026-05-08T00:00:00Z",
     };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockAskFetch(async (input, init) => {
       const url = input.toString();
       const method = init?.method ?? "GET";
       if (url === `${BASE}/api/v1/workspaces`) {
@@ -863,7 +1307,7 @@ describe("AskScreen", () => {
 
   it("disables session switching while a turn is sending", async () => {
     let resolveTurn!: (response: Response) => void;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockAskFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -891,7 +1335,7 @@ describe("AskScreen", () => {
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns/stream` &&
         init?.method === "POST"
       ) {
         return new Promise<Response>((resolve) => {
@@ -908,6 +1352,7 @@ describe("AskScreen", () => {
     );
 
     await screen.findByText(/Context-first retrieval summary/);
+    await chooseTestModel();
     await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Hello");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
 
@@ -947,7 +1392,7 @@ describe("AskScreen", () => {
   it("keeps a newer route when a deferred turn completes", async () => {
     let resolveTurn!: (response: Response) => void;
     let resolveSecondDetail!: (response: Response) => void;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockAskFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -969,7 +1414,7 @@ describe("AskScreen", () => {
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns` &&
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns/stream` &&
         init?.method === "POST"
       ) {
         return new Promise<Response>((resolve) => {
@@ -1001,6 +1446,7 @@ describe("AskScreen", () => {
     );
 
     await screen.findByText(/Context-first retrieval summary/);
+    await chooseTestModel();
     await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Hello");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     await userEvent.click(screen.getByRole("button", { name: "Navigate to second Ask" }));
@@ -1027,7 +1473,7 @@ describe("AskScreen", () => {
     let resolveOverviewSessions!: (response: Response) => void;
     const newSession = { ...sessionDetail([]), id: "session-new", title: "New Ask" };
     let createTurnPath = "";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockAskFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -1050,9 +1496,13 @@ describe("AskScreen", () => {
         return jsonResponse({ data: newSession });
       }
       if (url.startsWith(`${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/`) &&
-          url.endsWith("/turns") && init?.method === "POST") {
+          url.endsWith("/turns/stream") && init?.method === "POST") {
         createTurnPath = url;
-        return jsonResponse({ data: askTurn({ id: "turn-new", ask_session_id: "session-new" }) });
+        // Fails at once: likely before the new session's URL is applied.
+        return jsonResponse(
+          { error_code: "internal_error", message: "boom", request_id: "r" },
+          500,
+        );
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1078,12 +1528,17 @@ describe("AskScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: "Open Ask overview" }));
     await waitFor(() => expect(pathname).toBe(`/workspaces/${WORKSPACE_ID}/ask`));
     const message = screen.getByRole("textbox", { name: "Message" });
+    await chooseTestModel();
     await userEvent.type(message, "Fresh route target");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(createTurnPath).toContain("/sessions/session-new/turns"));
     expect(createTurnPath).not.toContain(`/sessions/${SESSION_ID}/turns`);
     expect(await screen.findByRole("heading", { name: "New Ask" })).toBeInTheDocument();
+    // The first question's failure is still reported on the new session.
+    expect(
+      screen.getByText("The server could not complete the request. Please try again."),
+    ).toBeInTheDocument();
     resolveOverviewSessions(jsonResponse({
       data: { items: [sessionRef()], date_buckets: [], next_cursor: null },
     }));
@@ -1091,7 +1546,7 @@ describe("AskScreen", () => {
 
   it("disables the composer while another session is loading", async () => {
     let resolveDetail!: (response: Response) => void;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockAskFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({ data: { current_workspace_id: WORKSPACE_ID, workspaces: [] } });
@@ -1144,7 +1599,7 @@ describe("AskScreen", () => {
   });
 
   it("uses localized fallback copy for an unexpected send-turn failure", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockAskFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return new Response(
@@ -1195,7 +1650,7 @@ describe("AskScreen", () => {
         });
       }
       if (
-        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns`
+        url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/sessions/${SESSION_ID}/turns/stream`
       ) {
         throw new Error("raw req-secret");
       }
@@ -1212,6 +1667,7 @@ describe("AskScreen", () => {
       await screen.findByText(/Context-first retrieval summary/),
     ).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "Message" });
+    await chooseTestModel();
     await userEvent.type(input, "Hello");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
 
@@ -1308,7 +1764,7 @@ describe("AskScreen", () => {
       turn_count: 0,
       turns: [],
     };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    mockAskFetch(async (input, init) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({
@@ -1504,6 +1960,10 @@ describe("AskScreen", () => {
   });
 
   it("shows next-step actions when a session has no turns", async () => {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({
+      connectionKey: `workspace:${TEST_MODEL.connection_id}`,
+      profileId: "removed-profile",
+    }));
     mockFetch((url) => {
       if (url === `${BASE}/api/v1/workspaces`) {
         return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
@@ -1544,6 +2004,92 @@ describe("AskScreen", () => {
       .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/library`);
     expect(screen.getByRole("link", { name: "Write Context page" }))
       .toHaveAttribute("href", `/workspaces/${WORKSPACE_ID}/context/pages/new`);
+    const connection = screen.getByRole("combobox", { name: "LLM connection" });
+    const submit = screen.getByRole("button", { name: "Send" });
+    await screen.findByRole("option", { name: TEST_MODEL.connection_label });
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Question");
+    expect(within(connection).getByRole("option", { name: "Default", selected: true }))
+      .toBeInTheDocument();
+    expect(submit).toBeEnabled();
+    await chooseTestModel();
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveValue(TEST_MODEL.model_profile_id);
+    expect(submit).toBeEnabled();
+  });
+
+  it("remembers complete model and search-only choices and clears them with Default", async () => {
+    const prefix = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask`;
+    const models = [TEST_MODEL, { ...TEST_MODEL, model_profile_id: "model-alt", model_label: "Alternate model" }];
+    const turns = [
+      askTurn({ selection: TEST_SELECTION }),
+      askTurn({ id: "turn-2", turn_no: 2, selection: null }),
+    ];
+    let sentBody: unknown;
+    mockFetch((url, init) => {
+      if (url === `${BASE}/api/v1/workspaces`) {
+        return { data: { current_workspace_id: WORKSPACE_ID, workspaces: [{ id: WORKSPACE_ID, slug: "default", default_language: "en", role: "owner" }] } };
+      }
+      if (url === `${prefix}/sessions`) {
+        return { data: { items: [sessionRef()], date_buckets: [], next_cursor: null } };
+      }
+      if (url === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/tree?section=context`) {
+        return { data: [] };
+      }
+      if (url === `${prefix}/sessions/${SESSION_ID}`) {
+        return { data: sessionDetail(turns) };
+      }
+      if (url === `${prefix}/sessions/${SESSION_ID}/turns/stream` && init?.method === "POST") {
+        sentBody = JSON.parse(String(init.body));
+        return { data: askTurn({ id: "turn-3", turn_no: 3, selection: null }) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }, models);
+
+    const renderAsk = () => render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/ask/${SESSION_ID}`]}>
+        <AskScreen />
+      </MemoryRouter>,
+    );
+
+    let view = renderAsk();
+    await userEvent.type(await screen.findByRole("textbox", { name: "Message" }), "Question");
+    await chooseTestModel();
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send).toBeDisabled();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Model" }), TEST_MODEL.model_profile_id);
+    expect(send).toBeEnabled();
+    view.unmount();
+
+    models.shift();
+    view = renderAsk();
+    await userEvent.type(await screen.findByRole("textbox", { name: "Message" }), "Question");
+    await screen.findByRole("option", { name: TEST_MODEL.connection_label });
+    expect(screen.getByRole("option", { name: "Default", selected: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    view.unmount();
+    models.unshift(TEST_MODEL);
+
+    view = renderAsk();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model" }))
+      .toHaveValue(TEST_MODEL.model_profile_id));
+    const searchOnly = screen.getByRole("option", { name: "Search without AI" });
+    await userEvent.selectOptions(searchOnly.closest("select")!, searchOnly);
+    view.unmount();
+
+    view = renderAsk();
+    expect(await screen.findByRole("option", { name: "Search without AI", selected: true }))
+      .toBeInTheDocument();
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Local question");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Turn 3")).toBeInTheDocument();
+    expect(sentBody).toEqual(expect.objectContaining({ selection: null }));
+
+    const defaultOption = screen.getByRole("option", { name: "Default" });
+    await userEvent.selectOptions(defaultOption.closest("select")!, defaultOption);
+    view.unmount();
+
+    renderAsk();
+    expect(await screen.findByRole("option", { name: "Default", selected: true }))
+      .toBeInTheDocument();
   });
 
   it("links no-evidence answers to source, context, and search recovery", async () => {
@@ -1902,7 +2448,7 @@ describe("AskScreen", () => {
   it("keeps the placement panel mounted until the post-accept refresh resolves", async () => {
     let accepted = false;
     let resolveDetail: ((response: Response) => void) | null = null;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockAskFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return jsonResponse({
@@ -2161,7 +2707,7 @@ describe("AskScreen", () => {
     // Stall the workspaces probe forever so the initial async `load()` is
     // still in flight when we unmount the component; without the unmount
     // guard React logs a "state update on unmounted component" warning.
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    mockAskFetch(async (input) => {
       const url = input.toString();
       if (url === `${BASE}/api/v1/workspaces`) {
         return new Promise<Response>(() => {
@@ -2199,8 +2745,25 @@ describe("AskScreen", () => {
 
 });
 
-function mockFetch(handler: (url: string, init?: RequestInit) => unknown) {
+async function chooseTestModel() {
+  const option = await screen.findByRole("option", { name: TEST_MODEL.connection_label });
+  await userEvent.selectOptions(option.closest("select")!, option);
+}
+
+function mockAskFetch(
+  handler: typeof globalThis.fetch,
+  models: AskModelOption[] = [TEST_MODEL],
+) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (input.toString() === `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/ask/models`) {
+      return jsonResponse({ data: { items: models } });
+    }
+    return handler(input, init);
+  });
+}
+
+function mockFetch(handler: (url: string, init?: RequestInit) => unknown, models?: AskModelOption[]) {
+  mockAskFetch(async (input, init) => {
     const body = handler(input.toString(), init);
     if (body instanceof Response) {
       return body;
@@ -2209,7 +2772,7 @@ function mockFetch(handler: (url: string, init?: RequestInit) => unknown) {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  });
+  }, models);
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -2270,6 +2833,9 @@ function askTurn(overrides: Partial<AskTurnDetail> = {}): AskTurnDetail {
     recommended_placement_tree_node_id: PARENT_ID,
     placement_confidence: "medium",
     promotion_state: "not_promoted",
+    status: "completed",
+    can_search: false,
+    steer_supported: false,
     created_at: "2026-05-09T00:00:00Z",
     retrieval_trace: [],
     tried_lanes: [],

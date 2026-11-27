@@ -74,7 +74,8 @@ describe("editor block menu entries", () => {
 
     expect(first.text).toMatch(/<!-- decision id=dec-[a-z0-9]{4,6} status=proposed/);
     expect(first.text).not.toContain("{{decisionId}}");
-    expect(first.text).not.toContain("dec-001");
+    // The old fixed id; a random id may still start with "001".
+    expect(first.text).not.toContain("id=dec-001 ");
     expect(first.text).not.toEqual(second.text);
   });
 

@@ -1,5 +1,6 @@
 import {
   expect,
+  isResizeObserverDeferralReport,
   isTransientNetworkImportError,
   test,
   type APIRequestContext,
@@ -1181,15 +1182,31 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
       });
 
       test("keeps the contract Web routes and Context History IA live and viewport-safe", async ({
+        browserName,
         page,
       }, testInfo) => {
         test.setTimeout(120_000);
         const pageErrors: string[] = [];
+        let graphStartupUrl: string | null = null;
+        let graphStartupDeferralSeen = false;
         const networkChangeRecoveries: Array<{
           path: string;
           recovered: RequestIdentity[];
         }> = [];
         page.on("pageerror", (error) => {
+          if (
+            browserName === "webkit"
+            && page.url() === graphStartupUrl
+            && !graphStartupDeferralSeen
+            && isResizeObserverDeferralReport(error.message)
+          ) {
+            graphStartupDeferralSeen = true;
+            testInfo.annotations.push({
+              type: "resize-observer-deferral",
+              description: "Context Graph mounted after one WebKit resize deferral.",
+            });
+            return;
+          }
           if (!isTransientNetworkImportError(page, error.message)) {
             pageErrors.push(`${page.url()}: ${error.message}`);
           }
@@ -1262,11 +1279,20 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
           await expect(visibleHead).toContainText(/^v1/);
           await expectViewportFits(page);
 
+          // Match the shared renderer check only during the first Graph mount.
+          // Any repeated report, or a report later in the journey, stays blocking.
+          graphStartupUrl = new URL(
+            workspaceUrl(workspace.id, `context/pages/${decision.id}?tab=graph`),
+            frontendBaseUrl,
+          ).href;
           await readerTabs.getByRole("tab", { name: /^Graph/ }).click();
           const graphPanel = page.getByRole("tabpanel", { name: /^Graph/ });
           await expect(
             graphPanel.getByRole("heading", { name: "Graph relationships" }),
           ).toBeVisible();
+          const graphCanvasFrame = graphPanel.getByTestId("graph-canvas").locator("..");
+          await expect(graphCanvasFrame).toHaveAttribute("data-renderer-status", "ready");
+          graphStartupUrl = null;
           await graphPanel.getByRole("button", { name: "List", exact: true }).click();
           const relatedRow = graphPanel.getByTestId("graph-list-view")
             .locator("button[data-local-graph-id]")
@@ -1281,9 +1307,7 @@ test.describe("Workspace MVP v3 browser acceptance", () => {
             "href",
             `/p/${workspace.id}/${related.id}`,
           );
-          await expect(
-            graphPanel.getByTestId("graph-canvas").locator(".."),
-          ).toHaveAttribute("data-renderer-status", "ready");
+          await expect(graphCanvasFrame).toHaveAttribute("data-renderer-status", "ready");
           await expect(
             graphPanel.getByTestId("graph-canvas").locator("canvas[data-local-graph-canvas]"),
           ).toBeVisible();

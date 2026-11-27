@@ -66,7 +66,7 @@ def bootstrap(settings: Settings, app=None) -> None:
 
     lock = _hold_runtime_lock(app)
     try:
-        bootstrap_core(settings)
+        prepare_serving(settings)
         if app is not None:
             app.state.app_version_synced = True
     except BaseException:
@@ -92,6 +92,25 @@ def bootstrap_core(settings: Settings) -> None:
     ensure_data_dirs()
     ensure_app_version_synced(settings)
     registry.migrate(settings, allow_upgrade=True)
+
+
+def prepare_serving(settings: Settings) -> None:
+    """Prepare storage for a process about to serve.
+
+    Before it serves, no process is answering Ask questions: those a stopped
+    server left unanswered stay, ended as internal errors. Maintenance
+    commands use ``bootstrap_core`` alone; they may run beside a server.
+    """
+
+    bootstrap_core(settings)
+
+    from backend.services.ask_service import fail_interrupted_ask_turns
+
+    engine = make_engine(settings.database_url)
+    try:
+        fail_interrupted_ask_turns(make_session_factory(engine))
+    finally:
+        engine.dispose()
 
 
 def _hold_runtime_lock(app) -> runtime_lock.RuntimeLock | None:

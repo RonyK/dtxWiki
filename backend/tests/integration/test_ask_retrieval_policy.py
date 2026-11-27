@@ -20,6 +20,7 @@ from backend.services.ask_service import (
     AskService,
 )
 from backend.services.search_service import SearchService
+from backend.tests.utils.ask import create_turn_in_session
 
 pytestmark = pytest.mark.integration
 
@@ -97,7 +98,8 @@ def test_the_fallback_reaches_the_turn_as_a_warning(session_factory, page_servic
             actor_kind="human",
             actor_id=str(uuid4()),
         )
-        _detail, warnings = service.create_turn(
+        _detail, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace_id,
             ask_session_id=ask_session.id,
@@ -130,7 +132,8 @@ def test_a_servable_choice_produces_no_warning(session_factory, page_service):
             actor_kind="human",
             actor_id=str(uuid4()),
         )
-        _detail, warnings = service.create_turn(
+        _detail, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace_id,
             ask_session_id=ask_session.id,

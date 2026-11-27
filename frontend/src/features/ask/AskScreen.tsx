@@ -18,11 +18,22 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { MarkdownView } from "../pages/MarkdownView";
-import { apiErrorMessage } from "../../shared/api/client";
+import { ApiError, apiErrorMessage } from "../../shared/api/client";
+import {
+  followAskTurn,
+  listAskModels,
+  searchAskQuestion,
+  steerAskTurn,
+  stopAskTurn,
+  submitAskQuestion,
+  type AskModelOption,
+  type AskModelSelection,
+} from "../../shared/api/askStreams";
+import { askQuestionError } from "../../shared/api/inputPolicy";
+import { newIdempotencyKey } from "../../shared/api/pages";
 import {
   acceptContextIngressProposal,
   createAskSession,
-  createAskTurn,
   rejectContextIngressProposal,
   listAskSessions,
   promoteAskTurn,
@@ -41,6 +52,7 @@ import {
   listWorkspaces,
 } from "../../shared/api/workspace";
 import type { TreeNodePayload } from "../../shared/api/workspace";
+import { useOptionalAuth } from "../../shared/auth/AuthContext";
 import { Breadcrumbs } from "../../shared/components/Breadcrumbs";
 import { WorkspaceFirstUseChecklist } from "../../shared/components/FirstUseChecklist";
 import { RouteLoading } from "../../shared/components/RouteLoading";
@@ -84,6 +96,17 @@ type AskState = {
   detail: AskSessionDetail | null;
 };
 
+type ModelChoice = {
+  connectionKey: string;
+  profileId?: string;
+};
+
+type ModelCatalog = {
+  scope: string;
+  items: AskModelOption[];
+  failed: boolean;
+};
+
 type AskLocale = "en" | "ko";
 
 type AskCopy = {
@@ -104,6 +127,35 @@ type AskCopy = {
   composerPlaceholder: string;
   send: string;
   sending: string;
+  generation: {
+    connection: string;
+    defaultModel: string;
+    unresolvedConnection: string;
+    model: string;
+    chooseModel: string;
+    personal: string;
+    workspace: string;
+    searchOnly: string;
+    noModels: string;
+    modelsFailed: string;
+    manageConnections: string;
+    retry: string;
+    queue: string;
+    steer: string;
+    replace: string;
+    stop: string;
+    cancelQueued: string;
+    queued: string;
+    reconnecting: string;
+    failed: string;
+    restarted: string;
+    copyToMessage: string;
+    searchResults: string;
+    searching: string;
+    searchFailed: string;
+    steeringMessages: string;
+    steeringStatus: Record<"waiting" | "applied" | "failed" | "unknown", string>;
+  };
   savedForReview: string;
   savedAsFeedback: string;
   savedToContext: string;
@@ -143,6 +195,9 @@ type AskCopy = {
     turnPrefix: string;
     noAnswer: string;
     saveAnswer: string;
+    pending: string;
+    failed: string;
+    stopped: string;
   };
   evidence: {
     heading: string;
@@ -213,6 +268,12 @@ type AskCopy = {
   >;
 };
 
+// How often a screen re-reads a session whose question another request is
+// still answering.
+const PENDING_TURN_REFRESH_MS = 2000;
+const SEARCH_ONLY = "search-only";
+const DEFAULT_MODEL_CHOICE: ModelChoice = { connectionKey: "" };
+
 const ASK_COPY = {
   en: {
     title: "Ask",
@@ -232,6 +293,40 @@ const ASK_COPY = {
     composerPlaceholder: "Send a context-first message",
     send: "Send",
     sending: "Sending…",
+    generation: {
+      connection: "LLM connection",
+      defaultModel: "Default",
+      unresolvedConnection: "Selected connection",
+      model: "Model",
+      chooseModel: "Select a model",
+      personal: "My connections",
+      workspace: "Workspace connections",
+      searchOnly: "Search without AI",
+      noModels: "No verified LLM connections are available.",
+      modelsFailed: "Connections could not be loaded.",
+      manageConnections: "Manage LLM connections",
+      retry: "Retry",
+      queue: "Queue next question",
+      steer: "Apply to current answer",
+      replace: "Stop and regenerate",
+      stop: "Stop generation",
+      cancelQueued: "Cancel queued question",
+      queued: "Queued",
+      reconnecting: "Reconnecting to the answer…",
+      failed: "The answer could not be generated.",
+      restarted: "The server restarted before the answer finished.",
+      copyToMessage: "Copy to message",
+      searchResults: "Search results",
+      searching: "Searching…",
+      searchFailed: "Search results could not be loaded.",
+      steeringMessages: "Instructions for this answer",
+      steeringStatus: {
+        waiting: "Waiting to apply",
+        applied: "Applied",
+        failed: "Could not apply",
+        unknown: "Application unconfirmed",
+      },
+    },
     savedForReview: "Saved for review",
     savedAsFeedback: "Saved as feedback",
     savedToContext: "Saved to Context",
@@ -271,6 +366,9 @@ const ASK_COPY = {
       turnPrefix: "Turn",
       noAnswer: "No answer",
       saveAnswer: "Save answer",
+      pending: "Writing the answer…",
+      failed: "Internal server error. The answer was not saved.",
+      stopped: "Stopped. The answer was not saved.",
     },
     evidence: {
       heading: "Cited evidence",
@@ -391,6 +489,40 @@ const ASK_COPY = {
     composerPlaceholder: "컨텍스트 우선 메시지를 보내세요",
     send: "보내기",
     sending: "보내는 중…",
+    generation: {
+      connection: "LLM 연결",
+      defaultModel: "기본값",
+      unresolvedConnection: "선택한 연결",
+      model: "모델",
+      chooseModel: "모델 선택",
+      personal: "내 연결",
+      workspace: "워크스페이스 연결",
+      searchOnly: "AI 없이 검색",
+      noModels: "사용 가능한 검증 완료 LLM 연결이 없습니다.",
+      modelsFailed: "연결을 불러오지 못했습니다.",
+      manageConnections: "LLM 연결 관리",
+      retry: "다시 시도",
+      queue: "다음 질문 예약",
+      steer: "현재 답변에 반영",
+      replace: "중지하고 다시 생성",
+      stop: "답변 생성 중지",
+      cancelQueued: "예약 질문 취소",
+      queued: "예약됨",
+      reconnecting: "답변에 다시 연결하는 중…",
+      failed: "답변을 생성하지 못했습니다.",
+      restarted: "서버가 다시 시작되어 답변을 완료하지 못했습니다.",
+      copyToMessage: "입력창에 복사",
+      searchResults: "검색 결과",
+      searching: "검색 중…",
+      searchFailed: "검색 결과를 불러오지 못했습니다.",
+      steeringMessages: "이 답변에 추가한 지시",
+      steeringStatus: {
+        waiting: "반영 대기",
+        applied: "반영됨",
+        failed: "반영 실패",
+        unknown: "반영 확인 불가",
+      },
+    },
     savedForReview: "리뷰 대상으로 저장됨",
     savedAsFeedback: "피드백으로 저장됨",
     savedToContext: "Context에 저장됨",
@@ -430,6 +562,9 @@ const ASK_COPY = {
       turnPrefix: "턴",
       noAnswer: "답변 없음",
       saveAnswer: "답변 저장",
+      pending: "답변을 만들고 있습니다…",
+      failed: "내부 서버 오류가 발생해 답변을 저장하지 못했습니다.",
+      stopped: "중지되어 답변을 저장하지 않았습니다.",
     },
     evidence: {
       heading: "인용된 근거",
@@ -562,6 +697,143 @@ function resolveAskWarningLabel(
   );
 }
 
+function connectionKeyFor(selection: AskModelSelection) {
+  return `${selection.scope}:${selection.connection_id}`;
+}
+
+function readModelChoice(storageKey: string | null): ModelChoice {
+  if (!storageKey) return DEFAULT_MODEL_CHOICE;
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (!stored) return DEFAULT_MODEL_CHOICE;
+    const choice: Partial<ModelChoice> | null = JSON.parse(stored);
+    if (choice?.connectionKey === SEARCH_ONLY) return { connectionKey: SEARCH_ONLY };
+    if (
+      typeof choice?.connectionKey === "string" && choice.connectionKey &&
+      typeof choice.profileId === "string" && choice.profileId
+    ) {
+      return { connectionKey: choice.connectionKey, profileId: choice.profileId };
+    }
+  } catch {
+    // The picker works without a stored preference.
+  }
+  return DEFAULT_MODEL_CHOICE;
+}
+
+function writeModelChoice(storageKey: string | null, choice: ModelChoice) {
+  if (!storageKey) return;
+  try {
+    if (!choice.connectionKey) {
+      window.localStorage.removeItem(storageKey);
+    } else if (choice.connectionKey === SEARCH_ONLY || choice.profileId) {
+      window.localStorage.setItem(storageKey, JSON.stringify(choice));
+    }
+  } catch {
+    // Keep the current choice in memory when storage is unavailable.
+  }
+}
+
+function profilesForConnection(catalog: ModelCatalog | null, connectionKey: string) {
+  return catalog?.items.filter((model) => connectionKeyFor(model) === connectionKey) ?? [];
+}
+
+function isUnfinishedTurn(turn: AskTurnDetail) {
+  return turn.status === "pending" || turn.status === "queued";
+}
+
+function compareTurnExecutionOrder(left: AskTurnDetail, right: AskTurnDetail) {
+  const leftQueued = left.status === "queued";
+  const rightQueued = right.status === "queued";
+  if (leftQueued !== rightQueued) return leftQueued ? 1 : -1;
+  const turnNumberOrder = left.turn_no - right.turn_no;
+  if (leftQueued) return turnNumberOrder;
+  const leftAt = left.started_at ?? left.created_at;
+  const rightAt = right.started_at ?? right.created_at;
+  // The server's timestamps carry microseconds that Date.parse drops.
+  return Date.parse(leftAt) - Date.parse(rightAt) || leftAt.localeCompare(rightAt) || turnNumberOrder;
+}
+
+function newerTurn(previous: AskTurnDetail | undefined, current: AskTurnDetail): AskTurnDetail {
+  if (!previous || !isUnfinishedTurn(current)) return current;
+  if (!isUnfinishedTurn(previous) || (previous.status === "pending" && current.status === "queued")) {
+    return previous;
+  }
+  // Facts that only move forward during a turn survive an older snapshot:
+  // instruction outcomes, and steering once the model has enabled it.
+  const steering = new Map(previous.steering_messages?.map((message) => [message.id, message]));
+  for (const message of current.steering_messages ?? []) {
+    const existing = steering.get(message.id);
+    if (!existing || message.status !== "waiting") steering.set(message.id, message);
+  }
+  return {
+    ...current,
+    steer_supported: Boolean(current.steer_supported || previous.steer_supported),
+    ...(steering.size > 0 ? { steering_messages: [...steering.values()] } : {}),
+  };
+}
+
+// The open session is always in the history rail, in activity order.
+function updateAskHistory(sessions: AskSessionRef[], detail: AskSessionDetail) {
+  return sortSessionsByActivity([
+    detail,
+    ...sessions.filter((session) => session.id !== detail.id),
+  ]);
+}
+
+function mergeAskTurn(
+  state: AskState,
+  detail: AskSessionDetail,
+  turn: AskTurnDetail,
+  questionAccepted = false,
+): AskState {
+  const saved = detail.turns.find((item) => item.id === turn.id);
+  const turns = saved
+    ? detail.turns.map((item) => item.id === turn.id ? newerTurn(saved, turn) : item)
+    : [...detail.turns, turn].sort((left, right) => left.turn_no - right.turn_no);
+  // A question response carries its creation time; the terminal read will
+  // supply the session's authoritative activity time.
+  const updatedAt = questionAccepted && Date.parse(turn.created_at) > Date.parse(sessionActivityAt(detail))
+    ? turn.created_at
+    : detail.updated_at;
+  const session = { ...detail, updated_at: updatedAt, turns, turn_count: turns.length };
+  const sessions = updateAskHistory(state.sessions, session);
+  return { ...state, detail: session, sessions };
+}
+
+function applySessionRead(
+  state: AskState | null,
+  workspaceId: string,
+  reported: AskSessionDetail,
+): AskState | null {
+  return state?.workspaceId === workspaceId && state.detail?.id === reported.id
+    ? mergeAskSnapshot(state, reported)
+    : state;
+}
+
+function mergeAskSnapshot(state: AskState, reported: AskSessionDetail): AskState {
+  const previous = state.detail;
+  if (previous?.id !== reported.id) return { ...state, detail: reported };
+  // A GET can start before a send or stream update that resolved earlier.
+  const priorTurns = new Map(previous.turns.map((turn) => [turn.id, turn]));
+  const turns = reported.turns.map((turn) => {
+    const merged = newerTurn(priorTurns.get(turn.id), turn);
+    priorTurns.delete(turn.id);
+    return merged;
+  });
+  turns.push(...priorTurns.values());
+  turns.sort((left, right) => left.turn_no - right.turn_no);
+  // A read that started earlier keeps the newer title and activity time.
+  const olderRead = Date.parse(sessionActivityAt(reported)) < Date.parse(sessionActivityAt(previous));
+  const detail = {
+    ...reported,
+    ...(olderRead ? { title: previous.title, updated_at: previous.updated_at } : {}),
+    turns,
+    turn_count: turns.length,
+  };
+  const sessions = updateAskHistory(state.sessions, detail);
+  return { ...state, detail, sessions };
+}
+
 export function AskScreen() {
   const routeWorkspaceId = useRouteWorkspaceId();
   const route = useWorkspaceRoute();
@@ -571,6 +843,10 @@ export function AskScreen() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { t } = useTranslation("search");
+  const accountId = useOptionalAuth()?.user?.user_id;
+  const modelScope = `${accountId ?? ""}:${routeWorkspaceId ?? ""}`;
+  const modelStorageKey = accountId && routeWorkspaceId ? `dtxwiki:ask:model:${modelScope}` : null;
+  const storedModelChoice = useMemo(() => readModelChoice(modelStorageKey), [modelStorageKey]);
   const workspaceContext = useOptionalWorkspaceContext();
   const canEdit = isEditorRole(workspaceContext?.selectedWorkspace?.role);
   const [state, setState] = useState<AskState | null>(null);
@@ -579,6 +855,7 @@ export function AskScreen() {
   // control that silently does nothing.
   const canCompose = canEdit && Boolean(state?.workspaceId);
   const [message, setMessage] = useState("");
+  const composerRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [savingTurn, setSavingTurn] = useState<AskTurnDetail | null>(null);
   const [savedLabel, setSavedLabel] = useState<string | null>(null);
@@ -587,6 +864,16 @@ export function AskScreen() {
   const [routeRetryKey, setRouteRetryKey] = useState(0);
   const [selectingSessionId, setSelectingSessionId] = useState<string | null>(null);
   const [sendingTurn, setSendingTurn] = useState(false);
+  const [turnActionId, setTurnActionId] = useState<string | null>(null);
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
+  const [modelRetry, setModelRetry] = useState(0);
+  const [modelChoice, setModelChoice] = useState<{
+    scope: string;
+    choice: ModelChoice;
+  } | null>(null);
+  const [preview, setPreview] = useState<{ turnId: string; text: string } | null>(null);
+  const [reconnectingTurnId, setReconnectingTurnId] = useState<string | null>(null);
+  const [streamAttempt, setStreamAttempt] = useState(0);
   const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
   const consumedNewRequestRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
@@ -598,6 +885,13 @@ export function AskScreen() {
     routeIdentityRef.current = routeIdentity;
     return () => { routeIdentityRef.current = ""; };
   }, [routeIdentity]);
+  // The route of a session this screen created for a first question, until
+  // that route loads. The question's outcome can arrive before the route is
+  // applied, and the route's load must not clear it.
+  const submittedRouteRef = useRef<string | null>(null);
+  // The submission whose outcome is not known yet: a retry of the same input
+  // reuses its request id and the turn it first targeted.
+  const requestRef = useRef<{ key: string; id: string; targetTurnId?: string } | null>(null);
   const entryRefreshGenerationRef = useRef(0);
   // Tracks whether the component is still mounted. Async handlers below
   // (`startSession`, `load`, `sendTurn`, `acceptPlacement`,
@@ -612,6 +906,24 @@ export function AskScreen() {
       routeIdentityRef.current = "";
     };
   }, []);
+
+  useEffect(() => {
+    if (!canEdit || !routeWorkspaceId) return;
+    const controller = new AbortController();
+    void listAskModels(routeWorkspaceId, controller.signal).then(
+      (items) => {
+        if (!controller.signal.aborted) {
+          setModelCatalog({ scope: modelScope, items, failed: false });
+        }
+      },
+      () => {
+        if (!controller.signal.aborted) {
+          setModelCatalog({ scope: modelScope, items: [], failed: true });
+        }
+      },
+    );
+    return () => controller.abort();
+  }, [canEdit, routeWorkspaceId, modelScope, modelRetry]);
 
   async function load(preferredSessionId?: string): Promise<boolean> {
     const generation = ++loadGenerationRef.current;
@@ -635,14 +947,17 @@ export function AskScreen() {
     if (!mountedRef.current || loadGenerationRef.current !== generation) {
       return false;
     }
-    setState({
-      workspaceId,
-      workspaceLanguage: normalizeAskLocale(workspace?.default_language),
-      sessions,
-      sessionsCursor: sessionsData.next_cursor,
-      sessionsHasMore: sessionsData.has_more,
-      contextTree,
-      detail,
+    setState((previous) => {
+      const next: AskState = {
+        workspaceId,
+        workspaceLanguage: normalizeAskLocale(workspace?.default_language),
+        sessions,
+        sessionsCursor: sessionsData.next_cursor,
+        sessionsHasMore: sessionsData.has_more,
+        contextTree,
+        detail: previous?.workspaceId === workspaceId ? previous.detail : null,
+      };
+      return detail ? mergeAskSnapshot(next, detail) : { ...next, detail: null };
     });
     return true;
   }
@@ -747,7 +1062,11 @@ export function AskScreen() {
         }
         return {
           ...prev,
-          sessions: sortSessionsByActivity([...prev.sessions, ...next.items]),
+          // A session already shown (e.g. the open one) is not added twice.
+          sessions: sortSessionsByActivity([
+            ...prev.sessions,
+            ...next.items.filter((item) => !prev.sessions.some((shown) => shown.id === item.id)),
+          ]),
           sessionsCursor: next.next_cursor,
           sessionsHasMore: next.has_more,
         };
@@ -765,15 +1084,25 @@ export function AskScreen() {
 
   useEffect(() => {
     let cancelled = false;
+    let generation = 0;
     async function initialLoad() {
+      const submitted = submittedRouteRef.current === routeIdentity;
+      submittedRouteRef.current = null;
       setNotFound(false);
-      setError(null);
-      setLastTurnWarnings([]);
+      if (!submitted) {
+        setError(null);
+        setLastTurnWarnings([]);
+      }
       setSelectingSessionId(requestedSessionId);
-      try { await load(); } finally { if (!cancelled) setSelectingSessionId(null); }
+      const loading = load();
+      // load() takes its generation before its first await.
+      generation = loadGenerationRef.current;
+      try { await loading; } finally { if (!cancelled) setSelectingSessionId(null); }
     }
     initialLoad().catch((exc) => {
-      if (cancelled || !mountedRef.current) {
+      // A newer load (such as the one after a sent question) owns the screen,
+      // as it does when this load succeeds late.
+      if (cancelled || !mountedRef.current || loadGenerationRef.current !== generation) {
         return;
       }
       setNotFound(Boolean(requestedSessionId) && typeof exc === "object" && exc !== null && "status" in exc && exc.status === 404);
@@ -857,25 +1186,54 @@ export function AskScreen() {
   }
 
 
-  async function sendTurn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function submission(input: unknown, targetTurnId?: string) {
+    const key = JSON.stringify(input);
+    if (requestRef.current?.key !== key) {
+      requestRef.current = { key, id: newIdempotencyKey(), targetTurnId };
+    }
+    return requestRef.current;
+  }
+
+  async function sendTurn(action: "queue" | "steer" | "replace") {
     if (
       !state ||
       !state.workspaceId ||
-      !message.trim() ||
+      !canCompose ||
       startingSession ||
       sendingTurn ||
-      selectingSessionId
+      selectingSessionId ||
+      turnActionId ||
+      // A new or replacing question uses the chosen model; steering does not.
+      (action !== "steer" && modelChoicePending) ||
+      (action !== "queue" && !activeTurn)
     ) {
       return;
     }
     if (state.workspaceId !== routeWorkspaceId) {
       return;
     }
+    // Refuse an invalid question before a new session is created for it.
+    const question = message.trim();
+    if (!question) return;
+    const questionError = askQuestionError(question);
+    if (questionError) {
+      setError(questionError);
+      return;
+    }
     setError(null);
     setLastTurnWarnings([]);
     setSendingTurn(true);
-    const mutationRouteIdentity = routeIdentity;
+    // The route this submission belongs to. A new session moves it to that
+    // session's URL; any other navigation means the user went elsewhere.
+    const startRoute = routeIdentity;
+    let submissionRoute = routeIdentity;
+    const stillHere = () =>
+      mountedRef.current &&
+      (routeIdentityRef.current === submissionRoute ||
+        // The new session's URL is set but not applied yet.
+        (submittedRouteRef.current === submissionRoute &&
+          routeIdentityRef.current === startRoute));
+    let sessionId: string | null = null;
     try {
       // The overview deliberately has no selected session. During a route
       // transition `state.detail` can still contain the prior detail while
@@ -888,51 +1246,142 @@ export function AskScreen() {
       if (requestedSessionId && !detailMatchesRoute) {
         return;
       }
-      let detail = detailMatchesRoute ? state.detail : null;
+      const selectedDetail = detailMatchesRoute ? state.detail : null;
+      if (action === "steer") {
+        if (!selectedDetail || !activeTurn?.steer_supported) return;
+        sessionId = selectedDetail.id;
+        const requestId = submission([state.workspaceId, activeTurn.id, action, question]).id;
+        const steered = await steerAskTurn(state.workspaceId, activeTurn.id, question, requestId);
+        if (!stillHere()) return;
+        requestRef.current = null;
+        setMessage("");
+        setState((previous) =>
+          previous?.detail?.id === steered.ask_session_id
+            ? mergeAskTurn(previous, previous.detail, steered)
+            : previous,
+        );
+        return;
+      }
+      let detail = selectedDetail;
       if (!detail) {
         detail = await createAskSession(state.workspaceId, {});
-        if (
-          !mountedRef.current ||
-          routeIdentityRef.current !== mutationRouteIdentity
-        ) {
+        if (!stillHere()) {
           return;
         }
+        // Show the session's address before asking, so a reload finds the
+        // question once the server has stored it.
+        submissionRoute = `${routeWorkspaceId ?? ""}\u0000${detail.id}`;
+        submittedRouteRef.current = submissionRoute;
+        setSelectedSessionParams(detail.id);
       }
-      const created = await createAskTurn(
-        state.workspaceId,
-        detail.id,
-        message.trim(),
+      sessionId = detail.id;
+      // The key names the input, not the running turn: after a lost response
+      // the accepted replacement is the running turn, and a retry must still
+      // send the original request id and target.
+      const pending = submission(
+        [state.workspaceId, detail.id, selection, action, question],
+        action === "replace" ? activeTurn?.id : undefined,
       );
-      if (
-        !mountedRef.current ||
-        routeIdentityRef.current !== mutationRouteIdentity
-      ) {
+      const replaceTurnId = pending.targetTurnId;
+      const requestId = pending.id;
+      const created = await submitAskQuestion(state.workspaceId, detail.id, {
+        user_message: question,
+        request_id: requestId,
+        ...(selection !== undefined ? { selection } : {}),
+        ...(replaceTurnId ? { replace_turn_id: replaceTurnId } : {}),
+      });
+      if (!stillHere()) {
         return;
       }
+      requestRef.current = null;
       setLastTurnWarnings(created.warnings);
       setMessage("");
-      const applied = await load(detail.id);
-      if (
-        !mountedRef.current ||
-        routeIdentityRef.current !== mutationRouteIdentity ||
-        !applied
-      ) {
+      setError(null);
+      setNotFound(false);
+      // A read started before the acceptance can omit the newly stored turn.
+      ++loadGenerationRef.current;
+      setSelectingSessionId(null);
+      const acceptedSession = detail;
+      setState((previous) => {
+        const liveState = previous?.workspaceId === state.workspaceId ? previous : state;
+        const liveDetail = liveState.detail?.id === acceptedSession.id
+          ? liveState.detail
+          : acceptedSession;
+        const turns = replaceTurnId ? liveDetail.turns.map((turn) => {
+          if (turn.id !== replaceTurnId || !isUnfinishedTurn(turn)) return turn;
+          return {
+            ...turn,
+            status: "stopped" as const,
+            steering_messages: turn.steering_messages?.map((instruction) =>
+              instruction.status === "waiting" ? { ...instruction, status: "unknown" as const } : instruction,
+            ),
+          };
+        }) : liveDetail.turns;
+        return mergeAskTurn(liveState, { ...liveDetail, turns }, created.turn, true);
+      });
+    } catch (e) {
+      if (!stillHere()) {
         return;
       }
-      setSelectedSessionParams(detail.id);
-    } catch (e) {
-      if (
-        !mountedRef.current ||
-        routeIdentityRef.current !== mutationRouteIdentity
-      ) {
-        return;
+      // A retry reuses the request only while its outcome is unknown. Only a
+      // refusal of the question itself settles it; an access error happens
+      // before the server looks the request up.
+      if (e instanceof ApiError && (e.status === 409 || e.status === 422)) {
+        requestRef.current = null;
       }
       setError(errorMessage(e, ASK_COPY[state.workspaceLanguage].errors.sendTurn));
+      // The question may be stored even though its answer failed; show the
+      // session as the server has it. This error stays the one reported.
+      if (sessionId) {
+        if (await load(sessionId).catch(() => false) && stillHere()) {
+          setNotFound(false);
+        }
+      }
     } finally {
       if (mountedRef.current) {
         setSendingTurn(false);
       }
     }
+  }
+
+  // A session read applies only if no newer load started meanwhile.
+  function refreshSession(workspaceId: string, sessionId: string) {
+    const generation = loadGenerationRef.current;
+    const route = routeIdentityRef.current;
+    void readAskSession(workspaceId, sessionId).then((detail) => {
+      if (!mountedRef.current || routeIdentityRef.current !== route) return;
+      if (generation !== loadGenerationRef.current) return;
+      setState((previous) => applySessionRead(previous, workspaceId, detail));
+    }).catch(() => undefined);
+  }
+
+  async function stopTurn(turn: AskTurnDetail) {
+    if (!canCompose || !state?.workspaceId || sendingTurn || turnActionId) return;
+    const routeAtAction = routeIdentity;
+    setTurnActionId(turn.id);
+    setError(null);
+    try {
+      const stopped = await stopAskTurn(state.workspaceId, turn.id);
+      if (routeIdentityRef.current !== routeAtAction) return;
+      setState((previous) =>
+        previous?.detail?.id === stopped.ask_session_id
+          ? mergeAskTurn(previous, previous.detail, stopped)
+          : previous,
+      );
+      // Another question may start now; show the session as it is.
+      refreshSession(state.workspaceId, stopped.ask_session_id);
+    } catch (exc) {
+      if (routeIdentityRef.current === routeAtAction) {
+        setError(errorMessage(exc, ASK_COPY[state.workspaceLanguage].errors.sendTurn));
+      }
+    } finally {
+      if (mountedRef.current) setTurnActionId(null);
+    }
+  }
+
+  function copyToMessage(text: string) {
+    setMessage((draft) => draft ? `${draft} ${text}` : text);
+    composerRef.current?.focus();
   }
 
   function setSelectedSessionParams(sessionId: string) {
@@ -1057,6 +1506,113 @@ export function AskScreen() {
         ? state.detail?.id === requestedSessionId
         : state.detail === null),
   );
+  const visibleDetail = detailMatchesRoute ? state?.detail ?? null : null;
+  const displayedTurns = useMemo(
+    () => visibleDetail?.turns.slice().sort(compareTurnExecutionOrder) ?? [],
+    [visibleDetail?.turns],
+  );
+  const activeTurn = displayedTurns.find((turn) => turn.status === "pending");
+  const watchedTurn = activeTurn ?? displayedTurns.find((turn) => turn.status === "queued");
+  const watchedTurnId = watchedTurn?.id;
+  const catalog = modelCatalog?.scope === modelScope ? modelCatalog : null;
+  const choice = modelChoice?.scope === modelScope ? modelChoice.choice : storedModelChoice;
+  const profiles = profilesForConnection(catalog, choice.connectionKey);
+  const selectedModel = profiles.find((model) => model.model_profile_id === choice.profileId);
+  const searchOnly = choice.connectionKey === SEARCH_ONLY;
+  const connectionAvailable = profiles.length > 0 && (!choice.profileId || selectedModel !== undefined);
+  const catalogResolved = catalog !== null && !catalog.failed;
+  const connectionKey = searchOnly || !catalogResolved || connectionAvailable ? choice.connectionKey : "";
+  // A chosen model must be resolved before a question uses it: while the
+  // list is unavailable, or while a connection with several models has none picked.
+  // Sending then would silently use the default model instead.
+  const modelChoicePending =
+    !searchOnly && connectionKey !== "" && selectedModel === undefined;
+  const selection = searchOnly ? null : selectedModel && {
+    scope: selectedModel.scope,
+    connection_id: selectedModel.connection_id,
+    model_profile_id: selectedModel.model_profile_id,
+  };
+
+  function changeModelChoice(next: ModelChoice) {
+    const options = profilesForConnection(catalog, next.connectionKey);
+    const nextChoice = {
+      connectionKey: next.connectionKey,
+      profileId: next.profileId ?? (options.length === 1 ? options[0].model_profile_id : undefined),
+    };
+    setModelChoice({ scope: modelScope, choice: nextChoice });
+    writeModelChoice(modelStorageKey, nextChoice);
+  }
+
+  useEffect(() => {
+    if (!routeWorkspaceId || !requestedSessionId || !watchedTurnId) return;
+    const workspaceId = routeWorkspaceId;
+    const sessionId = requestedSessionId;
+    const turnId = watchedTurnId;
+    const controller = new AbortController();
+    let timer: number | undefined;
+    let ended = false;
+    let previewText = "";
+    const onRoute = () => mountedRef.current && routeIdentityRef.current === routeIdentity;
+    const current = () => !controller.signal.aborted && onRoute();
+    const clearPreview = () => setPreview((previous) => previous?.turnId === turnId ? null : previous);
+    setPreview(null);
+    function reconcile() {
+      if (!current() || ended) return;
+      clearPreview();
+      setReconnectingTurnId(turnId);
+      timer = window.setTimeout(async () => {
+        let shouldReconnect = true;
+        try {
+          const generation = loadGenerationRef.current;
+          const detail = await readAskSession(workspaceId, sessionId);
+          if (!current()) return;
+          // A read overtaken by a newer load decides nothing: keep following.
+          if (generation === loadGenerationRef.current) {
+            setState((previous) => applySessionRead(previous, workspaceId, detail));
+            shouldReconnect = detail.turns.some((turn) => turn.id === turnId && isUnfinishedTurn(turn));
+          }
+        } catch (exc) {
+          if (!current()) return;
+          if (exc instanceof ApiError && [401, 403, 404].includes(exc.status)) {
+            setState((previous) =>
+              previous?.detail?.id === sessionId ? { ...previous, detail: null } : previous,
+            );
+            setRouteRetryKey((key) => key + 1);
+            return;
+          }
+        }
+        if (shouldReconnect) setStreamAttempt((attempt) => attempt + 1);
+      }, PENDING_TURN_REFRESH_MS);
+    }
+    void followAskTurn(workspaceId, turnId, controller.signal, (event) => {
+      if (!current()) return;
+      setReconnectingTurnId((previous) => previous === turnId ? null : previous);
+      if (event.kind === "delta") {
+        if (!ended) {
+          previewText = event.reset ? event.text : previewText + event.text;
+          setPreview({ turnId, text: previewText });
+        }
+        return;
+      }
+      if (event.turn.id !== turnId || event.turn.ask_session_id !== sessionId) return;
+      ended = !isUnfinishedTurn(event.turn);
+      setState((previous) =>
+        previous?.workspaceId === workspaceId && previous.detail?.id === sessionId
+          ? mergeAskTurn(previous, previous.detail, event.turn)
+          : previous,
+      );
+      if (ended) {
+        clearPreview();
+        // The terminal commit can also change the session's title and recency.
+        refreshSession(workspaceId, sessionId);
+      }
+    }).then(reconcile, reconcile);
+    return () => {
+      controller.abort();
+      clearPreview();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [requestedSessionId, routeIdentity, routeWorkspaceId, streamAttempt, watchedTurnId]);
   if (notFound) return <NotFoundScreen />;
   if (requestedSessionId && !detailMatchesRoute) {
     if (error) {
@@ -1094,15 +1650,19 @@ export function AskScreen() {
     );
   }
 
-  const visibleDetail = detailMatchesRoute ? state.detail : null;
   const visibleSavingTurn = visibleDetail?.turns.some(
     (turn) => turn.id === savingTurn?.id,
   )
     ? savingTurn
     : null;
-  const latestTurn = visibleDetail?.turns.at(-1) ?? null;
+  // Only an answered turn can be saved, so a failed question after it does
+  // not take the save action away from the last answer.
+  const latestAnsweredTurn = displayedTurns.filter((turn) => turn.status === "completed").at(-1);
   const uiLanguage = normalizeAskLocale(resolveInitialLocale(state.workspaceLanguage));
   const copy = ASK_COPY[uiLanguage];
+  const composerBusy =
+    startingSession || sendingTurn || Boolean(selectingSessionId) || Boolean(turnActionId);
+  const composerEmpty = !message.trim();
   // A7: on the empty state the composer is rendered non-sticky (it would
   // otherwise overlap the first-use checklist on mobile) and the redundant
   // create FAB is dropped — the header "+ New" and "Start first Ask session"
@@ -1190,36 +1750,68 @@ export function AskScreen() {
           ) : (
             <TurnList
               copy={copy}
-              latestTurnId={latestTurn?.id ?? null}
+              latestTurnId={latestAnsweredTurn?.id ?? null}
               locale={uiLanguage}
               onSave={canCompose ? setSavingTurn : undefined}
-              turns={visibleDetail?.turns ?? []}
+              onStop={canCompose ? stopTurn : undefined}
+              onRestore={canCompose ? copyToMessage : undefined}
+              mutationsBusy={sendingTurn || Boolean(turnActionId)}
+              preview={preview}
+              reconnectingTurnId={reconnectingTurnId}
+              turns={displayedTurns}
             />
           )}
         </div>
         {canCompose ? (
-            <form className="ask-composer" onSubmit={sendTurn}>
+            <form className="ask-composer" onSubmit={(event: FormEvent<HTMLFormElement>) => {
+              event.preventDefault();
+              void sendTurn("queue");
+            }}>
+              <AskModelPicker
+                catalog={catalog}
+                connectionKey={connectionKey}
+                profileId={selectedModel?.model_profile_id ?? ""}
+                profiles={connectionAvailable ? profiles : []}
+                copy={copy}
+                disabled={composerBusy}
+                manageHref={workspaceContext?.selectedWorkspace?.role === "owner"
+                  ? `${workspacePath(routeWorkspaceId, "settings")}?section=workspace-llm`
+                  : "/account/integrations?section=llm"}
+                onChange={changeModelChoice}
+                onRetry={() => {
+                  setModelCatalog(null);
+                  setModelRetry((attempt) => attempt + 1);
+                }}
+              />
               <input
                 aria-label={copy.composerLabel}
-                disabled={
-                  startingSession || sendingTurn || Boolean(selectingSessionId)
-                }
+                disabled={composerBusy}
                 placeholder={copy.composerPlaceholder}
+                ref={composerRef}
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
               />
               <button
                 aria-busy={sendingTurn}
                 className="icon-button primary"
-                disabled={
-                  sendingTurn || Boolean(selectingSessionId) || !message.trim()
-                  || startingSession
-                }
+                disabled={composerBusy || composerEmpty || modelChoicePending}
                 type="submit"
               >
                 <Send size={16} aria-hidden="true" />
-                <span>{sendingTurn ? copy.sending : copy.send}</span>
+                <span>{sendingTurn ? copy.sending : watchedTurn ? copy.generation.queue : copy.send}</span>
               </button>
+              {activeTurn ? (
+                <div className="ask-generation-actions">
+                  <button
+                    type="button"
+                    className="icon-button text-button"
+                    disabled={composerBusy || composerEmpty || (!activeTurn.steer_supported && modelChoicePending)}
+                    onClick={() => void sendTurn(activeTurn.steer_supported ? "steer" : "replace")}
+                  >
+                    {activeTurn.steer_supported ? copy.generation.steer : copy.generation.replace}
+                  </button>
+                </div>
+              ) : null}
             </form>
         ) : null}
       </section>
@@ -1239,6 +1831,94 @@ export function AskScreen() {
         ) : undefined
       }
     />
+  );
+}
+
+function AskModelPicker({
+  catalog,
+  connectionKey,
+  profileId,
+  profiles,
+  copy,
+  disabled,
+  manageHref,
+  onChange,
+  onRetry,
+}: {
+  catalog: ModelCatalog | null;
+  connectionKey: string;
+  profileId: string;
+  profiles: AskModelOption[];
+  copy: AskCopy;
+  disabled: boolean;
+  manageHref: string;
+  onChange: (choice: ModelChoice) => void;
+  onRetry: () => void;
+}) {
+  const labels = copy.generation;
+  const connections = new Map(
+    catalog?.items.map((option) => [connectionKeyFor(option), option]),
+  );
+  const options = [...connections.values()];
+  const noModels = catalog?.items.length === 0;
+
+  return (
+    <div className="ask-model-controls">
+      <label className="field-stack">
+        <span>{labels.connection}</span>
+        <select
+          disabled={disabled}
+          value={connectionKey}
+          onChange={(event) => onChange({ connectionKey: event.target.value })}
+        >
+          <option value="">{labels.defaultModel}</option>
+          {connectionKey && connectionKey !== SEARCH_ONLY && !connections.has(connectionKey) ? (
+            <option value={connectionKey}>{labels.unresolvedConnection}</option>
+          ) : null}
+          {(["personal", "workspace"] as const).map((scope) => {
+            const scoped = options.filter((option) => option.scope === scope);
+            return scoped.length > 0 ? (
+              <optgroup key={scope} label={labels[scope]}>
+                {scoped.map((option) => (
+                  <option key={connectionKeyFor(option)} value={connectionKeyFor(option)}>
+                    {option.connection_label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null;
+          })}
+          <option value={SEARCH_ONLY}>{labels.searchOnly}</option>
+        </select>
+      </label>
+      {connectionKey !== SEARCH_ONLY ? (
+        <label className="field-stack">
+          <span>{labels.model}</span>
+          <select
+            disabled={disabled || profiles.length === 0}
+            value={profileId}
+            onChange={(event) => onChange({ connectionKey, profileId: event.target.value })}
+          >
+            <option value="">{labels.chooseModel}</option>
+            {profiles.map((model) => (
+              <option key={model.model_profile_id} value={model.model_profile_id}>
+                {model.model_label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {catalog?.failed ? (
+        <div className="ask-model-help">
+          <span>{labels.modelsFailed}</span>
+          <button type="button" className="inline-action" onClick={onRetry}>{labels.retry}</button>
+        </div>
+      ) : noModels ? (
+        <div className="ask-model-help">
+          <span>{labels.noModels}</span>
+          <Link to={manageHref}>{labels.manageConnections}</Link>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1423,12 +2103,22 @@ function TurnList({
   latestTurnId,
   locale,
   onSave,
+  onStop,
+  onRestore,
+  mutationsBusy,
+  preview,
+  reconnectingTurnId,
 }: {
   copy: AskCopy;
   turns: AskTurnDetail[];
   latestTurnId: string | null;
   locale: AskLocale;
   onSave?: (turn: AskTurnDetail) => void;
+  onStop?: (turn: AskTurnDetail) => Promise<void>;
+  onRestore?: (text: string) => void;
+  mutationsBusy: boolean;
+  preview: { turnId: string; text: string } | null;
+  reconnectingTurnId: string | null;
 }) {
   if (turns.length === 0) {
     return (
@@ -1458,6 +2148,11 @@ function TurnList({
             latestTurnId={latestTurnId}
             locale={locale}
             onSave={onSave}
+            onStop={onStop}
+            onRestore={onRestore}
+            mutationsBusy={mutationsBusy}
+            preview={preview?.turnId === turn.id ? preview.text : undefined}
+            reconnecting={reconnectingTurnId === turn.id}
             turn={turn}
           />
         ))}
@@ -1472,17 +2167,88 @@ function TurnCard({
   latestTurnId,
   locale,
   onSave,
+  onStop,
+  onRestore,
+  mutationsBusy,
+  preview,
+  reconnecting,
 }: {
   copy: AskCopy;
   turn: AskTurnDetail;
   latestTurnId: string | null;
   locale: AskLocale;
   onSave?: (turn: AskTurnDetail) => void;
+  onStop?: (turn: AskTurnDetail) => Promise<void>;
+  onRestore?: (text: string) => void;
+  mutationsBusy: boolean;
+  preview?: string;
+  reconnecting: boolean;
 }) {
-  const { t } = useTranslation("search");
   const noEvidence = isNoEvidenceTurn(turn);
   const workspaceId = useRouteWorkspaceId();
   const recoveryDescriptionId = `no-evidence-recovery-${turn.id}`;
+  const instructions = (turn.steering_messages?.length ?? 0) > 0 ? (
+    <ul className="ask-turn-instructions" aria-label={copy.generation.steeringMessages}>
+      {turn.steering_messages?.map((message) => (
+        <li key={message.id}>
+          <span>{message.user_message}</span>
+          <small>{copy.generation.steeringStatus[message.status]}</small>
+          {onRestore && (message.status === "failed" || message.status === "unknown") ? (
+            <button
+              type="button"
+              className="inline-action"
+              disabled={mutationsBusy}
+              onClick={() => onRestore(message.user_message)}
+            >
+              {copy.generation.copyToMessage}
+            </button>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  ) : null;
+  if (turn.status !== "completed") {
+    return (
+      <article className="turn-card">
+        <div className="turn-card-header">
+          <span>{copy.turns.turnPrefix} {turn.turn_no}</span>
+        </div>
+        <div className="turn-bubble user">{turn.user_message}</div>
+        {instructions}
+        <StatusBanner tone={turn.status === "failed" ? "warning" : "info"}>
+          {reconnecting && isUnfinishedTurn(turn)
+            ? copy.generation.reconnecting
+            : unansweredTurnLabel(turn, copy)}
+        </StatusBanner>
+        {turn.status === "pending" && preview ? (
+          <div className="turn-bubble assistant ask-stream-preview">{preview}</div>
+        ) : null}
+        {isUnfinishedTurn(turn) && onStop ? (
+          <button
+            type="button"
+            className="icon-button text-button"
+            disabled={mutationsBusy}
+            onClick={() => void onStop(turn)}
+          >
+            {turn.status === "queued" ? copy.generation.cancelQueued : copy.generation.stop}
+          </button>
+        ) : null}
+        {turn.status === "failed" && turn.can_search && workspaceId ? (
+          <AskSearchPreview copy={copy} workspaceId={workspaceId} turnId={turn.id} locale={locale} />
+        ) : null}
+        {turn.status === "failed" && turn.error_code === "server_restarted" && turn.user_message && onRestore ? (
+          <button
+            type="button"
+            className="icon-button text-button"
+            disabled={mutationsBusy}
+            onClick={() => onRestore(turn.user_message ?? "")}
+          >
+            {copy.generation.copyToMessage}
+          </button>
+        ) : null}
+      </article>
+    );
+  }
   return (
     <article className={`turn-card ${noEvidence ? "no-evidence-turn" : ""}`}>
       <div className="turn-card-header">
@@ -1494,6 +2260,7 @@ function TurnCard({
         />
       </div>
       <div className="turn-bubble user">{turn.user_message}</div>
+      {instructions}
       <div className={`turn-bubble assistant ${noEvidence ? "no-evidence" : ""}`}>
         {/* Model answers render Markdown, with internal links activated only
             when the server confirms their cited targets for this turn. */}
@@ -1511,11 +2278,7 @@ function TurnCard({
       {turn.retrieval_trace.length > 0 || (turn.tried_lanes ?? []).length > 0 ? (
         <SearchTrace copy={copy} turn={turn} />
       ) : null}
-      {(turn.warning_codes ?? []).map((code) => (
-        <StatusBanner key={code} tone="warning">
-          {resolveAskWarningLabel(code, copy, t, locale)}
-        </StatusBanner>
-      ))}
+      <AskWarnings codes={turn.warning_codes ?? []} copy={copy} locale={locale} />
       {turn.fallback_disclosure && !noEvidence ? (
         <StatusBanner tone="info">{copy.evidence.fallbackNotice}</StatusBanner>
       ) : null}
@@ -1539,6 +2302,83 @@ function TurnCard({
         />
       ) : null}
     </article>
+  );
+}
+
+function AskWarnings({ codes, copy, locale }: {
+  codes: string[];
+  copy: AskCopy;
+  locale: AskLocale;
+}) {
+  const { t } = useTranslation("search");
+  return (
+    <>
+      {codes.map((code) => (
+        <StatusBanner key={code} tone="warning">
+          {resolveAskWarningLabel(code, copy, t, locale)}
+        </StatusBanner>
+      ))}
+    </>
+  );
+}
+
+function AskSearchPreview({ copy, workspaceId, turnId, locale }: {
+  copy: AskCopy;
+  workspaceId: string;
+  turnId: string;
+  locale: AskLocale;
+}) {
+  const [result, setResult] = useState<AskTurnDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => requestRef.current?.abort(), []);
+
+  async function search() {
+    if (searching) return;
+    const request = new AbortController();
+    requestRef.current = request;
+    setSearching(true);
+    setError(null);
+    try {
+      const results = await searchAskQuestion(workspaceId, turnId, request.signal);
+      if (!request.signal.aborted) setResult(results);
+    } catch (exc) {
+      if (!request.signal.aborted) {
+        setError(errorMessage(exc, copy.generation.searchFailed));
+      }
+    } finally {
+      if (!request.signal.aborted) setSearching(false);
+    }
+  }
+  return (
+    <div className="ask-search-preview">
+      {result ? (
+        <>
+          <h3>{copy.generation.searchResults}</h3>
+          <MarkdownView
+            body={result.assistant_message ?? copy.turns.noAnswer}
+            renderPolicy="confirmed-links"
+            workspaceId={workspaceId}
+            linkTargets={result.link_targets}
+            wikilinkMode="plain"
+          />
+          {hasCitations(result) ? <EvidencePack copy={copy} turn={result} /> : null}
+          <AskWarnings codes={result.warning_codes ?? []} copy={copy} locale={locale} />
+        </>
+      ) : (
+        <button
+          className="icon-button text-button"
+          type="button"
+          disabled={searching}
+          onClick={() => void search()}
+        >
+          <Search size={15} aria-hidden="true" />
+          {searching ? copy.generation.searching : copy.generation.searchOnly}
+        </button>
+      )}
+      {error ? <StatusBanner tone="warning">{error}</StatusBanner> : null}
+    </div>
   );
 }
 
@@ -2128,7 +2968,17 @@ function AskWorkflowActions({
 }
 
 function isNoEvidenceTurn(turn: AskTurnDetail) {
-  return !hasCitations(turn);
+  return turn.status === "completed" && !hasCitations(turn);
+}
+
+function unansweredTurnLabel(turn: AskTurnDetail, copy: AskCopy) {
+  if (turn.status === "queued") return copy.generation.queued;
+  if (turn.status === "pending") return copy.turns.pending;
+  if (turn.status === "stopped") return copy.turns.stopped;
+  if (turn.error_code === "server_restarted") return copy.generation.restarted;
+  return !turn.error_code || turn.error_code === "internal_error"
+    ? copy.turns.failed
+    : copy.generation.failed;
 }
 
 function hasCitations(turn: AskTurnDetail) {

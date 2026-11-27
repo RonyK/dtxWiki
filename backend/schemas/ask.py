@@ -1,10 +1,12 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas.common import RESTResponseBase
 from backend.schemas.input_policy import InputRequest
+from backend.schemas.llm_connection import ConnectionLabel
 from backend.schemas.read import ContextLinkTarget, GraphNeighborEntry, TreePathEntry
 
 
@@ -16,9 +18,67 @@ class AskSessionCreate(InputRequest):
     model_config = ConfigDict(extra="forbid")
 
 
-class AskTurnCreate(InputRequest):
+AskTurnStatus = Literal["queued", "pending", "completed", "failed", "stopped"]
+
+
+class AskModelSelection(BaseModel):
+    scope: Literal["personal", "workspace"]
+    connection_id: UUID
+    model_profile_id: ConnectionLabel
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AskModelChoice(AskModelSelection):
+    connection_label: str
+    model_label: str
+    steer: bool
+
+
+class AskModelChoices(BaseModel):
+    items: list[AskModelChoice]
+
+
+class AskModelListResponse(RESTResponseBase):
+    data: AskModelChoices
+
+
+class AskSteeringMessage(BaseModel):
+    id: UUID
+    user_message: str
+    status: Literal["waiting", "applied", "failed", "unknown"]
+
+
+class AskQuestion(InputRequest):
+    """A question for an Ask session, whichever endpoint receives it."""
+
     user_message: str
     ttl_override_seconds: int | None = None
+    # Leave it out for the workspace's default Ask; null searches without a
+    # model; a value asks that model.
+    selection: AskModelSelection | None = None
+    # A resubmission with the same id returns the stored turn.
+    request_id: UUID | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AskTurnCreate(AskQuestion):
+    # The latest turn the asker saw: null for an empty session. A different
+    # latest turn means the session moved on (409). Leave it out to skip the
+    # check.
+    after_turn_id: UUID | None = None
+
+
+class AskStreamTurnCreate(AskQuestion):
+    request_id: UUID
+    # A running turn of the same asker to stop; this question continues it.
+    replace_turn_id: UUID | None = None
+
+
+class AskSteerRequest(InputRequest):
+    user_message: str
+    request_id: UUID
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,7 +113,14 @@ class AskTurnDetail(BaseModel):
     recommended_placement_tree_node_id: UUID | None
     placement_confidence: str | None
     promotion_state: str
+    status: AskTurnStatus
+    error_code: str | None = None
+    selection: AskModelSelection | None = None
+    steering_messages: list[AskSteeringMessage] = Field(default_factory=list)
+    steer_supported: bool = False
+    can_search: bool = False
     created_at: datetime
+    started_at: datetime | None = None
     # Backend-only field (not surfaced in the frontend operations type); keep a
     # default so it stays optional in the generated schema.
     tree_path: list[TreePathEntry] = Field(default_factory=list)

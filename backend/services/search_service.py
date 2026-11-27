@@ -403,6 +403,7 @@ class SearchService:
         actor: ActorContext | None = None,
         *,
         citable_only: bool = False,
+        allow_rerank: bool = True,
     ) -> SearchPayload:
         """Return matching versions; citations narrow eligibility before retrieval."""
         return self._search(
@@ -416,6 +417,7 @@ class SearchService:
             cursor,
             actor,
             citable_only=citable_only,
+            allow_rerank=allow_rerank,
         )
 
     def search_documents(
@@ -461,6 +463,7 @@ class SearchService:
         citable_only: bool = False,
         document_results: bool = False,
         result_filter: Callable[[RankedResult], bool] | None = None,
+        allow_rerank: bool = True,
     ) -> SearchPayload:
         retriever = self._retriever_for(retrieval_mode)
         if retriever is None:
@@ -554,10 +557,9 @@ class SearchService:
                 # Trigram is a fuzzy resolver candidate, not proof that other
                 # source kinds are irrelevant. Compose it with the requested
                 # fallback lane; only exact/direct hits short-circuit.
+                use_rerank = allow_rerank and self._reranker is not None
                 fetch_limit = (
-                    max(limit, self._rerank_candidate_k)
-                    if self._reranker is not None
-                    else limit
+                    max(limit, self._rerank_candidate_k) if use_rerank else limit
                 )
                 results = retriever.retrieve(
                     session=session,
@@ -591,17 +593,19 @@ class SearchService:
                     workspace_id,
                     {result.id for result in results if result.type == "context_page"},
                 )
-                fallback_ranked = self._maybe_rerank(
-                    query=plan.raw_query,
-                    ranked=sorted(
-                        results,
-                        key=lambda result: (
-                            -result.score,
-                            -trust_priors.get(result.id, 0.0),
-                            str(result.id),
-                        ),
+                fallback_ranked = sorted(
+                    results,
+                    key=lambda result: (
+                        -result.score,
+                        -trust_priors.get(result.id, 0.0),
+                        str(result.id),
                     ),
                 )
+                if use_rerank:
+                    fallback_ranked = self._maybe_rerank(
+                        query=plan.raw_query,
+                        ranked=fallback_ranked,
+                    )
                 ranked = _merge_ranked_results(
                     primary=trigram_results,
                     fallback=fallback_ranked,

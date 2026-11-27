@@ -12,7 +12,9 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select
 
+from backend.llm.binding import ModelBinding
 from backend.models.ask import AskTurn, AskTurnCitation
+from backend.models.chunk import ContentChunk
 from backend.models.context import ContextPage, ContextPageVersion
 from backend.models.coverage import KnowledgeCoverageGap
 from backend.models.delegated_task import ClientDelegatedTask
@@ -29,10 +31,15 @@ from backend.models.library import (
 from backend.models.workspace import Workspace
 from backend.policy.auth import ActorContext
 from backend.schemas.ask import AskSessionCreate, AskTurnCreate
+from backend.schemas.context_ingress import AskTurnPromoteRequest
 from backend.schemas.read import RankedResult, SearchPayload
-from backend.services.ask_service import AskService
+from backend.services.ask_service import AskService, ask_evidence_visible
+from backend.services.context_ingress_service import ContextIngressService
 from backend.services.graph_service import GraphService
+from backend.services.read_errors import ReadNotFoundError
 from backend.services.search_service import SearchService
+from backend.spi.llm import CanonicalTextResult, TextMessage
+from backend.tests.utils.ask import create_turn_in_session
 
 pytestmark = pytest.mark.integration
 
@@ -78,6 +85,16 @@ class FakeSemanticSearch:
             next_cursor=None,
             warnings=self._warnings,
         )
+
+
+class _RecordingPort:
+    def __init__(self, *answers: str) -> None:
+        self.answers = list(answers)
+        self.calls: list[tuple[TextMessage, ...]] = []
+
+    async def generate(self, request, _context):
+        self.calls.append(request.messages)
+        return CanonicalTextResult(text=self.answers.pop(0), termination="completed")
 
 
 def _ws(session) -> Workspace:
@@ -190,7 +207,9 @@ def _seed_library(session, workspace_id):
     return item, artifact
 
 
-def _semantic_context_result(page_id: UUID) -> RankedResult:
+def _semantic_context_result(
+    page_id: UUID, version_id: UUID | None = None
+) -> RankedResult:
     return RankedResult(
         id=uuid4(),  # chunk id — deliberately NOT the page id
         type="context_page",
@@ -198,6 +217,8 @@ def _semantic_context_result(page_id: UUID) -> RankedResult:
         snippet="Rollout guidance",
         score=1.0,
         citation_available=True,
+        # The version the chunk was cut from; Ask cites only such hits.
+        version_id=version_id or uuid4(),
         source_ref={"kind": "content_chunk", "document_id": str(page_id)},
     )
 
@@ -211,6 +232,16 @@ def _semantic_library_result(item_id: UUID) -> RankedResult:
         score=1.0,
         citation_available=True,
         source_ref={"kind": "content_chunk", "document_id": str(item_id)},
+    )
+
+
+def _cited_visible(session, page_ids, artifact_ids, actor, workspace_id) -> bool:
+    return ask_evidence_visible(
+        session,
+        context_refs=[(page_id, None) for page_id in page_ids],
+        artifact_ids=artifact_ids,
+        actor=actor,
+        workspace_id=workspace_id,
     )
 
 
@@ -230,7 +261,8 @@ def _create_turn(
         actor_kind="human",
         actor_id=ACTOR_ID,
     )
-    detail, warnings = service.create_turn(
+    detail, warnings = create_turn_in_session(
+        service,
         session=session,
         workspace_id=workspace_id,
         ask_session_id=ask_session.id,
@@ -416,12 +448,36 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
         draft.current_version_id = version.id
         draft.latest_draft_version_id = version.id
         draft_id = draft.id
-
-        service = AskService(
-            search_service=FakeSemanticSearch(
-                context=[_semantic_context_result(draft_id)]
-            )
+        public = _seed_page(session, workspace.id)
+        published = ContextPageVersion(
+            workspace_id=workspace.id,
+            page_id=public.id,
+            version_no=1,
+            body_md="Rollback guidance",
+            content_hash="ask-h01-public-v1",
+            actor_type="human",
+            created_by_actor_kind="human",
+            created_by_actor_id=ACTOR_ID,
+            version_status="published_snapshot",
         )
+        session.add(published)
+        session.flush()
+        public.current_published_version_id = published.id
+        public.current_version_id = published.id
+
+        search = FakeSemanticSearch(
+            context=[_semantic_context_result(draft_id, version.id)]
+        )
+        port = _RecordingPort("The plan [1].", "Roll it back [1].")
+        binding = ModelBinding(
+            port=port,
+            target={"kind": "server", "model": "test-default"},
+            model="test-default",
+            max_output_tokens=1024,
+            context_window=None,
+            steer=False,
+        )
+        service = AskService(search_service=search)
         ask_session = service.create_session(
             session=session,
             workspace_id=workspace.id,
@@ -430,7 +486,8 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor_id=ACTOR_ID,
             actor=_actor("editor"),
         )
-        service.create_turn(
+        create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace.id,
             ask_session_id=ask_session.id,
@@ -438,7 +495,64 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor_kind="human",
             actor_id=ACTOR_ID,
             actor=_actor("editor"),
+            binding=binding,
         )
+        search._context = [_semantic_context_result(public.id, published.id)]
+        search_turn_id = service.submit_turn(
+            session,
+            workspace_id=workspace.id,
+            ask_session_id=ask_session.id,
+            request=AskTurnCreate(
+                user_message="find rollback guidance", selection=None
+            ),
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+        )
+        actor = _actor("editor")
+        prepared = service.prepare_turn(
+            session,
+            workspace.id,
+            search_turn_id,
+            actor,
+            keyword_only=True,
+        )
+        service.finish_turn(
+            session,
+            workspace.id,
+            prepared,
+            service.compose_evidence(prepared),
+        )
+        # The follow-up uses public evidence and the earlier model exchange.
+        follow_up, _warnings = create_turn_in_session(
+            service,
+            session=session,
+            workspace_id=workspace.id,
+            ask_session_id=ask_session.id,
+            request=AskTurnCreate(user_message="how do I roll it back?"),
+            actor_kind="human",
+            actor_id=ACTOR_ID,
+            actor=_actor("editor"),
+            binding=binding,
+        )
+        # The model saw the earlier exchange and the follow-up with its pack.
+        *history, _question = port.calls[1]
+        assert [(message.role, message.text) for message in history] == [
+            ("user", "what is the plan?"),
+            ("assistant", "The plan [1]."),
+        ]
+        # Saving it is refused where reading it is: at the promotion entry.
+        with pytest.raises(ReadNotFoundError):
+            ContextIngressService().promote_ask_turn(
+                session=session,
+                workspace_id=workspace.id,
+                ask_turn_id=follow_up.id,
+                request=AskTurnPromoteRequest(
+                    save_mode="create_page", page_type="concept"
+                ),
+                actor_kind="human",
+                actor_id=ACTOR_ID,
+                actor=_actor("viewer"),
+            )
         editor_detail = service.get_session(
             session=session,
             workspace_id=workspace.id,
@@ -452,6 +566,12 @@ def test_ask_session_read_redacts_evidence_for_actor_without_visibility(
             actor=_actor("viewer"),
         )
 
+    assert follow_up.cited_context_page_ids == [public.id]
+    # It cites only the public page but drew on the draft: whoever cannot read
+    # the draft cannot read or save it.
+    assert editor_detail.turns[2].assistant_message == "Roll it back [1]."
+    assert viewer_detail.turns[2].assistant_message != "Roll it back [1]."
+    assert viewer_detail.turns[2].cited_context_page_ids == []
     editor_turn = editor_detail.turns[0]
     viewer_turn = viewer_detail.turns[0]
     # The editor who can read the draft evidence sees the full answer.
@@ -470,30 +590,58 @@ def test_ask_turn_evidence_visible_fails_closed_on_dangling(session_factory):
     # H-01 (Codex follow-up): a dangling citation (cited page/artifact gone)
     # must fail CLOSED — the stored answer was built from it and we cannot
     # confirm the reader was ever allowed to see it.
-    from backend.services.ask_service import ask_turn_evidence_visible
 
     with session_factory.begin() as session:
         workspace = _ws(session)
         owner = _actor("owner")
         wsid = workspace.id
         # A citation to a non-existent page id.
-        assert ask_turn_evidence_visible(session, [uuid4()], [], owner, wsid) is False
+        assert _cited_visible(session, [uuid4()], [], owner, wsid) is False
         # A citation to a non-existent artifact id.
-        assert ask_turn_evidence_visible(session, [], [uuid4()], owner, wsid) is False
+        assert _cited_visible(session, [], [uuid4()], owner, wsid) is False
         # No citations at all: nothing to leak.
-        assert ask_turn_evidence_visible(session, [], [], owner, wsid) is True
-        # Belt-and-suspenders: workspace exists so the fixture is valid.
-        assert workspace is not None
+        assert _cited_visible(session, [], [], owner, wsid) is True
+        # A newer answer records the version it read. An undone approval
+        # closes that version while the page stays readable at its old one.
+        page = _seed_page(session, wsid)
+        versions = []
+        for number, status in ((1, "superseded_snapshot"), (2, "closed")):
+            version = ContextPageVersion(
+                workspace_id=wsid,
+                page_id=page.id,
+                version_no=number,
+                body_md=f"Version {number}",
+                content_hash=f"ask-closed-v{number}",
+                actor_type="human",
+                created_by_actor_kind="human",
+                created_by_actor_id=ACTOR_ID,
+                version_status=status,
+            )
+            session.add(version)
+            session.flush()
+            versions.append(version)
+        page.current_published_version_id = versions[0].id
+        page.current_version_id = versions[0].id
+        viewer = _actor("viewer")
+        assert [
+            ask_evidence_visible(
+                session,
+                context_refs=[(page.id, version.id)],
+                artifact_ids=[],
+                actor=viewer,
+                workspace_id=wsid,
+            )
+            for version in versions
+        ] == [True, False]
 
 
 def test_ask_turn_evidence_keeps_ready_a_until_ready_b_supersedes_it(
     session_factory,
 ):
     # Codex round-11: the stored answer paraphrases the cited library evidence,
-    # so ask_turn_evidence_visible must fail closed when the source is later
+    # so the visibility check must fail closed when the source is later
     # archived/hidden or superseded by a newer version — trust alone under-gated
     # lifecycle and currency.
-    from backend.services.ask_service import ask_turn_evidence_visible
 
     with session_factory.begin() as session:
         workspace = _ws(session)
@@ -502,16 +650,12 @@ def test_ask_turn_evidence_keeps_ready_a_until_ready_b_supersedes_it(
         item, artifact = _seed_library(session, wsid)
 
         # Live source, cited version current: visible.
-        assert (
-            ask_turn_evidence_visible(session, [], [artifact.id], owner, wsid) is True
-        )
+        assert _cited_visible(session, [], [artifact.id], owner, wsid) is True
 
         # Archived source: fail closed on lifecycle.
         item.lifecycle_status = "archived"
         session.flush()
-        assert (
-            ask_turn_evidence_visible(session, [], [artifact.id], owner, wsid) is False
-        )
+        assert _cited_visible(session, [], [artifact.id], owner, wsid) is False
 
         # Un-archived with pending latest B: ready A remains canonical.
         item.lifecycle_status = "registered"
@@ -526,17 +670,13 @@ def test_ask_turn_evidence_keeps_ready_a_until_ready_b_supersedes_it(
         session.flush()
         item.current_version_id = v2.id
         session.flush()
-        assert (
-            ask_turn_evidence_visible(session, [], [artifact.id], owner, wsid) is True
-        )
+        assert _cited_visible(session, [], [artifact.id], owner, wsid) is True
 
         # Once B becomes the ready projection, evidence from A is superseded.
         v2.processing_status = "completed"
         item.current_ready_version_id = v2.id
         session.flush()
-        assert (
-            ask_turn_evidence_visible(session, [], [artifact.id], owner, wsid) is False
-        )
+        assert _cited_visible(session, [], [artifact.id], owner, wsid) is False
 
 
 def test_ask_forwards_permission_limited_but_not_search_only_warnings(session_factory):
@@ -568,18 +708,44 @@ def test_ask_resolves_library_item_result_to_artifact_id(session_factory):
     with session_factory.begin() as session:
         workspace = _ws(session)
         item, artifact = _seed_library(session, workspace.id)
-        service = AskService(
-            search_service=FakeSemanticSearch(
-                library=[
-                    _semantic_library_result(item.id).model_copy(
-                        update={"version_id": artifact.library_item_version_id}
-                    )
-                ]
-            )
+        # As the indexer stores it: cut from the canonical version's text.
+        chunk = ContentChunk(
+            workspace_id=workspace.id,
+            document_kind="library_item",
+            document_id=item.id,
+            source_version_id=artifact.library_item_version_id,
+            source_content_hash="h1",
+            ordinal=0,
+            chunk_text="Body",
+            chunk_text_hash="body",
         )
+        session.add(chunk)
+        session.flush()
+        hit = _semantic_library_result(item.id).model_copy(
+            update={
+                "version_id": artifact.library_item_version_id,
+                "source_ref": {
+                    "kind": "content_chunk",
+                    "id": str(chunk.id),
+                    "document_id": str(item.id),
+                },
+            }
+        )
+        service = AskService(search_service=FakeSemanticSearch(library=[hit]))
         turn, detail = _create_turn(
             service, session, workspace.id, "what does the doc say?"
         )
+        # A chunk replaced by a newer conversion no longer proves the snippet.
+        session.delete(chunk)
+        session.flush()
+        _stale_turn, stale = _create_turn(
+            service,
+            session,
+            workspace.id,
+            "what does the doc say?",
+            expected_warnings=["evidence_not_citable"],
+        )
+        assert (stale.cited_library_artifact_ids, stale.retrieval_trace) == ([], [])
         cited_artifacts = session.scalars(
             select(AskTurnCitation.target_id)
             .where(AskTurnCitation.ask_turn_id == turn.id)
@@ -622,7 +788,8 @@ def test_library_hit_without_artifact_is_evidence_not_coverage_gap(session_facto
         ).all()
 
         assert citations == []
-        assert detail.retrieval_trace[0]["id"] == str(item.id)
+        # An unproven hit is not shown: it could not be hidden later.
+        assert detail.retrieval_trace == []
         assert detail.placement_confidence == "medium"
         assert session.scalar(select(func.count(KnowledgeCoverageGap.id))) == 0
         assert session.scalar(select(func.count(ClientDelegatedTask.id))) == 0
@@ -685,7 +852,7 @@ def test_ask_graph_context_is_bounded_and_actor_visible(
         workspace = _ws(session)
         service = AskService(
             search_service=FakeSemanticSearch(
-                context=[_semantic_context_result(seed.id)]
+                context=[_semantic_context_result(seed.id, seed.version_id)]
             ),
             graph_service=GraphService(),
         )
@@ -697,7 +864,8 @@ def test_ask_graph_context_is_bounded_and_actor_visible(
             actor_id=ACTOR_ID,
             actor=_actor("editor"),
         )
-        editor_turn, warnings = service.create_turn(
+        editor_turn, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace.id,
             ask_session_id=ask_session.id,
@@ -736,7 +904,8 @@ def test_ask_graph_context_is_empty_without_context_citation(session_factory):
             actor_kind="human",
             actor_id=ACTOR_ID,
         )
-        detail, warnings = service.create_turn(
+        detail, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace.id,
             ask_session_id=ask_session.id,
@@ -760,7 +929,8 @@ def test_deterministic_no_evidence_message_uses_workspace_language(session_facto
             actor_kind="human",
             actor_id=ACTOR_ID,
         )
-        detail, warnings = service.create_turn(
+        detail, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace.id,
             ask_session_id=ask_session.id,

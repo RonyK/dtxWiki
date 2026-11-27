@@ -214,6 +214,8 @@ def labs_workspace_access(feature: str):
 WorkspaceAskAccessDep = Annotated[
     WorkspaceAccess, Depends(labs_workspace_access("ask"))
 ]
+
+
 WorkspaceAgentAccessDep = Annotated[
     WorkspaceAccess, Depends(labs_workspace_access("agent"))
 ]
@@ -260,6 +262,9 @@ def status_code_for_read_error(exc: ReadServiceError) -> int:
         "decision_id_conflict",
         "review_decision_impact_changed",
         "review_decision_undo_unavailable",
+        "ask_turn_not_yours",
+        "ask_session_changed",
+        "ask_turn_not_completed",
     }:
         return 409
     if exc.error_code == "operation_outcome_unknown":

@@ -17,11 +17,12 @@ from backend.llm.adapters import (
 )
 from backend.llm.adapters._shared import BuiltinAdapterFactory
 from backend.llm.base import EmbeddingProvider
-from backend.llm.generation import BlockingTextGenerator
-from backend.llm.legacy import RetryingTextGeneration, build_llm_provider
+from backend.llm.binding import ModelBinding
+from backend.llm.legacy import build_default_binding
 from backend.llm.transport import HttpxLLMTransport
 from backend.schemas.read import RankedResult, SearchPayload
-from backend.services.ask_service import AskService
+from backend.services import ask_service
+from backend.services.ask_service import AskGenerationError, AskService, PreparedTurn
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
@@ -35,6 +36,7 @@ from backend.spi.llm import (
 from backend.testing.spi_conformance import WireCase, assert_llm_adapter_contract
 
 KEY = "secret-test-key"
+VERSION_ID = uuid4()
 REQUEST = CanonicalTextRequest(
     model="model-x",
     messages=(TextMessage(role="user", text="Needle?"),),
@@ -76,70 +78,124 @@ def test_provider_abcs_are_abstract():
         EmbeddingProvider()
 
 
-def test_registry_returns_none_by_default_and_builds_configured_providers():
+def test_configured_default_bindings_stream_with_their_model_settings():
     registry = _builtin_registry()
-    assert build_llm_provider(Settings(_env_file=None), registry) is None
+    assert build_default_binding(Settings(_env_file=None), registry) is None
 
-    # Each accepted value keeps the model, temperature and token budget the
-    # server-wide answer model always used, on its built-in adapter.
-    for selection, key_field, url, model, budget_field, reply in (
+    service = AskService(search_service=_needle_search(uuid4()))
+    prepared = _prepared(service._retrieve(_NoPolicySession(), uuid4(), "Needle"))
+    requests = []
+    deltas = []
+
+    def send(request):
+        requests.append(request)
+        return reply
+
+    async def on_delta(text):
+        deltas.append(text)
+
+    transport = HttpxLLMTransport(transport=httpx.MockTransport(send))
+    for (
+        selection,
+        key_field,
+        adapter_id,
+        endpoint,
+        route,
+        model,
+        budget_field,
+        events,
+    ) in (
         (
             "anthropic",
             "anthropic_api_key",
-            "https://api.anthropic.com/v1/messages",
+            "builtin.anthropic.messages",
+            "https://api.anthropic.com/v1",
+            "/messages",
             "claude-sonnet-4-6",
             "max_tokens",
-            {"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn"},
+            (
+                '{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}',
+                '{"type":"message_delta","delta":{"stop_reason":"end_turn"}}',
+                '{"type":"message_stop"}',
+            ),
         ),
         (
             "openai",
             "openai_api_key",
-            "https://api.openai.com/v1/chat/completions",
+            "builtin.openai.chat_completions",
+            "https://api.openai.com/v1",
+            "/chat/completions",
             "gpt-4o-mini",
             "max_completion_tokens",
-            {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]},
+            (
+                '{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}',
+                "[DONE]",
+            ),
         ),
     ):
-        transport = RecordingTransport(_reply(reply))
-        generator = build_llm_provider(
+        requests.clear()
+        deltas.clear()
+        reply = httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            text="".join(f"data: {event}\n\n" for event in events),
+        )
+        binding = build_default_binding(
             Settings(_env_file=None, llm_provider=selection, **{key_field: KEY}),
             registry,
             transport=transport,
         )
-        result = generator.generate(
-            system="sys",
-            messages=(TextMessage(role="user", text="q"),),
-            max_output_tokens=1024,
+        assert binding is not None
+        composed = asyncio.run(
+            service.stream_turn(prepared, binding, on_delta=on_delta)
         )
-        (call,) = transport.calls
-        assert (result.text, result.termination) == ("ok", "completed")
-        assert call["url"] == url
-        assert call["payload"]["model"] == model
-        assert call["payload"]["temperature"] == 0.0
-        assert call["payload"][budget_field] == 1024
+        (request,) = requests
+        payload = json.loads(request.content)
+        assert (deltas, composed.answer, composed.generation["outcome"]) == (
+            ["ok"],
+            "ok",
+            "completed",
+        )
+        assert composed.generation["target"] == {
+            "kind": "server",
+            "adapter_id": adapter_id,
+            "model": model,
+            "endpoint": endpoint,
+        }
+        assert str(request.url) == endpoint + route
+        assert payload["stream"] is True
+        assert (payload["model"], payload["temperature"], payload[budget_field]) == (
+            model,
+            0.0,
+            1024,
+        )
+
+    # The provider may already have charged for a failed request.
+    requests.clear()
+    reply = httpx.Response(503, json={"error": {"message": "busy"}})
+    binding = build_default_binding(
+        Settings(_env_file=None, llm_provider="openai", openai_api_key=KEY),
+        registry,
+        transport=transport,
+    )
+    assert binding is not None
+    with pytest.raises(AskGenerationError) as failure:
+        asyncio.run(service.stream_turn(prepared, binding, on_delta=on_delta))
+    assert (failure.value.code, len(requests)) == ("llm_composer_retryable", 1)
 
     # An option the model cannot honor is refused before anything is sent.
     transport = RecordingTransport(_reply({}))
-    unsupported = BlockingTextGenerator(
-        port=registry.create(
-            "builtin.anthropic.messages",
-            base_url=None,
-            config={},
-            credential={"api_key": KEY},
-            model="model-x",
-            capabilities=LLMModelCapabilities(),
-            transport=transport,
-        ),
-        model="model-x",
-        context=ExecutionContext(timeout_seconds=5),
-        temperature=0.0,
+    port = registry.create(
+        "builtin.anthropic.messages",
+        base_url=None,
+        config={},
+        credential={"api_key": KEY},
+        model=WARM_REQUEST.model,
+        capabilities=LLMModelCapabilities(),
+        transport=transport,
     )
     with pytest.raises(LLMAdapterError) as error:
-        unsupported.generate(
-            system=None,
-            messages=(TextMessage(role="user", text="q"),),
-            max_output_tokens=8,
-        )
+        asyncio.run(port.generate(WARM_REQUEST, ExecutionContext(5)))
     assert (error.value.code, error.value.delivery) == (
         "unsupported_option",
         "not_sent",
@@ -147,88 +203,18 @@ def test_registry_returns_none_by_default_and_builds_configured_providers():
     assert transport.calls == []
 
 
-def test_registry_rejects_missing_keys_and_unknown_provider():
+def test_build_default_binding_rejects_missing_keys_and_unknown_provider():
     registry = _builtin_registry()
     with pytest.raises(ValueError, match="DTXWIKI_ANTHROPIC_API_KEY"):
-        build_llm_provider(Settings(_env_file=None, llm_provider="anthropic"), registry)
+        build_default_binding(
+            Settings(_env_file=None, llm_provider="anthropic"), registry
+        )
 
     with pytest.raises(ValueError, match="DTXWIKI_OPENAI_API_KEY"):
-        build_llm_provider(Settings(_env_file=None, llm_provider="openai"), registry)
+        build_default_binding(Settings(_env_file=None, llm_provider="openai"), registry)
 
     with pytest.raises(RuntimeError, match="DTXWIKI_LLM_PROVIDER"):
-        build_llm_provider(Settings(_env_file=None, llm_provider="local"), registry)
-
-
-class ScriptedPort:
-    def __init__(self, outcomes) -> None:
-        self.outcomes = list(outcomes)
-        self.calls = 0
-
-    async def generate(self, request, context):
-        outcome = self.outcomes[self.calls]
-        self.calls += 1
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-
-def test_legacy_retry_policy_keeps_its_statuses_and_backoff():
-    """The server-wide model keeps its two retries; adapters never retry."""
-
-    def failure(code, status=None, retry_after=None):
-        return LLMAdapterError(
-            code,
-            delivery="sent" if status else "unknown",
-            status_code=status,
-            retry_after_seconds=retry_after,
-        )
-
-    async def run(port):
-        try:
-            return await port.generate(REQUEST, ExecutionContext(5))
-        except LLMAdapterError as exc:
-            return exc
-
-    ok = CanonicalTextResult(text="ok", termination="completed")
-    for outcomes, expected_calls, expected_sleeps, expected in (
-        # Retries follow the old statuses, not the normalized code: a 429 is
-        # retried even as quota_exhausted, honoring Retry-After (capped at
-        # 8 s); a 503 backs off; then success.
-        (
-            [
-                failure("quota_exhausted", 429, 30.0),
-                failure("provider_unavailable", 503),
-                ok,
-            ],
-            3,
-            [8.0, 1.0],
-            ok,
-        ),
-        # A 401 is not transient, and neither was a 501.
-        ([failure("authentication_failed", 401)], 1, [], "authentication_failed"),
-        ([failure("provider_unavailable", 501)], 1, [], "provider_unavailable"),
-        # A status-less transport timeout is retried until the budget runs out.
-        ([failure("timeout")] * 3, 3, [0.5, 1.0], "timeout"),
-        # A successful HTTP status only proves headers arrived. Legacy Ask
-        # retries interrupted body reads within the same budget.
-        (
-            [failure("timeout", 200), failure("network_error", 200), ok],
-            3,
-            [0.5, 1.0],
-            ok,
-        ),
-    ):
-        port = ScriptedPort(outcomes)
-        sleeps: list[float] = []
-
-        async def sleep(seconds, sleeps=sleeps):
-            sleeps.append(seconds)
-
-        outcome = asyncio.run(
-            run(RetryingTextGeneration(port, sleep=sleep, jitter=lambda: 1.0))
-        )
-        assert getattr(outcome, "code", outcome) == expected
-        assert (port.calls, sleeps) == (expected_calls, expected_sleeps)
+        build_default_binding(Settings(_env_file=None, llm_provider="local"), registry)
 
 
 def _anthropic_cases():
@@ -967,9 +953,8 @@ def test_error_response_keeps_status_and_retry_metadata_on_decoding_failure():
     assert error.provider_request_id == "upstream-request"
 
 
-def test_ask_service_composes_from_evidence_when_provider_is_set():
-    result_id = uuid4()
-    search_service = FakeSearchService(
+def _needle_search(result_id):
+    return FakeSearchService(
         SearchPayload(
             ranked_results=[
                 RankedResult(
@@ -979,6 +964,7 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
                     snippet="Needle evidence body.",
                     score=1.0,
                     citation_available=True,
+                    version_id=VERSION_ID,
                 )
             ],
             supported_retrieval_modes=["keyword"],
@@ -986,28 +972,21 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
             next_cursor=None,
         )
     )
-    service = AskService(
-        search_service=search_service,
-        provider=FixedProvider("Composed answer [1]."),
+
+
+def test_ask_service_composes_from_evidence_with_a_model_binding():
+    result_id = uuid4()
+    service = AskService(search_service=_needle_search(result_id))
+    binding = _binding(FixedPort("Composed answer [1]."))
+    retrieved = service._retrieve(_NoPolicySession(), uuid4(), "Needle")
+    composed = asyncio.run(
+        service.stream_turn(_prepared(retrieved), binding, on_delta=_ignore_delta)
     )
 
-    (
-        answer,
-        context_ids,
-        artifact_ids,
-        trace,
-        lanes,
-        fallback,
-        nearest,
-        warnings,
-    ) = service._answer(
-        session=_NoPolicySession(), workspace_id=uuid4(), question="Needle"
-    )
-
-    assert answer == "Composed answer [1]."
-    assert context_ids == [result_id]
-    assert artifact_ids == []
-    assert trace == [
+    assert composed.answer == "Composed answer [1]."
+    assert retrieved.context_ids == (result_id,)
+    assert retrieved.artifact_ids == ()
+    assert retrieved.trace == (
         {
             "id": str(result_id),
             "type": "context_page",
@@ -1015,74 +994,47 @@ def test_ask_service_composes_from_evidence_when_provider_is_set():
             "score": "1.00",
             "match_reason": "",
             "stable_url": "",
-        }
-    ]
-    assert lanes == []
-    assert fallback is False
-    assert nearest == []
-    assert warnings == []
+            "version_id": str(VERSION_ID),
+            "version_status": "",
+            "citation_available": "true",
+        },
+    )
+    assert retrieved.tried_lanes == ()
+    assert retrieved.fallback is False
+    assert retrieved.nearest_candidates == ()
+    assert composed.warnings == ()
 
 
-# Each case is one thing the reader can do about the fallback: try again
-# (a 503), nothing (a cut-off reply), or ask an administrator (a rejected key,
-# or a bug in the composer itself). A refused reply is checked end to end in
-# test_ask_llm_degrade, where the turn's warning allowlist applies.
-@pytest.mark.parametrize(
-    ("provider", "warning"),
-    [
-        (lambda: ErrorProvider(503, "provider_unavailable"), "llm_composer_retryable"),
-        (
-            lambda: ErrorProvider(401, "authentication_failed"),
-            "llm_provider_unavailable",
-        ),
-        (
-            lambda: FixedProvider("Incomplete", termination="truncated"),
-            "llm_answer_incomplete",
-        ),
-        (lambda: UnexpectedErrorProvider(), "llm_provider_unavailable"),
-    ],
-    ids=["temporary", "credential", "truncated", "unexpected"],
-)
-def test_ask_service_falls_back_to_deterministic_pack_on_provider_failure(
-    provider, warning
-):
-    service = AskService(
-        search_service=FakeSearchService(
-            SearchPayload(
-                ranked_results=[
-                    RankedResult(
-                        id=uuid4(),
-                        type="context_page",
-                        title="Needle Context",
-                        snippet="Needle evidence body.",
-                        score=1.0,
-                        citation_available=True,
-                    )
-                ],
-                supported_retrieval_modes=["keyword"],
-                permission_note=None,
-                next_cursor=None,
-            )
-        ),
-        provider=provider(),
+def _binding(port):
+    return ModelBinding(
+        port=port,
+        target={"kind": "server", "model": "model-x"},
+        model="model-x",
+        max_output_tokens=1024,
+        context_window=None,
+        steer=False,
     )
 
-    answer, *_, warnings = service._answer(
-        session=_NoPolicySession(),
-        workspace_id=uuid4(),
+
+async def _ignore_delta(_text):
+    pass
+
+
+def _prepared(retrieved) -> PreparedTurn:
+    return PreparedTurn(
+        turn_id=uuid4(),
+        ask_session_id=uuid4(),
         question="Needle",
+        retrieved=retrieved,
+        history=(),
+        evidence=retrieved.evidence,
     )
-
-    assert answer == (
-        "Context-first retrieval summary:\n1. Needle Context: Needle evidence body."
-    )
-    assert warnings == [warning]
 
 
 class _NoPolicySession:
-    """The only thing `_answer` asks a session for: this workspace's retrieval
-    policy. These tests are about the composer, so there is none and Ask falls
-    back to the ladder it has always used."""
+    """All the retrieval asks a session for: this workspace's retrieval policy
+    and answer language. These tests are about the composer, so there are none
+    and Ask uses its defaults."""
 
     def scalar(self, *_args, **_kwargs):
         return None
@@ -1096,26 +1048,124 @@ class FakeSearchService:
         return self.payload
 
 
-class FixedProvider:
+class FixedPort:
     def __init__(self, text: str, *, termination: str = "completed") -> None:
         self.text = text
         self.termination = termination
 
-    def generate(self, *, system, messages, max_output_tokens):
-        assert "[Evidence pack]" in messages[-1].text
-        assert "1. Needle Context: Needle evidence body." in messages[-1].text
+    async def generate(self, request, context):
+        assert "[Evidence pack]" in request.messages[-1].text
+        assert "1. Needle Context: Needle evidence body." in request.messages[-1].text
         return CanonicalTextResult(text=self.text, termination=self.termination)
 
 
-class ErrorProvider:
-    def __init__(self, status: int, code: str) -> None:
-        self.status = status
-        self.code = code
-
-    def generate(self, **_kwargs):
-        raise LLMAdapterError(self.code, delivery="sent", status_code=self.status)
+class RejectedCredentialPort:
+    async def generate(self, request, context):
+        raise LLMAdapterError("authentication_failed", delivery="sent", status_code=401)
 
 
-class UnexpectedErrorProvider:
-    def generate(self, **_kwargs):
-        raise RuntimeError("unexpected provider failure")
+class StalledPort:
+    async def generate(self, request, context):
+        await asyncio.sleep(0)
+        return CanonicalTextResult(text="Too late", termination="completed")
+
+
+@pytest.mark.parametrize(
+    ("port", "code"),
+    [
+        pytest.param(
+            RejectedCredentialPort(), "llm_provider_unavailable", id="credential"
+        ),
+        pytest.param(
+            FixedPort("Incomplete", termination="truncated"),
+            "llm_answer_incomplete",
+            id="truncated",
+        ),
+        pytest.param(StalledPort(), "llm_composer_retryable", id="deadline"),
+    ],
+)
+def test_ask_service_raises_for_model_failure(port, code, monkeypatch):
+    if isinstance(port, StalledPort):
+        monkeypatch.setattr(ask_service, "_MODEL_DEADLINE_SECONDS", 0)
+    service = AskService(search_service=_needle_search(uuid4()))
+    prepared = _prepared(service._retrieve(_NoPolicySession(), uuid4(), "Needle"))
+
+    with pytest.raises(AskGenerationError) as failure:
+        asyncio.run(
+            service.stream_turn(prepared, _binding(port), on_delta=_ignore_delta)
+        )
+
+    assert failure.value.code == code
+
+
+def test_responses_websocket_steer_starts_a_new_response_and_keeps_unsent_input():
+    from collections import deque
+
+    from backend.llm.responses_websocket import _Run
+    from backend.llm.streaming import SteerInput
+
+    def frame(kind, response_id=None, **fields):
+        event = {"type": kind, **fields}
+        if response_id is not None:
+            event["response"] = {"id": response_id}
+        return json.dumps(event)
+
+    steer_parent = {"previous_response_id": "r1"}
+    incoming = deque(
+        [
+            frame("response.created", "r1"),
+            frame("response.output_text.delta", delta="Draft. "),
+            frame("response.steer.accepted", steer={**steer_parent, "id": "p1"}),
+            frame("response.completed", "r1"),
+            frame("response.created", "r2"),
+            frame("response.output_text.delta", delta="Revised."),
+            frame("response.completed", "r2"),
+        ]
+    )
+    sent, timeline = [], []
+    waiting = deque([SteerInput("s1", "be brief")])
+    more = asyncio.Event()
+
+    class Socket:
+        async def send(self, message):
+            sent.append(json.loads(message)["type"])
+
+        async def recv(self):
+            return incoming.popleft()
+
+    async def next_steer():
+        while not waiting:
+            more.clear()
+            await more.wait()
+        return waiting[0]
+
+    async def on_steer(update):
+        timeline.append((update.id, update.status))
+        if update.status == "sent":
+            waiting.popleft()
+
+    async def on_delta(text):
+        timeline.append(("delta", text))
+        if text == "Revised.":
+            # Ready in the same step as the response's terminal event.
+            waiting.append(SteerInput("s2", "and cite"))
+            more.set()
+
+    def response_result(response, _response_id):
+        return CanonicalTextResult(text=timeline[-1][1], termination="completed")
+
+    run = _Run(5, response_result, on_delta, next_steer, on_steer)
+    result = asyncio.run(run.receive(Socket(), {"model": "m"}))
+
+    assert result.text == "Revised."
+    assert sent == ["response.create", "response.steer"]
+    # The applied steer comes before the replacing response's text.
+    assert timeline == [
+        ("delta", "Draft. "),
+        ("s1", "sent"),
+        ("s1", "accepted"),
+        ("s1", "applied"),
+        ("delta", "Revised."),
+    ]
+    # The terminal event won; the later instruction was never sent and stays.
+    assert [steer.id for steer in waiting] == ["s2"]

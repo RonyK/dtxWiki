@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { authenticatePage, saveLabsSettings, workspaceUrl } from "./auth";
 import { evidenceScreenshot } from "./evidence";
 import { approveContextDraft } from "./context_workflow";
+import type { components } from "../../frontend/src/shared/api/types.gen";
 
 async function checkBoxes(page: Page, testInfo: TestInfo, surface: string) {
   const geometry = await page
@@ -674,12 +675,17 @@ for (const [language, width] of LAYOUTS) {
       recommended_placement_tree_node_id: null,
       placement_confidence: "medium",
       promotion_state: "not_promoted",
+      status: "completed",
+      error_code: null,
+      can_search: false,
+      steer_supported: false,
       created_at: session.started_at,
+      started_at: null,
       retrieval_trace: [],
       tried_lanes: [],
       fallback_disclosure: false,
       graph_context: [],
-    };
+    } satisfies components["schemas"]["AskTurnDetail"];
     await page.route(`**${prefix}/ask/sessions**`, (route) =>
       route.fulfill({
         json: {

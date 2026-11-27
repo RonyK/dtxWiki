@@ -35,7 +35,7 @@ from backend.models import (
     LintFinding,
     LintRun,
 )
-from backend.models.ask import AskSession, AskTurn
+from backend.models.ask import AskSession
 from backend.models.context import ContextPageVersion, ContextVersionHistoryParent
 from backend.models.coverage import KnowledgeCoverageGap
 from backend.models.mcp_trace import MCPToolCall, MCPWriteIdempotency
@@ -811,14 +811,21 @@ def _seed_locators(engine, dialect, workspace_id, key):
             )
         )
         session.flush()
-        session.add(
-            AskTurn(
-                id=loc.ask_turn_id,
-                workspace_id=workspace_id,
-                ask_session_id=loc.ask_session_id,
+        # The parent revision's turn columns, not the current mapper's.
+        ask_turns = sa.Table(
+            "ask_turn", sa.MetaData(), autoload_with=session.connection()
+        )
+        session.execute(
+            ask_turns.insert().values(
+                id=key(loc.ask_turn_id),
+                workspace_id=key(workspace_id),
+                ask_session_id=key(loc.ask_session_id),
                 turn_no=1,
                 user_message="Kept question",
                 assistant_message="Kept answer",
+                topic_tags=[],
+                promotion_state="not_promoted",
+                created_at=loc.now,
                 retrieval_trace=[
                     {
                         "type": "context_page",
@@ -937,7 +944,15 @@ def _assert_locators(engine, dialect, workspace_id, loc):
             "stable_url": page_url,
             "rationale": "Keep",
         }
-        assert session.get(AskTurn, loc.ask_turn_id).retrieval_trace == [
+        ask_turns = sa.Table(
+            "ask_turn", sa.MetaData(), autoload_with=session.connection()
+        )
+        assert session.execute(
+            sa.select(ask_turns.c.retrieval_trace).where(
+                ask_turns.c.id
+                == (loc.ask_turn_id.hex if dialect == "sqlite" else loc.ask_turn_id)
+            )
+        ).scalar_one() == [
             {
                 "type": "context_page",
                 "id": str(loc.page_id),

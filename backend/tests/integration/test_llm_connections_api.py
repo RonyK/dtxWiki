@@ -20,12 +20,16 @@ from backend.llm.credential_vault import CredentialBinding
 from backend.models.audit import AuditEvent
 from backend.models.llm_connection import UserLLMConnection, WorkspaceLLMConnection
 from backend.models.user import User
+from backend.models.workspace import Workspace
 from backend.policy.rbac import grant_workspace_membership
+from backend.schemas.ask import AskModelSelection
 from backend.services.llm_connection_service import (
+    LLMConnectionError,
     LLMConnectionService,
     build_llm_connection_service,
 )
 from backend.spi.llm import TransportResponse
+from backend.spi.types import ActorContext
 from backend.tests.conftest import authenticate_test_client, captured_log_records
 
 
@@ -501,9 +505,45 @@ def test_verification_applies_only_to_the_setup_it_checked(
     local = owner.post(path, json=served).json()["data"]
     assert local["endpoint_url"] == "http://10.0.0.5:11434/v1"
     local_item = f"{path}/{local['id']}"
-    checked = owner.post(f"{local_item}/verify", json={"expected_revision": 1})
-    assert checked.json()["data"]["verification"]["status"] == "succeeded"
+    checked = owner.post(f"{local_item}/verify", json={"expected_revision": 1}).json()[
+        "data"
+    ]
+    assert checked["verification"]["status"] == "succeeded"
     assert calls[-1] == ("http://10.0.0.5:11434/v1/chat/completions", "local-model")
+    enabled = owner.patch(
+        local_item,
+        json={
+            "expected_revision": checked["connection"]["revision"],
+            "status": "enabled",
+        },
+    )
+    assert enabled.status_code == 200, enabled.text
+    workspace_uuid = UUID(workspace_id)
+    with control.begin() as session:
+        session.get(Workspace, workspace_uuid).labs_policy = {"ask_enabled": True}
+        user_id = session.scalar(
+            select(User.id).where(User.email == "llm-verifier@example.com")
+        )
+    actor = ActorContext(actor_kind="human", actor_id=str(user_id), user_id=user_id)
+
+    def available_ask_connections():
+        response = owner.get(f"/api/v1/workspaces/{workspace_id}/ask/models")
+        assert response.status_code == 200, response.text
+        return {choice["connection_id"] for choice in response.json()["data"]["items"]}
+
+    def bind_ask_connection(scope, connection_id):
+        return app.state.container.ask_connections.resolve(
+            control,
+            control,
+            workspace_uuid,
+            actor,
+            AskModelSelection(
+                scope=scope, connection_id=UUID(connection_id), model_profile_id="local"
+            ),
+        )
+
+    assert local["id"] in available_ask_connections()
+    assert bind_ask_connection("workspace", local["id"]).model == "local-model"
     policies = f"/api/v1/workspaces/{workspace_id}/settings/policies"
     card = owner.get(policies).json()["data"]["llm"]
     assert card["policy"] == {"custom_endpoints_enabled": True}
@@ -516,6 +556,11 @@ def test_verification_applies_only_to_the_setup_it_checked(
         },
     )
     assert off.status_code == 200, off.text
+    assert local["id"] not in available_ask_connections()
+    # A saved selection must obey the current switch when the answer starts.
+    with pytest.raises(LLMConnectionError) as unavailable:
+        bind_ask_connection("workspace", local["id"])
+    assert unavailable.value.error_code == "custom_endpoint_disabled"
     stored = owner.get(local_item).json()["data"]
     assert stored["unavailable_reason"] == "custom_endpoint_disabled"
     # A refusal before any call is no verification: the last one stands.
@@ -533,4 +578,22 @@ def test_verification_applies_only_to_the_setup_it_checked(
     )
     personal = owner.post("/api/v1/me/llm-connections", json=served)
     assert personal.status_code == 201, personal.text
-    assert personal.json()["data"]["unavailable_reason"] is None
+    personal_record = personal.json()["data"]
+    assert personal_record["unavailable_reason"] is None
+    personal_item = f"/api/v1/me/llm-connections/{personal_record['id']}"
+    personal_verified = owner.post(
+        f"{personal_item}/verify", json={"expected_revision": 1}
+    ).json()["data"]
+    assert personal_verified["verification"]["status"] == "succeeded"
+    personal_enabled = owner.patch(
+        personal_item,
+        json={
+            "expected_revision": personal_verified["connection"]["revision"],
+            "status": "enabled",
+        },
+    )
+    assert personal_enabled.status_code == 200, personal_enabled.text
+    # A person's own connection is theirs to use: the Workspace switch governs
+    # only the Workspace's connections.
+    assert personal_record["id"] in available_ask_connections()
+    assert bind_ask_connection("personal", personal_record["id"]).model

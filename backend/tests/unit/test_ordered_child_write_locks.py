@@ -31,10 +31,12 @@ def test_agent_page_ordered_writes_lock_by_id_and_slug():
 
 def test_ask_turn_number_allocation_locks_parent_session():
     ask_session_id = UUID("00000000-0000-0000-0000-000000000003")
-
-    assert "FOR UPDATE" in _postgres_sql(
-        ask_session_for_turn_insert_statement(ask_session_id)
+    workspace_id = UUID("00000000-0000-0000-0000-000000000004")
+    sql = _postgres_sql(
+        ask_session_for_turn_insert_statement(ask_session_id, workspace_id)
     )
+    assert "FOR UPDATE" in sql
+    assert "ask_session.workspace_id =" in sql
 
 
 def test_context_ingress_locks_proposal_and_target_page_in_workspace():

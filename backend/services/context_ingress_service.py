@@ -16,6 +16,7 @@ from backend.context_media.ports import ContextMediaRepository
 from backend.domain.input_policy import fit_generated_title, validate_text
 from backend.domain.prepared_body import PreparedBody
 from backend.models.ask import (
+    ASK_TURN_COMPLETED,
     AskSession,
     AskTurn,
     ContextIngressProposal,
@@ -94,6 +95,13 @@ class ContextIngressService:
         # launders restricted evidence into a normal Context page.
         if not _proposal_evidence_visible(session, turn.id, actor, workspace_id):
             raise ReadNotFoundError("ask turn not found")
+        # A pending, failed or stopped turn has no answer to save; the request
+        # body must not stand in for one.
+        if turn.status != ASK_TURN_COMPLETED:
+            raise RejectedByPolicyError(
+                "ask turn has no completed answer",
+                error_code="ask_turn_not_completed",
+            )
         parent = self._recommended_parent(
             session=session,
             workspace_id=workspace_id,
@@ -670,7 +678,7 @@ def _proposal_evidence_visible(
     # Imported lazily to avoid a module-load cycle with ask_service.
     from backend.services.ask_service import (
         _turn_citations_by_turn,
-        ask_turn_evidence_visible,
+        ask_turn_visible,
     )
 
     # Fail CLOSED when the source turn is gone (source_ask_turn_id nulled on
@@ -699,12 +707,10 @@ def _proposal_evidence_visible(
     # actor. Require the turn's workspace to match the proposal's (Codex final).
     if ask_session is None or ask_session.workspace_id != expected_workspace_id:
         return False
-    cited_page_ids, cited_artifact_ids = _turn_citations_by_turn(
-        session, [source_ask_turn_id]
-    ).get(source_ask_turn_id, ([], []))
-    return ask_turn_evidence_visible(
-        session, cited_page_ids, cited_artifact_ids, actor, ask_session.workspace_id
+    citations = _turn_citations_by_turn(session, [source_ask_turn_id]).get(
+        source_ask_turn_id, ([], [])
     )
+    return ask_turn_visible(session, turn, citations, actor, ask_session.workspace_id)
 
 
 def require_ask_turn(

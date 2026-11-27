@@ -1,32 +1,18 @@
-"""The server-wide answer model selected by ``DTXWIKI_LLM_PROVIDER``.
+"""The server-wide default answer model selected by ``DTXWIKI_LLM_PROVIDER``.
 
-This is the owner-only Ask's instance configuration. It maps each accepted
-value to a built-in adapter and keeps what that path has always done: a fixed
-model per value, temperature 0 and up to two retries of transient failures.
-The retries live here, around the adapter, because an adapter makes exactly
-one call per request.
+Each accepted value maps to a built-in adapter with a fixed model and
+temperature 0. Ask runs it like any LLM connection (``ModelBinding``).
 """
 
 from __future__ import annotations
 
-import asyncio
-import random
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from backend.llm.generation import BlockingTextGenerator, TextGenerator
+from backend.llm.binding import ModelBinding
 from backend.llm.transport import HttpxLLMTransport
-from backend.spi.llm import (
-    CanonicalTextRequest,
-    CanonicalTextResult,
-    ExecutionContext,
-    LLMAdapterError,
-    LLMModelCapabilities,
-    LLMTransport,
-    TextGenerationPort,
-)
+from backend.spi.llm import LLMModelCapabilities, LLMTransport
 
 if TYPE_CHECKING:
     from backend.app.settings import Settings
@@ -56,70 +42,17 @@ _ANSWER_MODELS = MappingProxyType(
 )
 _CAPABILITIES = LLMModelCapabilities(options=frozenset({"temperature"}))
 _TEMPERATURE = 0.0
-_TIMEOUT_SECONDS = 120.0
-
-# HTTP error statuses this path has always retried.
-RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504, 529})
-DEFAULT_MAX_RETRIES = 2
-DEFAULT_RETRY_BASE_DELAY = 0.5
-DEFAULT_RETRY_MAX_DELAY = 8.0
+_MAX_OUTPUT_TOKENS = 1024
 
 
-class RetryingTextGeneration:
-    """Retries a port on transient failures with jittered backoff."""
-
-    def __init__(
-        self,
-        port: TextGenerationPort,
-        *,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-        base_delay: float = DEFAULT_RETRY_BASE_DELAY,
-        max_delay: float = DEFAULT_RETRY_MAX_DELAY,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-        jitter: Callable[[], float] = random.random,
-    ) -> None:
-        self._port = port
-        self._max_retries = max_retries
-        self._base_delay = base_delay
-        self._max_delay = max_delay
-        self._sleep = sleep
-        self._jitter = jitter
-
-    async def generate(
-        self, request: CanonicalTextRequest, context: ExecutionContext
-    ) -> CanonicalTextResult:
-        attempt = 0
-        while True:
-            try:
-                return await self._port.generate(request, context)
-            except LLMAdapterError as exc:
-                if attempt >= self._max_retries or not _retryable(exc):
-                    raise
-                await self._sleep(self._delay(attempt, exc.retry_after_seconds))
-                attempt += 1
-
-    def _delay(self, attempt: int, retry_after: float | None) -> float:
-        delay = min(self._max_delay, self._base_delay * (2**attempt))
-        delay *= 0.5 + self._jitter() / 2
-        if retry_after is not None:
-            delay = max(delay, min(retry_after, self._max_delay))
-        return delay
-
-
-def _retryable(error: LLMAdapterError) -> bool:
-    status_code = error.status_code
-    # A successful status confirms delivery even if the body read failed.
-    if status_code is None or 200 <= status_code < 300:
-        return error.code in ("timeout", "network_error")
-    return status_code in RETRYABLE_STATUS_CODES
-
-
-def build_llm_provider(
+def build_default_binding(
     settings: Settings,
     adapters: LLMAdapterRegistry,
     *,
     transport: LLMTransport | None = None,
-) -> TextGenerator | None:
+) -> ModelBinding | None:
+    """The configured default model, or None; raises on a misconfiguration."""
+
     selection = settings.llm_provider.strip().lower()
     if selection in {"", "none"}:
         return None
@@ -143,35 +76,38 @@ def build_llm_provider(
         capabilities=_CAPABILITIES,
         transport=transport or HttpxLLMTransport(),
     )
-    return BlockingTextGenerator(
-        port=RetryingTextGeneration(port),
+    return ModelBinding(
+        port=port,
+        # An earlier answer is shown only to the same adapter, model and
+        # endpoint, so changing the default model starts a new history.
+        target={
+            "kind": "server",
+            "adapter_id": answer_model.adapter_id,
+            "model": answer_model.model,
+            "endpoint": adapters.descriptor(answer_model.adapter_id).default_base_url
+            or "",
+        },
         model=answer_model.model,
-        context=ExecutionContext(timeout_seconds=_TIMEOUT_SECONDS),
+        max_output_tokens=_MAX_OUTPUT_TOKENS,
+        context_window=None,
+        steer=False,
         temperature=_TEMPERATURE,
     )
 
 
-def resolve_llm_provider(
+def resolve_default_binding(
     settings: Settings, adapters: LLMAdapterRegistry
-) -> tuple[TextGenerator | None, str | None]:
-    """Build the answer model, turning a misconfiguration into a reason string.
+) -> tuple[ModelBinding | None, str | None]:
+    """Build the default model, turning a misconfiguration into a reason.
 
-    Ask composes answers with the model when one is available and falls back
-    to the deterministic evidence pack when it is not, so a bad setting must
-    not take the whole Ask surface down. ``build_llm_provider`` raises so that
-    setup/CLI paths still fail loudly; this wrapper is what the request path
-    uses, and the returned reason is surfaced to the user as a warning.
+    A bad setting must not take Ask down: without the default model Ask answers
+    with the evidence summary, and the reason is surfaced as a warning.
     """
 
     try:
-        return build_llm_provider(settings, adapters), None
+        return build_default_binding(settings, adapters), None
     except (ValueError, RuntimeError) as exc:
         return None, str(exc)
 
 
-__all__ = [
-    "RETRYABLE_STATUS_CODES",
-    "RetryingTextGeneration",
-    "build_llm_provider",
-    "resolve_llm_provider",
-]
+__all__ = ["build_default_binding", "resolve_default_binding"]

@@ -33,6 +33,7 @@ from backend.services.search_service import (
     SearchService,
 )
 from backend.tests.conftest import authenticate_test_client_in_workspace
+from backend.tests.utils.ask import create_turn_in_session
 
 pytestmark = pytest.mark.integration
 
@@ -439,7 +440,8 @@ def test_ask_warns_without_recording_gap(
     _set_postgresql_dialect(monkeypatch, session_factory)
 
     with session_factory.begin() as session:
-        detail, warnings = service.create_turn(
+        detail, warnings = create_turn_in_session(
+            service,
             session=session,
             workspace_id=workspace_id,
             ask_session_id=ask_session.id,

@@ -8,15 +8,18 @@ from typing import Any
 from backend.llm.adapters._shared import (
     NO_CONFIG_SCHEMA,
     BuiltinAdapterFactory,
+    _stream_error,
     api_key_schema,
     count,
     mapping,
+    open_json_events,
     post_json_object,
     sequence,
     termination,
     text_of,
 )
 from backend.llm.adapters.openai_errors import refine_openai_error
+from backend.llm.streaming import NextSteer, OnDelta, OnSteer, supports_native_steer
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
@@ -60,8 +63,7 @@ class OpenAIResponsesAdapter:
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext
     ) -> CanonicalTextResult:
-        if request.max_output_tokens < _MIN_OUTPUT_TOKENS:
-            raise LLMAdapterError("invalid_request", delivery="not_sent")
+        _require_output_limit(request)
         reply = await post_json_object(
             self._transport,
             f"{self._connection.base_url}/responses",
@@ -73,39 +75,133 @@ class OpenAIResponsesAdapter:
             request_id_header="x-request-id",
             refine_error=refine_openai_error,
         )
-        body = reply.body
-        if body.get("status") == "failed":
-            # A failed response object can arrive with HTTP 200.
-            raise LLMAdapterError(
-                refine_openai_error(mapping(body.get("error"))) or "provider_error",
-                delivery="sent",
-                status_code=200,
-                provider_request_id=reply.request_id,
-            )
-        items = [mapping(item) for item in sequence(body.get("output"))]
-        if any(not isinstance(item.get("type"), str) for item in items):
-            raise LLMAdapterError(
-                "invalid_response",
-                delivery="sent",
-                provider_request_id=reply.request_id,
-            )
-        parts = [
-            mapping(part)
-            for item in items
-            if item.get("type") == "message"
-            for part in sequence(item.get("content"))
-        ]
-        return CanonicalTextResult(
-            text="".join(
-                text_of(part.get("text"))
-                for part in parts
-                if part.get("type") == "output_text"
-            ),
-            termination=_termination(body, items, parts),
-            model=text_of(body.get("model")) or None,
-            usage=_usage(mapping(body.get("usage"))),
-            provider_request_id=reply.request_id,
+        return _response_result(reply.body, reply.request_id, status_code=200)
+
+    async def stream(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
+    ) -> CanonicalTextResult:
+        _require_output_limit(request)
+        async with open_json_events(
+            self._transport,
+            f"{self._connection.base_url}/responses",
+            headers={
+                "authorization": f"Bearer {self._connection.credential['api_key']}"
+            },
+            payload={**_payload(request), "stream": True},
+            context=context,
+            request_id_header="x-request-id",
+            refine_error=refine_openai_error,
+        ) as (events, request_id):
+            async for event in events:
+                if event is None:
+                    break
+                kind = event.get("type")
+                if kind == "response.output_text.delta":
+                    piece = text_of(event.get("delta"))
+                    if piece:
+                        await on_delta(piece)
+                elif kind in (
+                    "response.completed",
+                    "response.incomplete",
+                    "response.failed",
+                ):
+                    body = mapping(event.get("response"))
+                    if not body:
+                        raise _stream_error(request_id)
+                    return _response_result(body, request_id, status_code=200)
+                elif kind == "error":
+                    raise LLMAdapterError(
+                        refine_openai_error(mapping(event.get("error")) or event)
+                        or "provider_error",
+                        delivery="sent",
+                        provider_request_id=request_id,
+                    )
+            raise _stream_error(request_id)
+
+    async def steered_stream(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
+        next_steer: NextSteer,
+        on_steer: OnSteer,
+    ) -> CanonicalTextResult:
+        from backend.llm.responses_websocket import stream_responses_websocket
+
+        _require_output_limit(request)
+        if not supports_native_steer(
+            DESCRIPTOR.adapter_id, self._connection.base_url, request.model
+        ):
+            raise LLMAdapterError("unsupported_option", delivery="not_sent")
+        payload = _payload(request)
+        # GPT-6 reasoning does not accept legacy sampling options. A first
+        # developer message keeps the instruction prefix for continuation.
+        payload.pop("temperature", None)
+        payload.pop("instructions", None)
+        if request.system:
+            payload["input"] = [
+                {"role": "developer", "content": request.system},
+                *sequence(payload["input"]),
+            ]
+        return await stream_responses_websocket(
+            payload,
+            self._connection.credential["api_key"],
+            context,
+            response_result=_response_result,
+            on_delta=on_delta,
+            next_steer=next_steer,
+            on_steer=on_steer,
         )
+
+
+def _require_output_limit(request: CanonicalTextRequest) -> None:
+    if request.max_output_tokens < _MIN_OUTPUT_TOKENS:
+        raise LLMAdapterError("invalid_request", delivery="not_sent")
+
+
+def _response_result(
+    body: Mapping[str, Any],
+    request_id: str | None,
+    *,
+    status_code: int | None = None,
+) -> CanonicalTextResult:
+    if body.get("status") == "failed":
+        # A failed response object can arrive with HTTP 200.
+        raise LLMAdapterError(
+            refine_openai_error(mapping(body.get("error"))) or "provider_error",
+            delivery="sent",
+            status_code=status_code,
+            provider_request_id=request_id,
+        )
+    items = [mapping(item) for item in sequence(body.get("output"))]
+    if any(not isinstance(item.get("type"), str) for item in items):
+        raise LLMAdapterError(
+            "invalid_response",
+            delivery="sent",
+            provider_request_id=request_id,
+        )
+    parts = [
+        mapping(part)
+        for item in items
+        if item.get("type") == "message"
+        for part in sequence(item.get("content"))
+    ]
+    return CanonicalTextResult(
+        text="".join(
+            text_of(part.get("text"))
+            for part in parts
+            if part.get("type") == "output_text"
+        ),
+        termination=_termination(body, items, parts),
+        model=text_of(body.get("model")) or None,
+        usage=_usage(mapping(body.get("usage"))),
+        provider_request_id=request_id,
+    )
 
 
 def _payload(request: CanonicalTextRequest) -> dict[str, object]:
