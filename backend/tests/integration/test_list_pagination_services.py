@@ -41,7 +41,7 @@ def test_ask_list_sessions_keyset_paginates_to_older_rows(session_factory):
     with session_factory.begin() as session:
         workspace = _default_workspace(session)
         for index in range(7):
-            service.create_session(
+            service.sessions.create_session(
                 session=session,
                 workspace_id=workspace.id,
                 request=AskSessionCreate(title=f"Session {index:02d}"),
@@ -55,7 +55,7 @@ def test_ask_list_sessions_keyset_paginates_to_older_rows(session_factory):
             ask_session.updated_at = base + timedelta(minutes=offset)
 
     with session_factory() as session:
-        first = service.list_sessions(
+        first = service.sessions.list_sessions(
             session=session, workspace_id=workspace.id, limit=5
         )
         assert len(first.items) == 5
@@ -63,7 +63,7 @@ def test_ask_list_sessions_keyset_paginates_to_older_rows(session_factory):
         assert first.has_more is True
         assert first.next_cursor is not None
 
-        second = service.list_sessions(
+        second = service.sessions.list_sessions(
             session=session,
             workspace_id=workspace.id,
             limit=5,
@@ -89,7 +89,7 @@ def test_ask_list_sessions_keyset_handles_tied_updated_at(session_factory):
     with session_factory.begin() as session:
         workspace = _default_workspace(session)
         for index in range(6):
-            service.create_session(
+            service.sessions.create_session(
                 session=session,
                 workspace_id=workspace.id,
                 request=AskSessionCreate(title=f"Session {index:02d}"),
@@ -110,7 +110,7 @@ def test_ask_list_sessions_keyset_handles_tied_updated_at(session_factory):
     cursor: str | None = None
     with session_factory() as session:
         for _ in range(10):  # generous page cap; loop ends via has_more
-            page = service.list_sessions(
+            page = service.sessions.list_sessions(
                 session=session, workspace_id=workspace.id, limit=2, cursor=cursor
             )
             collected.extend(item.id for item in page.items)
@@ -128,7 +128,7 @@ def test_ask_list_sessions_garbled_cursor_restarts(session_factory):
     with session_factory.begin() as session:
         workspace = _default_workspace(session)
         for index in range(3):
-            service.create_session(
+            service.sessions.create_session(
                 session=session,
                 workspace_id=workspace.id,
                 request=AskSessionCreate(title=f"Session {index}"),
@@ -137,10 +137,10 @@ def test_ask_list_sessions_garbled_cursor_restarts(session_factory):
             )
 
     with session_factory() as session:
-        first = service.list_sessions(
+        first = service.sessions.list_sessions(
             session=session, workspace_id=workspace.id, limit=10
         )
-        garbled = service.list_sessions(
+        garbled = service.sessions.list_sessions(
             session=session,
             workspace_id=workspace.id,
             limit=10,

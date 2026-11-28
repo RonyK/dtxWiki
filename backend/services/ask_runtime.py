@@ -27,14 +27,13 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
 from backend.llm.binding import ModelBinding
-from backend.llm.streaming import SteerInput, SteerUpdate
 from backend.models.ask import (
     ASK_TURN_FAILED,
     ASK_TURN_PENDING,
@@ -46,21 +45,25 @@ from backend.repositories.workspace_scoped import get_in_workspace, select_in_wo
 from backend.schemas.ask import AskQuestion, AskSteerRequest, AskTurnDetail
 from backend.schemas.input_policy import validate_request_inputs
 from backend.services.ask_connection_service import AskConnectionService
-from backend.services.ask_service import (
+from backend.services.ask_service import AskService
+from backend.services.ask_turn_store import (
+    ask_session_for_turn_insert_statement,
+    settle_steering,
+)
+from backend.services.ask_types import (
     ASK_TURN_INTERNAL_ERROR,
     LLM_PROVIDER_UNAVAILABLE_WARNING,
     AskEvidence,
     AskGenerationError,
-    AskService,
     ComposedTurn,
     PreparedTurn,
     _validate_user_message,
-    ask_evidence_visible,
-    ask_session_for_turn_insert_statement,
 )
+from backend.services.ask_visibility import ask_evidence_visible
 from backend.services.db_write_intent import acquire_workspace_write_intent
 from backend.services.llm_connection_service import LLMConnectionError
 from backend.services.read_errors import ReadNotFoundError, RejectedByPolicyError
+from backend.spi.llm import SteerInput, SteerUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +106,7 @@ class _Job:
     factory: SessionFactory
     actor: ActorContext
     request: AskQuestion
-    # A replacement starts in the slot its predecessor held.
+    # A question asked again starts in the slot its predecessor held.
     reserved: bool = False
     task: asyncio.Task[None] | None = None
     error: Exception | None = None
@@ -113,6 +116,9 @@ class _Job:
     preview: str = ""
     preview_epoch: int = 0
     state_version: int = 0
+    # Set once the model answers and takes instructions while it does; until
+    # then an instruction asks the question again (see ``steer``).
+    takes_steering: bool = False
     # Steering inputs not yet sent to the model, oldest first.
     steering: deque[SteerInput] = field(default_factory=deque)
     steering_added: asyncio.Event = field(default_factory=asyncio.Event)
@@ -156,20 +162,11 @@ class AskRuntime:
         session_id: UUID,
         request: AskQuestion,
         actor: ActorContext,
-        *,
-        replace_turn_id: UUID | None = None,
     ) -> tuple[AskTurnDetail, _Job | None]:
         """Store the question and queue it; the job is None for a resubmission."""
 
         return await self._owned(
-            self._accept(
-                factory,
-                workspace_id,
-                session_id,
-                request,
-                actor,
-                replace_turn_id,
-            )
+            self._accept(factory, workspace_id, session_id, request, actor)
         )
 
     async def answer(
@@ -213,7 +210,14 @@ class AskRuntime:
         request: AskSteerRequest,
         actor: ActorContext,
     ) -> AskTurnDetail:
-        """Add an instruction to the asker's running turn."""
+        """Add an instruction to the asker's running turn.
+
+        A model that takes instructions while it answers gets it at once, and
+        the turn is returned. Otherwise the turn is stopped and its question is
+        asked again with the instruction, by the same model selection, ahead of
+        queued questions; the new turn is returned. A retry with the same
+        request id returns what the first request did.
+        """
 
         return await self._owned(
             self._steer(factory, workspace_id, turn_id, request, actor)
@@ -227,7 +231,7 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         with factory() as session:
-            return self.service.get_turn(session, workspace_id, turn_id, actor)
+            return self.service.reader.get_turn(session, workspace_id, turn_id, actor)
 
     async def events(
         self,
@@ -322,12 +326,8 @@ class AskRuntime:
         session_id: UUID,
         request: AskQuestion,
         actor: ActorContext,
-        replace_turn_id: UUID | None,
     ) -> tuple[AskTurnDetail, _Job | None]:
         async with self._write:
-            replaced = (
-                self._jobs.get(replace_turn_id) if replace_turn_id is not None else None
-            )
             detail, created = await run_in_threadpool(
                 self._store_question,
                 factory,
@@ -335,26 +335,12 @@ class AskRuntime:
                 session_id,
                 request,
                 actor,
-                replace_turn_id,
-                replaced,
             )
             if not created:
                 return detail, self._jobs.get(detail.id)
-            job = _Job(
-                workspace_id,
-                detail.id,
-                factory,
-                actor,
-                request,
-                reserved=replaced is not None,
-            )
+            job = _Job(workspace_id, detail.id, factory, actor, request)
             self._jobs[job.turn_id] = job
-            queue = self._session_queue(session_id)
-            if replaced is None:
-                queue.append(job)
-            else:
-                self._cancel(replaced)
-                queue.appendleft(job)
+            self._session_queue(session_id).append(job)
             return detail, job
 
     def _store_question(
@@ -364,8 +350,6 @@ class AskRuntime:
         session_id: UUID,
         request: AskQuestion,
         actor: ActorContext,
-        replace_turn_id: UUID | None,
-        replaced: _Job | None,
     ) -> tuple[AskTurnDetail, bool]:
         """Store a new question; a resubmission returns the stored one first."""
 
@@ -389,38 +373,22 @@ class AskRuntime:
                 )
                 if existing is not None:
                     return (
-                        self.service.get_turn(session, workspace_id, existing, actor),
+                        self.service.reader.get_turn(
+                            session, workspace_id, existing, actor
+                        ),
                         False,
                     )
-            earlier_text = None
-            if replace_turn_id is not None:
-                replaced = _controllable(replaced, workspace_id, actor)
-                target = self._turn(session, workspace_id, replaced.turn_id)
-                if target.ask_session_id != session_id or not _running(target):
-                    raise _turn_changed()
-                # The replacement continues the stopped question.
-                earlier_text = "\n\n".join(
-                    [target.user_message or "", *_applied_steering(target)]
-                )
-                self._mark_stopped(target)
-                session.flush()
-            turn_id = self.service.submit_turn(
+            turn_id = self.service.store.submit_turn(
                 session,
                 workspace_id=workspace_id,
                 ask_session_id=session_id,
                 request=request,
                 actor_kind=actor.actor_kind,
                 actor_id=actor.actor_id,
-                previous_user_message=earlier_text,
             )
-            if replace_turn_id is not None:
-                # Take the stopped turn's slot in the same transaction, before
-                # the worker picks the next queued question.
-                self._turn(session, workspace_id, turn_id).started_at = datetime.now(
-                    UTC
-                )
-                session.flush()
-            return self.service.get_turn(session, workspace_id, turn_id, actor), True
+            return self.service.reader.get_turn(
+                session, workspace_id, turn_id, actor
+            ), True
 
     async def _stop(
         self,
@@ -450,7 +418,7 @@ class AskRuntime:
                 raise _turn_changed()
             self._mark_stopped(turn)
             session.flush()
-            return self.service.get_turn(session, workspace_id, turn_id, actor)
+            return self.service.reader.get_turn(session, workspace_id, turn_id, actor)
 
     async def _steer(
         self,
@@ -461,16 +429,30 @@ class AskRuntime:
         actor: ActorContext,
     ) -> AskTurnDetail:
         async with self._write:
-            job = _controllable(self._jobs.get(turn_id), workspace_id, actor)
-            detail, created = await run_in_threadpool(
-                self._store_steer, factory, workspace_id, turn_id, request, actor
+            job = self._jobs.get(turn_id)
+            detail, outcome = await run_in_threadpool(
+                self._store_steer, factory, workspace_id, turn_id, request, actor, job
             )
-            if created:
+            if job is None or outcome == "stored":
+                return detail
+            if outcome == "sent":
                 job.steering.append(
                     SteerInput(str(request.request_id), request.user_message)
                 )
                 job.steering_added.set()
                 job.state_changed()
+                return detail
+            again = _Job(
+                workspace_id,
+                detail.id,
+                factory,
+                actor,
+                _asked_again(job.request, request),
+                reserved=True,
+            )
+            self._jobs[again.turn_id] = again
+            self._cancel(job)
+            self._session_queue(detail.ask_session_id).appendleft(again)
             return detail
 
     def _store_steer(
@@ -480,28 +462,69 @@ class AskRuntime:
         turn_id: UUID,
         request: AskSteerRequest,
         actor: ActorContext,
-    ) -> tuple[AskTurnDetail, bool]:
+        job: _Job | None,
+    ) -> tuple[AskTurnDetail, Literal["stored", "sent", "asked again"]]:
         validate_request_inputs(request)
         request.user_message = _validate_user_message(request.user_message)
         with factory.begin() as session:
             turn = self._locked_turn(session, workspace_id, turn_id)
+            # A request id is the session's idempotency key, as for questions:
+            # a retry returns what the first request did, even after the job
+            # it changed has ended.
             request_id = str(request.request_id)
             if any(message["id"] == request_id for message in turn.steering_messages):
-                return self.service.get_turn(
+                return self.service.reader.get_turn(
                     session, workspace_id, turn_id, actor
-                ), False
-            if not _running(turn) or not turn.steer_supported:
+                ), "stored"
+            asked_again = session.scalar(
+                select_in_workspace(
+                    AskTurn,
+                    workspace_id=workspace_id,
+                    criteria=(
+                        AskTurn.ask_session_id == turn.ask_session_id,
+                        AskTurn.request_id == request.request_id,
+                    ),
+                ).with_only_columns(AskTurn.id)
+            )
+            if asked_again is not None:
+                return self.service.reader.get_turn(
+                    session, workspace_id, asked_again, actor
+                ), "stored"
+            job = _controllable(job, workspace_id, actor)
+            if not _running(turn):
                 raise _turn_changed()
-            turn.steering_messages = [
-                *turn.steering_messages,
-                {
-                    "id": request_id,
-                    "user_message": request.user_message,
-                    "status": "waiting",
-                },
-            ]
+            if job.takes_steering:
+                turn.steering_messages = [
+                    *turn.steering_messages,
+                    {
+                        "id": request_id,
+                        "user_message": request.user_message,
+                        "status": "waiting",
+                    },
+                ]
+                session.flush()
+                return self.service.reader.get_turn(
+                    session, workspace_id, turn_id, actor
+                ), "sent"
+            # Asked again in one transaction: the stopped question with the
+            # instruction, in the stopped turn's slot, before the worker picks
+            # the next queued question.
+            self._mark_stopped(turn)
             session.flush()
-            return self.service.get_turn(session, workspace_id, turn_id, actor), True
+            again_id = self.service.store.submit_turn(
+                session,
+                workspace_id=workspace_id,
+                ask_session_id=turn.ask_session_id,
+                request=_asked_again(job.request, request),
+                actor_kind=actor.actor_kind,
+                actor_id=actor.actor_id,
+                previous_user_message=turn.user_message,
+            )
+            self._turn(session, workspace_id, again_id).started_at = datetime.now(UTC)
+            session.flush()
+            return self.service.reader.get_turn(
+                session, workspace_id, again_id, actor
+            ), "asked again"
 
     def _cancel(self, job: _Job) -> None:
         if job.task is not None:
@@ -554,12 +577,13 @@ class AskRuntime:
             binding = await self._binding(job)
             prepared = await run_in_threadpool(self._prepare, job, binding)
             asks_model = binding is not None and bool(prepared.retrieved.pack)
-            if asks_model and binding.steer:
-                await run_in_threadpool(self._enable_steering, job)
-                job.state_changed()
+            async with self._write:
+                # Under the lock ``steer`` decides by: an instruction either
+                # reaches this model call or asks again before it is sent.
+                job.takes_steering = asks_model and binding.features.steering
             job.evidence = prepared.evidence
             if asks_model:
-                composed = await self.service.stream_turn(
+                composed = await self.service.composer.stream_turn(
                     prepared,
                     binding,
                     on_delta=lambda text: self._on_delta(job, text),
@@ -567,7 +591,7 @@ class AskRuntime:
                     on_steer=lambda update: self._on_steer(job, update),
                 )
             else:
-                composed = self.service.compose_evidence(prepared)
+                composed = self.service.composer.compose_evidence(prepared)
             await run_in_threadpool(self._finish, job, prepared, composed)
         except AskGenerationError as exc:
             await run_in_threadpool(self._fail, job, exc.code)
@@ -622,14 +646,14 @@ class AskRuntime:
             if stale is not None:
                 stale.status = ASK_TURN_FAILED
                 stale.error_code = ASK_TURN_INTERNAL_ERROR
-                _settle_steering(stale, "unknown")
+                settle_steering(stale, "unknown")
                 session.flush()
             turn.started_at = datetime.now(UTC)
         return True
 
     def _prepare(self, job: _Job, binding: ModelBinding | None) -> PreparedTurn:
         with job.factory() as session:
-            return self.service.prepare_turn(
+            return self.service.retriever.prepare_turn(
                 session,
                 job.workspace_id,
                 job.turn_id,
@@ -640,12 +664,6 @@ class AskRuntime:
                 and job.request.selection is None,
             )
 
-    def _enable_steering(self, job: _Job) -> None:
-        with job.factory.begin() as session:
-            turn = self._locked_turn(session, job.workspace_id, job.turn_id)
-            if turn.status == ASK_TURN_PENDING:
-                turn.steer_supported = True
-
     def _finish(
         self,
         job: _Job,
@@ -654,21 +672,25 @@ class AskRuntime:
     ) -> None:
         with job.factory.begin() as session:
             # Instructions the model never received did not shape the answer.
-            _settle_steering(
+            settle_steering(
                 self._locked_turn(session, job.workspace_id, job.turn_id), "failed"
             )
             session.flush()
-            self.service.finish_turn(session, job.workspace_id, prepared, composed)
+            self.service.store.finish_turn(
+                session, job.workspace_id, prepared, composed
+            )
 
     def _fail(self, job: _Job, code: str) -> None:
         try:
             with job.factory.begin() as session:
-                _settle_steering(
+                settle_steering(
                     self._locked_turn(session, job.workspace_id, job.turn_id),
                     "unknown",
                 )
                 session.flush()
-                self.service.fail_turn(session, job.workspace_id, job.turn_id, code)
+                self.service.store.fail_turn(
+                    session, job.workspace_id, job.turn_id, code
+                )
         except Exception:
             logger.exception("Could not record failure for Ask turn %s", job.turn_id)
 
@@ -689,7 +711,8 @@ class AskRuntime:
         return job.steering[0]
 
     async def _on_steer(self, job: _Job, update: SteerUpdate) -> None:
-        if update.status == "sent" and job.steering and job.steering[0].id == update.id:
+        # Sent, or settled without being sent: either way it is not offered again.
+        if job.steering and job.steering[0].id == update.id:
             job.steering.popleft()
         if update.status not in _STORED_STEER_STATES:
             return
@@ -756,11 +779,23 @@ class AskRuntime:
     def _mark_stopped(turn: AskTurn) -> None:
         if turn.status == ASK_TURN_PENDING:
             turn.status = ASK_TURN_STOPPED
-            _settle_steering(turn, "unknown")
+            settle_steering(turn, "unknown")
 
 
 def _names_no_model(request: AskQuestion) -> bool:
     return "selection" not in request.model_fields_set
+
+
+def _asked_again(question: AskQuestion, steer: AskSteerRequest) -> AskQuestion:
+    """The instruction as a question for the same model selection."""
+
+    fields: dict[str, Any] = {
+        "user_message": steer.user_message,
+        "request_id": steer.request_id,
+    }
+    if not _names_no_model(question):
+        fields["selection"] = question.selection
+    return AskQuestion(**fields)
 
 
 def _person(actor: ActorContext) -> tuple[str, str]:
@@ -787,24 +822,6 @@ def _controllable(job: _Job | None, workspace_id: UUID, actor: ActorContext) -> 
 
 def _running(turn: AskTurn) -> bool:
     return turn.status == ASK_TURN_PENDING and turn.started_at is not None
-
-
-def _applied_steering(turn: AskTurn) -> list[str]:
-    return [
-        message["user_message"]
-        for message in turn.steering_messages
-        if message["status"] == "applied"
-    ]
-
-
-def _settle_steering(turn: AskTurn, status: str) -> None:
-    """Give every instruction still waiting its final status."""
-
-    if any(message["status"] == "waiting" for message in turn.steering_messages):
-        turn.steering_messages = [
-            {**message, "status": status} if message["status"] == "waiting" else message
-            for message in turn.steering_messages
-        ]
 
 
 def _turn_changed() -> RejectedByPolicyError:

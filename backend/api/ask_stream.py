@@ -30,7 +30,7 @@ from backend.services.ask_runtime import (
     AskTurnPreview,
     AskTurnState,
 )
-from backend.services.ask_service import InvalidUserMessageError
+from backend.services.ask_types import InvalidUserMessageError
 from backend.services.read_errors import ReadServiceError
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/ask", tags=["read"])
@@ -101,15 +101,10 @@ async def submit_ask_stream_turn(
     session_factory: WorkspaceSessionFactoryDep,
 ):
     try:
-        # Stream submissions join the session's queue; only stop, replace and
-        # steer name a running turn.
+        # Stream submissions join the session's queue; only stop and steer
+        # name a running turn.
         detail, _job = await _runtime(request).submit(
-            session_factory,
-            workspace_id,
-            ask_session_id,
-            request_body,
-            actor,
-            replace_turn_id=request_body.replace_turn_id,
+            session_factory, workspace_id, ask_session_id, request_body, actor
         )
     except (InvalidUserMessageError, InputPolicyError) as exc:
         return _invalid_message(exc)
@@ -216,7 +211,7 @@ def search_failed_ask_turn(
 ):
     try:
         with session_factory() as session:
-            detail = ask_service.search_failed_turn(
+            detail = ask_service.reader.search_failed_turn(
                 session, workspace_id, ask_turn_id, actor
             )
     except ReadServiceError as exc:

@@ -678,7 +678,6 @@ for (const [language, width] of LAYOUTS) {
       status: "completed",
       error_code: null,
       can_search: false,
-      steer_supported: false,
       created_at: session.started_at,
       started_at: null,
       retrieval_trace: [],

@@ -42,6 +42,7 @@ from backend.scripts.seed_dev import DEFAULT_WORKSPACE_SLUG, seed_default_worksp
 from backend.services import context_ingress_service, context_write_service
 from backend.services.agent_page_service import AgentPageService
 from backend.services.ask_service import AskService
+from backend.services.ask_turn_store import AskTurnStore
 from backend.services.context_write_service import ContextWriteService
 from backend.services.library_service import LibraryService
 from backend.services.page_service import PageService
@@ -319,10 +320,10 @@ def test_submit_turn_holds_write_intent(db, probe):
         session.flush()
         ask_session_id = ask_session.id
 
-    probe(AskService, "_lock_session_for_turn_insert")
+    probe(AskTurnStore, "_lock_session_for_turn_insert")
     with db.factory.begin() as session:
         _assert_locked_at_guarded_read(
-            lambda: AskService().submit_turn(
+            lambda: AskService().store.submit_turn(
                 session,
                 workspace_id=db.workspace_id,
                 ask_session_id=ask_session_id,

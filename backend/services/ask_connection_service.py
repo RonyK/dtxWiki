@@ -16,7 +16,6 @@ from backend.llm.credential_vault import (
     CredentialBinding,
     CredentialVaultError,
 )
-from backend.llm.streaming import supports_native_steer
 from backend.llm.transport import HttpxLLMTransport
 from backend.services.llm_connection_service import (
     LLMConnectionError,
@@ -78,15 +77,6 @@ class AskConnectionService:
                         or view["unavailable_reason"] is not None
                     ):
                         continue
-                    # Only native adapter defaults can advertise live steering.
-                    # The management projection already checked this exact URL.
-                    adapter_id = view["adapter_id"]
-                    base_url = (
-                        self._registry.descriptor(adapter_id).default_base_url or ""
-                        if view["endpoint_profile_id"] is None
-                        and view["endpoint_url"] is None
-                        else ""
-                    )
                     for profile in view["model_profiles"]:
                         choices.append(
                             {
@@ -96,9 +86,6 @@ class AskConnectionService:
                                 "connection_label": view["name"],
                                 "model_label": profile.get("display_name")
                                 or profile["model_id"],
-                                "steer": supports_native_steer(
-                                    adapter_id, base_url, profile["model_id"]
-                                ),
                             }
                         )
         return choices
@@ -198,10 +185,6 @@ class AskConnectionService:
             model=model,
             max_output_tokens=min(1024, profile.get("max_output_tokens") or 1024),
             context_window=profile.get("context_window"),
-            steer=(
-                endpoint["kind"] == "adapter_default"
-                and supports_native_steer(adapter_id, base_url, model)
-            ),
         )
 
 

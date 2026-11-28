@@ -21,6 +21,13 @@
   Completions (and compatible servers) and the Gemini API register the same
   way plugin adapters do. Each makes at most one provider call per request and
   reports a normalized result, token usage and error.
+- Every adapter declares its `features` (streaming, and steering: taking
+  instructions while it answers), and each port reports what it offers for
+  its model and endpoint. The registry refuses a port that reports more than
+  its adapter declares or lacks a method for a feature it reports. Plugin
+  adapters stream when they declare it, as built-in ones do. Among the
+  built-in adapters only OpenAI Responses declares steering, for GPT-6 models
+  at OpenAI's own endpoint.
 - `DTXWIKI_LLM_PROVIDER` keeps its models and temperature. A failed call is
   no longer sent again, because the provider may already have charged for it.
   `openai` sends `max_completion_tokens` instead of the deprecated
@@ -58,9 +65,14 @@
   the workspace's default model, any enabled LLM connection — the asker's own
   connections whatever their address and with or without a key — or search
   only; the browser remembers the last choice. The asker can stop a queued or
-  running question, add an instruction to a running answer (OpenAI models that
-  support steering), or replace the running question with a longer one. Only
-  the asker can change a question (`409 ask_turn_not_yours`).
+  running question, or add an instruction to a running answer
+  (`POST …/ask/turns/{ask_turn_id}/steer`). A model that takes instructions
+  while it answers is sent it in order, and the instruction shows whether it
+  was applied, failed or could not be confirmed. Otherwise the answer is stopped and the question is asked
+  again with the instruction, with the same model selection (checked again
+  when it starts) and ahead of queued questions, and the new turn is
+  returned. Only the asker can change a
+  question (`409 ask_turn_not_yours`).
 - `POST …/ask/sessions/{ask_session_id}/turns` takes an optional
   `after_turn_id`, the latest turn the asker saw (`null` for an empty session),
   and answers `409 ask_session_changed` when it is not the latest. It waits

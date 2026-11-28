@@ -21,16 +21,17 @@ from backend.llm.adapters._shared import (
     text_of,
     total,
 )
-from backend.llm.streaming import OnDelta
 from backend.spi.llm import (
     CanonicalTextRequest,
     CanonicalTextResult,
     ExecutionContext,
+    GenerationFeatures,
     LLMAdapterDescriptor,
     LLMAdapterError,
     LLMConnection,
     LLMErrorCode,
     LLMTransport,
+    OnDelta,
     Termination,
     TokenUsage,
 )
@@ -70,13 +71,18 @@ DESCRIPTOR = LLMAdapterDescriptor(
     display_name={"en": "Gemini API", "ko": "Gemini API"},
     config_schema=NO_CONFIG_SCHEMA,
     credential_schema=api_key_schema(required=True),
+    features=GenerationFeatures(streaming=True, steering=False),
     options=frozenset({"temperature"}),
     default_base_url="https://generativelanguage.googleapis.com/v1beta",
 )
 
 
 class GeminiGenerateContentAdapter:
-    def __init__(self, connection: LLMConnection, transport: LLMTransport) -> None:
+    features = DESCRIPTOR.features
+
+    def __init__(
+        self, connection: LLMConnection, transport: LLMTransport, _model: str
+    ) -> None:
         self._connection = connection
         self._transport = transport
 

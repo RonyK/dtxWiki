@@ -48,7 +48,7 @@ def test_ask_session_timestamps_serialize_with_utc_offset(session_factory):
     service = AskService()
     with session_factory.begin() as session:
         workspace_id = _default_workspace_id(session)
-        service.create_session(
+        service.sessions.create_session(
             session=session,
             workspace_id=workspace_id,
             request=AskSessionCreate(title="Naive timestamp session"),
@@ -65,7 +65,9 @@ def test_ask_session_timestamps_serialize_with_utc_offset(session_factory):
     # Fresh session forces a load from the DB (no identity-map shortcut), so the
     # TypeDecorator's process_result_value runs — the real served path.
     with session_factory() as session:
-        page = service.list_sessions(session=session, workspace_id=workspace_id)
+        page = service.sessions.list_sessions(
+            session=session, workspace_id=workspace_id
+        )
 
     assert len(page.items) == 1
     item = page.items[0]

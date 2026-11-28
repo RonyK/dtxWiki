@@ -1403,7 +1403,7 @@ def test_ask_selects_published_candidates_before_the_document_budget(session_fac
         assert [(hit.id, hit.version_id) for hit in citable.ranked_results] == [
             (published.id, version.id)
         ]
-        retrieved = AskService(search_service=search)._retrieve(
+        retrieved = AskService(search_service=search).retriever._retrieve(
             session, workspace.id, "CrowdNeedle", actor
         )
         assert retrieved.context_ids == (published.id,)

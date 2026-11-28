@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from backend.app.bootstrap import resolve_alembic_ini, resolve_migrations_dir
 from backend.models.ask import AskSession, AskTurn, AskTurnCitation
 from backend.repositories.workspace_repo import insert_workspace
-from backend.services.ask_service import ensure_ask_root
+from backend.services.ask_session_service import ensure_ask_root
 from backend.tests.utils.migration_paths import configure_test_repositories
 from backend.tests.utils.postgres import drop_reflected_postgres_metadata
 
@@ -26,7 +26,6 @@ _NEW_COLUMNS = {
     "request_id",
     "selection",
     "steering_messages",
-    "steer_supported",
 }
 _PENDING_INDEX = "uq_ask_turn_session_pending"
 _REQUEST_INDEX = "uq_ask_turn_request"
@@ -130,7 +129,7 @@ def test_ask_turn_status_migration_traversal(tmp_path, dialect):
             assert stored_nulls() == (True, True)
             assert stored_turn() == ("Old question", "Old answer")
             assert old.started_at is None
-            assert old.steering_messages == [] and not old.steer_supported
+            assert old.steering_messages == []
 
             def add_turn(turn_no, status, *, started_at=None, request_id=None):
                 turn = AskTurn(

@@ -20,7 +20,7 @@ from backend.schemas.library_semantic import LibrarySemanticMarkdownUpdateReques
 from backend.schemas.page import ContextPageCreateRequest
 from backend.schemas.tree import TreeFolderCreateRequest, TreeNodeUpdate
 from backend.services import context_ingress_service
-from backend.services.ask_service import InvalidUserMessageError, _validate_user_message
+from backend.services.ask_types import InvalidUserMessageError, _validate_user_message
 from backend.services.body_preparer import (
     BodyInput,
     BodyPreparer,

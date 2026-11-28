@@ -15,10 +15,8 @@ from sqlalchemy import select
 
 from backend.models.workspace import Workspace
 from backend.schemas.ask import AskSessionCreate, AskTurnCreate
-from backend.services.ask_service import (
-    UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING,
-    AskService,
-)
+from backend.services.ask_service import AskService
+from backend.services.ask_types import UNSUPPORTED_RETRIEVAL_MODE_FALLBACK_WARNING
 from backend.services.search_service import SearchService
 from backend.tests.utils.ask import create_turn_in_session
 
@@ -54,21 +52,21 @@ def _set_mode(session_factory, mode: str):
 def test_auto_keeps_the_ladder_it_always_used():
     service = AskService(search_service=_HybridSearch())
 
-    assert service._best_retrieval_mode("auto") == ("hybrid", True)
-    assert service._best_retrieval_mode(None) == ("hybrid", True)
+    assert service.retriever._best_retrieval_mode("auto") == ("hybrid", True)
+    assert service.retriever._best_retrieval_mode(None) == ("hybrid", True)
 
 
 def test_a_supported_choice_is_honoured():
     service = AskService(search_service=_HybridSearch())
 
-    assert service._best_retrieval_mode("keyword") == ("keyword", True)
-    assert service._best_retrieval_mode("semantic") == ("semantic", True)
+    assert service.retriever._best_retrieval_mode("keyword") == ("keyword", True)
+    assert service.retriever._best_retrieval_mode("semantic") == ("semantic", True)
 
 
 def test_an_unservable_choice_falls_back_instead_of_raising():
     service = AskService(search_service=SearchService())
 
-    mode, honored = service._best_retrieval_mode("semantic")
+    mode, honored = service.retriever._best_retrieval_mode("semantic")
 
     assert mode == "keyword"
     assert honored is False
@@ -91,7 +89,7 @@ def test_the_fallback_reaches_the_turn_as_a_warning(session_factory, page_servic
     service = AskService(search_service=SearchService())
 
     with session_factory.begin() as session:
-        ask_session = service.create_session(
+        ask_session = service.sessions.create_session(
             session=session,
             workspace_id=workspace_id,
             request=AskSessionCreate(),
@@ -125,7 +123,7 @@ def test_a_servable_choice_produces_no_warning(session_factory, page_service):
     service = AskService(search_service=SearchService())
 
     with session_factory.begin() as session:
-        ask_session = service.create_session(
+        ask_session = service.sessions.create_session(
             session=session,
             workspace_id=workspace_id,
             request=AskSessionCreate(),

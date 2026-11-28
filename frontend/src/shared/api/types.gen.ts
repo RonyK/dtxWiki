@@ -4954,8 +4954,6 @@ export interface components {
              * @enum {string}
              */
             scope: "personal" | "workspace";
-            /** Steer */
-            steer: boolean;
         };
         /** AskModelChoices */
         AskModelChoices: {
@@ -5128,8 +5126,6 @@ export interface components {
         };
         /** AskStreamTurnCreate */
         AskStreamTurnCreate: {
-            /** Replace Turn Id */
-            replace_turn_id?: string | null;
             /**
              * Request Id
              * Format: uuid
@@ -5217,11 +5213,6 @@ export interface components {
              * @enum {string}
              */
             status: "queued" | "pending" | "completed" | "failed" | "stopped";
-            /**
-             * Steer Supported
-             * @default false
-             */
-            steer_supported: boolean;
             /** Steering Messages */
             steering_messages?: components["schemas"]["AskSteeringMessage"][];
             /** Topic Tags */

@@ -67,12 +67,12 @@ _LINE_END = re.compile(rb"\r\n?|\n")
 @dataclass(frozen=True)
 class BuiltinAdapterFactory:
     descriptor: LLMAdapterDescriptor
-    build: Callable[[LLMConnection, LLMTransport], TextGenerationPort]
+    build: Callable[[LLMConnection, LLMTransport, str], TextGenerationPort]
 
     def create(
-        self, connection: LLMConnection, transport: LLMTransport
+        self, connection: LLMConnection, transport: LLMTransport, model: str
     ) -> TextGenerationPort:
-        return self.build(connection, transport)
+        return self.build(connection, transport, model)
 
 
 @dataclass(frozen=True)

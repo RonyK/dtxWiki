@@ -185,7 +185,7 @@ from backend.services.activity_feed_service import (
     InvalidActivityTokenError,
 )
 from backend.services.actor_visible_read import context_page_id_visible
-from backend.services.ask_service import InvalidUserMessageError
+from backend.services.ask_types import InvalidUserMessageError
 from backend.services.context_link_targets import markdown_link_targets
 from backend.services.context_media_attachments import (
     asset_usage_read_projection,
@@ -3040,7 +3040,7 @@ def list_ask_sessions(
 ):
     with session_factory() as session:
         return {
-            "data": ask_service.list_sessions(
+            "data": ask_service.sessions.list_sessions(
                 session=session,
                 workspace_id=workspace_id,
                 limit=limit,
@@ -3066,7 +3066,7 @@ def create_ask_session(
     try:
         with session_factory.begin() as session:
             return {
-                "data": ask_service.create_session(
+                "data": ask_service.sessions.create_session(
                     session=session,
                     workspace_id=workspace_id,
                     request=request_body,
@@ -3095,7 +3095,7 @@ def get_ask_session(
     try:
         with session_factory() as session:
             return {
-                "data": ask_service.get_session(
+                "data": ask_service.reader.get_session(
                     session=session,
                     workspace_id=workspace_id,
                     ask_session_id=ask_session_id,

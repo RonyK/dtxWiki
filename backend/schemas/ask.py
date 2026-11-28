@@ -32,7 +32,6 @@ class AskModelSelection(BaseModel):
 class AskModelChoice(AskModelSelection):
     connection_label: str
     model_label: str
-    steer: bool
 
 
 class AskModelChoices(BaseModel):
@@ -72,8 +71,6 @@ class AskTurnCreate(AskQuestion):
 
 class AskStreamTurnCreate(AskQuestion):
     request_id: UUID
-    # A running turn of the same asker to stop; this question continues it.
-    replace_turn_id: UUID | None = None
 
 
 class AskSteerRequest(InputRequest):
@@ -117,7 +114,6 @@ class AskTurnDetail(BaseModel):
     error_code: str | None = None
     selection: AskModelSelection | None = None
     steering_messages: list[AskSteeringMessage] = Field(default_factory=list)
-    steer_supported: bool = False
     can_search: bool = False
     created_at: datetime
     started_at: datetime | None = None

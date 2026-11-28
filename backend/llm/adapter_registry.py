@@ -12,6 +12,7 @@ import re
 from collections.abc import Awaitable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import httpx
@@ -19,19 +20,22 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from packaging.version import InvalidVersion, Version
 
-from backend.llm.streaming import NextSteer, OnDelta, OnSteer, supports_native_steer
 from backend.spi.llm import (
     COMMON_OPTIONS,
     LLM_ADAPTER_SPI_VERSION,
     CanonicalTextRequest,
     CanonicalTextResult,
     ExecutionContext,
+    GenerationFeatures,
     LLMAdapterDescriptor,
     LLMAdapterError,
     LLMAdapterFactory,
     LLMConnection,
     LLMModelCapabilities,
     LLMTransport,
+    NextSteer,
+    OnDelta,
+    OnSteer,
     TextGenerationPort,
     TransportResponse,
 )
@@ -141,10 +145,12 @@ class LLMAdapterRegistry:
     ) -> TextGenerationPort:
         """Build one execution's adapter for one model from validated inputs.
 
-        Every caller gets the same Core rules around the adapter: requests
-        must name ``model`` and are checked against its capabilities before
-        anything is sent, calls stay under the connection's endpoint, and provider
-        request IDs are kept only when opaque and free of credentials.
+        The port offers the features it reports, within those its adapter
+        declares. Every caller gets the same Core rules around the adapter:
+        requests must name ``model`` and are checked against its capabilities
+        before anything is sent, calls stay under the connection's endpoint,
+        and provider request IDs are kept only when opaque and free of
+        credentials.
         """
 
         registration = self._registration(adapter_id)
@@ -157,21 +163,40 @@ class LLMAdapterRegistry:
         )
         secrets = tuple(value for value in credential.values() if value)
         port = registration.factory.create(
-            connection, _EndpointScopedTransport(transport, endpoint, secrets=secrets)
+            connection,
+            _EndpointScopedTransport(transport, endpoint, secrets=secrets),
+            model,
         )
-        if not _binds_two_arguments(getattr(port, "generate", None), coroutine=True):
+        if not _binds(getattr(port, "generate", None), arguments=2, coroutine=True):
             raise LLMAdapterRegistryError(
                 f"LLM adapter {adapter_id!r} did not build a text generation port"
             )
-        return _GuardedPort(
-            port,
-            model,
-            capabilities,
-            secrets=secrets,
-            http_stream=adapter_id.startswith(f"{BUILTIN_NAMESPACE}.")
-            and callable(getattr(transport, "open_sse", None)),
-            native_steer=supports_native_steer(adapter_id, endpoint.url, model),
-        )
+        features = getattr(port, "features", None)
+        if (
+            not isinstance(features, GenerationFeatures)
+            or not features.within(registration.descriptor.features)
+            or not all(
+                _binds(
+                    getattr(port, method, None),
+                    arguments=2,
+                    coroutine=True,
+                    keywords=keywords,
+                )
+                for enabled, method, keywords in (
+                    (features.streaming, "stream", ("on_delta",)),
+                    (
+                        features.steering,
+                        "stream_with_steering",
+                        ("on_delta", "next_steer", "on_steer"),
+                    ),
+                )
+                if enabled
+            )
+        ):
+            raise LLMAdapterRegistryError(
+                f"LLM adapter {adapter_id!r} built a port without its declared features"
+            )
+        return _GuardedPort(port, model, capabilities, features, secrets=secrets)
 
     @staticmethod
     def _validate_fields(
@@ -218,8 +243,8 @@ class LLMAdapterRegistry:
 
     def _register(self, factory: LLMAdapterFactory, *, namespace: str) -> None:
         descriptor = getattr(factory, "descriptor", None)
-        if not isinstance(descriptor, LLMAdapterDescriptor) or not _binds_two_arguments(
-            getattr(factory, "create", None), coroutine=False
+        if not isinstance(descriptor, LLMAdapterDescriptor) or not _binds(
+            getattr(factory, "create", None), arguments=3, coroutine=False
         ):
             raise LLMAdapterRegistryError(
                 "LLM adapter does not implement LLMAdapterFactory"
@@ -360,25 +385,24 @@ class _GuardedPort:
 
     def __init__(
         self,
-        port: TextGenerationPort,
+        port: Any,
         model: str,
         capabilities: LLMModelCapabilities,
+        features: GenerationFeatures,
         *,
         secrets: tuple[str, ...],
-        http_stream: bool,
-        native_steer: bool,
     ) -> None:
         self._port = port
         self._model = model
         self._capabilities = capabilities
         self._secrets = secrets
-        self._http_stream = http_stream
-        self._native_steer = native_steer
+        # The value that was checked against the port's methods.
+        self.features = features
 
     async def generate(
         self, request: CanonicalTextRequest, context: ExecutionContext
     ) -> CanonicalTextResult:
-        self._check_request(request)
+        self._check_request(request, offered=True)
         return await self._checked_result(self._port.generate(request, context))
 
     async def stream(
@@ -387,32 +411,38 @@ class _GuardedPort:
         context: ExecutionContext,
         *,
         on_delta: OnDelta,
-        next_steer: NextSteer | None,
-        on_steer: OnSteer | None,
     ) -> CanonicalTextResult:
-        self._check_request(request)
-        ws = getattr(self._port, "steered_stream", None)
-        if self._native_steer and callable(ws) and next_steer and on_steer:
-            return await self._checked_result(
-                ws(
-                    request,
-                    context,
-                    on_delta=on_delta,
-                    next_steer=next_steer,
-                    on_steer=on_steer,
-                )
-            )
-        stream = getattr(self._port, "stream", None)
-        if self._http_stream and callable(stream):
-            return await self._checked_result(
-                stream(request, context, on_delta=on_delta)
-            )
-        return await self._checked_result(self._port.generate(request, context))
+        self._check_request(request, offered=self.features.streaming)
+        return await self._checked_result(
+            self._port.stream(request, context, on_delta=on_delta)
+        )
 
-    def _check_request(self, request: CanonicalTextRequest) -> None:
+    async def stream_with_steering(
+        self,
+        request: CanonicalTextRequest,
+        context: ExecutionContext,
+        *,
+        on_delta: OnDelta,
+        next_steer: NextSteer,
+        on_steer: OnSteer,
+    ) -> CanonicalTextResult:
+        self._check_request(request, offered=self.features.steering)
+        return await self._checked_result(
+            self._port.stream_with_steering(
+                request,
+                context,
+                on_delta=on_delta,
+                next_steer=next_steer,
+                on_steer=on_steer,
+            )
+        )
+
+    def _check_request(self, request: CanonicalTextRequest, *, offered: bool) -> None:
         # The capabilities describe one model; another model is not covered.
         if request.model != self._model:
             raise LLMAdapterError("invalid_request", delivery="not_sent")
+        if not offered:
+            raise LLMAdapterError("unsupported_option", delivery="not_sent")
         self._capabilities.require_supported(request)
 
     async def _checked_result(
@@ -447,11 +477,19 @@ def normalize_base_url(url: str) -> str | None:
     return None if endpoint is None else endpoint.url
 
 
-def _binds_two_arguments(function: object, *, coroutine: bool) -> bool:
+def _binds(
+    function: object,
+    *,
+    arguments: int,
+    coroutine: bool,
+    keywords: Iterable[str] = (),
+) -> bool:
     if not callable(function) or inspect.iscoroutinefunction(function) != coroutine:
         return False
     try:
-        inspect.signature(function).bind(None, None)
+        inspect.signature(function).bind(
+            *(None,) * arguments, **dict.fromkeys(keywords)
+        )
     except (TypeError, ValueError):
         return False
     return True
@@ -472,7 +510,8 @@ def _validated_snapshot(descriptor: LLMAdapterDescriptor) -> LLMAdapterDescripto
     options = frozenset(descriptor.options)
     labels = descriptor.display_name
     if (
-        not options <= COMMON_OPTIONS
+        not isinstance(descriptor.features, GenerationFeatures)
+        or not options <= COMMON_OPTIONS
         or type(descriptor.config_schema_version) is not int
         or descriptor.config_schema_version < 1
         or not isinstance(labels, Mapping)
