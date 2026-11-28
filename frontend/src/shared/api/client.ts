@@ -165,6 +165,8 @@ export async function apiRequest<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const response = await requestApiResponse(path, init, "application/json");
+  // 204 No Content has no body to parse.
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 

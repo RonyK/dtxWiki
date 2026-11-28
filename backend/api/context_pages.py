@@ -33,7 +33,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from backend.api.deps import RestActorDep, read_service_error_response
 from backend.app.errors import build_rest_error_response
@@ -753,7 +753,9 @@ def discard_context_edit(
         return service_error_response(exc)
     except ReadServiceError as exc:
         return read_service_error_response(exc)
-    return JSONResponse(status_code=204, content=None)
+    # No body: a 204 that carries `null` fails at the HTTP server after the
+    # discard has committed.
+    return Response(status_code=204)
 
 
 @router.post(

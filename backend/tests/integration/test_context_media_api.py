@@ -1288,6 +1288,7 @@ def test_upload_rejects_closed_foreign_and_wrong_page_editing_versions(
         json={"version_id": page["version_id"], "idempotency_key": "close-upload"},
     )
     assert withdrawn.status_code == 204, withdrawn.text
+    assert withdrawn.content == b""
     closed = _upload_editing_png(client, page=page, marker_uuid=uuid4())
     assert closed.status_code == 409, closed.text
     assert closed.json()["error_code"] == "media_editing_not_open"
