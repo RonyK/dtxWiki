@@ -5677,6 +5677,8 @@ export interface components {
              * Format: uuid
              */
             version_id: string;
+            /** Version No */
+            version_no: number;
             /**
              * Version Status
              * @constant

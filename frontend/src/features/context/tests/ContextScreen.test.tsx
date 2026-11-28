@@ -872,12 +872,12 @@ describe("ContextScreen", () => {
     const base = (await (await originalFetch(pageUrl, undefined)).json()).data;
     const author = { actor_kind: "human", actor_id: "author-1", display_name: "Draft Author" };
     const writing = {
-      version_id: "writing-1", version_status: "draft", author,
+      version_id: "writing-1", version_no: 3, version_status: "draft", author,
       last_saved_at: "2026-05-11T01:00:00Z", is_editing: true,
       review: null, is_behind: false, is_mine: false, state: "writing",
     };
     const reviewing = {
-      ...writing, version_id: "reviewing-1", version_status: "draft", is_editing: false,
+      ...writing, version_id: "reviewing-1", version_no: 4, version_status: "draft", is_editing: false,
       author: { ...author, display_name: "Review Author" },
       review: { id: "review-1", status: "pending" }, state: "reviewing",
     };
@@ -918,7 +918,7 @@ describe("ContextScreen", () => {
     await userEvent.click(switcher());
     await waitFor(() => expect(screen.getByRole("button", { name: "More drafts" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "More drafts" }));
-    await userEvent.click(await screen.findByRole("button", { name: /Review Author/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^v4 · Review Author/ }));
     await screen.findByText("Selected reviewing-1");
     expect(switcher()).toHaveTextContent(/Draft.*Review Author/);
     expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute(
@@ -956,7 +956,7 @@ describe("ContextScreen", () => {
     const pageUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
     const base = (await (await originalFetch(pageUrl, undefined)).json()).data;
     const writing = {
-      version_id: "writing-1", version_status: "draft", last_saved_at: "2026-05-11T01:00:00Z",
+      version_id: "writing-1", version_no: 3, version_status: "draft", last_saved_at: "2026-05-11T01:00:00Z",
       author: { actor_kind: "human", actor_id: "author-1", display_name: "Draft Author" },
       is_editing: true, review: null, is_behind: false, is_mine: false, state: "writing",
     };
@@ -985,6 +985,90 @@ describe("ContextScreen", () => {
     expect(switcher).not.toHaveTextContent(/Published/);
     await userEvent.click(switcher);
     expect(await screen.findByRole("button", { name: /What readers see/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("discards an open draft from the switcher or History, leaving the screen only when that draft was on it", async () => {
+    const fetchMock = mockDecisionLogRoutes();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const pageUrl = `${BASE}/api/v1/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}`;
+    const pagePath = new URL(pageUrl).pathname;
+    const base = (await (await originalFetch(pageUrl, undefined)).json()).data;
+    const draft = (versionId: string, versionNo: number) => ({
+      version_id: versionId, version_no: versionNo, version_status: "draft",
+      author: { actor_kind: "human", actor_id: "author-1", display_name: "Draft Author" },
+      last_saved_at: "2026-05-11T01:00:00Z", is_editing: true,
+      review: null, is_behind: false, is_mine: false, state: "writing",
+    });
+    let open = [draft("draft-4", 4), draft("draft-3", 3)];
+    const discarded: string[] = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(input.toString());
+      const openDrafts = () => ({ total: open.length, items: open, next_cursor: null });
+      if (url.pathname === `${pagePath}/discard-edit`) {
+        const versionId = JSON.parse(String(init?.body)).version_id as string;
+        discarded.push(versionId);
+        open = open.filter((item) => item.version_id !== versionId);
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === `${pagePath}/drafts`) return jsonResponse({ data: openDrafts() });
+      if (url.pathname === pagePath) {
+        const shown = open.find((item) => item.version_id === url.searchParams.get("version_id")) ?? null;
+        return jsonResponse({ data: {
+          ...base, open_drafts: openDrafts(), draft: shown,
+          version_id: shown?.version_id ?? "version-1",
+          version_status: shown ? "draft" : "published_snapshot",
+          body_md: shown ? `Selected ${shown.version_id}` : "Published body",
+        } });
+      }
+      if (url.pathname.endsWith("/changesets")) {
+        return jsonResponse({ data: {
+          versions: [
+            ...open.map((item) => ({
+              ...historyVersion(item.version_id, item.version_no, "draft", "version-1"),
+              version_status: "draft",
+            })),
+            {
+              ...historyVersion("version-1", 2, "published", { isPublishedHead: true, isVisibleHead: true }),
+              version_status: "published_snapshot",
+            },
+          ],
+          changesets: [], review_decisions: [], diffs: null,
+        } });
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <MemoryRouter initialEntries={[`/workspaces/${WORKSPACE_ID}/context/pages/${PAGE_ID}?version=draft-4`]}>
+        <ContextScreen />
+      </MemoryRouter>,
+    );
+    const confirmDiscard = async () => {
+      const dialog = await screen.findByRole("dialog", { name: "Discard this draft?" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Discard draft" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    };
+
+    // Another draft, from the switcher: the draft on screen stays.
+    await screen.findByText("Selected draft-4");
+    await userEvent.click(screen.getByRole("button", { name: "Switch the version shown" }));
+    expect(await screen.findByRole("button", { name: /^v3 · Draft Author/ })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: /^v4 · Draft Author/ })).toHaveAttribute("aria-current", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Discard draft v3" }));
+    await confirmDiscard();
+    expect(discarded).toEqual(["draft-3"]);
+    expect(screen.getByText("Selected draft-4")).toBeInTheDocument();
+
+    // The draft on screen, from History: back to the published version.
+    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Discard draft v3" })).toBeNull());
+    expect(screen.queryByRole("button", { name: "Discard draft v2" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Discard draft v4" }));
+    await confirmDiscard();
+    expect(discarded).toEqual(["draft-3", "draft-4"]);
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Version" })).toBeNull());
+    await waitFor(() => expect(screen.getByRole("tab", { name: /History/ })).toHaveAttribute("aria-selected", "true"));
+    await userEvent.click(await screen.findByRole("tab", { name: /View/ }));
+    await screen.findByText("Published body");
   });
 
   it("presents the reader-visible version as one described action with a decorative arrow", async () => {

@@ -382,6 +382,8 @@
     "mergePublishedHint": "Merges the current published version's changes into this draft",
     "merging": "Merging…",
     "discard": "Discard draft",
+    "discardVersion": "Discard draft v{{version}}",
+    "goToDraft": "Go to draft v{{version}}",
     "discarding": "Discarding…",
     "discardTitle": "Discard this draft?",
     "discardConfirm": "The draft stays in History as an ended version, and you can start again from it.",
