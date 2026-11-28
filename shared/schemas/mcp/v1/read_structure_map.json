@@ -255,6 +255,11 @@
             "title": "Version Id",
             "type": "string"
           },
+          "version_no": {
+            "minimum": 1,
+            "title": "Version No",
+            "type": "integer"
+          },
           "version_status": {
             "const": "draft",
             "title": "Version Status",
@@ -266,6 +271,7 @@
           "last_saved_at",
           "is_editing",
           "version_id",
+          "version_no",
           "version_status",
           "is_mine",
           "state"

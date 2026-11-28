@@ -5,8 +5,9 @@
 ### Important changes
 
 - The MCP tool contract adds the Ask warnings `llm_composer_retryable`,
-  `llm_answer_incomplete` and `llm_answer_refused`. Refresh cached tool catalogs
-  and result schemas.
+  `llm_answer_incomplete` and `llm_answer_refused`, and each `open_drafts` item
+  and `list_context_drafts` item adds the draft's `version_no`. Refresh cached
+  tool catalogs and result schemas.
 - DB schema: migration `916a6162b789` follows `dafc5339b3b1` and adds Ask turn
   status columns. Existing turns become `completed`. Downgrading drops the
   record of the evidence each answer was given; follow-up answers are then

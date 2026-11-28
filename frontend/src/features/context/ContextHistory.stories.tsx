@@ -121,6 +121,7 @@ const baseProps = {
   onCompare: () => {},
   onComparePair: () => {},
   onLoadOlder: () => {},
+  onVersionRefresh: () => {},
   onVersionRestored: () => {},
   workspaceId: "workspace-1",
 };

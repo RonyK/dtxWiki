@@ -1960,6 +1960,25 @@ textarea.context-merge-editor {
   background: var(--context-soft);
 }
 
+/* An open draft: the version (selects it), then go-to and discard. */
+.context-version-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.context-version-row > .context-version-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.context-version-row-action {
+  flex-shrink: 0;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+}
+
 .context-version-state {
   display: flex;
   flex-wrap: wrap;
@@ -2074,6 +2093,11 @@ textarea.context-merge-editor {
   .context-version-switch,
   .context-version-menu > .text-button,
   .context-version-merge .text-button {
+    min-height: 44px;
+  }
+
+  .context-version-row-action {
+    width: 44px;
     min-height: 44px;
   }
 }

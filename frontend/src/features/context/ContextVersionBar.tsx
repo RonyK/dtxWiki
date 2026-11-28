@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ClipboardList, GitCompareArrows, GitMerge, MessageSquare, Send } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, ClipboardList, GitCompareArrows, GitMerge, MessageSquare, Send, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
@@ -77,7 +77,6 @@ export function ContextVersionBar({
   const merge = useContextMerge();
   const actorId = useOptionalAuth()?.user?.user_id ?? "preview";
   const narrow = useMediaQuery("(max-width: 720px)");
-  const discardTitleId = useId();
   const menuId = useId();
 
   const draft = detail.draft ?? null;
@@ -104,7 +103,9 @@ export function ContextVersionBar({
   const [busy, setBusy] = useState<Busy>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [blockedByFormat, setBlockedByFormat] = useState(false);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // The open draft the discard dialog asks about: the one on screen, or one
+  // chosen from the switcher.
+  const [discardTarget, setDiscardTarget] = useState<string | null>(null);
   const [reasonOpen, setReasonOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [compareOpen, setCompareOpen] = useState(false);
@@ -419,16 +420,22 @@ export function ContextVersionBar({
     }
   }
 
-  async function discard() {
-    if (!draftVersionId || busy) return;
+  // Discarding the draft on screen returns to the published version;
+  // discarding another one keeps the version on screen.
+  async function discard(versionId: string) {
+    if (busy) return;
     begin("discard");
     try {
-      await discardPageEdit(workspaceId, detail.id, draftVersionId);
-      setConfirmDiscard(false);
-      selectVersion(null);
-      await onChanged();
+      await discardPageEdit(workspaceId, detail.id, versionId);
+      setDiscardTarget(null);
+      if (versionId === draftVersionId) {
+        selectVersion(null);
+        await onChanged();
+      } else {
+        await onRefresh();
+      }
     } catch (error) {
-      setConfirmDiscard(false);
+      setDiscardTarget(null);
       await fail(error, t("drafts.actionError"));
     } finally {
       setBusy(null);
@@ -509,28 +516,58 @@ export function ContextVersionBar({
               <p className="context-version-menu-label">{t("drafts.count", { count: openTotal })}</p>
               {draftItems.length ? (
                 <ul>
-                  {draftItems.map((item) => (
-                    <li key={item.version_id}>
-                      <button
-                        aria-current={item.version_id === draftVersionId ? "true" : undefined}
-                        className="context-version-item"
-                        onClick={() => selectVersion(item.version_id)}
-                        type="button"
-                      >
-                        <span>
-                          {item.author.display_name || t("drafts.unknownAuthor")}
-                          {item.is_mine ? <span className="context-version-mine">{t("drafts.mine")}</span> : null}
-                        </span>
-                        <small>
-                          {item.state === "reviewing" ? t("versionBar.reviewWaiting") : t("drafts.writing")}
-                          {" · "}
-                          <time dateTime={item.last_saved_at}>
-                            {t("drafts.lastSaved", { time: formatVersionTimestamp(item.last_saved_at) })}
-                          </time>
-                        </small>
-                      </button>
-                    </li>
-                  ))}
+                  {draftItems.map((item) => {
+                    const shown = item.version_id === draftVersionId;
+                    const goLabel = t("versionBar.goToDraft", { version: item.version_no });
+                    const discardLabel = t("versionBar.discardVersion", { version: item.version_no });
+                    return (
+                      <li className="context-version-row" key={item.version_id}>
+                        <button
+                          aria-current={shown ? "true" : undefined}
+                          className="context-version-item"
+                          onClick={() => selectVersion(item.version_id)}
+                          type="button"
+                        >
+                          <span>
+                            <strong>v{item.version_no}</strong>
+                            {" · "}
+                            {item.author.display_name || t("drafts.unknownAuthor")}
+                            {item.is_mine ? <span className="context-version-mine">{t("drafts.mine")}</span> : null}
+                          </span>
+                          <small>
+                            {item.state === "reviewing" ? t("versionBar.reviewWaiting") : t("drafts.writing")}
+                            {" · "}
+                            <time dateTime={item.last_saved_at}>
+                              {t("drafts.lastSaved", { time: formatVersionTimestamp(item.last_saved_at) })}
+                            </time>
+                          </small>
+                        </button>
+                        <button
+                          aria-label={goLabel}
+                          className="icon-button context-version-row-action"
+                          disabled={shown}
+                          onClick={() => selectVersion(item.version_id)}
+                          title={goLabel}
+                          type="button"
+                        >
+                          <ArrowRight aria-hidden="true" size={16} />
+                        </button>
+                        <button
+                          aria-label={discardLabel}
+                          className="icon-button danger context-version-row-action"
+                          disabled={busy !== null}
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setDiscardTarget(item.version_id);
+                          }}
+                          title={discardLabel}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" size={16} />
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : draftsLoading ? null : <p className="context-version-menu-empty">{t("drafts.empty")}</p>}
               {draftsError ? <p role="alert">{t("drafts.loadError")}</p> : null}
@@ -627,7 +664,7 @@ export function ContextVersionBar({
             <button
               className="icon-button text-button danger context-version-action"
               disabled={busy !== null}
-              onClick={() => setConfirmDiscard(true)}
+              onClick={() => setDiscardTarget(draftVersionId)}
               type="button"
             >
               <span>{t("versionBar.discard")}</span>
@@ -692,19 +729,13 @@ export function ContextVersionBar({
         </p>
       ) : null}
       {notice ? <p className="context-version-error" role="alert">{notice}</p> : null}
-      {confirmDiscard ? (
-        <ConfirmDialog
+      {discardTarget ? (
+        <DiscardDraftDialog
           busy={busy === "discard"}
-          busyLabel={t("versionBar.discarding")}
-          confirmLabel={t("versionBar.discard")}
-          labelledBy={discardTitleId}
-          onCancel={() => setConfirmDiscard(false)}
-          onConfirm={() => void discard()}
-          title={t("versionBar.discardTitle")}
-          tone="danger"
-        >
-          <p>{t("versionBar.discardConfirm")}</p>
-        </ConfirmDialog>
+          onCancel={() => setDiscardTarget(null)}
+          onConfirm={() => void discard(discardTarget)}
+          restoreFocusFallback={() => triggerRef.current}
+        />
       ) : null}
       {compareOpen && draftVersionId ? (
         <PublishResultDiff
@@ -718,6 +749,37 @@ export function ContextVersionBar({
       ) : null}
       {merge.dialog}
     </section>
+  );
+}
+
+/** The one question asked before an open draft is discarded, wherever from. */
+export function DiscardDraftDialog({
+  busy,
+  onCancel,
+  onConfirm,
+  restoreFocusFallback,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  restoreFocusFallback?: () => HTMLElement | null;
+}) {
+  const { t } = useTranslation("context");
+  const titleId = useId();
+  return (
+    <ConfirmDialog
+      busy={busy}
+      busyLabel={t("versionBar.discarding")}
+      confirmLabel={t("versionBar.discard")}
+      labelledBy={titleId}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+      restoreFocusFallback={restoreFocusFallback}
+      title={t("versionBar.discardTitle")}
+      tone="danger"
+    >
+      <p>{t("versionBar.discardConfirm")}</p>
+    </ConfirmDialog>
   );
 }
 

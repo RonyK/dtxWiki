@@ -10,6 +10,7 @@ import {
   Plus,
   RotateCcw,
   Share2,
+  Trash2,
 } from "lucide-react";
 import {
   useCallback,
@@ -35,7 +36,7 @@ import { useWorkspaceGraphCapability } from "../graph/useWorkspaceGraphCapabilit
 import { useLabsPreferences } from "../../shared/hooks/useLabsPreferences";
 import { MarkdownView } from "../pages/MarkdownView";
 import { PagePublicShareControl } from "../pages/PagePublicShareControl";
-import { ContextVersionBar } from "./ContextVersionBar";
+import { ContextVersionBar, DiscardDraftDialog } from "./ContextVersionBar";
 import { citationKeyForSource } from "../pages/editorCompletions";
 import {
   contextGraphQuery,
@@ -58,6 +59,7 @@ import {
 import {
   beginPageEdit,
   diffPageVersions,
+  discardPageEdit,
   restorePageVersion,
 } from "../../shared/api/pages";
 import {
@@ -2785,6 +2787,7 @@ function ContextReader({
             onCompare={(entry) => void openHistoryComparison(entry)}
             onComparePair={openComparison}
             onLoadOlder={() => void loadOlderHistory()}
+            onVersionRefresh={onVersionRefresh ?? onVersionRestored}
             onVersionRestored={onVersionRestored}
             workspaceId={workspaceId}
           />
@@ -3719,6 +3722,7 @@ export function ContextHistory({
   onCompare,
   onComparePair,
   onLoadOlder,
+  onVersionRefresh,
   onVersionRestored,
   workspaceId,
 }: {
@@ -3734,6 +3738,8 @@ export function ContextHistory({
   onCompare: (entry: VersionEntry) => void;
   onComparePair: (candidate: CompareCandidate) => void;
   onLoadOlder: () => void;
+  /** Re-reads the version on screen and History, keeping the selection. */
+  onVersionRefresh: () => Promise<void> | void;
   onVersionRestored: () => Promise<void> | void;
   workspaceId: string | null;
 }) {
@@ -3746,6 +3752,8 @@ export function ContextHistory({
   const restoring = restoreVersionId !== null;
   const navigate = useNavigate();
   const [startingVersionId, setStartingVersionId] = useState<string | null>(null);
+  const [discardVersionId, setDiscardVersionId] = useState<string | null>(null);
+  const [discarding, setDiscarding] = useState(false);
   const versions = useMemo(() => history?.versions ?? [], [history?.versions]);
   const versionNodes = useMemo(() => contextHistoryNodes(versions), [versions]);
   const historyComplete = !history?.next_cursor;
@@ -3814,6 +3822,7 @@ export function ContextHistory({
     setRestoreMessage(null);
     setRestoreVersionId(null);
     setStartingVersionId(null);
+    setDiscardVersionId(null);
   }, [detail.id]);
   useEffect(() => {
     setRestoreError(null);
@@ -3882,6 +3891,28 @@ export function ContextHistory({
     }
   }
 
+  // Discarding the draft on screen returns to the published version, as the
+  // version bar does; discarding another one keeps the version on screen.
+  async function discardDraft(versionId: string) {
+    if (!workspaceId || discarding) return;
+    const shown = Boolean(detail.draft) && detail.version_info?.version_id === versionId;
+    setRestoreError(null);
+    setRestoreMessage(null);
+    setDiscarding(true);
+    try {
+      await discardPageEdit(workspaceId, detail.id, versionId);
+      setDiscardVersionId(null);
+      await (shown ? onVersionRestored() : onVersionRefresh());
+    } catch (exc) {
+      setDiscardVersionId(null);
+      setRestoreError(apiErrorMessage(exc, t("drafts.actionError")));
+      // The draft may have closed meanwhile: show History as it is now.
+      void onVersionRefresh();
+    } finally {
+      setDiscarding(false);
+    }
+  }
+
   function renderCard(row: HistoryGraphRow<VersionEntry>) {
     const { entry } = row;
     const historyStatus = entry.history_status ?? "state_inconsistent";
@@ -3941,6 +3972,18 @@ export function ContextHistory({
                 }
                 open={comparing}
                 row={row}
+              />
+            ) : null}
+            {/* Destructive, so last: the row pushes it to its end. */}
+            {canEdit && entry.version_status === "draft" ? (
+              <HistoryActionButton
+                accessibleLabel={t("versionBar.discardVersion", { version: entry.version_no })}
+                busy={discarding && discardVersionId === entry.version_id}
+                disabled={discarding}
+                icon={Trash2}
+                label={t("versionBar.discard")}
+                onClick={() => setDiscardVersionId(entry.version_id)}
+                tone="danger"
               />
             ) : null}
           </>
@@ -4123,6 +4166,13 @@ export function ContextHistory({
                 })
               : null
           }
+        />
+      ) : null}
+      {discardVersionId ? (
+        <DiscardDraftDialog
+          busy={discarding}
+          onCancel={() => setDiscardVersionId(null)}
+          onConfirm={() => void discardDraft(discardVersionId)}
         />
       ) : null}
     </>

@@ -160,6 +160,7 @@ def test_saved_draft_projection_pages_reviewless_and_open_rows(session_factory):
         )
         assert first.total == second.total == 4
         assert [item.version_id for item in first.items + second.items] == expected
+        assert [item.version_no for item in first.items + second.items] == [6, 5, 3, 4]
         assert first.items[0].state == "reviewing"
         assert first.items[0].review.status == "pending"
         assert first.items[1].state == "writing"

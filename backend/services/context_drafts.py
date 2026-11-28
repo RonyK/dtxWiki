@@ -417,6 +417,7 @@ def _project_open_drafts(session, page, actor, *, limit=5, boundary=None):
     query = _select_open_drafts(session, workspace_id, page_id, boundary).options(
         load_only(
             ContextPageVersion.id,
+            ContextPageVersion.version_no,
             ContextPageVersion.page_id,
             ContextPageVersion.workspace_id,
             ContextPageVersion.parent_version_id,
@@ -439,6 +440,7 @@ def _project_open_drafts(session, page, actor, *, limit=5, boundary=None):
             ContextDraftSummary(
                 **info.model_dump(),
                 version_id=row.id,
+                version_no=row.version_no,
                 version_status=row.version_status,
                 is_mine=(
                     row.created_by_actor_kind == getattr(actor, "actor_kind", None)

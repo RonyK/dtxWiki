@@ -44,6 +44,7 @@ class ContextDraftInfo(BaseModel):
 
 class ContextDraftSummary(ContextDraftInfo):
     version_id: UUID
+    version_no: int = Field(ge=1)
     version_status: Literal["draft"]
     is_mine: bool
     state: Literal["writing", "reviewing"]
